@@ -1,0 +1,25 @@
+{
+  "schema_version": 1,
+  "category_id": "products",
+  "id": "chejin_sienna_2021_hybrid",
+  "status": "active",
+  "source": {"type": "test_fixture", "batch_token": "CHEJIN_SEED_20260507"},
+  "data": {
+    "name": "2021款丰田赛那SIENNA 2.5L混动 尊贵版",
+    "sku": "CHEJIN-SIENNA-2021-HYBRID",
+    "category": "二手车/MPV",
+    "aliases": ["赛那", "丰田赛那", "SIENNA", "MPV", "商务车", "保姆车"],
+    "specs": "2021年11月上牌，表显2.8万公里，2.5L混动，7座MPV，双侧电动滑门，原版原漆。",
+    "price": 28.5,
+    "unit": "台",
+    "inventory": 1,
+    "shipping_policy": "高价值车辆看车需预约，支持全家试乘体验。",
+    "warranty_policy": "原版原漆精品车况，混动系统按厂家政策质保，支持任何第三方检测。",
+    "reply_templates": {
+      "recommendation": "这台赛那适合28到30万预算、二胎或多口之家，混动省油、空间大是核心卖点。"
+    },
+    "risk_rules": ["高价值车辆需预约看车", "金融方案需人工确认"]
+  },
+  "runtime": {"allow_auto_reply": true, "requires_handoff": false, "risk_level": "normal"},
+  "metadata": {"created_at": "2026-05-07T10:00:00", "updated_at": "2026-05-07T10:00:00", "created_by": "admin", "updated_by": "admin"}
+}

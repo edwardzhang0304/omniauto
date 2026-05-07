@@ -2,7 +2,7 @@
   "schema_version": 1,
   "category_id": "policies",
   "id": "company_profile_details",
-  "status": "active",
+  "status": "archived",
   "source": {
     "type": "migration",
     "path": "structured/product_knowledge.example.json"
@@ -28,7 +28,7 @@
   },
   "metadata": {
     "created_at": "2026-04-26T17:58:50",
-    "updated_at": "2026-04-26T17:58:50",
+    "updated_at": "2026-05-06T05:18:23",
     "created_by": "migration",
     "updated_by": "migration"
   }

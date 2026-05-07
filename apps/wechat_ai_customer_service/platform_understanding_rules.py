@@ -8,6 +8,8 @@ import os
 from pathlib import Path
 from typing import Any
 
+from apps.wechat_ai_customer_service.knowledge_paths import shared_runtime_snapshot_path
+
 
 APP_ROOT = Path(__file__).resolve().parent
 PROJECT_ROOT = APP_ROOT.parents[1]
@@ -26,6 +28,29 @@ def resolve_platform_understanding_rules_path(settings: dict[str, Any] | None = 
 
 
 def load_platform_understanding_rules(settings: dict[str, Any] | None = None) -> dict[str, Any]:
+    cloud_required = str(os.getenv("WECHAT_CLOUD_REQUIRED", "1")).strip().lower() in {"1", "true", "yes", "on"}
+    cloud = load_platform_understanding_rules_from_cloud()
+    if cloud is not None:
+        item = normalize_platform_understanding_rules(cloud)
+        item["_path"] = "cloud://shared_snapshot/policy_bundle/merged/platform_understanding_rules"
+        return {
+            "ok": True,
+            "path": item["_path"],
+            "source": "cloud_shared_snapshot",
+            "readonly": True,
+            "item": item,
+        }
+    if cloud_required:
+        item = empty_rules()
+        item["_path"] = "cloud://shared_snapshot/policy_bundle/merged/platform_understanding_rules"
+        return {
+            "ok": False,
+            "path": item["_path"],
+            "source": "cloud_shared_snapshot",
+            "readonly": True,
+            "error": "platform_understanding_rules_cloud_snapshot_required",
+            "item": item,
+        }
     path = resolve_platform_understanding_rules_path(settings)
     try:
         payload = json.loads(path.read_text(encoding="utf-8"))
@@ -37,10 +62,23 @@ def load_platform_understanding_rules(settings: dict[str, Any] | None = None) ->
         return {"ok": False, "path": str(path), "error": "platform_understanding_rules_not_object", "item": empty_rules()}
     item = normalize_platform_understanding_rules(payload)
     item["_path"] = str(path)
-    return {"ok": True, "path": str(path), "item": item}
+    return {"ok": True, "path": str(path), "source": "local_file", "readonly": False, "item": item}
 
 
 def save_platform_understanding_rules(payload: dict[str, Any], settings: dict[str, Any] | None = None) -> dict[str, Any]:
+    cloud = load_platform_understanding_rules_from_cloud()
+    cloud_required = str(os.getenv("WECHAT_CLOUD_REQUIRED", "1")).strip().lower() in {"1", "true", "yes", "on"}
+    if cloud_required:
+        item = normalize_platform_understanding_rules(cloud) if cloud is not None else empty_rules()
+        item["_path"] = "cloud://shared_snapshot/policy_bundle/merged/platform_understanding_rules"
+        return {
+            "ok": False,
+            "path": item["_path"],
+            "source": "cloud_shared_snapshot",
+            "readonly": True,
+            "error": "platform_understanding_rules_managed_by_cloud",
+            "item": item,
+        }
     path = resolve_platform_understanding_rules_path(settings)
     item = normalize_platform_understanding_rules(payload)
     item.pop("_path", None)
@@ -48,7 +86,7 @@ def save_platform_understanding_rules(payload: dict[str, Any], settings: dict[st
     tmp = path.with_suffix(path.suffix + ".tmp")
     tmp.write_text(json.dumps(item, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     tmp.replace(path)
-    return {"ok": True, "path": str(path), "item": item}
+    return {"ok": True, "path": str(path), "source": "local_file", "readonly": False, "item": item}
 
 
 def normalize_platform_understanding_rules(payload: dict[str, Any]) -> dict[str, Any]:
@@ -167,3 +205,19 @@ def escape_regex(value: str) -> str:
     import re
 
     return re.escape(str(value))
+
+
+def load_platform_understanding_rules_from_cloud() -> dict[str, Any] | None:
+    path = shared_runtime_snapshot_path()
+    if not path.exists():
+        return None
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    if not isinstance(payload, dict):
+        return None
+    policy_bundle = payload.get("policy_bundle") if isinstance(payload.get("policy_bundle"), dict) else {}
+    merged = policy_bundle.get("merged") if isinstance(policy_bundle.get("merged"), dict) else {}
+    rules = merged.get("platform_understanding_rules") if isinstance(merged.get("platform_understanding_rules"), dict) else None
+    return copy.deepcopy(rules) if isinstance(rules, dict) else None

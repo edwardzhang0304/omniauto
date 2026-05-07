@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import copy
 import json
+import os
 import sys
 import tempfile
 from dataclasses import dataclass
@@ -24,6 +25,8 @@ ADAPTERS_ROOT = APP_ROOT / "adapters"
 for path in (PROJECT_ROOT, WORKFLOWS_ROOT, APP_ROOT, ADAPTERS_ROOT):
     if str(path) not in sys.path:
         sys.path.insert(0, str(path))
+os.environ.setdefault("WECHAT_CLOUD_REQUIRED", "0")
+os.environ.setdefault("WECHAT_CLOUD_STRICT_ONLINE", "0")
 
 import llm_reply_synthesis as synthesis_module  # noqa: E402
 from customer_service_loop import load_rules  # noqa: E402

@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -143,21 +144,22 @@ class RagExperienceStore:
         record["quality"] = score_experience_quality(record)
         db = postgres_store(self.tenant_id)
         config = load_storage_config()
+        db_existing = None
         if db:
-            existing = next((item for item in db.list_rag_experiences(self.tenant_id, status="all", limit=500) if item.get("experience_id") == record["experience_id"]), None)
-            if existing:
-                usage = dict(existing.get("usage", {}) or {})
+            db_existing = next((item for item in db.list_rag_experiences(self.tenant_id, status="all", limit=500) if item.get("experience_id") == record["experience_id"]), None)
+            if db_existing:
+                usage = dict(db_existing.get("usage", {}) or {})
                 usage["reply_count"] = int(usage.get("reply_count", 1) or 1) + 1
                 usage["last_used_at"] = now_text
-                existing.update(
+                db_existing.update(
                     {
-                        "status": existing.get("status") or "active",
+                        "status": db_existing.get("status") or "active",
                         "summary": record["summary"],
                         "question": record["question"],
                         "reply_text": record["reply_text"],
                         "target": record["target"],
                         "message_ids": record["message_ids"],
-                        "reply_trace_id": record.get("reply_trace_id") or existing.get("reply_trace_id"),
+                        "reply_trace_id": record.get("reply_trace_id") or db_existing.get("reply_trace_id"),
                         "intent": record["intent"],
                         "recommended_action": record["recommended_action"],
                         "safety": record["safety"],
@@ -166,17 +168,12 @@ class RagExperienceStore:
                         "updated_at": now_text,
                     }
                 )
-                existing["quality"] = score_experience_quality(existing)
-                db.upsert_rag_experience(existing)
+                db_existing["quality"] = score_experience_quality(db_existing)
+                db.upsert_rag_experience(db_existing)
                 rebuild_rag_index_safely(self.tenant_id)
                 if not config.mirror_files:
-                    return existing
-                record = existing
-            else:
-                db.upsert_rag_experience(record)
-                rebuild_rag_index_safely(self.tenant_id)
-                if not config.mirror_files:
-                    return record
+                    return db_existing
+                record = db_existing
         records = self._read()
         for index, existing in enumerate(records):
             if existing.get("experience_id") == record["experience_id"]:
@@ -205,9 +202,14 @@ class RagExperienceStore:
                 self._write(records)
                 rebuild_rag_index_safely(self.tenant_id)
                 return existing
+        # New record: apply real-time LLM quality gate before saving
+        _apply_creation_audit(record)
         records.append(record)
         self._write(records)
         rebuild_rag_index_safely(self.tenant_id)
+        if db and not db_existing:
+            db.upsert_rag_experience(record)
+            rebuild_rag_index_safely(self.tenant_id)
         return record
 
     def record_intake(
@@ -265,6 +267,7 @@ class RagExperienceStore:
             "updated_at": now_text,
         }
         record["quality"] = score_record_quality(record)
+        _apply_creation_audit(record)
         return self._upsert_record(record, increment_usage=False)
 
     def discard(self, experience_id: str, *, reason: str = "") -> dict[str, Any]:
@@ -472,6 +475,54 @@ def merge_experience_record(existing: dict[str, Any], record: dict[str, Any], *,
     merged["usage"] = usage
     merged["quality"] = score_record_quality(merged)
     return merged
+
+
+def _apply_creation_audit(record: dict[str, Any]) -> None:
+    """Apply real-time LLM quality gate to a newly created RAG experience.
+
+    Modifies the record in place. By default it only annotates the review
+    outcome so retrieval remains stable and human review can decide whether
+    to discard. Set WECHAT_RAG_AUTO_DISCARD=1 to enable immediate discard.
+    Failures are silently ignored so the hot path is never blocked.
+    """
+    try:
+        from apps.wechat_ai_customer_service.admin_backend.services.llm_knowledge_audit import (
+            audit_single_rag_experience,
+            has_llm_config,
+        )
+    except Exception:
+        return
+    if not has_llm_config():
+        return
+    try:
+        audit = audit_single_rag_experience(record)
+    except Exception:
+        return
+    if not audit:
+        return
+    action = str(audit.get("action") or "")
+    reason = str(audit.get("reason") or "")
+    record["auto_audit"] = {
+        "action": action,
+        "reason": reason,
+        "audited_at": now(),
+    }
+    if action != "delete":
+        return
+    auto_discard_enabled = str(os.getenv("WECHAT_RAG_AUTO_DISCARD", "0")).strip().lower() in {"1", "true", "yes", "on"}
+    if auto_discard_enabled:
+        record["status"] = "discarded"
+        record["auto_audit_discard"] = {
+            "reason": reason,
+            "audited_at": now(),
+            "mode": "auto_discard_enabled",
+        }
+        return
+    record["auto_audit_suggested_discard"] = {
+        "reason": reason,
+        "audited_at": now(),
+        "mode": "suggest_only",
+    }
 
 
 def summarize_intake_experience(source_type: str, category: str, evidence_excerpt: str, candidate_ids: list[str]) -> str:

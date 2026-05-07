@@ -1,0 +1,18 @@
+{
+  "schema_version": 1,
+  "category_id": "chats",
+  "id": "chejin_loan_inquiry_reply",
+  "status": "active",
+  "source": {"type": "test_fixture", "batch_token": "CHEJIN_SEED_20260507"},
+  "data": {
+    "customer_message": "这车能贷款吗？首付多少？",
+    "service_reply": "可以的，我们有多家合作金融机构。一般首付3成起，具体利率和月供要看您的征信情况和选择的还款期限。我把您的需求转给金融专员，让他给您做个详细方案，您看可以吗？",
+    "intent_tags": ["loan_inquiry", "finance"],
+    "tone_tags": ["helpful", "handoff_smooth"],
+    "linked_categories": ["policies"],
+    "linked_item_ids": ["chejin_loan_policy"],
+    "applicability_scope": "global",
+    "usable_as_template": true
+  },
+  "metadata": {"created_at": "2026-05-07T10:00:00", "updated_at": "2026-05-07T10:00:00", "created_by": "admin", "updated_by": "admin"}
+}

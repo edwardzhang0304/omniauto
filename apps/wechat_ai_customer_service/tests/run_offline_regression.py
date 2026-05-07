@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 from dataclasses import asdict
 from pathlib import Path
@@ -19,6 +20,8 @@ ADAPTERS_ROOT = APP_ROOT / "adapters"
 for path in (WORKFLOWS_ROOT, ADAPTERS_ROOT):
     if str(path) not in sys.path:
         sys.path.insert(0, str(path))
+os.environ.setdefault("WECHAT_CLOUD_REQUIRED", "0")
+os.environ.setdefault("WECHAT_CLOUD_STRICT_ONLINE", "0")
 
 from customer_data_capture import extract_customer_data  # noqa: E402
 from knowledge_loader import build_evidence_pack  # noqa: E402

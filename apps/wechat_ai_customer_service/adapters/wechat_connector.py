@@ -3,6 +3,10 @@
 The connector is the stable boundary the workflow layer should use. It keeps
 WeChat-specific Python 3.12/wxauto4 details outside the OmniAuto Python 3.13
 process and returns plain dictionaries that are easy to validate and persist.
+
+Daemon mode caching: a single sidecar process is spawned and reused across
+multiple calls to avoid the ~2-5 second overhead of starting Python 3.12 and
+importing wxauto4 on every WeChat operation.
 """
 
 from __future__ import annotations
@@ -10,6 +14,7 @@ from __future__ import annotations
 import json
 import os
 import subprocess
+import threading
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -23,6 +28,10 @@ SIDECAR_PYTHON = ROOT / "runtime/tool_envs/wxauto4-py312/Scripts/python.exe"
 SIDECAR_SCRIPT = ROOT / "apps/wechat_ai_customer_service/adapters/wxauto4_sidecar.py"
 WECHAT_EXE = Path(r"C:\Program Files (x86)\Tencent\Weixin\Weixin.exe")
 FILE_TRANSFER_ASSISTANT = "".join(chr(c) for c in [0x6587, 0x4EF6, 0x4F20, 0x8F93, 0x52A9, 0x624B])
+
+# Global daemon process cache to avoid repeated subprocess spawn overhead.
+_daemon_proc: subprocess.Popen | None = None
+_daemon_lock = threading.Lock()
 
 
 class WeChatConnectorError(RuntimeError):
@@ -118,32 +127,111 @@ class WeChatConnector:
             raise FileNotFoundError(str(self.sidecar_python))
         if not self.sidecar_script.exists():
             raise FileNotFoundError(str(self.sidecar_script))
+        return self._call_daemon(args, allow_failure)
 
-        env = os.environ.copy()
-        env["PYTHONUTF8"] = "1"
-        completed = subprocess.run(
-            [str(self.sidecar_python), str(self.sidecar_script), *args],
-            cwd=str(self.root),
-            env=env,
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-            timeout=self.timeout_seconds,
-        )
-        output = (completed.stdout or completed.stderr or "").strip()
+    def _call_daemon(self, args: list[str], allow_failure: bool = False) -> dict[str, Any]:
+        global _daemon_proc
+        with _daemon_lock:
+            proc = _ensure_daemon(self.sidecar_python, self.sidecar_script, self.root)
+
+            request = _args_to_request(args)
+            request_line = json.dumps(request, ensure_ascii=False) + "\n"
+
+            try:
+                proc.stdin.write(request_line.encode("utf-8"))
+                proc.stdin.flush()
+                payload = _read_json_response(proc, timeout=25)
+            except Exception:
+                # Daemon may have died; kill, restart, and retry once.
+                _kill_daemon()
+                proc = _ensure_daemon(self.sidecar_python, self.sidecar_script, self.root)
+                proc.stdin.write(request_line.encode("utf-8"))
+                proc.stdin.flush()
+                payload = _read_json_response(proc, timeout=25)
+
+            if not payload.get("ok") and not allow_failure:
+                payload.setdefault("error", "daemon_command_failed")
+            return payload
+
+
+def _read_json_response(proc: subprocess.Popen, timeout: int = 25) -> dict[str, Any]:
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        if proc.poll() is not None:
+            raise RuntimeError("daemon_process_died")
+        line = proc.stdout.readline().decode("utf-8", errors="replace").strip()
+        if not line:
+            continue
         try:
-            payload = json.loads(output)
+            return json.loads(line)
         except json.JSONDecodeError:
-            payload = {
-                "ok": False,
-                "returncode": completed.returncode,
-                "stdout": completed.stdout,
-                "stderr": completed.stderr,
-            }
-        if completed.returncode and not allow_failure and payload.get("ok") is not True:
-            payload.setdefault("returncode", completed.returncode)
-        return payload
+            # Skip non-JSON lines (e.g., library warnings on startup)
+            continue
+    raise TimeoutError("daemon_response_timeout")
+
+
+def _ensure_daemon(
+    sidecar_python: Path,
+    sidecar_script: Path,
+    root: Path,
+) -> subprocess.Popen:
+    global _daemon_proc
+    if _daemon_proc is not None:
+        if _daemon_proc.poll() is None:
+            return _daemon_proc
+        _kill_daemon()
+
+    env = os.environ.copy()
+    env["PYTHONUTF8"] = "1"
+    _daemon_proc = subprocess.Popen(
+        [str(sidecar_python), str(sidecar_script), "--daemon"],
+        cwd=str(root),
+        env=env,
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+    return _daemon_proc
+
+
+def _kill_daemon() -> None:
+    global _daemon_proc
+    if _daemon_proc is not None:
+        try:
+            _daemon_proc.stdin.write(b'{"action": "exit"}\n')
+            _daemon_proc.stdin.flush()
+            _daemon_proc.wait(timeout=2)
+        except Exception:
+            _daemon_proc.kill()
+        _daemon_proc = None
+
+
+def _args_to_request(args: list[str]) -> dict[str, Any]:
+    request: dict[str, Any] = {"resize": True}
+    if not args:
+        request["action"] = "status"
+        return request
+    if args[0] == "status":
+        request["action"] = "status"
+    elif args[0] == "sessions":
+        request["action"] = "sessions"
+    elif args[0] == "messages":
+        request["action"] = "messages"
+        for i, arg in enumerate(args):
+            if arg == "--target" and i + 1 < len(args):
+                request["target"] = args[i + 1]
+            elif arg == "--exact":
+                request["exact"] = True
+    elif args[0] == "send":
+        request["action"] = "send"
+        for i, arg in enumerate(args):
+            if arg == "--target" and i + 1 < len(args):
+                request["target"] = args[i + 1]
+            elif arg == "--text" and i + 1 < len(args):
+                request["text"] = args[i + 1]
+            elif arg == "--exact":
+                request["exact"] = True
+    return request
 
 
 def any_weixin_process() -> bool:

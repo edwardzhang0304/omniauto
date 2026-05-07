@@ -23,6 +23,8 @@ os.environ.setdefault("WECHAT_STORAGE_BACKEND", "file")
 os.environ["WECHAT_VPS_BASE_URL"] = ""
 os.environ["WECHAT_VPS_AUTH_REQUIRED"] = "0"
 os.environ["WECHAT_VPS_AUTO_DISCOVER"] = "0"
+os.environ.setdefault("WECHAT_CLOUD_REQUIRED", "0")
+os.environ.setdefault("WECHAT_CLOUD_STRICT_ONLINE", "0")
 
 from fastapi.testclient import TestClient
 from openpyxl import load_workbook
@@ -686,7 +688,7 @@ def check_customer_service_matrix(token: str) -> dict[str, Any]:
     cases.append(run_service_case(config, rules, target, state, "cs-02", f"8万预算，自动挡省油，通勤代步 {token}", expect_action="sent", expect_contains="凯美瑞"))
     cases.append(run_service_case(config, rules, target, state, "cs-03", f"宝马320Li那台今天能到店试驾吗 {token}", expect_action="handoff_sent", expect_handoff=True))
     cases.append(run_service_case(config, rules, target, state, "cs-04", "思域首付三成月供大概多少，贷款能不能包过？", expect_action="handoff_sent", expect_handoff=True))
-    cases.append(run_service_case(config, rules, target, state, "cs-05", "我有一台老朗逸想置换", expect_action="sent", expect_contains="上牌年份"))
+    cases.append(run_service_case(config, rules, target, state, "cs-05", "我有一台老朗逸想置换", expect_action="handoff_sent", expect_contains="核实", expect_handoff=True))
     cases.append(run_service_case(config, rules, target, state, "cs-08", "你保证无事故吗，不对就赔我？", expect_action="handoff_sent", expect_handoff=True))
     cases.append(run_service_case(config, rules, target, state, "cs-11", "今天天气怎么样，顺便讲个笑话", expect_action="handoff_sent", expect_handoff=True))
 

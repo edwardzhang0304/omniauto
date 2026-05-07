@@ -21,12 +21,16 @@ from typing import Any
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("action", choices=["status", "sessions", "messages", "send"])
+    parser.add_argument("action", choices=["status", "sessions", "messages", "send"], nargs="?")
     parser.add_argument("--target", help="Chat name for messages/send.")
     parser.add_argument("--text", help="Message text for send.")
     parser.add_argument("--exact", action="store_true", help="Use exact chat name matching.")
     parser.add_argument("--resize", action="store_true", help="Allow wxauto4 to resize WeChat.")
+    parser.add_argument("--daemon", action="store_true", help="Run in daemon mode (read commands from stdin).")
     args = parser.parse_args()
+
+    if args.daemon:
+        return run_daemon()
 
     payload: dict[str, Any]
     captured = io.StringIO()
@@ -45,10 +49,98 @@ def main() -> int:
     return 0 if payload.get("ok") else 1
 
 
-def run_action(args: argparse.Namespace) -> dict[str, Any]:
+def run_daemon() -> int:
+    """Run in daemon mode: read JSON commands from stdin, write JSON responses to stdout."""
+    import sys
+
+    wx = None
+    window_probe = None
+
+    for line in sys.stdin:
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            request = json.loads(line)
+        except json.JSONDecodeError:
+            print(json.dumps({"ok": False, "error": "invalid_json"}, ensure_ascii=False))
+            sys.stdout.flush()
+            continue
+
+        if request.get("action") == "exit":
+            print(json.dumps({"ok": True, "state": "exiting"}, ensure_ascii=False))
+            sys.stdout.flush()
+            return 0
+
+        # Probe window on first real command
+        if window_probe is None:
+            window_probe = ensure_visible_wechat_window()
+
+        if not window_probe["visible_main_windows"]:
+            print(json.dumps({
+                "ok": False,
+                "online": False,
+                "state": "main_window_not_found",
+                "window_probe": window_probe,
+                "error": "No visible WeChat main window was found.",
+            }, ensure_ascii=False))
+            sys.stdout.flush()
+            continue
+
+        # Lazy init WeChat connection once and reuse
+        if wx is None:
+            from wxauto4 import WeChat
+            try:
+                resize = bool(request.get("resize"))
+                wx = WeChat(debug=False, resize=resize, ads=False)
+            except Exception as exc:
+                print(json.dumps({
+                    "ok": False,
+                    "online": False,
+                    "state": "connect_failed",
+                    "connect_error": repr(exc),
+                    "window_probe": window_probe,
+                    "error": "Visible WeChat window exists, but wxauto4 could not attach to it.",
+                }, ensure_ascii=False))
+                sys.stdout.flush()
+                continue
+
+        # Build args from request and execute
+        args = argparse.Namespace(
+            action=request.get("action", "status"),
+            target=request.get("target"),
+            text=request.get("text"),
+            exact=bool(request.get("exact", False)),
+            resize=bool(request.get("resize", False)),
+        )
+
+        captured = io.StringIO()
+        try:
+            with contextlib.redirect_stdout(captured):
+                payload = run_action(args, wx=wx, window_probe=window_probe)
+            payload.setdefault("ok", bool(payload.get("online")))
+        except Exception as exc:
+            payload = {"ok": False, "error": repr(exc)}
+
+        logs = captured.getvalue().strip()
+        if logs:
+            payload["library_stdout"] = logs
+
+        print(json.dumps(payload, ensure_ascii=False))
+        sys.stdout.flush()
+
+    return 0
+
+
+def run_action(
+    args: argparse.Namespace,
+    wx: Any = None,
+    window_probe: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     from wxauto4 import WeChat
 
-    window_probe = ensure_visible_wechat_window()
+    if window_probe is None:
+        window_probe = ensure_visible_wechat_window()
     if not window_probe["visible_main_windows"]:
         return {
             "login_window_exists": False,
@@ -58,17 +150,18 @@ def run_action(args: argparse.Namespace) -> dict[str, Any]:
             "error": "No visible WeChat main window was found; refusing to start or attach to a login/secondary window.",
         }
 
-    try:
-        wx = WeChat(debug=False, resize=args.resize, ads=False)
-    except Exception as exc:
-        return {
-            "login_window_exists": False,
-            "online": False,
-            "state": "connect_failed",
-            "connect_error": repr(exc),
-            "window_probe": window_probe,
-            "error": "Visible WeChat window exists, but wxauto4 could not attach to it.",
-        }
+    if wx is None:
+        try:
+            wx = WeChat(debug=False, resize=args.resize, ads=False)
+        except Exception as exc:
+            return {
+                "login_window_exists": False,
+                "online": False,
+                "state": "connect_failed",
+                "connect_error": repr(exc),
+                "window_probe": window_probe,
+                "error": "Visible WeChat window exists, but wxauto4 could not attach to it.",
+            }
 
     payload: dict[str, Any] = {
         "login_window_exists": False,

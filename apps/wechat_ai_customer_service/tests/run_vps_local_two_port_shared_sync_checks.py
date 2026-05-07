@@ -89,10 +89,14 @@ def main() -> int:
         assert_true(str(first_sync.get("snapshot_version") or "").startswith("shared_"), "snapshot version should be cloud-derived")
         assert_true(bool(first_sync.get("expires_at")), "sync response should expose lease expiry")
         assert_true((shared_runtime_cache_root() / "global_guidelines" / "items" / "cloud_two_port_guideline.json").exists(), "cloud item should be materialized in the runtime cache")
+        assert_true((shared_runtime_cache_root() / "reply_style" / "items" / "cloud_home_appliance_install_style.json").exists(), "home appliance item should be included for default tenant industry")
+        assert_true(not (shared_runtime_cache_root() / "risk_control" / "items" / "cloud_usedcar_transfer_boundary.json").exists(), "used-car-only item should not leak into default tenant snapshot")
 
         persisted = json.loads(shared_runtime_snapshot_path().read_text(encoding="utf-8"))
         assert_equal(persisted.get("source"), "cloud_official_shared_library", "persisted cache should declare cloud source")
         assert_true(persisted.get("cache_policy", {}).get("requires_cloud_refresh") is True, "persisted cache should require cloud refresh")
+        assert_equal(persisted.get("tenant_industry_id"), "home_appliance", "default tenant should resolve to home appliance industry")
+        assert_true(isinstance(persisted.get("policy_bundle"), dict), "snapshot should include policy bundle")
         assert_true(shared_runtime_cache_root() in runtime_knowledge_roots("default"), "valid cloud cache should participate in runtime knowledge roots")
 
         second_sync = request_json("POST", f"{local_base}/api/sync/shared/cloud-snapshot", {"force": False})
@@ -104,6 +108,19 @@ def main() -> int:
         cache_status = refreshed_status.get("shared_cloud_cache") if isinstance(refreshed_status.get("shared_cloud_cache"), dict) else {}
         assert_true(cache_status.get("valid") is True, "local status should expose a valid cloud shared cache")
         assert_true(bool(cache_status.get("expires_at")), "local status should expose cloud cache expiry")
+        assert_equal(cache_status.get("tenant_industry_id"), "home_appliance", "status should expose tenant industry binding")
+
+        usedcar_sync = request_json(
+            "POST",
+            f"{local_base}/api/sync/shared/cloud-snapshot",
+            {"force": True},
+            headers={"X-Tenant-ID": "jiangsu_chejin_usedcar_customer_20260501"},
+        )
+        assert_true(usedcar_sync.get("ok") is True, "used-car tenant cloud snapshot sync should succeed")
+        assert_true((shared_runtime_cache_root() / "risk_control" / "items" / "cloud_usedcar_transfer_boundary.json").exists(), "used-car item should be included for used-car tenant snapshot")
+        assert_true(not (shared_runtime_cache_root() / "reply_style" / "items" / "cloud_home_appliance_install_style.json").exists(), "home appliance item should not leak into used-car tenant snapshot")
+        assert_true(shared_runtime_cache_root() in runtime_knowledge_roots("jiangsu_chejin_usedcar_customer_20260501"), "shared root should participate for matched tenant")
+        assert_true(shared_runtime_cache_root() not in runtime_knowledge_roots("default"), "shared root should not participate when snapshot tenant mismatches active tenant")
 
         result = {
             "ok": True,
@@ -149,14 +166,24 @@ def seed_vps_state(path: Path) -> None:
             "default": {
                 "tenant_id": "default",
                 "display_name": "Default Tenant",
+                "industry_id": "home_appliance",
                 "status": "active",
                 "created_at": now,
                 "updated_at": now,
-            }
+            },
+            "jiangsu_chejin_usedcar_customer_20260501": {
+                "tenant_id": "jiangsu_chejin_usedcar_customer_20260501",
+                "display_name": "Used Car Tenant",
+                "industry_id": "used_car",
+                "status": "active",
+                "created_at": now,
+                "updated_at": now,
+            },
         },
         "shared_library": {
             "cloud_two_port_guideline": {
                 "item_id": "cloud_two_port_guideline",
+                "industry_id": "global",
                 "category_id": "global_guidelines",
                 "title": "Two Port Cloud Guideline",
                 "content": "The local client must refresh official shared knowledge from the cloud lease before using shared public context.",
@@ -174,6 +201,62 @@ def seed_vps_state(path: Path) -> None:
                     "guideline_text": "The local client must refresh official shared knowledge from the cloud lease before using shared public context.",
                     "keywords": ["cloud", "lease", "shared"],
                     "applies_to": "all customer-service tenants",
+                },
+                "created_by": "two-port-test",
+                "created_at": now,
+                "updated_by": "two-port-test",
+                "updated_at": now,
+            },
+            "cloud_home_appliance_install_style": {
+                "item_id": "cloud_home_appliance_install_style",
+                "industry_id": "home_appliance",
+                "category_id": "reply_style",
+                "title": "Home Appliance Installation Reply Style",
+                "content": "Home appliance installation must be confirmed with site conditions and service windows.",
+                "keywords": ["install", "home appliance"],
+                "applies_to": "home appliance consultations",
+                "notes": "industry fixture for two-port sync checks",
+                "status": "active",
+                "source": "two_port_test",
+                "tenant_id": "default",
+                "data": {
+                    "schema_version": 1,
+                    "id": "cloud_home_appliance_install_style",
+                    "category_id": "reply_style",
+                    "industry_id": "home_appliance",
+                    "title": "Home Appliance Installation Reply Style",
+                    "guideline_text": "Home appliance installation must be confirmed with site conditions and service windows.",
+                    "keywords": ["install", "home appliance"],
+                    "applies_to": "home appliance consultations",
+                },
+                "created_by": "two-port-test",
+                "created_at": now,
+                "updated_by": "two-port-test",
+                "updated_at": now,
+            },
+            "cloud_usedcar_transfer_boundary": {
+                "item_id": "cloud_usedcar_transfer_boundary",
+                "industry_id": "used_car",
+                "category_id": "risk_control",
+                "title": "Used Car Transfer Boundary",
+                "content": "Used-car transfer and registration promises require manual confirmation.",
+                "keywords": ["used car", "transfer", "registration"],
+                "applies_to": "used-car transfer consultation",
+                "notes": "industry fixture for two-port sync checks",
+                "status": "active",
+                "source": "two_port_test",
+                "tenant_id": "default",
+                "data": {
+                    "schema_version": 1,
+                    "id": "cloud_usedcar_transfer_boundary",
+                    "category_id": "risk_control",
+                    "industry_id": "used_car",
+                    "title": "Used Car Transfer Boundary",
+                    "guideline_text": "Used-car transfer and registration promises require manual confirmation.",
+                    "keywords": ["used car", "transfer", "registration"],
+                    "applies_to": "used-car transfer consultation",
+                    "allow_auto_reply": False,
+                    "requires_handoff": True,
                 },
                 "created_by": "two-port-test",
                 "created_at": now,
@@ -287,7 +370,7 @@ def cleanup_test_root() -> None:
     if expected_parent not in resolved.parents and resolved != expected_parent:
         raise RuntimeError(f"unsafe test cleanup path: {resolved}")
     if resolved.exists():
-        shutil.rmtree(resolved)
+        shutil.rmtree(resolved, ignore_errors=True)
     resolved.mkdir(parents=True, exist_ok=True)
 
 

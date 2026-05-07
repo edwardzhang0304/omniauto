@@ -21,9 +21,20 @@ from apps.wechat_ai_customer_service.knowledge_paths import (
     DEFAULT_TENANT_ID,
     TENANTS_ROOT,
     active_tenant_id,
+    read_tenant_metadata,
     runtime_app_root,
     tenant_knowledge_base_root,
     tenant_metadata_path,
+)
+from apps.wechat_ai_customer_service.industry_catalog import (
+    GLOBAL_INDUSTRY_ID,
+    build_policy_bundle,
+    default_industry_for_tenant,
+    industry_catalog,
+    normalize_industry_id,
+    normalize_shared_item_industry_id,
+    resolve_tenant_industry_id,
+    seed_shared_library_items,
 )
 from apps.wechat_ai_customer_service.sync import BackupService, SharedPatchService
 from apps.wechat_ai_customer_service.workflows.generate_review_candidates import (
@@ -53,6 +64,7 @@ class TenantService:
     def list_tenants(self) -> list[dict[str, Any]]:
         def mutate(state: dict[str, Any]) -> list[dict[str, Any]]:
             seed_local_customer_accounts(state)
+            ensure_tenant_industry_bindings(state)
             tenants = state.get("tenants", {})
             return sorted(tenants.values(), key=lambda item: str(item.get("tenant_id") or ""))
 
@@ -60,12 +72,17 @@ class TenantService:
 
     def create_tenant(self, payload: dict[str, Any], *, actor: AuthSession) -> dict[str, Any]:
         tenant_id = active_tenant_id(payload.get("tenant_id") or payload.get("id") or make_id("tenant"))
+        metadata = payload.get("metadata") if isinstance(payload.get("metadata"), dict) else {}
+        industry_id = normalize_industry_id(
+            payload.get("industry_id") or payload.get("industry") or metadata.get("industry_id") or metadata.get("industry")
+        )
         record = {
             "tenant_id": tenant_id,
             "display_name": str(payload.get("display_name") or tenant_id),
             "status": str(payload.get("status") or "active"),
             "sync_enabled": bool(payload.get("sync_enabled", False)),
-            "metadata": payload.get("metadata") if isinstance(payload.get("metadata"), dict) else {},
+            "industry_id": industry_id,
+            "metadata": {**metadata, "industry_id": industry_id},
             "created_at": now_iso(),
             "updated_at": now_iso(),
         }
@@ -89,8 +106,19 @@ class TenantService:
             for key in ("display_name", "status", "sync_enabled"):
                 if key in payload:
                     record[key] = payload[key]
+            if "industry_id" in payload or "industry" in payload:
+                record["industry_id"] = normalize_industry_id(payload.get("industry_id") or payload.get("industry"))
             if isinstance(payload.get("metadata"), dict):
                 record["metadata"] = payload["metadata"]
+            metadata = record.get("metadata") if isinstance(record.get("metadata"), dict) else {}
+            industry = normalize_industry_id(
+                record.get("industry_id")
+                or metadata.get("industry_id")
+                or metadata.get("industry")
+                or default_industry_for_tenant(tenant)
+            )
+            record["industry_id"] = industry
+            record["metadata"] = {**metadata, "industry_id": industry}
             record["updated_at"] = now_iso()
             append_audit(state, actor_id=actor.user.user_id, action="update_tenant", target_type="tenant", target_id=tenant)
             return record
@@ -284,6 +312,8 @@ class UserService:
             guest_customer_username = str(payload.get("authorized_customer") or payload.get("customer_username") or "").strip()
             if not guest_customer_username:
                 raise HTTPException(status_code=400, detail="guest account requires an authorized customer")
+        raw_industry = str(payload.get("industry_id") or payload.get("industry") or "").strip()
+        requested_industry = normalize_industry_id(raw_industry) if raw_industry else ""
 
         user_id = str(payload.get("user_id") or make_id("user"))
         record = {
@@ -293,6 +323,7 @@ class UserService:
             "email": normalize_email(str(payload.get("email") or "")),
             "role": role.value,
             "tenant_ids": tenant_ids,
+            "industry_id": requested_industry or "",
             "resource_scopes": payload.get("resource_scopes") if isinstance(payload.get("resource_scopes"), list) else ["*"],
             "status": str(payload.get("status") or "active"),
             "created_at": now_iso(),
@@ -325,9 +356,20 @@ class UserService:
             for tenant_id in resolved_tenant_ids:
                 if tenant_id not in state["tenants"]:
                     if role == Role.CUSTOMER and tenant_id == active_tenant_id(username):
-                        state["tenants"][tenant_id] = customer_tenant_record(username=username, tenant_id=tenant_id)
+                        state["tenants"][tenant_id] = customer_tenant_record(
+                            username=username,
+                            tenant_id=tenant_id,
+                            industry_id=requested_industry or default_industry_for_tenant(tenant_id),
+                        )
                     else:
                         ensure_tenant_exists(state, tenant_id)
+                if role == Role.CUSTOMER and requested_industry:
+                    tenant_record = state["tenants"].get(tenant_id)
+                    if isinstance(tenant_record, dict):
+                        tenant_metadata = tenant_record.get("metadata") if isinstance(tenant_record.get("metadata"), dict) else {}
+                        tenant_record["industry_id"] = requested_industry
+                        tenant_record["metadata"] = {**tenant_metadata, "industry_id": requested_industry}
+                        tenant_record["updated_at"] = now_iso()
             if user_id in state["users"]:
                 raise HTTPException(status_code=409, detail=f"user already exists: {user_id}")
             if any(str(item.get("username") or "") == username for item in state["users"].values()):
@@ -361,6 +403,20 @@ class UserService:
                 for tenant_id in tenant_ids:
                     ensure_tenant_exists(state, tenant_id)
                 record["tenant_ids"] = tenant_ids
+            requested_industry = ""
+            if "industry_id" in payload or "industry" in payload:
+                requested_industry = normalize_industry_id(payload.get("industry_id") or payload.get("industry"))
+                record["industry_id"] = requested_industry
+                if role == Role.CUSTOMER:
+                    target_tenants = [active_tenant_id(item) for item in record.get("tenant_ids", []) if str(item).strip()]
+                    for tenant_id in target_tenants:
+                        tenant_record = state.get("tenants", {}).get(tenant_id)
+                        if not isinstance(tenant_record, dict):
+                            continue
+                        tenant_metadata = tenant_record.get("metadata") if isinstance(tenant_record.get("metadata"), dict) else {}
+                        tenant_record["industry_id"] = requested_industry
+                        tenant_record["metadata"] = {**tenant_metadata, "industry_id": requested_industry}
+                        tenant_record["updated_at"] = now_iso()
             for key in ("display_name", "resource_scopes", "status"):
                 if key in payload:
                     record[key] = payload[key]
@@ -388,10 +444,20 @@ class UserService:
         result = public_user(record)
         tenant_ids = [active_tenant_id(item) for item in result.get("tenant_ids", []) if str(item).strip()]
         customer_names: list[str] = []
+        tenant_industries: dict[str, str] = {}
         for tenant_id in tenant_ids:
             customer = customer_username_for_tenant(state, tenant_id)
             customer_names.append(customer or tenant_id)
+            tenant_record = state.get("tenants", {}).get(tenant_id)
+            metadata = tenant_record.get("metadata") if isinstance(tenant_record, dict) and isinstance(tenant_record.get("metadata"), dict) else {}
+            tenant_industries[tenant_id] = normalize_industry_id(
+                (tenant_record.get("industry_id") if isinstance(tenant_record, dict) else "")
+                or metadata.get("industry_id")
+                or metadata.get("industry")
+                or default_industry_for_tenant(tenant_id)
+            )
         result["authorized_customers"] = customer_names
+        result["tenant_industries"] = tenant_industries
         if result.get("role") == Role.CUSTOMER.value:
             result["customer_name"] = result.get("username")
         return result
@@ -753,20 +819,35 @@ class SharedKnowledgeService:
     def __init__(self, store: VpsAdminStore) -> None:
         self.store = store
 
-    def list_library_items(self, *, include_inactive: bool = False) -> list[dict[str, Any]]:
+    def industry_catalog(self) -> list[dict[str, Any]]:
+        return industry_catalog()
+
+    def list_library_items(self, *, include_inactive: bool = False, industry_id: str = "") -> list[dict[str, Any]]:
         def mutate(state: dict[str, Any]) -> list[dict[str, Any]]:
             seed_shared_library_if_empty(state)
             items = list(state.get("shared_library", {}).values())
             if not include_inactive:
                 items = [item for item in items if str(item.get("status") or "active") == "active"]
+            industry_filter = normalize_shared_item_industry_id(industry_id) if str(industry_id or "").strip() else ""
+            if industry_filter:
+                items = [
+                    item
+                    for item in items
+                    if normalize_shared_item_industry_id(item.get("industry_id") or GLOBAL_INDUSTRY_ID) == industry_filter
+                ]
             normalized = [public_shared_library_record(item) for item in items]
             return sorted(normalized, key=lambda item: str(item.get("updated_at") or item.get("created_at") or ""), reverse=True)
 
         return self.store.update(mutate)
 
     def official_snapshot(self, *, tenant_id: str = "", since_version: str = "") -> dict[str, Any]:
-        state = self.store.read()
-        return build_official_shared_knowledge_snapshot(state, tenant_id=tenant_id, since_version=since_version)
+        def mutate(state: dict[str, Any]) -> dict[str, Any]:
+            seed_local_customer_accounts(state)
+            seed_shared_library_if_empty(state)
+            ensure_tenant_industry_bindings(state)
+            return build_official_shared_knowledge_snapshot(state, tenant_id=tenant_id, since_version=since_version)
+
+        return self.store.update(mutate)
 
     def get_library_item(self, item_id: str) -> dict[str, Any]:
         def mutate(state: dict[str, Any]) -> dict[str, Any]:
@@ -806,6 +887,8 @@ class SharedKnowledgeService:
             for key in ("category_id", "title", "content", "status", "source", "tenant_id"):
                 if key in payload:
                     record[key] = str(payload.get(key) or "")
+            if "industry_id" in payload or "industry" in payload:
+                record["industry_id"] = normalize_shared_item_industry_id(payload.get("industry_id") or payload.get("industry"))
             if isinstance(payload.get("data"), dict):
                 record["data"] = payload["data"]
             if "keywords" in payload:
@@ -1167,17 +1250,18 @@ class SharedKnowledgeService:
     def overview(self) -> dict[str, Any]:
         state = self.store.read()
         snapshots = sorted(state.get("shared_snapshots", {}).values(), key=lambda item: str(item.get("created_at") or ""), reverse=True)
-        official = build_official_shared_knowledge_snapshot(state)
+        official = self.official_snapshot()
         return {
             "local": official,
             "official": official,
+            "industry_catalog": industry_catalog(),
             "local_legacy": build_shared_knowledge_snapshot(),
             "snapshots": snapshots,
             "latest_snapshot": snapshots[0] if snapshots else None,
         }
 
     def sync_local_snapshot(self, *, actor: AuthSession) -> dict[str, Any]:
-        snapshot = build_official_shared_knowledge_snapshot(self.store.read())
+        snapshot = self.official_snapshot()
         snapshot_id = str("shared_snapshot_" + make_id("sync"))
         record = {
             "snapshot_id": snapshot_id,
@@ -1583,13 +1667,15 @@ def select_target_nodes(state: dict[str, Any], *, tenant_id: str = "", node_id: 
     return nodes
 
 
-def customer_tenant_record(*, username: str, tenant_id: str) -> dict[str, Any]:
+def customer_tenant_record(*, username: str, tenant_id: str, industry_id: str | None = None) -> dict[str, Any]:
+    normalized_industry = normalize_industry_id(industry_id or default_industry_for_tenant(tenant_id))
     return {
         "tenant_id": active_tenant_id(tenant_id),
         "display_name": username,
         "status": "active",
         "sync_enabled": False,
-        "metadata": {"source": "customer_account", "account_username": username},
+        "industry_id": normalized_industry,
+        "metadata": {"source": "customer_account", "account_username": username, "industry_id": normalized_industry},
         "created_at": now_iso(),
         "updated_at": now_iso(),
     }
@@ -1632,27 +1718,37 @@ def seed_local_customer_accounts(state: dict[str, Any]) -> None:
             tenant_id = active_tenant_id(path.name)
             if tenant_id not in state.get("tenants", {}):
                 state["tenants"][tenant_id] = local_customer_tenant_record({}, tenant_id)
+    ensure_tenant_industry_bindings(state)
 
 
 def local_customer_tenant_record(account: dict[str, Any], tenant_id: str) -> dict[str, Any]:
-    metadata = {}
-    try:
-        payload = json.loads(tenant_metadata_path(tenant_id).read_text(encoding="utf-8"))
-        if isinstance(payload, dict):
-            metadata = payload
-    except Exception:
-        metadata = {}
+    metadata = read_tenant_metadata(tenant_id)
     username = str(account.get("username") or metadata.get("account_username") or tenant_id)
     display = str(account.get("display_name") or metadata.get("display_name") or metadata.get("name") or username)
+    industry = resolve_tenant_industry_id(tenant_id, tenant_metadata=metadata)
     return {
         "tenant_id": active_tenant_id(tenant_id),
         "display_name": display,
         "status": "active",
         "sync_enabled": True,
-        "metadata": {"source": "local_client_account", "account_username": username, **(metadata if isinstance(metadata, dict) else {})},
+        "industry_id": industry,
+        "metadata": {"source": "local_client_account", "account_username": username, "industry_id": industry, **(metadata if isinstance(metadata, dict) else {})},
         "created_at": str(account.get("created_at") or account.get("initialized_at") or now_iso()),
         "updated_at": str(account.get("updated_at") or now_iso()),
     }
+
+
+def ensure_tenant_industry_bindings(state: dict[str, Any]) -> None:
+    tenants = state.get("tenants", {})
+    if not isinstance(tenants, dict):
+        return
+    for tenant_id, record in tenants.items():
+        if not isinstance(record, dict):
+            continue
+        metadata = record.get("metadata") if isinstance(record.get("metadata"), dict) else {}
+        resolved = resolve_tenant_industry_id(str(tenant_id), tenant_record=record, tenant_metadata=metadata)
+        record["industry_id"] = resolved
+        record["metadata"] = {**metadata, "industry_id": resolved}
 
 
 def customer_username_for_tenant(state: dict[str, Any], tenant_id: str) -> str:
@@ -2641,9 +2737,17 @@ def build_shared_library_record(
     keywords = payload.get("keywords") if "keywords" in payload else readable_data.get("keywords")
     applies_to = payload.get("applies_to") if "applies_to" in payload else readable_data.get("applies_to")
     notes = payload.get("notes") if "notes" in payload else readable_data.get("notes")
+    industry_id = normalize_shared_item_industry_id(
+        payload.get("industry_id")
+        or data.get("industry_id")
+        or readable_data.get("industry_id")
+        or (existing.get("industry_id") if isinstance(existing, dict) else "")
+        or GLOBAL_INDUSTRY_ID
+    )
     now = now_iso()
     record = {
         "item_id": resolved_item_id,
+        "industry_id": industry_id,
         "category_id": category_id,
         "title": title,
         "content": content,
@@ -2673,6 +2777,12 @@ def public_shared_library_record(record: dict[str, Any]) -> dict[str, Any]:
     result["keywords"] = normalize_text_list(result.get("keywords") or readable_data.get("keywords"))
     result["applies_to"] = str(result.get("applies_to") or readable_data.get("applies_to") or "")
     result["notes"] = str(result.get("notes") or readable_data.get("notes") or "")
+    result["industry_id"] = normalize_shared_item_industry_id(
+        result.get("industry_id")
+        or readable_data.get("industry_id")
+        or data.get("industry_id")
+        or GLOBAL_INDUSTRY_ID
+    )
     return result
 
 
@@ -2683,22 +2793,38 @@ def build_official_shared_knowledge_snapshot(
     since_version: str = "",
 ) -> dict[str, Any]:
     tenant = active_tenant_id(tenant_id or DEFAULT_TENANT_ID)
+    seed_shared_library_if_empty(state)
+    ensure_tenant_industry_bindings(state)
+    tenant_record = state.get("tenants", {}).get(tenant) if isinstance(state.get("tenants"), dict) else {}
+    tenant_metadata = read_tenant_metadata(tenant)
+    tenant_industry_id = resolve_tenant_industry_id(
+        tenant,
+        tenant_record=tenant_record if isinstance(tenant_record, dict) else {},
+        tenant_metadata=tenant_metadata,
+    )
+    allowed_industries = {GLOBAL_INDUSTRY_ID, tenant_industry_id}
     generated_at = now_iso()
     items = [
         public_shared_library_record(item)
         for item in state.get("shared_library", {}).values()
-        if isinstance(item, dict) and str(item.get("status") or "active") == "active"
+        if isinstance(item, dict)
+        and str(item.get("status") or "active") == "active"
+        and normalize_shared_item_industry_id(item.get("industry_id") or GLOBAL_INDUSTRY_ID) in allowed_industries
     ]
     items = sorted(items, key=lambda item: (str(item.get("category_id") or ""), str(item.get("title") or item.get("item_id") or "")))
-    version = official_shared_snapshot_version(items)
+    policy_bundle = build_policy_bundle(tenant_industry_id)
+    version = official_shared_snapshot_version(items, tenant_industry_id=tenant_industry_id, policy_bundle=policy_bundle)
     base = {
         "schema_version": 1,
         "source": "cloud_official_shared_library",
         "version": version,
         "tenant_id": tenant,
+        "tenant_industry_id": tenant_industry_id,
+        "industry_catalog": industry_catalog(),
         "generated_at": generated_at,
         **shared_snapshot_cache_policy(version=version, tenant_id=tenant, issued_at=generated_at),
         "deleted_item_ids": [],
+        "policy_bundle": policy_bundle,
     }
     if since_version and str(since_version) == version:
         return {**base, "not_modified": True, "categories": [], "items": []}
@@ -2710,10 +2836,16 @@ def build_official_shared_knowledge_snapshot(
     }
 
 
-def official_shared_snapshot_version(items: list[dict[str, Any]]) -> str:
+def official_shared_snapshot_version(
+    items: list[dict[str, Any]],
+    *,
+    tenant_industry_id: str = "",
+    policy_bundle: dict[str, Any] | None = None,
+) -> str:
     fingerprints = [
         {
             "item_id": item.get("item_id"),
+            "industry_id": item.get("industry_id"),
             "category_id": item.get("category_id"),
             "title": item.get("title"),
             "content": item.get("content"),
@@ -2724,7 +2856,12 @@ def official_shared_snapshot_version(items: list[dict[str, Any]]) -> str:
         }
         for item in items
     ]
-    return "shared_" + stable_digest(json.dumps(fingerprints, ensure_ascii=False, sort_keys=True), 20)
+    version_payload = {
+        "tenant_industry_id": tenant_industry_id,
+        "items": fingerprints,
+        "policy_bundle_digest": stable_digest(json.dumps(policy_bundle or {}, ensure_ascii=False, sort_keys=True), 16),
+    }
+    return "shared_" + stable_digest(json.dumps(version_payload, ensure_ascii=False, sort_keys=True), 20)
 
 
 def shared_snapshot_cache_policy(*, version: str, tenant_id: str, issued_at: str) -> dict[str, Any]:
@@ -2777,19 +2914,26 @@ def parse_iso_datetime(value: str) -> datetime | None:
 
 
 def official_shared_snapshot_categories(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    grouped: dict[str, int] = {}
+    grouped: dict[str, dict[str, int]] = {}
     for item in items:
         category_id = str(item.get("category_id") or "global_guidelines")
-        grouped[category_id] = grouped.get(category_id, 0) + 1
+        bucket = grouped.setdefault(category_id, {"item_count": 0, "global_count": 0, "industry_count": 0})
+        bucket["item_count"] += 1
+        if normalize_shared_item_industry_id(item.get("industry_id") or GLOBAL_INDUSTRY_ID) == GLOBAL_INDUSTRY_ID:
+            bucket["global_count"] += 1
+        else:
+            bucket["industry_count"] += 1
     return [
         {
             "category_id": category_id,
             "name": category_id,
-            "kind": "global",
+            "kind": "mixed" if payload["global_count"] and payload["industry_count"] else ("industry" if payload["industry_count"] else "global"),
             "enabled": True,
-            "item_count": count,
+            "item_count": payload["item_count"],
+            "global_item_count": payload["global_count"],
+            "industry_item_count": payload["industry_count"],
         }
-        for category_id, count in sorted(grouped.items())
+        for category_id, payload in sorted(grouped.items())
     ]
 
 
@@ -2831,7 +2975,25 @@ def looks_like_json_object(value: str) -> bool:
 
 
 def seed_shared_library_if_empty(state: dict[str, Any]) -> None:
-    state.setdefault("shared_library", {})
+    library = state.setdefault("shared_library", {})
+    if not isinstance(library, dict):
+        state["shared_library"] = {}
+        library = state["shared_library"]
+    for payload in seed_shared_library_items():
+        if not isinstance(payload, dict):
+            continue
+        item_id = str(payload.get("item_id") or payload.get("id") or "").strip()
+        if not item_id or item_id in library:
+            continue
+        record = build_shared_library_record(
+            payload,
+            actor_id="system_seed",
+            item_id=item_id,
+            source=str(payload.get("source") or "system_seed_industry_library"),
+            tenant_id=DEFAULT_TENANT_ID,
+            existing=None,
+        )
+        library[item_id] = record
 
 
 def upsert_shared_library_from_operations(

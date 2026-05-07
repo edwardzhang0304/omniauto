@@ -9,6 +9,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import JSONResponse, Response
 
 from apps.wechat_ai_customer_service.auth import AuthContext, AuthService, assert_allowed
+from apps.wechat_ai_customer_service.cloud_gate import cloud_gate_error_payload, cloud_gate_status, cloud_required_enabled
 from apps.wechat_ai_customer_service.knowledge_paths import active_tenant_id, reset_active_tenant_id, set_active_tenant_id
 
 
@@ -31,6 +32,15 @@ PUBLIC_PATHS = {
     "/v1/auth/initialize/verify",
 }
 READ_METHODS = {"GET", "HEAD", "OPTIONS"}
+CLOUD_GATE_ALLOWED_PATHS = {
+    "/api/auth/me",
+    "/api/auth/security",
+    "/api/sync/status",
+    "/api/sync/register-node",
+    "/api/sync/shared/cloud-snapshot",
+    "/api/sync/commands/poll",
+}
+CLOUD_GATE_ALLOWED_PREFIXES = ()
 
 
 class AuthTenantMiddleware(BaseHTTPMiddleware):
@@ -53,6 +63,11 @@ class AuthTenantMiddleware(BaseHTTPMiddleware):
         if context is None:
             return JSONResponse({"ok": False, "detail": "authentication required"}, status_code=401)
 
+        if cloud_required_enabled() and not cloud_gate_exempt(path):
+            gate = cloud_gate_status()
+            if not gate.get("ok"):
+                return JSONResponse(cloud_gate_error_payload(), status_code=423)
+
         resource = resource_for_path(path)
         action = action_for_request(path, request.method)
         try:
@@ -69,6 +84,12 @@ class AuthTenantMiddleware(BaseHTTPMiddleware):
         response.headers.setdefault("X-Tenant-ID", context.tenant_id)
         response.headers.setdefault("X-Auth-Role", context.role.value)
         return response
+
+
+def cloud_gate_exempt(path: str) -> bool:
+    if path in CLOUD_GATE_ALLOWED_PATHS:
+        return True
+    return any(path.startswith(prefix) for prefix in CLOUD_GATE_ALLOWED_PREFIXES)
 
 
 def current_auth_context(request: Request) -> AuthContext:

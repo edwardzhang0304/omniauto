@@ -11,6 +11,8 @@ import time
 from datetime import datetime
 from pathlib import Path
 
+import psutil
+
 
 APP_ROOT = Path(__file__).resolve().parents[1]
 PROJECT_ROOT = APP_ROOT.parents[1]
@@ -23,6 +25,47 @@ from apps.wechat_ai_customer_service.admin_backend.services.customer_service_run
     summarize_listener_result,
     write_runtime_status,
 )
+from apps.wechat_ai_customer_service.cloud_gate import cloud_gate_status, cloud_required_enabled  # noqa: E402
+from apps.wechat_ai_customer_service.sync import VpsLocalSyncService  # noqa: E402
+
+
+def _ancestor_pids(pid: int) -> set[int]:
+    """Return all ancestor PIDs of the given process."""
+    ancestors: set[int] = set()
+    try:
+        proc = psutil.Process(pid)
+        while True:
+            parent = proc.parent()
+            if parent is None:
+                break
+            ancestors.add(parent.pid)
+            proc = parent
+    except psutil.NoSuchProcess:
+        pass
+    return ancestors
+
+
+def _already_running(tenant_id: str) -> bool:
+    """Check if another managed listener for the same tenant is already running."""
+    my_pid = os.getpid()
+    ancestor_pids = _ancestor_pids(my_pid)
+    for proc in psutil.process_iter(["pid", "cmdline", "name"]):
+        try:
+            pid = proc.info.get("pid")
+            cmdline = proc.info.get("cmdline") or []
+            cmd = " ".join(str(item) for item in cmdline)
+            name = str(proc.info.get("name") or "").lower()
+            if (
+                pid != my_pid
+                and pid not in ancestor_pids
+                and "python" in name
+                and "run_customer_service_listener" in cmd
+                and f"--tenant-id {tenant_id}" in cmd
+            ):
+                return True
+        except (psutil.NoSuchProcess, psutil.AccessDenied):
+            continue
+    return False
 
 
 def main() -> int:
@@ -31,10 +74,17 @@ def main() -> int:
     parser.add_argument("--config", type=Path, required=True)
     parser.add_argument("--interval-seconds", type=float, default=3.0)
     parser.add_argument("--send", action="store_true")
+    parser.add_argument("--write-data", action="store_true")
     args = parser.parse_args()
 
     tenant_id = str(args.tenant_id).strip()
     config_path = args.config.resolve()
+
+    if _already_running(tenant_id):
+        print(f"Managed listener for {tenant_id} is already running; exiting.", file=sys.stderr)
+        return 0
+    print(f"Managed listener for {tenant_id} starting with PID={os.getpid()}", file=sys.stderr)
+
     env = dict(os.environ)
     env["WECHAT_KNOWLEDGE_TENANT"] = tenant_id
     log_path = runtime_log_path(tenant_id)
@@ -43,10 +93,46 @@ def main() -> int:
 
     append_log(log_path, {"event": "managed_listener_start", "tenant_id": tenant_id, "config": str(config_path)})
     write_runtime_status("idle", "自动客服监听已启动，等待微信消息。", tenant_id=tenant_id)
+    sync_service = VpsLocalSyncService()
+    cloud_sync_token = str(os.getenv("WECHAT_RUNTIME_SYNC_TOKEN") or "").strip()
+    try:
+        cloud_refresh_interval = max(5.0, float(os.getenv("WECHAT_CLOUD_REFRESH_INTERVAL_SECONDS") or "20"))
+    except ValueError:
+        cloud_refresh_interval = 20.0
+    last_cloud_refresh_at = 0.0
     while True:
+        if cloud_required_enabled():
+            now_ts = time.monotonic()
+            if now_ts - last_cloud_refresh_at >= cloud_refresh_interval:
+                refresh = sync_service.fetch_shared_knowledge_snapshot(
+                    token=cloud_sync_token,
+                    tenant_id=tenant_id,
+                    force=False,
+                )
+                last_cloud_refresh_at = now_ts
+                if refresh.get("ok") is not True:
+                    message = "共享行业知识库续租失败，自动客服监听已停止。请恢复服务端连接并重新启动。"
+                    append_log(
+                        log_path,
+                        {
+                            "event": "managed_listener_cloud_refresh_failed",
+                            "tenant_id": tenant_id,
+                            "cloud_sync": refresh,
+                        },
+                    )
+                    write_runtime_status("stopped", message, tenant_id=tenant_id, cloud_sync=refresh)
+                    return 2
+            gate = cloud_gate_status()
+            if not gate.get("ok"):
+                message = "云端授权未通过，自动客服监听已停止。请连接服务端并刷新共享行业知识库。"
+                append_log(log_path, {"event": "managed_listener_cloud_gate_stop", "tenant_id": tenant_id, "cloud_gate": gate})
+                write_runtime_status("stopped", message, tenant_id=tenant_id, cloud_gate=gate)
+                return 2
         command = [sys.executable, str(workflow), "--config", str(config_path), "--once"]
         if args.send:
             command.append("--send")
+        if args.write_data:
+            command.append("--write-data")
         write_runtime_status("thinking", "正在读取微信消息并准备回复。", tenant_id=tenant_id)
         started = time.time()
         result = run_once(command, env=env, cwd=PROJECT_ROOT, log_path=log_path)

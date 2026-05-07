@@ -72,6 +72,9 @@ def guard_synthesized_reply(
     if has_unsafe_commitment(reply, platform_rules) and not has_caution(reply, platform_rules):
         return handoff_decision("unsafe_commitment_without_caution", candidate, include_candidate_reply=False)
 
+    if has_uncertainty_reassurance_conflict(candidate, reply):
+        return handoff_decision("uncertainty_conflicts_with_reassuring_reply", candidate, include_candidate_reply=False)
+
     if has_forbidden_private_payment_or_invoice_reply(reply, platform_rules):
         return handoff_decision("forbidden_payment_invoice_or_finance_boundary", candidate, include_candidate_reply=False)
 
@@ -81,6 +84,8 @@ def guard_synthesized_reply(
     if has_sales_followup_commitment(reply, platform_rules):
         return handoff_decision("sales_followup_requires_handoff", candidate)
 
+    if settings.get("require_evidence", True) is not False:
+        candidate = enrich_candidate_evidence(candidate=candidate, evidence_pack=evidence_pack)
     if settings.get("require_evidence", True) is not False and not candidate_evidence_declared(candidate):
         return {"allowed": False, "action": "fallback", "reason": "candidate_missing_used_evidence", "candidate": candidate}
 
@@ -185,6 +190,31 @@ def candidate_evidence_declared(candidate: dict[str, Any]) -> bool:
     return bool(candidate.get("rag_used") or candidate.get("structured_used"))
 
 
+def enrich_candidate_evidence(*, candidate: dict[str, Any], evidence_pack: dict[str, Any]) -> dict[str, Any]:
+    if candidate_evidence_declared(candidate):
+        return candidate
+    audit_summary = evidence_pack.get("audit_summary") if isinstance(evidence_pack.get("audit_summary"), dict) else {}
+    used_evidence = [str(item) for item in (audit_summary.get("evidence_ids") or []) if str(item)]
+    if not used_evidence:
+        used_evidence = [
+            str(item.get("id") or "")
+            for item in (evidence_pack.get("selected_items") or [])
+            if isinstance(item, dict) and str(item.get("id") or "")
+        ]
+    rag_used = int(audit_summary.get("rag_hit_count") or 0) > 0
+    structured_used = int(audit_summary.get("structured_evidence_count") or 0) > 0
+    if not used_evidence and not rag_used and not structured_used:
+        return candidate
+    enriched = dict(candidate)
+    if used_evidence and not enriched.get("used_evidence"):
+        enriched["used_evidence"] = used_evidence[:12]
+    if rag_used and not bool(enriched.get("rag_used")):
+        enriched["rag_used"] = True
+    if structured_used and not bool(enriched.get("structured_used")):
+        enriched["structured_used"] = True
+    return enriched
+
+
 def has_unsafe_commitment(reply: str, platform_rules: dict[str, Any] | None = None) -> bool:
     platform_rules = platform_rules or load_platform_safety_rules().get("item", {})
     normalized = re.sub(r"\s+", "", reply)
@@ -214,6 +244,17 @@ def has_caution(reply: str, platform_rules: dict[str, Any] | None = None) -> boo
 def has_formulaic_handoff(reply: str, platform_rules: dict[str, Any] | None = None) -> bool:
     platform_rules = platform_rules or load_platform_safety_rules().get("item", {})
     return any(term in reply for term in guard_term_set(platform_rules, "formulaic_handoff_terms"))
+
+
+def has_uncertainty_reassurance_conflict(candidate: dict[str, Any], reply: str) -> bool:
+    uncertain_points = [str(item) for item in candidate.get("uncertain_points", []) or [] if str(item)]
+    if not uncertain_points:
+        return False
+    uncertainty_markers = ("人工确认", "需确认", "需要确认", "无法", "未知", "不确定", "核实")
+    if not any(any(marker in point for marker in uncertainty_markers) for point in uncertain_points):
+        return False
+    reassurance_markers = ("不用担心", "放心", "没问题", "完全没问题", "肯定", "一定", "包过", "包赔")
+    return any(marker in str(reply or "") for marker in reassurance_markers)
 
 
 def has_direct_appointment_commitment(reply: str, platform_rules: dict[str, Any] | None = None) -> bool:

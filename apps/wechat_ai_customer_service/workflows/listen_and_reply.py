@@ -20,6 +20,7 @@ import hashlib
 import json
 import os
 import sys
+import threading
 import time
 from dataclasses import dataclass
 from datetime import datetime, timedelta
@@ -42,8 +43,10 @@ from customer_intent_assist import (
     validate_llm_candidate,
 )
 from customer_service_loop import BOT_PREFIX, ReplyDecision, decide_reply, format_reply, load_rules
+from apps.wechat_ai_customer_service.cloud_gate import cloud_gate_status, cloud_required_enabled
 from apps.wechat_ai_customer_service.platform_safety_rules import guard_term_set, load_platform_safety_rules
 from knowledge_loader import build_evidence_pack
+from llm_intent_router import route_intent, IntentRouteResult
 from llm_reply_synthesis import maybe_synthesize_reply
 from product_knowledge import decide_product_knowledge_reply, load_product_knowledge
 from rag_answer_layer import maybe_build_rag_reply
@@ -55,6 +58,8 @@ from apps.wechat_ai_customer_service.admin_backend.services.customer_service_run
 )
 from admin_backend.services.customer_service_settings import CustomerServiceSettings
 from admin_backend.services.raw_message_store import RawMessageStore
+from apps.wechat_ai_customer_service.admin_backend.services.work_queue import WorkQueueService
+from apps.wechat_ai_customer_service.knowledge_paths import active_tenant_id
 
 
 CONFIG_PATH = ROOT / "apps/wechat_ai_customer_service/configs/default.example.json"
@@ -108,12 +113,38 @@ class StateLock:
             age_seconds = time.time() - self.path.stat().st_mtime
         except FileNotFoundError:
             return
-        if age_seconds < self.stale_seconds:
+        if age_seconds >= self.stale_seconds:
+            try:
+                self.path.unlink()
+            except FileNotFoundError:
+                pass
             return
+        # If lock holder PID is dead, remove immediately regardless of age
+        if self._lock_holder_dead():
+            try:
+                self.path.unlink()
+            except FileNotFoundError:
+                pass
+
+    def _lock_holder_dead(self) -> bool:
         try:
-            self.path.unlink()
-        except FileNotFoundError:
-            pass
+            content = self.path.read_text(encoding="utf-8")
+        except (OSError, FileNotFoundError):
+            return True
+        for line in content.splitlines():
+            if line.startswith("pid="):
+                try:
+                    pid = int(line.split("=", 1)[1].strip())
+                except ValueError:
+                    continue
+                if pid <= 0:
+                    return True
+                try:
+                    os.kill(pid, 0)
+                    return False
+                except OSError:
+                    return True
+        return True
 
 
 def main() -> int:
@@ -153,6 +184,15 @@ def main() -> int:
     )
     args = parser.parse_args()
 
+    if cloud_required_enabled():
+        gate = cloud_gate_status()
+        if not gate.get("ok"):
+            message = "云端授权未通过，当前自动客服已锁定。请先连接服务端并刷新共享行业知识库。"
+            write_runtime_status("stopped", message, cloud_gate=gate)
+            result = {"ok": False, "error": "cloud_authoritative_access_required", "message": message, "cloud_gate": gate}
+            print_json(result)
+            return 1
+
     try:
         write_runtime_status("thinking", "正在读取微信消息并调用必要的大模型。")
         result = run_workflow(args)
@@ -171,7 +211,8 @@ def run_workflow(args: argparse.Namespace) -> dict[str, Any]:
     config = apply_local_customer_service_settings(config)
     state_path = resolve_path(config.get("state_path"))
     audit_path = resolve_path(config.get("audit_log_path"))
-    rules = load_rules(resolve_path(config.get("rules_path")))
+    rules_path = config.get("rules_path")
+    rules = load_rules(resolve_path(rules_path)) if rules_path else config
 
     iterations = resolve_iterations(args, config)
     interval = int(args.interval_seconds or config.get("poll", {}).get("interval_seconds", 15))
@@ -232,6 +273,64 @@ def run_workflow(args: argparse.Namespace) -> dict[str, Any]:
                 time.sleep(max(1, interval))
 
     return summary
+
+
+def _enqueue_post_reply_work(
+    target: TargetConfig,
+    config: dict[str, Any],
+    raw_capture: dict[str, Any],
+    data_capture: dict[str, Any],
+) -> None:
+    """Enqueue background tasks after a reply has been sent."""
+    try:
+        tenant_id = active_tenant_id()
+        queue = WorkQueueService(tenant_id=tenant_id)
+
+        # 1. experience_interpretation — raw message batch LLM processing
+        batch_id = str((raw_capture or {}).get("batch", {}).get("batch_id") or "")
+        raw_settings = config.get("raw_messages", {}) or {}
+        if batch_id and raw_settings.get("auto_learn", False):
+            queue.enqueue(
+                kind="experience_interpretation",
+                payload={
+                    "batch_id": batch_id,
+                    "tenant_id": tenant_id,
+                    "use_llm": raw_settings.get("use_llm", True) is not False,
+                },
+                queue="customer_service",
+                dedupe_key=f"exp_interp:{tenant_id}:{batch_id}",
+                priority=4,
+            )
+
+        # 2. customer_data_sync — Excel write or other data persistence
+        if data_capture.get("enabled") and data_capture.get("is_customer_data"):
+            queue.enqueue(
+                kind="customer_data_sync",
+                payload={
+                    "target_name": target.name,
+                    "tenant_id": tenant_id,
+                    "data_capture": {
+                        "fields": data_capture.get("fields", {}),
+                        "message_ids": data_capture.get("message_ids", []),
+                        "raw_text": data_capture.get("raw_text", ""),
+                    },
+                },
+                queue="customer_service",
+                dedupe_key=f"data_sync:{tenant_id}:{target.name}:{','.join(str(item) for item in data_capture.get('message_ids', []))}",
+                priority=3,
+            )
+
+        # 3. raw_message_archive — periodic cleanup (deduped, low priority)
+        queue.enqueue(
+            kind="raw_message_archive",
+            payload={"tenant_id": tenant_id, "days": 30},
+            queue="customer_service",
+            dedupe_key=f"raw_archive:{tenant_id}",
+            priority=8,
+        )
+    except Exception:
+        # Work queue failures must never block the reply path
+        pass
 
 
 def process_target(
@@ -300,19 +399,74 @@ def process_target(
                 },
             )
 
-    data_capture = maybe_capture_customer_data(
-        config=config,
-        target_state=target_state,
-        target=target,
-        batch=batch,
-        combined=combined,
-        write_data=False,
+    # 1. Build evidence pack for intent analysis and synthesis
+    evidence_pack = build_evidence_pack(
+        combined,
+        context=conversation_context_from_product_result(
+            target_state.get("conversation_context", {}) or {}
+        ),
     )
-    if data_capture.get("enabled"):
-        data_capture["write_requested"] = write_data
-    product_knowledge = maybe_match_product_knowledge(config, target_state, combined, data_capture)
-    update_conversation_context(target_state, product_knowledge)
-    decision = decide_reply_with_data_capture(combined, rules, config, data_capture, product_knowledge)
+
+    # 2. LLM intent routing — replaces keyword-based customer_data gate
+    intent_result = route_intent(
+        combined=combined,
+        config=config,
+        evidence_pack=evidence_pack,
+        target_state=target_state,
+    )
+
+    # 3. Branch by intent
+    data_capture: dict[str, Any] = {"enabled": False}
+    product_knowledge: dict[str, Any] | None = None
+    decision: ReplyDecision
+
+    if intent_result.intent == "customer_data_provide":
+        data_capture = maybe_capture_customer_data(
+            config=config,
+            target_state=target_state,
+            target=target,
+            batch=batch,
+            combined=combined,
+            write_data=False,
+            intent_result=intent_result,
+        )
+        if data_capture.get("enabled"):
+            data_capture["write_requested"] = write_data
+        decision = decide_reply_with_data_capture(
+            combined, rules, config, data_capture, product_knowledge
+        )
+
+    elif intent_result.intent == "handoff_request":
+        decision = ReplyDecision(
+            reply_text=handoff_acknowledgement_text(config),
+            rule_name="handoff_request",
+            matched=True,
+            need_handoff=True,
+            reason="customer_explicit_handoff_intent",
+        )
+
+    else:
+        # product_inquiry, general_chat, greeting, unclear
+        # Extract data fields without blocking the flow
+        data_capture = maybe_capture_customer_data(
+            config=config,
+            target_state=target_state,
+            target=target,
+            batch=batch,
+            combined=combined,
+            write_data=False,
+            intent_result=intent_result,
+        )
+        if data_capture.get("enabled"):
+            data_capture["write_requested"] = write_data
+
+        product_knowledge = maybe_match_product_knowledge(
+            config, target_state, combined, data_capture
+        )
+        update_conversation_context(target_state, product_knowledge)
+        decision = decide_reply_with_data_capture(
+            combined, rules, config, data_capture, product_knowledge
+        )
     reply_prefix = configured_reply_prefix(config)
     reply_text = format_reply(decision.reply_text, reply_prefix)
     fallback_allowed = bool(allow_fallback_send or config.get("reply", {}).get("allow_fallback_send"))
@@ -332,6 +486,7 @@ def process_target(
             "data_capture": data_capture,
             "raw_capture": raw_capture,
             "product_knowledge": product_knowledge,
+            "intent_result": intent_result.to_dict(),
             "intent_assist": skipped_intent_assist(config, "not_evaluated_yet"),
             "dry_run": not send,
         },
@@ -551,6 +706,7 @@ def process_target(
         mark_processed(target_state, batch, handoff_reply_text, reply_trace_id=reply_trace_id, send_result=verified)
         record_reply_timestamp(target_state)
         finalize_data_capture_state(target_state, data_capture)
+        _enqueue_post_reply_work(target, config, raw_capture, data_capture)
         event["operator_alert"] = alert
         event["action"] = "handoff_sent"
         return event
@@ -606,6 +762,7 @@ def process_target(
         )
         if record:
             event["rag_experience"] = record
+        _enqueue_post_reply_work(target, config, raw_capture, data_capture)
         mark_processed(target_state, batch, reply_text, reply_trace_id=reply_trace_id, send_result=verified)
         record_reply_timestamp(target_state)
         event["action"] = "sent"
@@ -656,12 +813,7 @@ def maybe_record_raw_messages(target: TargetConfig, config: dict[str, Any], mess
             batch_reason="customer_service_poll",
         )
         if settings.get("auto_learn", False) and result.get("batch"):
-            from admin_backend.services.raw_message_learning_service import RawMessageLearningService
-
-            result["learning"] = RawMessageLearningService().process_batch(
-                str(result["batch"].get("batch_id") or ""),
-                use_llm=settings.get("use_llm", True) is not False,
-            )
+            result["learning"] = {"status": "pending_enqueue", "batch_id": str(result["batch"].get("batch_id") or "")}
         return {"enabled": True, **result}
     except Exception as exc:
         return {"enabled": True, "ok": False, "error": repr(exc)}
@@ -740,15 +892,15 @@ def maybe_record_rag_experience(
 
 def should_operator_handoff(
     decision: ReplyDecision,
-    product_knowledge: dict[str, Any],
+    product_knowledge: dict[str, Any] | None,
     fallback_allowed: bool,
     intent_assist: dict[str, Any] | None = None,
 ) -> bool:
     if evidence_requires_handoff(intent_assist):
         return True
-    if product_knowledge.get("auto_reply_allowed") is False:
+    if product_knowledge and product_knowledge.get("auto_reply_allowed") is False:
         return True
-    if product_knowledge.get("needs_handoff"):
+    if product_knowledge and product_knowledge.get("needs_handoff"):
         return True
     if decision.need_handoff:
         return True
@@ -762,7 +914,7 @@ def should_operator_handoff(
 def build_operator_handoff_reply_text(
     config: dict[str, Any],
     decision: ReplyDecision,
-    product_knowledge: dict[str, Any],
+    product_knowledge: dict[str, Any] | None,
     current_reply_text: str,
     intent_assist: dict[str, Any] | None = None,
     combined: str = "",
@@ -771,9 +923,9 @@ def build_operator_handoff_reply_text(
         return current_reply_text
     if evidence_requires_handoff(intent_assist):
         return format_reply(handoff_acknowledgement_text(config, combined=combined), configured_reply_prefix(config))
-    if product_knowledge.get("auto_reply_allowed") is False:
+    if product_knowledge and product_knowledge.get("auto_reply_allowed") is False:
         return format_reply(handoff_acknowledgement_text(config, combined=combined), configured_reply_prefix(config))
-    if product_knowledge.get("reply_text"):
+    if product_knowledge and product_knowledge.get("reply_text"):
         return current_reply_text
     return format_reply(handoff_acknowledgement_text(config), configured_reply_prefix(config))
 
@@ -805,17 +957,17 @@ def handoff_acknowledgement_is_formulaic(text: str) -> bool:
 
 def handoff_reason(
     decision: ReplyDecision,
-    product_knowledge: dict[str, Any],
+    product_knowledge: dict[str, Any] | None,
     intent_assist: dict[str, Any] | None = None,
 ) -> str:
     evidence_reason = evidence_handoff_reason(intent_assist)
     if evidence_reason:
         return evidence_reason
-    if product_knowledge.get("approval_reason"):
+    if product_knowledge and product_knowledge.get("approval_reason"):
         return str(product_knowledge.get("approval_reason"))
-    if product_knowledge.get("auto_reply_allowed") is False:
+    if product_knowledge and product_knowledge.get("auto_reply_allowed") is False:
         return str(product_knowledge.get("reason") or "auto_reply_disabled")
-    if product_knowledge.get("needs_handoff"):
+    if product_knowledge and product_knowledge.get("needs_handoff"):
         return str(product_knowledge.get("reason") or "product_knowledge_requires_handoff")
     return str(decision.reason or "operator_handoff")
 
@@ -886,23 +1038,54 @@ def maybe_capture_customer_data(
     batch: list[dict[str, Any]],
     combined: str,
     write_data: bool,
+    intent_result: IntentRouteResult | None = None,
 ) -> dict[str, Any]:
     settings = config.get("data_capture", {}) or {}
     if not settings.get("enabled", False):
         return {"enabled": False}
 
     pending = get_open_pending_customer_data(target_state)
+    # Auto-close stale pending (older than 120s) so normal conversation can resume
+    if pending:
+        updated_at_str = str(pending.get("updated_at") or "")
+        try:
+            updated_at = datetime.fromisoformat(updated_at_str)
+            if (datetime.now() - updated_at).total_seconds() > 120:
+                close_pending_customer_data(target_state, {
+                    "fields": pending.get("fields", {}),
+                    "message_ids": pending.get("message_ids", []),
+                    "write_result": {"ok": False, "reason": "pending_expired"},
+                })
+                pending = None
+        except Exception:
+            pass
+
     pending_raw_text = str(pending.get("raw_text") or "") if pending else ""
     pending_message_ids = [str(item) for item in pending.get("message_ids", [])] if pending else []
     current_message_ids = [str(item.get("id") or "") for item in batch]
-    merged_text = "\n".join(item for item in [pending_raw_text, combined] if item.strip())
-    merged_message_ids = unique_list([*pending_message_ids, *current_message_ids])
+
+    # If current message itself has no customer-data signal, don't merge with stale pending
+    from customer_data_capture import has_customer_data_signal
+    current_has_signal = has_customer_data_signal(combined, {})
+    if pending and not current_has_signal:
+        merged_text = combined
+        merged_message_ids = current_message_ids
+    else:
+        merged_text = "\n".join(item for item in [pending_raw_text, combined] if item.strip())
+        merged_message_ids = unique_list([*pending_message_ids, *current_message_ids])
 
     required_fields = [str(item) for item in settings.get("required_fields", ["name", "phone"])]
     extraction = extract_customer_data(merged_text, required_fields=required_fields)
+
+    # Intent-driven gate: only mark as customer_data when LLM intent says so
+    if intent_result is not None:
+        is_customer_data = intent_result.intent == "customer_data_provide" and bool(extraction.fields)
+    else:
+        is_customer_data = extraction.is_customer_data
+
     result: dict[str, Any] = {
         "enabled": True,
-        "is_customer_data": extraction.is_customer_data,
+        "is_customer_data": is_customer_data,
         "complete": extraction.complete,
         "fields": extraction.fields,
         "missing_required_fields": extraction.missing_required_fields,
@@ -912,7 +1095,7 @@ def maybe_capture_customer_data(
         "raw_text": merged_text,
         "write_requested": write_data,
     }
-    if not extraction.is_customer_data:
+    if not is_customer_data:
         return result
     if not extraction.complete:
         result["write_skipped_reason"] = "missing_required_fields"
@@ -1078,7 +1261,9 @@ def apply_local_customer_service_settings(config: dict[str, Any]) -> dict[str, A
     return merged
 
 
-def update_conversation_context(target_state: dict[str, Any], product_knowledge: dict[str, Any]) -> None:
+def update_conversation_context(target_state: dict[str, Any], product_knowledge: dict[str, Any] | None) -> None:
+    if not product_knowledge:
+        return
     if not product_knowledge.get("matched"):
         return
     if product_knowledge.get("match_type") != "product":
@@ -1154,12 +1339,53 @@ def maybe_analyze_intent(
         payload["reason"] = "evidence_safety:" + ",".join(reasons) if reasons else "evidence_safety_must_handoff"
     suggested_reply = str(payload.get("suggested_reply") or "")
     payload["would_change_reply"] = bool(suggested_reply and suggested_reply not in reply_text)
-    payload["llm_advisory"] = build_llm_advisory(
-        settings=settings,
-        combined=combined,
-        context=analysis_context,
-        heuristic=result,
-    )
+
+    # Run LLM advisory in background so it never blocks the customer reply path.
+    llm_settings = settings.get("llm_advisory", {}) or {}
+    if llm_settings.get("enabled") and str(llm_settings.get("provider") or "") == "deepseek":
+        def _background_advisory(
+            settings_param: dict[str, Any],
+            combined_param: str,
+            context_param: dict[str, Any],
+            heuristic_param: Any,
+        ) -> None:
+            try:
+                adv = build_llm_advisory(
+                    settings=settings_param,
+                    combined=combined_param,
+                    context=context_param,
+                    heuristic=heuristic_param,
+                )
+                log_path = resolve_path("runtime/logs/wechat_customer_service/background_advisory.jsonl")
+                append_jsonl(
+                    log_path,
+                    {
+                        "created_at": datetime.now().isoformat(timespec="seconds"),
+                        "combined": combined_param,
+                        "advisory": adv,
+                    },
+                )
+            except Exception:
+                pass
+
+        threading.Thread(
+            target=_background_advisory,
+            args=(settings, combined, analysis_context, result),
+            daemon=True,
+        ).start()
+        payload["llm_advisory"] = {
+            "enabled": True,
+            "provider": "deepseek",
+            "status": "background_started",
+            "reason": "advisory_executed_in_background",
+        }
+    else:
+        payload["llm_advisory"] = build_llm_advisory(
+            settings=settings,
+            combined=combined,
+            context=analysis_context,
+            heuristic=result,
+        )
     return payload
 
 
@@ -1173,7 +1399,7 @@ def clear_no_relevant_handoff_after_safe_rule_match(
     if not isinstance(safety, dict) or not safety.get("must_handoff"):
         return
     reasons = {str(item) for item in safety.get("reasons", []) or [] if str(item)}
-    if not reasons or not reasons <= {"no_relevant_business_evidence"}:
+    if not reasons or not reasons <= {"no_relevant_business_evidence", "auto_reply_disabled"}:
         return
     if not decision.matched or decision.need_handoff or not str(decision.reply_text or "").strip():
         return
@@ -1322,7 +1548,7 @@ def build_llm_advisory(
             heuristic=heuristic,
             model=str(llm_settings.get("model") or ""),
             base_url=str(llm_settings.get("base_url") or ""),
-            timeout=int(llm_settings.get("timeout_seconds", 60)),
+            timeout=int(llm_settings.get("timeout_seconds", 15)),
         )
         return advisory
 
@@ -1368,10 +1594,7 @@ def maybe_apply_llm_reply(
     if not payload["apply_to_reply"]:
         payload["reason"] = "apply_to_reply_disabled"
         return payload
-    if data_capture.get("is_customer_data"):
-        payload["reason"] = "customer_data_decision_is_deterministic"
-        return payload
-    if evidence_requires_handoff(intent_assist) or product_knowledge.get("needs_handoff") or product_knowledge.get("auto_reply_allowed") is False:
+    if evidence_requires_handoff(intent_assist) or (product_knowledge and product_knowledge.get("needs_handoff")) or (product_knowledge and product_knowledge.get("auto_reply_allowed") is False):
         payload["reason"] = "handoff_required_before_llm_reply"
         return payload
 
@@ -1481,7 +1704,7 @@ def llm_reply_allowed_for_decision(
 
     if not decision.matched or decision.reason == "no_rule_matched":
         return True
-    if product_knowledge.get("matched") and settings.get("apply_to_matched_product", False):
+    if product_knowledge and product_knowledge.get("matched") and settings.get("apply_to_matched_product", False):
         return True
     policy_actions = {
         "answer_company_info",
@@ -1495,8 +1718,8 @@ def llm_reply_allowed_for_decision(
     return False
 
 
-def business_evidence_available(intent_assist: dict[str, Any], product_knowledge: dict[str, Any]) -> bool:
-    if product_knowledge.get("matched"):
+def business_evidence_available(intent_assist: dict[str, Any], product_knowledge: dict[str, Any] | None) -> bool:
+    if product_knowledge and product_knowledge.get("matched"):
         return True
     evidence = intent_assist.get("evidence", {}) or {}
     return bool(
@@ -1511,7 +1734,10 @@ def data_capture_reply(config: dict[str, Any], data_capture: dict[str, Any], com
     if complete:
         return str(settings.get("success_reply") or "客户资料已记录，我会尽快为您继续处理。")
     missing = "、".join(data_capture.get("missing_required_labels", []) or data_capture.get("missing_required_fields", []) or [])
-    template = str(settings.get("incomplete_reply") or "客户资料还缺少：{missing_fields}。请补充后我再记录。")
+    template = str(
+        settings.get("incomplete_reply")
+        or "好的，我先记一下。另外还需要您的{missing_fields}，方便后续跟进，您发我一下就好~"
+    )
     return template.format(missing_fields=missing)
 
 
@@ -1668,7 +1894,7 @@ def clear_no_relevant_handoff_after_safe_synthesis(
         return
     safety = evidence_safety(intent_assist)
     reasons = {str(item) for item in safety.get("reasons", []) or [] if str(item)}
-    if not reasons or not reasons <= {"no_relevant_business_evidence"}:
+    if not reasons or not reasons <= {"no_relevant_business_evidence", "auto_reply_disabled"}:
         return
     safety["must_handoff"] = False
     safety["allowed_auto_reply"] = True

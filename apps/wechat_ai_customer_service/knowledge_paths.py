@@ -59,6 +59,32 @@ def tenant_metadata_path(tenant_id: str | None = None) -> Path:
     return tenant_root(tenant_id) / "tenant.json"
 
 
+def read_tenant_metadata(tenant_id: str | None = None) -> dict:
+    path = tenant_metadata_path(tenant_id)
+    if not path.exists():
+        return {}
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+    return payload if isinstance(payload, dict) else {}
+
+
+def tenant_industry_hint(tenant_id: str | None = None) -> str:
+    metadata = read_tenant_metadata(tenant_id)
+    for key in ("industry_id", "industry"):
+        value = str(metadata.get(key) or "").strip()
+        if value:
+            return value
+    sync_meta = metadata.get("sync") if isinstance(metadata.get("sync"), dict) else {}
+    shared_meta = sync_meta.get("shared_knowledge") if isinstance(sync_meta.get("shared_knowledge"), dict) else {}
+    for key in ("industry_id", "industry"):
+        value = str(shared_meta.get(key) or "").strip()
+        if value:
+            return value
+    return ""
+
+
 def tenant_knowledge_base_root(tenant_id: str | None = None) -> Path:
     return tenant_root(tenant_id) / "knowledge_bases"
 
@@ -125,7 +151,7 @@ def shared_runtime_snapshot_path() -> Path:
     return shared_runtime_cache_root() / "snapshot.json"
 
 
-def shared_runtime_cache_valid(now: datetime | None = None) -> bool:
+def shared_runtime_cache_valid(now: datetime | None = None, tenant_id: str | None = None) -> bool:
     snapshot_path = shared_runtime_snapshot_path()
     if not snapshot_path.exists():
         return False
@@ -136,6 +162,10 @@ def shared_runtime_cache_valid(now: datetime | None = None) -> bool:
     if not isinstance(payload, dict):
         return False
     if str(payload.get("source") or "") != "cloud_official_shared_library":
+        return False
+    expected_tenant = active_tenant_id(tenant_id) if tenant_id else ""
+    snapshot_tenant = str(payload.get("tenant_id") or "").strip()
+    if expected_tenant and snapshot_tenant and active_tenant_id(snapshot_tenant) != expected_tenant:
         return False
     expires_at = parse_cloud_time(str(payload.get("expires_at") or ""))
     if expires_at is None:
@@ -211,6 +241,6 @@ def runtime_knowledge_roots(tenant_id: str | None = None) -> list[Path]:
     elif (LEGACY_KNOWLEDGE_BASE_ROOT / "registry.json").exists():
         roots.append(LEGACY_KNOWLEDGE_BASE_ROOT)
     shared_cache_root = shared_runtime_cache_root()
-    if (shared_cache_root / "registry.json").exists() and shared_runtime_cache_valid():
+    if (shared_cache_root / "registry.json").exists() and shared_runtime_cache_valid(tenant_id=tenant_id):
         roots.append(shared_cache_root)
     return roots

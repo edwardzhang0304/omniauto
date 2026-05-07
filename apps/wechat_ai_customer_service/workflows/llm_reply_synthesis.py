@@ -109,10 +109,6 @@ def maybe_synthesize_reply(
     if not payload["enabled"]:
         payload["reason"] = "llm_reply_synthesis_disabled"
         return payload
-    if data_capture.get("is_customer_data"):
-        payload["reason"] = "customer_data_decision_is_deterministic"
-        return payload
-
     flash_settings = synthesis_settings_for_tier(settings, "flash")
     evidence_pack = build_reply_evidence_pack(
         config=config_with_synthesis_settings(config, flash_settings),
@@ -177,7 +173,57 @@ def maybe_synthesize_reply(
         if key in result
     }
     if not result.get("ok"):
-        payload["reason"] = "llm_synthesis_unavailable"
+        if settings.get("fallback_to_existing_reply", True) is False:
+            payload["reason"] = "llm_synthesis_unavailable"
+            return payload
+        candidate = build_existing_reply_fallback_candidate(
+            decision=decision,
+            reply_text=reply_text,
+            evidence_pack=evidence_pack,
+        )
+        guard = guard_synthesized_reply(candidate=candidate, evidence_pack=evidence_pack, settings=settings)
+        payload["candidate"] = compact_candidate(candidate)
+        payload["guard"] = guard_for_audit(guard)
+        payload["llm_status"] = {
+            **payload.get("llm_status", {}),
+            "ok": True,
+            "fallback": "existing_reply_candidate",
+            "original_ok": False,
+        }
+        if payload["shadow_mode"]:
+            payload["reason"] = "shadow_mode"
+            return payload
+        if not guard.get("allowed"):
+            payload["reason"] = str(guard.get("reason") or "fallback_guard_rejected")
+            return payload
+        action = str(guard.get("action") or "")
+        if action == "send_reply":
+            raw_reply = truncate_reply(str(guard.get("reply") or candidate.get("reply") or ""), settings)
+            payload.update(
+                {
+                    "applied": True,
+                    "rule_name": "llm_synthesis_reply",
+                    "reason": str(guard.get("reason") or "fallback_existing_reply"),
+                    "needs_handoff": False,
+                    "raw_reply_text": raw_reply,
+                    "reply_text": raw_reply,
+                }
+            )
+            return payload
+        if action == "handoff":
+            raw_reply = truncate_reply(str(guard.get("reply") or candidate.get("reply") or ""), settings)
+            payload.update(
+                {
+                    "applied": True,
+                    "rule_name": "llm_synthesis_handoff",
+                    "reason": str(guard.get("reason") or "fallback_existing_reply_handoff"),
+                    "needs_handoff": True,
+                    "raw_reply_text": raw_reply,
+                    "reply_text": raw_reply,
+                }
+            )
+            return payload
+        payload["reason"] = str(guard.get("reason") or "fallback_guard_rejected")
         return payload
 
     candidate = result.get("candidate", {}) or {}
@@ -486,7 +532,7 @@ def post_deepseek_synthesis_with_retry(
             base_url=base_url,
             model=model,
             prompt_pack=prompt_pack,
-            timeout=int(settings.get("timeout_seconds") or resolve_deepseek_timeout()),
+            timeout=int(settings.get("timeout_seconds") or 30),
             max_tokens=resolve_synthesis_max_tokens(settings),
             temperature=resolve_synthesis_temperature(settings),
         )
@@ -615,9 +661,9 @@ def resolve_synthesis_temperature(settings: dict[str, Any]) -> float:
 
 def resolve_synthesis_retry_count(settings: dict[str, Any]) -> int:
     try:
-        parsed = int(settings.get("retry_count", 2))
+        parsed = int(settings.get("retry_count", 1))
     except (TypeError, ValueError):
-        parsed = 2
+        parsed = 1
     return max(0, min(5, parsed))
 
 
@@ -647,6 +693,35 @@ def compact_candidate(candidate: dict[str, Any]) -> dict[str, Any]:
         "risk_tags": candidate.get("risk_tags", []),
         "reason": candidate.get("reason"),
         "reply": truncate_reply(str(candidate.get("reply") or ""), {"max_reply_chars": 700}),
+    }
+
+
+def build_existing_reply_fallback_candidate(
+    *,
+    decision: Any,
+    reply_text: str,
+    evidence_pack: dict[str, Any],
+) -> dict[str, Any]:
+    audit_summary = evidence_pack.get("audit_summary") if isinstance(evidence_pack.get("audit_summary"), dict) else {}
+    safety = evidence_pack.get("safety") if isinstance(evidence_pack.get("safety"), dict) else {}
+    decision_need_handoff = bool(getattr(decision, "need_handoff", False))
+    needs_handoff = decision_need_handoff or bool(safety.get("must_handoff"))
+    base_reply = str(getattr(decision, "reply_text", "") or reply_text or "").strip()
+    used_evidence = [str(item) for item in audit_summary.get("evidence_ids", []) or [] if str(item)]
+    if not used_evidence:
+        used_evidence = [str(item.get("id") or "") for item in (evidence_pack.get("selected_items", []) or []) if isinstance(item, dict) and str(item.get("id") or "")]
+    return {
+        "can_answer": not needs_handoff,
+        "reply": base_reply,
+        "confidence": 0.86 if not needs_handoff else 0.95,
+        "recommended_action": "handoff" if needs_handoff else "send_reply",
+        "needs_handoff": needs_handoff,
+        "used_evidence": used_evidence[:12],
+        "rag_used": int(audit_summary.get("rag_hit_count") or 0) > 0,
+        "structured_used": int(audit_summary.get("structured_evidence_count") or 0) > 0,
+        "uncertain_points": [],
+        "risk_tags": list(safety.get("reasons", []) or [])[:8],
+        "reason": "llm_synthesis_fallback_existing_reply",
     }
 
 

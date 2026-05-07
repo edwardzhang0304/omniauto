@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import json
 import os
 from collections.abc import Callable
+from pathlib import Path
 
 
 DEFAULT_DEEPSEEK_BASE_URL = "https://api.deepseek.com"
@@ -14,11 +16,45 @@ DEFAULT_DEEPSEEK_CONTEXT_WINDOW_TOKENS = 1_000_000
 DEFAULT_DEEPSEEK_TIMEOUT_SECONDS = 120
 
 
+_LLM_CONFIG_PATH: Path | None = None
+
+
+def llm_config_path() -> Path:
+    global _LLM_CONFIG_PATH
+    if _LLM_CONFIG_PATH is None:
+        root = Path(__file__).resolve().parent
+        _LLM_CONFIG_PATH = root.parents[1] / "runtime" / "apps" / "wechat_ai_customer_service" / "llm_config.json"
+    return _LLM_CONFIG_PATH
+
+
+def load_llm_config() -> dict[str, str]:
+    path = llm_config_path()
+    if not path.exists():
+        return {}
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        if isinstance(payload, dict):
+            return {str(k): str(v) for k, v in payload.items() if isinstance(v, str)}
+    except (OSError, json.JSONDecodeError):
+        pass
+    return {}
+
+
+def save_llm_config(config: dict[str, str]) -> None:
+    path = llm_config_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(config, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
+
 SecretReader = Callable[[str], str]
 
 
 def read_secret(name: str) -> str:
-    """Read a secret from process env first, then the current user's Windows env."""
+    """Read a secret from config file first, then process env, then Windows registry."""
+    config = load_llm_config()
+    value = config.get(name)
+    if value:
+        return value
     value = os.getenv(name)
     if value:
         return value

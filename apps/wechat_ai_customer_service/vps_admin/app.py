@@ -272,6 +272,10 @@ def create_app(*, state_path: Path | None = None) -> FastAPI:
     def list_users(_: AuthSession = Depends(current_admin)) -> dict[str, Any]:
         return {"ok": True, "users": app.state.user_service.list_users()}
 
+    @app.get("/v1/admin/industries")
+    def list_industries(_: AuthSession = Depends(current_admin)) -> dict[str, Any]:
+        return {"ok": True, "industries": app.state.shared_service.industry_catalog()}
+
     @app.post("/v1/admin/users")
     def create_user(payload: dict[str, Any], actor: AuthSession = Depends(current_admin)) -> dict[str, Any]:
         return {"ok": True, "user": app.state.user_service.create_user(payload, actor=actor)}
@@ -340,8 +344,12 @@ def create_app(*, state_path: Path | None = None) -> FastAPI:
         return {"ok": True, "proposals": app.state.shared_service.list_proposals()}
 
     @app.get("/v1/admin/shared/library")
-    def list_shared_library(include_inactive: bool = Query(default=False), _: AuthSession = Depends(current_admin)) -> dict[str, Any]:
-        return {"ok": True, "items": app.state.shared_service.list_library_items(include_inactive=include_inactive)}
+    def list_shared_library(
+        include_inactive: bool = Query(default=False),
+        industry_id: str = Query(default=""),
+        _: AuthSession = Depends(current_admin),
+    ) -> dict[str, Any]:
+        return {"ok": True, "items": app.state.shared_service.list_library_items(include_inactive=include_inactive, industry_id=industry_id)}
 
     @app.post("/v1/admin/shared/library")
     def create_shared_library_item(payload: dict[str, Any], actor: AuthSession = Depends(current_admin)) -> dict[str, Any]:

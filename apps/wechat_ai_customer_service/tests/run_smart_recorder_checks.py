@@ -10,6 +10,8 @@ from pathlib import Path
 from typing import Any
 
 os.environ.setdefault("WECHAT_STORAGE_BACKEND", "file")
+os.environ.setdefault("WECHAT_CLOUD_REQUIRED", "0")
+os.environ.setdefault("WECHAT_CLOUD_STRICT_ONLINE", "0")
 
 from fastapi.testclient import TestClient
 

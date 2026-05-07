@@ -2,14 +2,8 @@
   "schema_version": 1,
   "scope": "wechat_ai_customer_service",
   "source": "three_layer_knowledge",
-  "compiled_at": "2026-05-06T02:39:19",
+  "compiled_at": "2026-05-07T23:18:00",
   "items": [
-    {
-      "id": "global_guidelines",
-      "path": "global_guidelines",
-      "summary": "Global Assistant Guidelines",
-      "participates_in_reply": true
-    },
     {
       "id": "products",
       "path": "products",
@@ -23,12 +17,6 @@
       "participates_in_reply": true
     },
     {
-      "id": "risk_control",
-      "path": "risk_control",
-      "summary": "共享风险边界",
-      "participates_in_reply": true
-    },
-    {
       "id": "policies",
       "path": "policies",
       "summary": "政策规则",
@@ -39,12 +27,6 @@
       "path": "erp_exports",
       "summary": "ERP 导出",
       "participates_in_reply": false
-    },
-    {
-      "id": "reply_style",
-      "path": "reply_style",
-      "summary": "共享回复口吻",
-      "participates_in_reply": true
     },
     {
       "id": "product_faq",

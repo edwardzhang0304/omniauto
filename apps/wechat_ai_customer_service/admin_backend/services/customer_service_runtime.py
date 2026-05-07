@@ -11,7 +11,11 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+import psutil
+
+from apps.wechat_ai_customer_service.cloud_gate import cloud_gate_status, cloud_required_enabled
 from apps.wechat_ai_customer_service.knowledge_paths import active_tenant_id, tenant_runtime_root
+from apps.wechat_ai_customer_service.sync import VpsLocalSyncService
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[4]
@@ -36,6 +40,10 @@ def runtime_status_path(tenant_id: str | None = None) -> Path:
 
 def runtime_pid_path(tenant_id: str | None = None) -> Path:
     return runtime_dir(tenant_id) / "listener.pid.json"
+
+
+def worker_pid_path(tenant_id: str | None = None) -> Path:
+    return runtime_dir(tenant_id) / "worker.pid.json"
 
 
 def runtime_log_path(tenant_id: str | None = None) -> Path:
@@ -137,6 +145,16 @@ class CustomerServiceRuntime:
         pid_record = self._read_pid_record()
         running = self._pid_alive(int(pid_record.get("pid") or 0))
         status = read_runtime_status(self.tenant_id)
+        gate = cloud_gate_status() if cloud_required_enabled() else {"ok": True, "required": False}
+        worker_pid_record = self._read_worker_pid_record()
+        worker_pid = int(worker_pid_record.get("pid") or 0)
+        worker_running = self._pid_alive(worker_pid)
+        queue_summary = {}
+        try:
+            from apps.wechat_ai_customer_service.admin_backend.services.work_queue import WorkQueueService
+            queue_summary = WorkQueueService(tenant_id=self.tenant_id).summary()
+        except Exception:
+            pass
         status.update(
             {
                 "running": running,
@@ -144,6 +162,10 @@ class CustomerServiceRuntime:
                 "started_at": pid_record.get("started_at") if running else "",
                 "config_path": str(pid_record.get("config_path") or self._config_path_or_empty()),
                 "log_path": str(runtime_log_path(self.tenant_id)),
+                "cloud_gate": gate,
+                "worker_pid": worker_pid if worker_running else None,
+                "worker_running": worker_running,
+                "queue_summary": queue_summary,
             }
         )
         if not running:
@@ -151,10 +173,31 @@ class CustomerServiceRuntime:
             status["message"] = status_default_message("stopped")
         return status
 
-    def start(self) -> dict[str, Any]:
+    def start(self, *, token: str = "") -> dict[str, Any]:
         current = self.status()
         if current.get("running"):
             return {"ok": True, "message": "自动客服已经在运行。", "item": current}
+        if cloud_required_enabled():
+            refresh = VpsLocalSyncService().fetch_shared_knowledge_snapshot(
+                token=token,
+                tenant_id=self.tenant_id,
+                force=True,
+            )
+            if refresh.get("ok") is not True:
+                message = "无法从服务端刷新共享行业知识库，自动客服已锁定。请恢复服务端连接后重试。"
+                write_runtime_status("stopped", message, tenant_id=self.tenant_id)
+                return {
+                    "ok": False,
+                    "message": message,
+                    "detail": "cloud_snapshot_refresh_failed",
+                    "sync_result": refresh,
+                    "item": self.status(),
+                }
+            gate = cloud_gate_status()
+            if not gate.get("ok"):
+                message = "云端授权未通过，自动客服已锁定。请先连接服务端并刷新共享行业知识库。"
+                write_runtime_status("stopped", message, tenant_id=self.tenant_id)
+                return {"ok": False, "message": message, "detail": "cloud_authoritative_access_required", "cloud_gate": gate, "item": self.status()}
         try:
             config_path = self._resolve_config_path()
         except FileNotFoundError as exc:
@@ -167,6 +210,8 @@ class CustomerServiceRuntime:
         log_path.parent.mkdir(parents=True, exist_ok=True)
         env = dict(os.environ)
         env["WECHAT_KNOWLEDGE_TENANT"] = self.tenant_id
+        if token:
+            env["WECHAT_RUNTIME_SYNC_TOKEN"] = token
         write_runtime_status("thinking", "正在启动微信自动客服监听。", tenant_id=self.tenant_id)
         creationflags = 0
         if os.name == "nt":
@@ -183,6 +228,7 @@ class CustomerServiceRuntime:
                 "--interval-seconds",
                 "3",
                 "--send",
+                "--write-data",
             ],
             cwd=str(PROJECT_ROOT),
             env=env,
@@ -200,14 +246,20 @@ class CustomerServiceRuntime:
                 "log_path": str(log_path),
             }
         )
+        # Start background worker
+        worker_result = self._start_worker()
         time.sleep(0.8)
-        return {"ok": True, "message": "自动客服监听已启动。", "item": self.status()}
+        result = {"ok": True, "message": "自动客服监听已启动。", "item": self.status()}
+        if not worker_result.get("ok"):
+            result["worker_warning"] = worker_result.get("message", "worker start warning")
+        return result
 
     def stop(self) -> dict[str, Any]:
         pid_record = self._read_pid_record()
         pid = int(pid_record.get("pid") or 0)
         if pid and self._pid_alive(pid):
             self._terminate_tree(pid)
+        self._stop_worker()
         write_runtime_status("stopped", "自动客服监听已手动停止。", tenant_id=self.tenant_id)
         self._clear_pid_record()
         return {"ok": True, "message": "自动客服监听已停止。", "item": self.status()}
@@ -267,9 +319,8 @@ class CustomerServiceRuntime:
         if pid <= 0:
             return False
         try:
-            os.kill(pid, 0)
-            return True
-        except OSError:
+            return psutil.Process(pid).is_running()
+        except psutil.NoSuchProcess:
             return False
 
     @staticmethod
@@ -280,4 +331,63 @@ class CustomerServiceRuntime:
         try:
             os.kill(pid, 15)
         except OSError:
+            pass
+
+    # --- Background worker lifecycle ---
+
+    def _read_worker_pid_record(self) -> dict[str, Any]:
+        path = worker_pid_path(self.tenant_id)
+        if not path.exists():
+            return {}
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return {}
+        return payload if isinstance(payload, dict) else {}
+
+    def _start_worker(self) -> dict[str, Any]:
+        worker_record = self._read_worker_pid_record()
+        existing_pid = int(worker_record.get("pid") or 0)
+        if existing_pid and self._pid_alive(existing_pid):
+            return {"ok": True, "message": "后台 worker 已经在运行。"}
+        script_path = APP_ROOT / "scripts" / "background_worker.py"
+        if not script_path.exists():
+            return {"ok": False, "message": f"缺少后台 worker 脚本：{script_path}"}
+        env = dict(os.environ)
+        env["WECHAT_KNOWLEDGE_TENANT"] = self.tenant_id
+        creationflags = 0
+        if os.name == "nt":
+            creationflags |= getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
+            creationflags |= getattr(subprocess, "CREATE_NO_WINDOW", 0)
+        proc = subprocess.Popen(
+            [
+                str(self._python_executable()),
+                str(script_path),
+                "--tenant-id",
+                self.tenant_id,
+                "--queue",
+                "customer_service",
+                "--interval-seconds",
+                "5",
+                "--limit",
+                "3",
+            ],
+            cwd=str(PROJECT_ROOT),
+            env=env,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            creationflags=creationflags,
+        )
+        time.sleep(0.3)
+        return {"ok": True, "message": "后台 worker 已启动。", "worker_pid": proc.pid}
+
+    def _stop_worker(self) -> None:
+        worker_record = self._read_worker_pid_record()
+        pid = int(worker_record.get("pid") or 0)
+        if pid and self._pid_alive(pid):
+            self._terminate_tree(pid)
+        try:
+            worker_pid_path(self.tenant_id).unlink()
+        except FileNotFoundError:
             pass
