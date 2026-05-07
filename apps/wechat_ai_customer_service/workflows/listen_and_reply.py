@@ -184,14 +184,15 @@ def main() -> int:
     )
     args = parser.parse_args()
 
-    if cloud_required_enabled():
-        gate = cloud_gate_status()
-        if not gate.get("ok"):
-            message = "云端授权未通过，当前自动客服已锁定。请先连接服务端并刷新共享行业知识库。"
-            write_runtime_status("stopped", message, cloud_gate=gate)
-            result = {"ok": False, "error": "cloud_authoritative_access_required", "message": message, "cloud_gate": gate}
-            print_json(result)
-            return 1
+    gate_error = cloud_gate_error_result()
+    if gate_error is not None:
+        write_runtime_status(
+            "stopped",
+            str(gate_error.get("message") or "云端授权未通过"),
+            cloud_gate=gate_error.get("cloud_gate"),
+        )
+        print_json(gate_error)
+        return 1
 
     try:
         write_runtime_status("thinking", "正在读取微信消息并调用必要的大模型。")
@@ -207,6 +208,10 @@ def main() -> int:
 
 
 def run_workflow(args: argparse.Namespace) -> dict[str, Any]:
+    gate_error = cloud_gate_error_result()
+    if gate_error is not None:
+        return gate_error
+
     config = load_config(args.config)
     config = apply_local_customer_service_settings(config)
     state_path = resolve_path(config.get("state_path"))
@@ -273,6 +278,21 @@ def run_workflow(args: argparse.Namespace) -> dict[str, Any]:
                 time.sleep(max(1, interval))
 
     return summary
+
+
+def cloud_gate_error_result() -> dict[str, Any] | None:
+    if not cloud_required_enabled():
+        return None
+    gate = cloud_gate_status()
+    if gate.get("ok"):
+        return None
+    message = "云端授权未通过，当前自动客服已锁定。请先连接服务端并刷新共享行业知识库。"
+    return {
+        "ok": False,
+        "error": "cloud_authoritative_access_required",
+        "message": message,
+        "cloud_gate": gate,
+    }
 
 
 def _enqueue_post_reply_work(
