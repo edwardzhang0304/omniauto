@@ -1070,7 +1070,7 @@ def call_deepseek_json(prompt: dict[str, Any]) -> dict[str, Any]:
     if not api_key:
         return {}
     base_url = resolve_deepseek_base_url(read_secret_fn=read_secret)
-    model = resolve_deepseek_tier_model(tier="pro", read_secret_fn=read_secret)
+    model = resolve_deepseek_tier_model(tier="flash", read_secret_fn=read_secret)
     payload = {
         "model": model,
         "messages": [

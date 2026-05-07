@@ -327,7 +327,7 @@ class KnowledgeGenerator:
         if not api_key:
             return {"ok": False, "error": "DEEPSEEK_API_KEY is not set"}
         base_url = resolve_deepseek_base_url(read_secret_fn=read_secret)
-        model = resolve_deepseek_tier_model(tier="pro", read_secret_fn=read_secret)
+        model = resolve_deepseek_tier_model(tier="flash", read_secret_fn=read_secret)
         prompt_pack = self._build_prompt_pack(session, message, preferred_category_id=preferred_category_id)
         payload = {
             "model": model,

@@ -74,7 +74,7 @@
         "payment_boundary",
         "price_approval_required"
       ],
-      "pro_when_must_handoff": true,
+      "pro_when_must_handoff": false,
       "pro_when_rag_only_authority": false,
       "pro_when_long_context": false,
       "pro_when_long_message": false,
@@ -178,5 +178,30 @@
       "allow_self_for_test": false,
       "max_batch_messages": 3
     }
-  ]
+  ],
+  "multi_target": {
+    "enabled": true,
+    "max_targets_per_iteration": 5,
+    "min_switch_interval_seconds": 2
+  },
+  "customer_profiles": {
+    "enabled": true,
+    "analysis": {
+      "enabled": true,
+      "model_tier": "flash",
+      "max_messages_per_analysis": 20,
+      "update_summary_every_n_messages": 10
+    },
+    "greeting": {
+      "enabled": true,
+      "formality_threshold": {
+        "new_customer": "formal",
+        "engaged": "casual"
+      }
+    },
+    "history": {
+      "max_rounds_in_context": 12,
+      "max_chars_in_context": 3500
+    }
+  }
 }

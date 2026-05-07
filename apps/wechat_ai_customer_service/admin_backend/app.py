@@ -12,6 +12,7 @@ from fastapi.staticfiles import StaticFiles
 from .api.auth import compat_router as auth_compat_router
 from .api.auth import router as auth_router
 from .api.candidates import router as candidates_router
+from .api.customers import router as customers_router
 from .api.customer_service import router as customer_service_router
 from .api.diagnostics import router as diagnostics_router
 from .api.drafts import router as drafts_router
@@ -58,6 +59,7 @@ def create_app() -> FastAPI:
     app.include_router(auth_router)
     app.include_router(auth_compat_router)
     app.include_router(candidates_router)
+    app.include_router(customers_router)
     app.include_router(customer_service_router)
     app.include_router(diagnostics_router)
     app.include_router(drafts_router)

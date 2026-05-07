@@ -233,7 +233,7 @@ def _call_llm_audit_batch(batch: list[dict[str, Any]], rag_only_mode: bool = Fal
     if not api_key:
         return []
     base_url = resolve_deepseek_base_url(read_secret_fn=read_secret)
-    model = resolve_deepseek_tier_model(tier="pro", read_secret_fn=read_secret)
+    model = resolve_deepseek_tier_model(tier="flash", read_secret_fn=read_secret)
 
     scope_hint = "RAG经验" if rag_only_mode else "知识库条目和RAG经验"
     system_content = (
@@ -422,7 +422,7 @@ def audit_single_rag_experience(record: dict[str, Any]) -> dict[str, Any] | None
     if not api_key:
         return None
     base_url = resolve_deepseek_base_url(read_secret_fn=read_secret)
-    model = resolve_deepseek_tier_model(tier="pro", read_secret_fn=read_secret)
+    model = resolve_deepseek_tier_model(tier="flash", read_secret_fn=read_secret)
 
     content_parts = [
         str(record.get("summary") or ""),

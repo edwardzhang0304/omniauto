@@ -84,6 +84,7 @@
           <div class="nav-group-title">业务工作台</div>
           <button class="nav-item is-active" data-view="customer_service">微信智能客服</button>
           <button class="nav-item" data-view="recorder">AI智能记录员</button>
+          <button class="nav-item" data-view="customer_profiles">客户画像</button>
           <div class="nav-group-title">知识成长中心</div>
           <button class="nav-item" data-view="knowledge_center">知识首页</button>
           <button class="nav-item nav-product-special" data-view="product_catalog">商品库</button>
@@ -176,6 +177,31 @@
               <section class="helper-card">
                 <strong>客户可以只用记录员，不开自动回复。</strong>
                 <span>选择"只记录不回复"或直接关闭客服总开关，系统仍可记录和整理聊天内容。</span>
+              </section>
+            </div>
+          </article>
+
+          <article class="glass-panel content-card view-panel" data-panel="customer_profiles">
+            <div class="section-head">
+              <div>
+                <h2>客户画像</h2>
+                <p>查看和管理客户档案、标签与聊天记录。</p>
+              </div>
+              <button class="secondary-button" id="refresh-customer-profiles">刷新</button>
+            </div>
+            <div class="profile-layout">
+              <section class="profile-list-panel">
+                <div class="form-field">
+                  <input id="customer-profile-search" type="text" placeholder="搜索客户昵称或标签..." />
+                </div>
+                <div class="profile-list" id="customer-profile-list">
+                  <div class="status-card loading"><strong><span class="loading-spinner" aria-hidden="true"></span>正在加载客户列表</strong></div>
+                </div>
+              </section>
+              <section class="profile-detail-panel" id="customer-profile-detail">
+                <div class="status-card info">
+                  <strong>选择左侧客户查看详情</strong>
+                </div>
               </section>
             </div>
           </article>
