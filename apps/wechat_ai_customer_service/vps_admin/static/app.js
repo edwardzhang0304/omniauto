@@ -333,6 +333,7 @@ async function refresh() {
       overview,
       tenants,
       users,
+      industries,
       customerData,
       shared,
       sharedLibrary,
@@ -350,6 +351,7 @@ async function refresh() {
       api("/v1/admin/overview"),
       api("/v1/admin/tenants"),
       api("/v1/admin/users"),
+      api("/v1/admin/industries"),
       api("/v1/admin/customer-data"),
       api("/v1/admin/shared/overview"),
       api("/v1/admin/shared/library?include_inactive=true"),
@@ -368,6 +370,7 @@ async function refresh() {
       overview,
       tenants: tenants.tenants || [],
       users: users.users || [],
+      industries: industries.industries || [],
       customerData: customerData.packages || [],
       shared,
       sharedLibrary: sharedLibrary.items || [],
@@ -455,12 +458,14 @@ function renderOverview() {
 
 function renderAccounts() {
   renderAccountFormMode();
+  renderIndustrySelect();
   renderPackageUserSelect();
   renderAuthorizedCustomerSelect();
   renderInto("user-list", `<h3>账号列表</h3>${state.data.users.map((item) => `
     <div class="record-row">
       <div class="row-title"><strong>${escapeHtml(item.username)}</strong><span class="status-chip ${item.role === "customer" ? "ok" : "warning"}">${roleLabel(item.role)}</span></div>
       <span>${accountAccessText(item)}</span>
+      <span>${customerIndustryText(item)}</span>
       <span>登录邮箱：${escapeHtml(item.email || "未设置，启用验证码后将无法登录")}</span>
       <div class="button-row">
         <button class="secondary-button danger-button" data-action="delete-user" data-user-id="${escapeAttr(item.user_id)}">删除账号</button>
@@ -472,6 +477,23 @@ function renderAccounts() {
 function renderAccountFormMode() {
   const role = document.querySelector("#new-user-role")?.value || "customer";
   document.querySelector("#authorized-customer-field")?.classList.toggle("is-hidden", role !== "guest");
+  document.querySelector("#industry-select-field")?.classList.toggle("is-hidden", role === "guest");
+}
+
+function renderIndustrySelect() {
+  const select = document.querySelector("#new-user-industry");
+  if (!select) return;
+  const options = (state.data.industries || []);
+  if (!options.length) {
+    select.innerHTML = `<option value="home_appliance">家电</option>`;
+    return;
+  }
+  const previousValue = select.value;
+  select.innerHTML = options.map((item) => `
+    <option value="${escapeAttr(item.industry_id)}">${escapeHtml(item.name || item.industry_id)}</option>
+  `).join("");
+  const fallback = options[0]?.industry_id || "home_appliance";
+  select.value = options.some((item) => item.industry_id === previousValue) ? previousValue : fallback;
 }
 
 function renderPackageUserSelect() {
@@ -528,7 +550,7 @@ function renderSharedKnowledge() {
         <div class="row-title"><strong>${escapeHtml(item.title || item.item_id)}</strong><span class="status-chip ${item.status === "active" ? "ok" : "warning"}">${escapeHtml(item.status || "active")}</span></div>
       </summary>
       <div class="record-body">
-        <span>分类：${escapeHtml(sharedCategoryLabel(item.category_id))} · 关键词：${escapeHtml((item.keywords || []).join("、") || "-")}</span>
+        <span>行业：${escapeHtml(industryLabel(item.industry_id))} · 分类：${escapeHtml(sharedCategoryLabel(item.category_id))} · 关键词：${escapeHtml((item.keywords || []).join("、") || "-")}</span>
         <span>${escapeHtml(trimText(sharedItemContent(item), 140))}</span>
         <div class="button-row">
           <button class="secondary-button" data-action="view-library" data-item-id="${escapeAttr(item.item_id)}">查看和编辑</button>
@@ -770,6 +792,7 @@ function bindStaticActions() {
   bindForm("#customer-package-form", "/v1/admin/customer-data/package-customer", (form) => ({account_username: form.get("account_username")}), "已打包所选客户数据。");
   bindForm("#library-form", "/v1/admin/shared/library", (form) => ({
     item_id: form.get("item_id"),
+    industry_id: form.get("industry_id") || "global",
     category_id: form.get("category_id"),
     title: form.get("title"),
     keywords: splitKeywords(form.get("keywords")),
@@ -778,6 +801,7 @@ function bindStaticActions() {
     notes: form.get("notes"),
     data: {
       title: form.get("title"),
+      industry_id: form.get("industry_id") || "global",
       keywords: splitKeywords(form.get("keywords")),
       applies_to: form.get("applies_to"),
       guideline_text: form.get("content"),
@@ -803,6 +827,8 @@ function accountFormPayload(form) {
     const customer = form.get("authorized_customer");
     payload.authorized_customer = customer;
     payload.tenant_ids = tenantIdsForCustomer(customer);
+  } else {
+    payload.industry_id = String(form.get("industry_id") || "");
   }
   return payload;
 }
@@ -1142,7 +1168,7 @@ async function showLibraryDetail(itemId) {
     <h3>正式共享知识详情</h3>
     <div class="record-row">
       <div class="row-title"><strong>${escapeHtml(item.title || item.item_id)}</strong><span class="status-chip ${item.status === "active" ? "ok" : "warning"}">${escapeHtml(item.status || "-")}</span></div>
-      <span>分类：${escapeHtml(sharedCategoryLabel(item.category_id))} · 来源：${escapeHtml(item.source || "-")} · 更新：${escapeHtml(item.updated_at || "-")}</span>
+      <span>行业：${escapeHtml(industryLabel(item.industry_id))} · 分类：${escapeHtml(sharedCategoryLabel(item.category_id))} · 来源：${escapeHtml(item.source || "-")} · 更新：${escapeHtml(item.updated_at || "-")}</span>
       <span>适用场景：${escapeHtml(item.applies_to || "-")}</span>
       <span>关键词：${escapeHtml((item.keywords || []).join("、") || "-")}</span>
       <p>${escapeHtml(sharedItemContent(item))}</p>
@@ -1345,6 +1371,22 @@ function accountAccessText(item) {
   if (item.role === "customer") return "权限：只能访问和修改自己的客户数据";
   const names = item.authorized_customers || (item.tenant_ids || []).map(customerNameForTenant);
   return `权限：只能查看 ${escapeHtml(names.join("，") || "-")}，不能修改`;
+}
+
+function customerIndustryText(item) {
+  if (item.role !== "customer") return "行业：继承被授权客户";
+  const tenantIndustries = item.tenant_industries || {};
+  const labels = (item.tenant_ids || []).map((tenantId) => industryLabel(tenantIndustries[tenantId])).filter(Boolean);
+  const unique = [...new Set(labels)];
+  return `行业：${escapeHtml(unique.join("，") || "-")}`;
+}
+
+function industryLabel(industryId) {
+  const value = String(industryId || "").trim();
+  if (!value) return "-";
+  if (value === "global") return "全行业通用";
+  const match = (state.data.industries || []).find((item) => item.industry_id === value);
+  return match?.name || value;
 }
 
 function displayCustomerName(item) {

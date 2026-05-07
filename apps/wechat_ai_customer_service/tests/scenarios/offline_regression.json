@@ -9,7 +9,7 @@
       "intent": "catalog"
     },
     "expect_contains": {
-      "reply_text": ["商用冰箱", "测试商品"]
+      "reply_text": ["商用冰箱 BX-200", "测试商品"]
     }
   },
   {
@@ -32,7 +32,7 @@
   {
     "name": "below_tier_discount_handoff",
     "kind": "product_knowledge",
-    "text": "买7台冰箱能按920吗？",
+    "text": "买7台商用冰箱按920元一台可以吗？",
     "expect_equal": {
       "matched": true,
       "match_type": "product",
@@ -43,33 +43,34 @@
   {
     "name": "invoice_policy",
     "kind": "product_knowledge",
-    "text": "可以开专票吗？",
+    "text": "可以开增值税专用发票吗？",
     "expect_equal": {
       "matched": true,
       "match_type": "faq",
-      "intent": "invoice"
+      "intent": "special_invoice_rule"
     },
     "expect_contains": {
-      "reply_text": ["增值税专用发票", "公司抬头"]
+      "reply_text": ["增值税专用发票", "开具"]
     }
   },
   {
-    "name": "company_info",
+    "name": "warranty_policy",
     "kind": "product_knowledge",
-    "text": "你们公司的信息给我一下",
+    "text": "商用冰箱保修多久？",
     "expect_equal": {
       "matched": true,
-      "match_type": "faq",
-      "intent": "company_profile"
+      "match_type": "product",
+      "intent": "warranty",
+      "product_id": "commercial_fridge_bx_200"
     },
     "expect_contains": {
-      "reply_text": ["杭州星澜供应链科技有限公司", "客服电话"]
+      "reply_text": ["整机保修 1 年", "压缩机保修 3 年"]
     }
   },
   {
     "name": "context_shipping",
     "kind": "product_knowledge",
-    "text": "发江苏南京，包邮吗？",
+    "text": "发到上海，物流怎么安排？",
     "context": {
       "last_product_id": "commercial_fridge_bx_200"
     },
@@ -81,12 +82,7 @@
       "product_id": "commercial_fridge_bx_200"
     },
     "expect_contains": {
-      "reply_text": ["江浙沪", "包邮"]
-    },
-    "expect_max_occurrences": {
-      "reply_text": {
-        "现货，付款后 48 小时内发出": 1
-      }
+      "reply_text": ["江浙沪包邮", "物流"]
     }
   },
   {

@@ -1,0 +1,25 @@
+{
+  "schema_version": 1,
+  "category_id": "products",
+  "id": "chejin_mazda3_2020_20l",
+  "status": "active",
+  "source": {"type": "test_fixture", "batch_token": "CHEJIN_SEED_20260507"},
+  "data": {
+    "name": "2020款马自达3昂克赛拉2.0L 自动质雅版",
+    "sku": "CHEJIN-MAZDA3-2020-20L",
+    "category": "二手车/紧凑型轿车",
+    "aliases": ["马自达3", "昂克赛拉", "马3", "操控好", "颜值高"],
+    "specs": "2020年8月上牌，表显3.6万公里，2.0L自动挡，魂动红车漆，内饰几乎无磨损，一手车。",
+    "price": 9.58,
+    "unit": "台",
+    "inventory": 1,
+    "shipping_policy": "随时看车，支持第三方检测陪同，魂动红车漆特殊工艺已告知。",
+    "warranty_policy": "精品车况，魂动红车漆后期补漆成本较高已提前告知，以检测报告为准。",
+    "reply_templates": {
+      "recommendation": "这台马3适合9到11万预算、注重颜值和驾驶感受的年轻客户，公里数少是亮点。"
+    },
+    "risk_rules": ["魂动红补漆成本高", "已提前告知"]
+  },
+  "runtime": {"allow_auto_reply": true, "requires_handoff": false, "risk_level": "normal"},
+  "metadata": {"created_at": "2026-05-07T10:00:00", "updated_at": "2026-05-07T10:00:00", "created_by": "admin", "updated_by": "admin"}
+}

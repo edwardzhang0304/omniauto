@@ -22,6 +22,7 @@ from apps.wechat_ai_customer_service.knowledge_paths import (
     tenant_metadata_path,
     tenant_root,
 )
+from apps.wechat_ai_customer_service.industry_catalog import default_industry_for_tenant, normalize_industry_id
 
 
 router = APIRouter(prefix="/api/tenants", tags=["tenants"])
@@ -48,10 +49,12 @@ def create_tenant(request: Request, payload: dict[str, Any]) -> dict[str, Any]:
     tenant_id = normalize_tenant_id(str(payload.get("tenant_id") or payload.get("id") or ""))
     if tenant_root(tenant_id).exists():
         raise HTTPException(status_code=409, detail=f"tenant already exists: {tenant_id}")
+    industry_id = normalize_industry_id(payload.get("industry_id") or payload.get("industry") or default_industry_for_tenant(tenant_id))
     metadata = {
         "schema_version": 1,
         "tenant_id": tenant_id,
         "display_name": str(payload.get("display_name") or payload.get("name") or tenant_id),
+        "industry_id": industry_id,
         "knowledge_base_root": "knowledge_bases",
         "product_item_knowledge_root": "product_item_knowledge",
         "created_at": now(),
@@ -81,6 +84,9 @@ def tenant_summary(tenant_id: str) -> dict[str, Any]:
     return {
         "tenant_id": tenant_id,
         "display_name": metadata.get("display_name") or metadata.get("name") or tenant_id,
+        "industry_id": normalize_industry_id(
+            metadata.get("industry_id") or metadata.get("industry") or default_industry_for_tenant(tenant_id)
+        ),
         "root": str(root),
         "exists": root.exists(),
         "knowledge_base_exists": (root / "knowledge_bases").exists(),

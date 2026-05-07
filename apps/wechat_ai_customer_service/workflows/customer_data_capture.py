@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+import sys
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -10,7 +11,16 @@ from typing import Any
 
 from openpyxl import Workbook, load_workbook
 
-from apps.wechat_ai_customer_service.platform_understanding_rules import map_of_lists
+APP_ROOT = Path(__file__).resolve().parents[1]
+PROJECT_ROOT = APP_ROOT.parents[1]
+for path in (PROJECT_ROOT, APP_ROOT):
+    if str(path) not in sys.path:
+        sys.path.insert(0, str(path))
+
+try:
+    from apps.wechat_ai_customer_service.platform_understanding_rules import map_of_lists
+except Exception:  # pragma: no cover - compatibility path for direct module tests
+    from platform_understanding_rules import map_of_lists
 
 
 HEADERS = [
@@ -72,6 +82,12 @@ def extract_customer_data(text: str, required_fields: list[str] | None = None) -
 
 
 def has_customer_data_signal(text: str, fields: dict[str, str]) -> bool:
+    """判断消息是否包含客户资料信号。仅用于 LLM 失败时的兜底判断。
+
+    不再使用 business_intent_keywords 做宽泛匹配，只保留：
+    - 已提取字段的存在判断
+    - 显式客户资料关键词
+    """
     if fields.get("phone") or fields.get("name") or fields.get("address"):
         return True
     explicit_keywords = [

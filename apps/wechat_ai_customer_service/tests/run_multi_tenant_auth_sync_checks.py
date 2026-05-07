@@ -19,6 +19,8 @@ PROJECT_ROOT = APP_ROOT.parents[1]
 TEST_ROOT = PROJECT_ROOT / "runtime" / "apps" / "wechat_ai_customer_service" / "test_artifacts" / "multi_tenant_auth_sync"
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
+os.environ.setdefault("WECHAT_CLOUD_REQUIRED", "0")
+os.environ.setdefault("WECHAT_CLOUD_STRICT_ONLINE", "0")
 
 from apps.wechat_ai_customer_service.admin_backend.app import create_app  # noqa: E402
 from apps.wechat_ai_customer_service.auth import AuthContext, AuthSession, AuthUser, Role, can_access  # noqa: E402

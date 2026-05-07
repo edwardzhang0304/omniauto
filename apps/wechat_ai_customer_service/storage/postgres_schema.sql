@@ -282,3 +282,44 @@ CREATE TABLE IF NOT EXISTS {schema}.runtime_heartbeats (
 
 CREATE INDEX IF NOT EXISTS idx_runtime_heartbeats_tenant
   ON {schema}.runtime_heartbeats (tenant_id, last_seen_at DESC);
+
+CREATE TABLE IF NOT EXISTS {schema}.customers (
+  tenant_id text NOT NULL,
+  profile_id text PRIMARY KEY,
+  target_name text NOT NULL DEFAULT '',
+  display_name text NOT NULL DEFAULT '',
+  status text NOT NULL DEFAULT 'active',
+  tags jsonb NOT NULL DEFAULT '{}'::jsonb,
+  basic_info jsonb NOT NULL DEFAULT '{}'::jsonb,
+  conversation_summary text NOT NULL DEFAULT '',
+  greeting_preference jsonb NOT NULL DEFAULT '{}'::jsonb,
+  payload jsonb NOT NULL DEFAULT '{}'::jsonb,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_customers_tenant_status
+  ON {schema}.customers (tenant_id, status);
+
+CREATE INDEX IF NOT EXISTS idx_customers_tenant_target
+  ON {schema}.customers (tenant_id, target_name);
+
+CREATE INDEX IF NOT EXISTS idx_customers_payload
+  ON {schema}.customers USING gin (payload jsonb_path_ops);
+
+CREATE TABLE IF NOT EXISTS {schema}.customer_conversations (
+  tenant_id text NOT NULL,
+  conversation_id text PRIMARY KEY,
+  profile_id text NOT NULL DEFAULT '',
+  target_name text NOT NULL DEFAULT '',
+  summary text NOT NULL DEFAULT '',
+  last_message_at timestamptz NOT NULL DEFAULT now(),
+  message_count integer NOT NULL DEFAULT 0,
+  reply_count integer NOT NULL DEFAULT 0,
+  payload jsonb NOT NULL DEFAULT '{}'::jsonb,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_customer_conversations_tenant_profile
+  ON {schema}.customer_conversations (tenant_id, profile_id, updated_at DESC);

@@ -32,6 +32,7 @@ const state = {
   ragStatus: null,
   ragHits: [],
   ragExperiences: [],
+  showDiscardedRagExperiences: false,
   ragExperienceExpanded: loadStringSet("ragExperienceExpanded"),
   ragInterpretationLoadingIds: new Set(),
   ragActionLoadingIds: new Map(),
@@ -49,6 +50,7 @@ const state = {
   security: null,
   platformSafetyRules: null,
   platformUnderstandingRules: null,
+  llmConfig: null,
 };
 const localDeviceId = getOrCreateDeviceId("localConsoleDeviceId");
 
@@ -621,6 +623,7 @@ function updateSharedCloudCacheStatus(payload = {}) {
     lease_id: payload.lease_id || previous.lease_id || "",
     cache_policy_mode: payload.cache_policy_mode || previous.cache_policy_mode || "",
     requires_cloud_refresh: payload.requires_cloud_refresh ?? previous.requires_cloud_refresh ?? true,
+    tenant_industry_id: payload.tenant_industry_id || previous.tenant_industry_id || "",
   };
 }
 
@@ -711,6 +714,11 @@ function renderAccountContext() {
       .join("");
   }
   document.getElementById("auth-pill").textContent = `${roleNames[role] || role}：${accountName}`;
+  const cloudGate = state.syncStatus?.cloud_gate || {};
+  if (cloudGate.required && cloudGate.ok === false) {
+    document.getElementById("sync-pill").textContent = "云端未授权（已锁定）";
+    return;
+  }
   const nodeText = state.syncStatus?.node?.node_id ? "VPS 已连接" : "VPS 已配置";
   document.getElementById("sync-pill").textContent = state.syncStatus?.vps_configured ? nodeText : "本地模式";
 }
@@ -881,6 +889,94 @@ async function savePlatformUnderstandingRules() {
   state.platformUnderstandingRules = payload;
   renderPlatformUnderstandingRules();
   alert("平台通用理解词典已保存。");
+}
+
+async function loadLlmConfig() {
+  const payload = await apiGet("/api/system/llm-config");
+  state.llmConfig = payload;
+  renderLlmConfig();
+}
+
+function renderLlmConfig() {
+  const payload = state.llmConfig || {};
+  const summary = document.getElementById("llm-config-summary");
+  const input = document.getElementById("llm-api-key-input");
+  const saveButton = document.getElementById("llm-config-save");
+  const testButton = document.getElementById("llm-config-test");
+  if (summary) {
+    summary.innerHTML = `
+      <div><span>Key 状态</span><strong>${payload.api_key_configured ? "已配置" : "未配置"}</strong></div>
+      <div><span>当前 Key</span><strong>${escapeHtml(payload.api_key_masked || "—")}</strong></div>
+      <div><span>编辑权限</span><strong>${payload.editable ? "admin 可编辑" : "只读"}</strong></div>
+    `;
+  }
+  if (input) {
+    input.value = "";
+    input.placeholder = payload.api_key_configured ? "已配置（输入新 Key 可覆盖）" : "请输入 DeepSeek API Key";
+    input.disabled = !payload.editable;
+  }
+  if (saveButton) {
+    saveButton.disabled = !payload.editable;
+    saveButton.title = payload.editable ? "保存 API Key" : "只有 admin 可以编辑 LLM 配置";
+  }
+  if (testButton) {
+    testButton.disabled = !payload.editable || !payload.api_key_configured;
+    testButton.title = payload.editable ? (payload.api_key_configured ? "测试 DeepSeek 连接" : "请先配置 API Key") : "只有 admin 可以测试";
+  }
+}
+
+async function saveLlmConfig(event) {
+  if (event) event.preventDefault();
+  const input = document.getElementById("llm-api-key-input");
+  if (!input) return;
+  const deepseekApiKey = input.value.trim();
+  if (!deepseekApiKey) {
+    const confirmed = confirm("确定要清空 API Key 吗？");
+    if (!confirmed) return;
+  }
+  const payload = await apiJson("/api/system/llm-config", {
+    method: "PUT",
+    body: JSON.stringify({deepseek_api_key: deepseekApiKey}),
+  });
+  if (payload.ok === false) {
+    alert(payload.detail || "保存失败");
+    return;
+  }
+  state.llmConfig = payload;
+  renderLlmConfig();
+  alert("大模型配置已保存。");
+}
+
+async function testLlmConfig() {
+  const testButton = document.getElementById("llm-config-test");
+  if (testButton) {
+    testButton.disabled = true;
+    testButton.textContent = "测试中...";
+  }
+  try {
+    const payload = await apiJson("/api/system/llm-config/test", {method: "POST", body: JSON.stringify({})});
+    if (payload.ok) {
+      alert(`连接成功\nBase URL: ${escapeHtml(payload.base_url || "—")}`);
+    } else {
+      alert(`连接失败: ${escapeHtml(payload.message || "未知错误")}`);
+    }
+  } catch (error) {
+    alert(`测试异常: ${error.message}`);
+  } finally {
+    if (testButton) {
+      testButton.disabled = false;
+      testButton.textContent = "测试连接";
+    }
+  }
+}
+
+function toggleLlmApiKeyVisibility() {
+  const input = document.getElementById("llm-api-key-input");
+  const button = document.getElementById("llm-config-toggle");
+  if (!input || !button) return;
+  const isPassword = input.type === "password";
+  input.type = isPassword ? "text" : "password";
+  button.textContent = isPassword ? "隐藏" : "显示";
 }
 
 async function loadCustomerService() {
@@ -2729,7 +2825,8 @@ function renderRagSources(payload = {}) {
 }
 
 async function loadRagExperiences() {
-  const payload = await apiGet("/api/rag/experiences?status=active&limit=200");
+  const statusParam = state.showDiscardedRagExperiences ? "all" : "active";
+  const payload = await apiGet(`/api/rag/experiences?status=${statusParam}&limit=200`);
   state.ragExperiences = payload.items || [];
   updateRagExperienceCountBadge(unreviewedRagExperienceCount(state.ragExperiences));
   renderRagExperiences(payload);
@@ -2844,8 +2941,9 @@ function renderRagExperiences(payload = {}) {
         const isInterpreting = state.ragInterpretationLoadingIds.has(experienceId);
         const activeAction = state.ragActionLoadingIds.get(experienceId) || "";
         const isActionLoading = Boolean(activeAction);
+        const isDiscarded = (item.status || "active") === "discarded";
         return `
-          <div class="record-row rag-experience-row readable-experience-row is-experience-${escapeHtml(displayState)}" data-experience-id="${escapeHtml(experienceId)}" data-review-state="${escapeHtml(displayState)}" data-collapsed="${isExpanded ? "false" : "true"}">
+          <div class="record-row rag-experience-row readable-experience-row is-experience-${escapeHtml(displayState)} ${isDiscarded ? "is-discarded" : ""}" data-experience-id="${escapeHtml(experienceId)}" data-review-state="${escapeHtml(displayState)}" data-collapsed="${isExpanded ? "false" : "true"}">
             <div class="rag-experience-main">
               <div class="experience-collapse-head">
                 <button type="button" class="experience-collapse-toggle rag-experience-toggle" data-id="${escapeHtml(experienceId)}" aria-expanded="${isExpanded ? "true" : "false"}">
@@ -4479,6 +4577,12 @@ function renderDiagnostics(payload) {
   document.querySelectorAll(".diagnostic-clear-notices").forEach((button) => {
     button.addEventListener("click", () => clearDiagnosticNotices().catch((error) => alert(error.message)));
   });
+  document.querySelectorAll(".diagnostic-merge").forEach((button) => {
+    button.addEventListener("click", () => openDiagnosticMerge(button.dataset.targets).catch((error) => alert(error.message)));
+  });
+  document.querySelectorAll(".diagnostic-delete").forEach((button) => {
+    button.addEventListener("click", () => deleteDiagnosticTarget(button.dataset.target).catch((error) => alert(error.message)));
+  });
 }
 
 function issueHtml(issue) {
@@ -4487,6 +4591,8 @@ function issueHtml(issue) {
   const detailId = safeDomId(`diagnostic-detail-${issue.fingerprint || Math.random().toString(16).slice(2)}`);
   const hasDetails = hasDiagnosticDetails(issue);
   const highlightTargets = diagnosticTargets(issue).join("|");
+  const actionType = issue.action_type || "";
+  const involvedTargets = (issue.involved_targets || []).join("|");
   return `
     <div class="issue-row ${escapeHtml(issue.severity || "warning")}">
       <div class="issue-main">
@@ -4500,6 +4606,8 @@ function issueHtml(issue) {
       <div class="inline-actions vertical-actions">
         ${hasDetails ? `<button class="secondary-button diagnostic-toggle" data-target="${detailId}">展开详情</button>` : ""}
         ${target ? `<button class="secondary-button diagnostic-open" data-target="${escapeHtml(target)}" data-targets="${escapeHtml(highlightTargets)}">查看位置</button>` : ""}
+        ${actionType === "merge" && involvedTargets ? `<button class="primary-button diagnostic-merge" data-targets="${escapeHtml(involvedTargets)}">合并</button>` : ""}
+        ${actionType === "delete" && target ? `<button class="danger-button diagnostic-delete" data-target="${escapeHtml(target)}">删除</button>` : ""}
         ${issue.code === "knowledge_token_budget_large" ? `<button class="secondary-button diagnostic-clear-notices">彻底消去提示</button>` : ""}
         ${issue.fingerprint ? `<button class="secondary-button diagnostic-ignore" data-fingerprint="${escapeHtml(issue.fingerprint)}">标记忽略</button>` : ""}
       </div>
@@ -4590,6 +4698,12 @@ function toggleDiagnosticDetails(button) {
 
 async function openDiagnosticTarget(target, highlightTargets = "") {
   if (!target) return;
+  if (target.startsWith("rag_exp_")) {
+    state.diagnosticHighlight = {targets: parseDiagnosticTargets(highlightTargets || target)};
+    selectView("rag_experiences", {keepDiagnosticHighlight: true});
+    await loadRagExperiences();
+    return;
+  }
   const [categoryId, itemId] = String(target).split("/");
   if (!categoryId) return;
   state.diagnosticHighlight = {targets: parseDiagnosticTargets(highlightTargets || target)};
@@ -4628,6 +4742,124 @@ async function applyDiagnosticRepair(runId) {
 async function clearDiagnosticNotices() {
   const payload = await apiJson("/api/diagnostics/clear-notices", {method: "POST", body: JSON.stringify({code: "knowledge_token_budget_large"})});
   renderDiagnostics(payload);
+}
+
+async function deleteDiagnosticTarget(target) {
+  if (!target) return;
+  const label = target.startsWith("rag_exp_") ? `RAG经验 ${target}` : `知识条目 ${target}`;
+  if (!confirm(`确定要删除/归档 ${label} 吗？`)) return;
+  const payload = await apiJson("/api/diagnostics/delete-target", {method: "POST", body: JSON.stringify({target})});
+  if (payload.ok) {
+    alert(payload.message || "已删除");
+    await runDiagnostics("quick");
+  } else {
+    alert(payload.message || "删除失败");
+  }
+}
+
+async function openDiagnosticMerge(targetsString) {
+  const targets = String(targetsString || "").split("|").map((t) => t.trim()).filter(Boolean);
+  if (targets.length < 2) return;
+  const primaryTarget = targets[0];
+  const secondaryTarget = targets[1];
+
+  // Load items
+  const primaryItem = await _loadMergeItem(primaryTarget);
+  const secondaryItem = await _loadMergeItem(secondaryTarget);
+  if (!primaryItem || !secondaryItem) {
+    alert("无法加载合并所需的条目数据");
+    return;
+  }
+
+  // Show modal
+  const modal = document.getElementById("diagnostic-merge-modal");
+  if (!modal) return;
+
+  document.getElementById("merge-primary-panel").innerHTML = _mergeItemHtml(primaryItem, "primary");
+  document.getElementById("merge-secondary-panel").innerHTML = _mergeItemHtml(secondaryItem, "secondary");
+  document.getElementById("merge-result-preview").innerHTML = `<pre class="merge-preview-json">${escapeHtml(JSON.stringify(primaryItem.data || {}, null, 2))}</pre>`;
+
+  modal.classList.remove("is-hidden");
+
+  // Setup confirm handler
+  const confirmBtn = document.getElementById("confirm-merge");
+  const cancelBtn = document.getElementById("cancel-merge");
+
+  const onConfirm = async () => {
+    const mergedData = _buildMergedData(primaryItem, secondaryItem);
+    const payload = await apiJson("/api/diagnostics/merge-knowledge", {
+      method: "POST",
+      body: JSON.stringify({
+        primary_target: primaryTarget,
+        secondary_targets: [secondaryTarget],
+        merged_data: mergedData,
+      }),
+    });
+    modal.classList.add("is-hidden");
+    confirmBtn.removeEventListener("click", onConfirm);
+    cancelBtn.removeEventListener("click", onCancel);
+    if (payload.ok) {
+      alert(payload.message || "合并成功");
+      await runDiagnostics("quick");
+    } else {
+      alert(payload.message || "合并失败");
+    }
+  };
+
+  const onCancel = () => {
+    modal.classList.add("is-hidden");
+    confirmBtn.removeEventListener("click", onConfirm);
+    cancelBtn.removeEventListener("click", onCancel);
+  };
+
+  confirmBtn.addEventListener("click", onConfirm);
+  cancelBtn.addEventListener("click", onCancel);
+}
+
+async function _loadMergeItem(target) {
+  if (target.startsWith("rag_exp_")) {
+    // RAG experiences are not mergeable through this flow
+    return null;
+  }
+  const parts = target.split("/");
+  if (parts.length !== 2) return null;
+  const [categoryId, itemId] = parts;
+  try {
+    const payload = await apiGet(`/api/knowledge/categories/${encodeURIComponent(categoryId)}/items/${encodeURIComponent(itemId)}`);
+    return payload.item || null;
+  } catch {
+    return null;
+  }
+}
+
+function _mergeItemHtml(item, side) {
+  const data = item.data || {};
+  const label = side === "primary" ? "主条目（保留）" : "次条目（将归档）";
+  const rows = Object.entries(data).map(([key, value]) => {
+    const strVal = typeof value === "object" ? JSON.stringify(value) : String(value ?? "");
+    return `<tr><td>${escapeHtml(key)}</td><td>${escapeHtml(strVal)}</td></tr>`;
+  }).join("");
+  return `
+    <div class="merge-item-panel">
+      <h4>${escapeHtml(label)}</h4>
+      <table class="merge-item-table">${rows || `<tr><td colspan="2">无数据</td></tr>`}</table>
+    </div>
+  `;
+}
+
+function _buildMergedData(primaryItem, secondaryItem) {
+  // Simple merge: prefer primary data, but for text fields, concatenate if different
+  const primaryData = {...(primaryItem.data || {})};
+  const secondaryData = secondaryItem.data || {};
+  for (const [key, value] of Object.entries(secondaryData)) {
+    if (value === undefined || value === null || value === "") continue;
+    if (!(key in primaryData) || primaryData[key] === "" || primaryData[key] === null) {
+      primaryData[key] = value;
+    } else if (typeof value === "string" && typeof primaryData[key] === "string" && primaryData[key] !== value) {
+      primaryData[key] = `${primaryData[key]}\n\n（合并内容）\n${value}`;
+    }
+  }
+  return primaryData;
 }
 
 async function loadVersions() {
@@ -4944,6 +5176,7 @@ async function loadViewData(view) {
     await Promise.all([
       loadVersions().catch(console.error),
       refreshAccountContext().catch(console.error),
+      loadLlmConfig().catch(console.error),
       loadPlatformSafetyRules().catch(console.error),
       loadPlatformUnderstandingRules().catch(console.error),
     ]);
@@ -5005,6 +5238,10 @@ document.getElementById("refresh-rag").addEventListener("click", () => loadRagSt
 document.getElementById("rebuild-rag").addEventListener("click", () => rebuildRag().catch((error) => alert(error.message)));
 document.getElementById("rag-search").addEventListener("click", () => searchRag().catch((error) => alert(error.message)));
 document.getElementById("refresh-rag-experiences").addEventListener("click", () => loadRagExperiences().catch((error) => alert(error.message)));
+document.getElementById("show-discarded-rag")?.addEventListener("change", (event) => {
+  state.showDiscardedRagExperiences = event.target.checked;
+  loadRagExperiences().catch((error) => alert(error.message));
+});
 document.getElementById("run-learning").addEventListener("click", () => runLearning().catch((error) => alert(error.message)));
 document.getElementById("refresh-candidates")?.addEventListener("click", () => loadCandidates().catch((error) => alert(error.message)));
 document.getElementById("refresh-customer-service")?.addEventListener("click", () => loadCustomerService().catch((error) => alert(error.message)));
@@ -5025,6 +5262,9 @@ document.getElementById("refresh-platform-safety")?.addEventListener("click", ()
 document.getElementById("save-platform-safety")?.addEventListener("click", () => savePlatformSafetyRules().catch((error) => alert(error.message)));
 document.getElementById("refresh-platform-understanding")?.addEventListener("click", () => loadPlatformUnderstandingRules().catch((error) => alert(error.message)));
 document.getElementById("save-platform-understanding")?.addEventListener("click", () => savePlatformUnderstandingRules().catch((error) => alert(error.message)));
+document.getElementById("llm-config-form")?.addEventListener("submit", (event) => saveLlmConfig(event).catch((error) => alert(error.message)));
+document.getElementById("llm-config-test")?.addEventListener("click", () => testLlmConfig().catch((error) => alert(error.message)));
+document.getElementById("llm-config-toggle")?.addEventListener("click", toggleLlmApiKeyVisibility);
 document.getElementById("local-password-form")?.addEventListener("submit", (event) => changeLocalPassword(event).catch((error) => alert(error.message)));
 document.getElementById("local-email-form")?.addEventListener("submit", (event) => bindLocalEmail(event).catch((error) => alert(error.message)));
 document.getElementById("local-logout-button")?.addEventListener("click", () => logoutLocal().catch((error) => alert(error.message)));

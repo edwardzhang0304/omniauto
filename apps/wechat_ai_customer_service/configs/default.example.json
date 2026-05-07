@@ -5,7 +5,7 @@
   "audit_log_path": "runtime/apps/wechat_ai_customer_service/logs/audit.jsonl",
   "poll": {
     "interval_seconds": 15,
-    "iterations": 1
+    "iterations": 9999
   },
   "state_lock": {
     "timeout_seconds": 120,
@@ -158,6 +158,13 @@
       "enabled": true,
       "exact": true,
       "allow_self_for_test": true,
+      "max_batch_messages": 3
+    },
+    {
+      "name": "许聪",
+      "enabled": true,
+      "exact": true,
+      "allow_self_for_test": false,
       "max_batch_messages": 3
     }
   ]

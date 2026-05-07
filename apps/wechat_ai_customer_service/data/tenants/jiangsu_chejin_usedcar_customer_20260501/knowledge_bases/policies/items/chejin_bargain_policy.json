@@ -1,0 +1,20 @@
+{
+  "schema_version": 1,
+  "category_id": "policies",
+  "id": "chejin_bargain_policy",
+  "status": "active",
+  "source": {"type": "test_fixture", "batch_token": "CHEJIN_SEED_20260507"},
+  "data": {
+    "title": "议价与价格政策",
+    "policy_type": "discount",
+    "keywords": ["便宜", "砍价", "优惠", "折扣", "最低价", "少点", "能降"],
+    "answer": "我们的定价基于市场行情和车况评估，已经尽量做到透明合理。部分车型有一定的议价空间，但需要到店沟通。价格包含的项目（如过户费、检测费）会明确告知。我们不参与恶性价格竞争，也不隐瞒车况来压价。如果您觉得价格偏高，可以告诉我您的预算，我帮您推荐其他合适的车源。",
+    "allow_auto_reply": true,
+    "requires_handoff": false,
+    "handoff_reason": "",
+    "operator_alert": false,
+    "risk_level": "normal"
+  },
+  "runtime": {"allow_auto_reply": true, "requires_handoff": false, "risk_level": "normal", "operator_alert": false},
+  "metadata": {"created_at": "2026-05-07T10:00:00", "updated_at": "2026-05-07T10:00:00", "created_by": "admin", "updated_by": "admin"}
+}

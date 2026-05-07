@@ -14,6 +14,7 @@ from typing import Any
 from urllib.parse import urlencode
 
 from apps.wechat_ai_customer_service.auth.vps_client import VpsAuthClient, VpsClientError, discover_vps_base_url
+from apps.wechat_ai_customer_service.cloud_gate import cloud_gate_status, cloud_required_enabled
 from apps.wechat_ai_customer_service.knowledge_paths import active_tenant_id, runtime_app_root, shared_runtime_cache_root, shared_runtime_snapshot_path
 
 from .backup_service import BackupService
@@ -53,6 +54,7 @@ class VpsLocalSyncService:
             "runtime_root": str(runtime_app_root()),
             "node": node_cache,
             "shared_cloud_cache": self.shared_cloud_cache_status(),
+            "cloud_gate": cloud_gate_status(),
             "supported_commands": ["backup_all", "backup_tenant", "pull_shared_patch", "check_update", "restore_backup", "push_update"],
             "supported_sync": ["formal_shared_candidates", "cloud_shared_knowledge", "commands", "updates"],
         }
@@ -229,6 +231,8 @@ class VpsLocalSyncService:
         try:
             payload = self.vps.get_json(f"/v1/shared/knowledge?{urlencode(query)}", token=token, headers=headers)
         except VpsClientError as exc:
+            if cloud_required_enabled():
+                expire_shared_cloud_snapshot_cache(cached, reason=str(exc))
             return {
                 "ok": False,
                 "tenant_id": tenant,
@@ -259,6 +263,8 @@ class VpsLocalSyncService:
                 "snapshot_path": str(shared_runtime_snapshot_path()),
             }
         if not isinstance(snapshot, dict):
+            if cloud_required_enabled():
+                expire_shared_cloud_snapshot_cache(cached, reason="snapshot_not_object")
             return {"ok": False, "tenant_id": tenant, "error": "shared knowledge snapshot response must be an object"}
         cache_result = write_shared_cloud_snapshot_cache(snapshot)
         return {
@@ -483,6 +489,8 @@ def normalize_shared_cloud_snapshot(snapshot: dict[str, Any]) -> dict[str, Any]:
         "source": str(snapshot.get("source") or "cloud_official_shared_library"),
         "version": str(snapshot.get("version") or stable_digest(json.dumps(items, ensure_ascii=False, sort_keys=True), 20)),
         "tenant_id": str(snapshot.get("tenant_id") or ""),
+        "tenant_industry_id": str(snapshot.get("tenant_industry_id") or ""),
+        "industry_catalog": [dict(item) for item in snapshot.get("industry_catalog", []) if isinstance(item, dict)],
         "generated_at": generated_at,
         "ttl_seconds": ttl_seconds,
         "refresh_after_seconds": refresh_after_seconds,
@@ -493,6 +501,7 @@ def normalize_shared_cloud_snapshot(snapshot: dict[str, Any]) -> dict[str, Any]:
         "cache_policy": cache_policy,
         "categories": categories,
         "items": items,
+        "policy_bundle": dict(snapshot.get("policy_bundle")) if isinstance(snapshot.get("policy_bundle"), dict) else {},
         "deleted_item_ids": [str(item) for item in snapshot.get("deleted_item_ids", []) if str(item).strip()],
     }
 
@@ -563,6 +572,7 @@ def shared_cache_item_payload(item: dict[str, Any], *, category_id: str, item_id
             "schema_version": int(source_data.get("schema_version") or item.get("schema_version") or 1),
             "id": item_id,
             "item_id": item_id,
+            "industry_id": str(item.get("industry_id") or source_data.get("industry_id") or "global"),
             "category_id": category_id,
             "status": str(item.get("status") or source_data.get("status") or "active"),
             "title": title,
@@ -655,7 +665,19 @@ def renew_shared_cloud_snapshot_cache(cached: dict[str, Any], lease_payload: dic
     if not cached:
         return {}
     merged = dict(cached)
-    for key in ("generated_at", "ttl_seconds", "refresh_after_seconds", "issued_at", "refresh_after_at", "expires_at", "lease_id", "cache_policy"):
+    for key in (
+        "generated_at",
+        "ttl_seconds",
+        "refresh_after_seconds",
+        "issued_at",
+        "refresh_after_at",
+        "expires_at",
+        "lease_id",
+        "cache_policy",
+        "tenant_industry_id",
+        "industry_catalog",
+        "policy_bundle",
+    ):
         if key in lease_payload:
             merged[key] = lease_payload[key]
     if lease_payload.get("version"):
@@ -671,6 +693,27 @@ def renew_shared_cloud_snapshot_cache(cached: dict[str, Any], lease_payload: dic
     return read_json_payload(shared_runtime_snapshot_path(), default=merged)
 
 
+def expire_shared_cloud_snapshot_cache(cached: dict[str, Any], *, reason: str = "") -> dict[str, Any]:
+    if not isinstance(cached, dict) or not cached:
+        return {}
+    now = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    expired = dict(cached)
+    expired["refresh_after_at"] = now
+    expired["expires_at"] = now
+    expired["issued_at"] = str(expired.get("issued_at") or now)
+    policy = dict(expired.get("cache_policy")) if isinstance(expired.get("cache_policy"), dict) else {}
+    policy.update({"issued_at": expired["issued_at"], "refresh_after_at": now, "expires_at": now, "requires_cloud_refresh": True})
+    if reason:
+        policy["last_error"] = reason[:280]
+        expired["last_error"] = reason[:280]
+    expired["cache_policy"] = policy
+    try:
+        write_shared_cloud_snapshot_cache(expired)
+    except Exception:
+        return expired
+    return read_json_payload(shared_runtime_snapshot_path(), default=expired)
+
+
 def shared_cloud_cache_policy_summary(snapshot: dict[str, Any]) -> dict[str, Any]:
     policy = snapshot.get("cache_policy") if isinstance(snapshot.get("cache_policy"), dict) else {}
     return {
@@ -682,6 +725,7 @@ def shared_cloud_cache_policy_summary(snapshot: dict[str, Any]) -> dict[str, Any
         "lease_id": str(snapshot.get("lease_id") or policy.get("lease_id") or ""),
         "cache_policy_mode": str(policy.get("mode") or ""),
         "requires_cloud_refresh": bool(snapshot) and policy.get("requires_cloud_refresh") is not False,
+        "tenant_industry_id": str(snapshot.get("tenant_industry_id") or ""),
     }
 
 

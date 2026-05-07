@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import sys
 from datetime import datetime, timedelta, timezone
@@ -18,6 +19,8 @@ PRIORITY_TENANT_ID = "knowledge_priority_probe"
 for path in (PROJECT_ROOT, WORKFLOWS_ROOT):
     if str(path) not in sys.path:
         sys.path.insert(0, str(path))
+os.environ.setdefault("WECHAT_CLOUD_REQUIRED", "0")
+os.environ.setdefault("WECHAT_CLOUD_STRICT_ONLINE", "0")
 
 from apps.wechat_ai_customer_service.admin_backend.services.knowledge_base_store import KnowledgeBaseStore  # noqa: E402
 from apps.wechat_ai_customer_service.admin_backend.services.formal_review_state import acknowledge_item  # noqa: E402

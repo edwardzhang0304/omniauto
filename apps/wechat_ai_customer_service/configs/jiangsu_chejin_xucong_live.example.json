@@ -75,11 +75,11 @@
         "price_approval_required"
       ],
       "pro_when_must_handoff": true,
-      "pro_when_rag_only_authority": true,
+      "pro_when_rag_only_authority": false,
       "pro_when_long_context": false,
       "pro_when_long_message": false,
-      "pro_min_history_count": 80,
-      "pro_min_message_chars": 420
+      "pro_min_history_count": 120,
+      "pro_min_message_chars": 600
     },
     "profiles": {
       "flash": {
@@ -141,6 +141,14 @@
   "operator_alert": {
     "enabled": true,
     "alert_log_path": "runtime/apps/wechat_ai_customer_service/tenants/jiangsu_chejin_usedcar_customer_20260501/logs/xucong_live_operator_alerts.jsonl"
+  },
+  "intent_router": {
+    "llm": {
+      "enabled": true,
+      "timeout_seconds": 2,
+      "max_tokens": 256
+    },
+    "cache_seconds": 60
   },
   "service_profile": {
     "role": "谨慎、真实、不过度承诺的微信客服；具体行业身份以当前客户可见知识库为准",

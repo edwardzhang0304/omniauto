@@ -1,0 +1,25 @@
+{
+  "schema_version": 1,
+  "category_id": "products",
+  "id": "chejin_haval_h6_2020_20t",
+  "status": "active",
+  "source": {"type": "test_fixture", "batch_token": "CHEJIN_SEED_20260507"},
+  "data": {
+    "name": "2020款哈弗H6 2.0GDIT 自动冠军版",
+    "sku": "CHEJIN-H6-2020-20T",
+    "category": "二手车/SUV",
+    "aliases": ["哈弗H6", "H6", "国产SUV", "性价比", "神车"],
+    "specs": "2020年7月上牌，表显5.5万公里，2.0T自动挡，配置丰富，全景天窗、360影像，右前叶子板补漆。",
+    "price": 7.28,
+    "unit": "台",
+    "inventory": 1,
+    "shipping_policy": "随时看车，国产SUV性价比高，适合预算有限但需要大空间的客户。",
+    "warranty_policy": "右前叶子板有补漆记录，已如实告知，其余部位原版，以检测报告为准。",
+    "reply_templates": {
+      "recommendation": "这台H6适合7到8万预算、需要大空间SUV但预算有限的客户，配置高是亮点。"
+    },
+    "risk_rules": ["右前叶子板补漆已告知", "不承诺最低价"]
+  },
+  "runtime": {"allow_auto_reply": true, "requires_handoff": false, "risk_level": "normal"},
+  "metadata": {"created_at": "2026-05-07T10:00:00", "updated_at": "2026-05-07T10:00:00", "created_by": "admin", "updated_by": "admin"}
+}

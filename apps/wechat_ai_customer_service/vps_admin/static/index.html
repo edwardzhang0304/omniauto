@@ -169,6 +169,15 @@
                 <label class="form-field"><span>密码</span><input name="password" type="password" required /></label>
                 <label class="form-field"><span>登录邮箱</span><input name="email" type="email" placeholder="用于登录验证码" /></label>
                 <label class="form-field"><span>账号类型</span><select name="role" id="new-user-role"><option value="customer">客户 customer</option><option value="guest">访客 guest</option></select></label>
+                <label class="form-field" id="industry-select-field">
+                  <span>行业</span>
+                  <select name="industry_id" id="new-user-industry">
+                    <option value="home_appliance">家电</option>
+                    <option value="used_car">二手车</option>
+                    <option value="fast_food">快餐</option>
+                    <option value="lab_instruments">实验室仪器</option>
+                  </select>
+                </label>
                 <label class="form-field" id="authorized-customer-field"><span>访客可查看客户</span><select name="authorized_customer" id="authorized-customer-select"></select></label>
                 <button class="primary-button" type="submit">创建账号</button>
               </form>
@@ -224,6 +233,16 @@
               <h2>新增正式共享知识</h2>
               <form class="shared-library-form compact-form" id="library-form">
                 <label class="form-field"><span>条目 ID</span><input name="item_id" placeholder="可留空自动生成" /></label>
+                <label class="form-field">
+                  <span>行业范围</span>
+                  <select name="industry_id">
+                    <option value="global">全行业通用</option>
+                    <option value="used_car">二手车</option>
+                    <option value="home_appliance">家电</option>
+                    <option value="fast_food">快餐</option>
+                    <option value="lab_instruments">实验室仪器</option>
+                  </select>
+                </label>
                 <label class="form-field">
                   <span>分类</span>
                   <select name="category_id">

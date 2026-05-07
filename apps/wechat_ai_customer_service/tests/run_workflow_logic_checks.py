@@ -25,6 +25,8 @@ ADAPTERS_ROOT = APP_ROOT / "adapters"
 for path in (PROJECT_ROOT, WORKFLOWS_ROOT, ADAPTERS_ROOT):
     if str(path) not in sys.path:
         sys.path.insert(0, str(path))
+os.environ.setdefault("WECHAT_CLOUD_REQUIRED", "0")
+os.environ.setdefault("WECHAT_CLOUD_STRICT_ONLINE", "0")
 
 import customer_intent_assist as customer_intent_assist_module  # noqa: E402
 from customer_intent_assist import IntentAssistResult, call_deepseek_advisory  # noqa: E402

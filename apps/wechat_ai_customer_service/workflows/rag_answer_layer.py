@@ -36,13 +36,10 @@ def maybe_build_rag_reply(
     if not payload["enabled"]:
         payload["reason"] = "rag_response_disabled"
         return payload
-    if data_capture.get("is_customer_data"):
-        payload["reason"] = "customer_data_decision_is_deterministic"
-        return payload
     if safety_requires_handoff(intent_assist):
         payload["reason"] = "evidence_safety_requires_handoff"
         return payload
-    if product_knowledge.get("needs_handoff") or product_knowledge.get("auto_reply_allowed") is False:
+    if (product_knowledge and (product_knowledge.get("needs_handoff") or product_knowledge.get("auto_reply_allowed") is False)):
         payload["reason"] = "product_knowledge_requires_handoff"
         return payload
 
@@ -107,7 +104,7 @@ def rag_reply_allowed_for_decision(
     *,
     settings: dict[str, Any],
     decision: Any,
-    product_knowledge: dict[str, Any],
+    product_knowledge: dict[str, Any] | None,
     intent_tags: set[str],
     candidate_intent: str,
     candidate_action: str,
@@ -119,7 +116,7 @@ def rag_reply_allowed_for_decision(
         return False
     if intent_tags & intent_group("rag_authority_block"):
         return False
-    if product_knowledge.get("matched"):
+    if product_knowledge and product_knowledge.get("matched"):
         return bool(settings.get("apply_to_matched_product", False))
     if candidate_intent == "small_talk" or candidate_action == "reply_small_talk" or "small_talk" in intent_tags:
         return bool(settings.get("apply_to_small_talk", True))

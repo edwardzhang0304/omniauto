@@ -1,0 +1,25 @@
+{
+  "schema_version": 1,
+  "category_id": "products",
+  "id": "chejin_elantra_2019_14t",
+  "status": "active",
+  "source": {"type": "test_fixture", "batch_token": "CHEJIN_SEED_20260507"},
+  "data": {
+    "name": "2019款现代领动1.4T 双离合炫动活力型",
+    "sku": "CHEJIN-ELANTRA-2019-14T",
+    "category": "二手车/紧凑型轿车",
+    "aliases": ["领动", "现代领动", "韩系", "代步车", "省油"],
+    "specs": "2019年5月上牌，表显8.2万公里，1.4T自动挡，外观时尚，左前门更换（非事故，停车刮蹭导致）。",
+    "price": 4.98,
+    "unit": "台",
+    "inventory": 1,
+    "shipping_policy": "随时看车，价格可谈，适合预算有限的代步需求。",
+    "warranty_policy": "左前门为更换件，原因是停车刮蹭，非碰撞事故，已如实告知，以检测报告为准。",
+    "reply_templates": {
+      "recommendation": "这台领动适合4到6万预算、需要代步车的客户，价格实在，左前门更换记录已透明告知。"
+    },
+    "risk_rules": ["左前门更换已告知", "非事故车"]
+  },
+  "runtime": {"allow_auto_reply": true, "requires_handoff": false, "risk_level": "normal"},
+  "metadata": {"created_at": "2026-05-07T10:00:00", "updated_at": "2026-05-07T10:00:00", "created_by": "admin", "updated_by": "admin"}
+}

@@ -8,7 +8,7 @@
     "path": "structured/product_knowledge.example.json"
   },
   "data": {
-    "title": "company_profile",
+    "title": "公司信息",
     "policy_type": "company",
     "keywords": [
       "你们公司",
@@ -19,7 +19,9 @@
       "你们地址",
       "在哪里",
       "营业时间",
-      "客服电话"
+      "客服电话",
+      "company",
+      "profile"
     ],
     "answer": "我们测试公司为杭州星澜供应链科技有限公司，主营商用设备、办公用品、净水耗材和包装耗材批发。地址：浙江省杭州市余杭区未来科技城星澜路 88 号 3 幢 502 室；服务时间：周一至周六 09:00-18:30；客服电话：0571-8800-1234。",
     "allow_auto_reply": true,
@@ -35,7 +37,7 @@
   },
   "metadata": {
     "created_at": "2026-04-26T17:58:50",
-    "updated_at": "2026-04-26T17:58:50",
+    "updated_at": "2026-05-06T05:18:23",
     "created_by": "migration",
     "updated_by": "migration"
   }

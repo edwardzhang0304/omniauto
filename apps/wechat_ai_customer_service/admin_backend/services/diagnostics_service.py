@@ -17,6 +17,7 @@ from .knowledge_compiler import KnowledgeCompiler
 from .knowledge_deduper import duplicate_text, normalize_price_tiers, normalized_fingerprint, semantic_key
 from .knowledge_registry import KnowledgeRegistry
 from .knowledge_schema_manager import KnowledgeSchemaManager
+from .llm_knowledge_audit import audit_knowledge_and_rag, auto_dedup_rag_experiences, has_llm_config
 from apps.wechat_ai_customer_service.knowledge_paths import active_tenant_id
 from apps.wechat_ai_customer_service.platform_understanding_rules import risk_keywords
 from apps.wechat_ai_customer_service.storage import get_postgres_store, load_storage_config
@@ -38,9 +39,20 @@ class DiagnosticsService:
         include_llm_probe: bool = False,
         include_wechat_live: bool = False,
         include_ignored: bool = False,
+        include_llm_audit: bool = True,
+        auto_dedup_rag: bool = False,
     ) -> dict[str, Any]:
         run_id = "diag_" + datetime.now().strftime("%Y%m%d_%H%M%S") + "_" + uuid.uuid4().hex[:6]
-        checks = [self.quick_check(recent_only=mode != "full")]
+
+        # Auto-dedup RAG experiences during full diagnostics (silent cleanup)
+        auto_dedup_result: dict[str, Any] | None = None
+        if mode == "full" or auto_dedup_rag:
+            try:
+                auto_dedup_result = auto_dedup_rag_experiences(active_tenant_id())
+            except Exception:
+                auto_dedup_result = None
+
+        checks = [self.quick_check(recent_only=mode != "full", include_llm_audit=include_llm_audit)]
         if mode == "full":
             checks.extend(self.full_checks(include_llm_probe=include_llm_probe, include_wechat_live=include_wechat_live))
         issues = []
@@ -102,6 +114,7 @@ class DiagnosticsService:
                 "ignored_count": ignored_count,
                 "hidden_notice_count": hidden_notice_count,
             },
+            "auto_dedup_rag": auto_dedup_result,
         }
         self.write_report(report)
         return report
@@ -118,6 +131,10 @@ class DiagnosticsService:
             if item.get("code") == "knowledge_token_budget_large":
                 item["repairable"] = False
                 item["target_label"] = "全局知识库"
+            # Preserve LLM audit fields
+            for extra_key in ("action_type", "involved_targets", "llm_reasoning"):
+                if extra_key in issue:
+                    item[extra_key] = issue[extra_key]
             item["fingerprint"] = issue_fingerprint(item)
             item.setdefault("suggestions", default_suggestions(item))
             enriched.append(item)
@@ -204,13 +221,21 @@ class DiagnosticsService:
         report["cleared_count"] = changed
         return report
 
-    def quick_check(self, *, recent_only: bool = True) -> dict[str, Any]:
+    def quick_check(self, *, recent_only: bool = True, include_llm_audit: bool = True) -> dict[str, Any]:
         checks = [
             self.validate_knowledge_bases(recent_only=recent_only),
         ]
         issues = []
         for check in checks:
             issues.extend(check.get("issues", []) or [])
+
+        if include_llm_audit and has_llm_config():
+            try:
+                llm_issues = audit_knowledge_and_rag(active_tenant_id())
+                issues.extend(llm_issues)
+            except Exception:
+                pass
+
         token_budget = self.estimate_token_budget()
         if token_budget > TOKEN_BUDGET_NOTICE_THRESHOLD:
             budget_detail = self.knowledge_budget_details(token_budget)

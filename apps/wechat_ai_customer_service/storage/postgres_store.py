@@ -1093,6 +1093,177 @@ class PostgresJsonStore:
             "by_status": counts,
         }
 
+    # ── Customer profiles ─────────────────────────────────────────────────
+
+    def upsert_customer_profile(self, tenant_id: str, profile: dict[str, Any]) -> None:
+        profile_id = str(profile.get("profile_id") or "")
+        if not profile_id:
+            raise ValueError("profile_id is required")
+        basic = profile.get("basic_info") if isinstance(profile.get("basic_info"), dict) else {}
+        tags = profile.get("tags") if isinstance(profile.get("tags"), dict) else {}
+        greeting = profile.get("greeting_preference") if isinstance(profile.get("greeting_preference"), dict) else {}
+        self.execute(
+            f"""
+            INSERT INTO {self.schema}.customers
+              (tenant_id, profile_id, target_name, display_name, status, tags, basic_info,
+               conversation_summary, greeting_preference, payload, updated_at)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, now())
+            ON CONFLICT (profile_id)
+            DO UPDATE SET
+              target_name = EXCLUDED.target_name,
+              display_name = EXCLUDED.display_name,
+              status = EXCLUDED.status,
+              tags = EXCLUDED.tags,
+              basic_info = EXCLUDED.basic_info,
+              conversation_summary = EXCLUDED.conversation_summary,
+              greeting_preference = EXCLUDED.greeting_preference,
+              payload = EXCLUDED.payload,
+              updated_at = now()
+            """,
+            [
+                tenant_id,
+                profile_id,
+                profile.get("target_name") or "",
+                profile.get("display_name") or profile.get("target_name") or "",
+                profile.get("status") or "active",
+                self.jsonb(tags),
+                self.jsonb(basic),
+                str(profile.get("conversation_summary") or ""),
+                self.jsonb(greeting),
+                self.jsonb(profile),
+            ],
+        )
+
+    def get_customer_profile(self, tenant_id: str, profile_id: str) -> dict[str, Any] | None:
+        row = self.fetchone(
+            f"SELECT payload FROM {self.schema}.customers WHERE tenant_id = %s AND profile_id = %s",
+            [tenant_id, profile_id],
+        )
+        return row["payload"] if row else None
+
+    def list_customer_profiles(
+        self,
+        tenant_id: str,
+        *,
+        query: str = "",
+        tag_key: str = "",
+        tag_value: str = "",
+        status: str = "all",
+        sort: str = "updated_at",
+        limit: int = 200,
+    ) -> list[dict[str, Any]] | None:
+        filters = ["tenant_id = %s"]
+        params: list[Any] = [tenant_id]
+        if status and status != "all":
+            filters.append("status = %s")
+            params.append(status)
+        if query:
+            filters.append("(target_name ILIKE %s OR display_name ILIKE %s)")
+            params.append(f"%{query}%")
+            params.append(f"%{query}%")
+        if tag_key:
+            filters.append("tags ? %s")
+            params.append(tag_key)
+            if tag_value:
+                filters.append("tags->>%s = %s")
+                params.append(tag_key)
+                params.append(tag_value)
+        sort_col = "updated_at" if sort in ("updated_at", "last_contact_at", "created_at") else "updated_at"
+        params.append(max(1, min(int(limit or 200), 500)))
+        rows = self.fetchall(
+            f"""
+            SELECT payload
+            FROM {self.schema}.customers
+            WHERE {" AND ".join(filters)}
+            ORDER BY {sort_col} DESC
+            LIMIT %s
+            """,
+            params,
+        )
+        return [row["payload"] for row in rows]
+
+    def delete_customer_profile(self, tenant_id: str, profile_id: str) -> bool:
+        row = self.fetchone(
+            f"SELECT count(*) AS count FROM {self.schema}.customers WHERE tenant_id = %s AND profile_id = %s",
+            [tenant_id, profile_id],
+        )
+        deleted = int(row["count"] if row else 0)
+        self.execute(
+            f"DELETE FROM {self.schema}.customers WHERE tenant_id = %s AND profile_id = %s",
+            [tenant_id, profile_id],
+        )
+        self.execute(
+            f"DELETE FROM {self.schema}.customer_conversations WHERE tenant_id = %s AND profile_id = %s",
+            [tenant_id, profile_id],
+        )
+        return deleted > 0
+
+    def upsert_customer_conversation(self, tenant_id: str, conv: dict[str, Any]) -> None:
+        conversation_id = str(conv.get("conversation_id") or "")
+        if not conversation_id:
+            raise ValueError("conversation_id is required")
+        self.execute(
+            f"""
+            INSERT INTO {self.schema}.customer_conversations
+              (tenant_id, conversation_id, profile_id, target_name, summary,
+               last_message_at, message_count, reply_count, payload, updated_at)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, now())
+            ON CONFLICT (conversation_id)
+            DO UPDATE SET
+              profile_id = EXCLUDED.profile_id,
+              target_name = EXCLUDED.target_name,
+              summary = EXCLUDED.summary,
+              last_message_at = EXCLUDED.last_message_at,
+              message_count = EXCLUDED.message_count,
+              reply_count = EXCLUDED.reply_count,
+              payload = EXCLUDED.payload,
+              updated_at = now()
+            """,
+            [
+                tenant_id,
+                conversation_id,
+                conv.get("profile_id") or "",
+                conv.get("target_name") or "",
+                conv.get("summary") or "",
+                conv.get("last_message_at") or None,
+                int(conv.get("message_count", 0) or 0),
+                int(conv.get("reply_count", 0) or 0),
+                self.jsonb(conv),
+            ],
+        )
+
+    def get_customer_conversation_summary(self, tenant_id: str, conversation_id: str) -> dict[str, Any] | None:
+        row = self.fetchone(
+            f"SELECT payload FROM {self.schema}.customer_conversations WHERE tenant_id = %s AND conversation_id = %s",
+            [tenant_id, conversation_id],
+        )
+        return row["payload"] if row else None
+
+    def list_customer_conversations(
+        self,
+        tenant_id: str,
+        *,
+        profile_id: str = "",
+        limit: int = 100,
+    ) -> list[dict[str, Any]] | None:
+        filters = ["tenant_id = %s"]
+        params: list[Any] = [tenant_id]
+        if profile_id:
+            filters.append("profile_id = %s")
+            params.append(profile_id)
+        params.append(max(1, min(int(limit or 100), 500)))
+        rows = self.fetchall(
+            f"""
+            SELECT payload
+            FROM {self.schema}.customer_conversations
+            WHERE {" AND ".join(filters)}
+            ORDER BY updated_at DESC
+            LIMIT %s
+            """,
+            params,
+        )
+        return [row["payload"] for row in rows]
+
     def execute(self, query: str, params: list[Any] | tuple[Any, ...] | None = None) -> None:
         with self.connect() as conn:
             with conn.cursor() as cur:

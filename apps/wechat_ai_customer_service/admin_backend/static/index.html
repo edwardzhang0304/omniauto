@@ -175,7 +175,7 @@
               </section>
               <section class="helper-card">
                 <strong>客户可以只用记录员，不开自动回复。</strong>
-                <span>选择“只记录不回复”或直接关闭客服总开关，系统仍可记录和整理聊天内容。</span>
+                <span>选择"只记录不回复"或直接关闭客服总开关，系统仍可记录和整理聊天内容。</span>
               </section>
             </div>
           </article>
@@ -337,7 +337,7 @@
               <div class="section-head sub-head">
                 <div>
                   <h2>资料导入</h2>
-                  <p>上传文件后，点击“整理未处理资料”，AI 会把内容整理进 RAG经验池，并给出下一步建议。</p>
+                  <p>上传文件后，点击"整理未处理资料"，AI 会把内容整理进 RAG经验池，并给出下一步建议。</p>
                 </div>
                 <button class="primary-button is-hidden" id="upload-button" type="button">手动上传</button>
               </div>
@@ -438,7 +438,10 @@
                   <h2>RAG经验清单</h2>
                   <p>这里是 AI 读完资料或真实对话后留下的经验总结和处理建议。</p>
                 </div>
-                <button class="secondary-button" id="refresh-rag-experiences">刷新经验</button>
+                <div class="button-row">
+                  <label class="checkbox-line"><input id="show-discarded-rag" type="checkbox" /> 显示已废弃</label>
+                  <button class="secondary-button" id="refresh-rag-experiences">刷新经验</button>
+                </div>
               </div>
               <div class="helper-card">
                 <strong>经验层不等于正式知识。</strong>
@@ -512,6 +515,49 @@
             <section class="settings-section">
               <div class="section-head sub-head">
                 <div>
+                  <h2>大模型配置</h2>
+                  <p>配置 DeepSeek API Key，用于 AI 辅助整理和自动回复。</p>
+                </div>
+              </div>
+              <div id="llm-config-summary" class="security-summary">大模型配置读取中...</div>
+              <div class="security-grid">
+                <section class="security-panel">
+                  <div class="security-panel-head">
+                    <h3>API Key</h3>
+                    <span>Flash 和 Pro 模型共用同一个 Key</span>
+                  </div>
+                  <form class="security-form" id="llm-config-form">
+                    <label class="form-field wide-field">
+                      <span>DEEPSEEK API KEY</span>
+                      <input name="deepseek_api_key" type="password" autocomplete="off" placeholder="输入 API Key 后点击保存" id="llm-api-key-input" />
+                    </label>
+                    <div class="security-actions">
+                      <button class="primary-button compact-button" type="submit" id="llm-config-save">保存配置</button>
+                      <button class="secondary-button compact-button" type="button" id="llm-config-test">测试连接</button>
+                      <button class="secondary-button compact-button" type="button" id="llm-config-toggle">显示</button>
+                    </div>
+                  </form>
+                </section>
+                <section class="security-panel">
+                  <div class="security-panel-head">
+                    <h3>模型信息</h3>
+                    <span>当前默认使用 DeepSeek 模型</span>
+                  </div>
+                  <div class="llm-info-grid">
+                    <div><span>Flash 模型</span><strong>deepseek-v4-flash</strong></div>
+                    <div><span>Pro 模型</span><strong>deepseek-v4-pro</strong></div>
+                    <div><span>Base URL</span><strong>https://api.deepseek.com</strong></div>
+                  </div>
+                </section>
+              </div>
+              <div class="security-note">
+                <strong>Key 存储位置</strong>
+                <span>API Key 保存在客户端本地的 llm_config.json 中，不会上传到 VPS 服务端。</span>
+              </div>
+            </section>
+            <section class="settings-section">
+              <div class="section-head sub-head">
+                <div>
                   <h2>备份还原</h2>
                   <p>仅保留最近 20 条备份快照，超过数量的旧备份会自动清理。</p>
                 </div>
@@ -567,8 +613,8 @@
                 <span>客户端只负责绑定邮箱和填写验证码，SMTP 发信配置由 VPS 服务端统一管理。</span>
               </div>
             </section>
-            <section class="settings-section">
-              <div class="section-head sub-head">
+            <details open class="settings-section collapsible-section">
+              <summary class="section-head sub-head">
                 <div>
                   <h2>平台底线规则</h2>
                   <p>这里维护所有账号共用的自动回复安全边界；行业专属规则请放到对应客户的正式知识库。</p>
@@ -577,7 +623,7 @@
                   <button class="secondary-button" id="refresh-platform-safety">刷新</button>
                   <button class="primary-button" id="save-platform-safety">保存规则</button>
                 </div>
-              </div>
+              </summary>
               <div id="platform-safety-summary" class="security-summary">平台底线规则读取中...</div>
               <label class="form-field platform-safety-editor">
                 <span>规则内容</span>
@@ -587,9 +633,9 @@
                 <strong>规则分层</strong>
                 <span>平台底线规则只放所有行业都适用的边界；二手车、贸易、门店、商品等专属规则必须放在客户自己的正式知识库或商品库。</span>
               </div>
-            </section>
-            <section class="settings-section">
-              <div class="section-head sub-head">
+            </details>
+            <details open class="settings-section collapsible-section">
+              <summary class="section-head sub-head">
                 <div>
                   <h2>平台通用理解词典</h2>
                   <p>这里维护所有账号共用的基础意图词、商品理解词和RAG检索近义词；不写客户专属业务规则。</p>
@@ -598,7 +644,7 @@
                   <button class="secondary-button" id="refresh-platform-understanding">刷新</button>
                   <button class="primary-button" id="save-platform-understanding">保存词典</button>
                 </div>
-              </div>
+              </summary>
               <div id="platform-understanding-summary" class="security-summary">平台通用理解词典读取中...</div>
               <label class="form-field platform-safety-editor">
                 <span>词典内容</span>
@@ -606,9 +652,9 @@
               </label>
               <div class="security-note">
                 <strong>词典分层</strong>
-                <span>这里适合放“价格、库存、发货、售后、发票、推荐、对比”等通用理解词；客户行业规则、商品规则和话术仍应放到正式知识库或商品库。</span>
+                <span>这里适合放"价格、库存、发货、售后、发票、推荐、对比"等通用理解词；客户行业规则、商品规则和话术仍应放到正式知识库或商品库。</span>
               </div>
-            </section>
+            </details>
             <section class="settings-section muted-section">
               <h2>后续设置</h2>
               <p>后续可以在这里加入界面风格、日志清理、端口检查等辅助功能。</p>
@@ -646,6 +692,21 @@
         </div>
       </div>
     </aside>
+    <div id="diagnostic-merge-modal" class="modal is-hidden">
+      <div class="modal-overlay"></div>
+      <div class="modal-content glass-panel">
+        <h3>合并知识条目</h3>
+        <div class="merge-preview-grid">
+          <div id="merge-primary-panel"></div>
+          <div id="merge-secondary-panel"></div>
+        </div>
+        <div id="merge-result-preview"></div>
+        <div class="button-row">
+          <button class="primary-button" id="confirm-merge">确认合并</button>
+          <button class="secondary-button" id="cancel-merge">取消</button>
+        </div>
+      </div>
+    </div>
     <script src="/static/app.js?v=20260505-promotion-chain-cleanup"></script>
   </body>
 </html>

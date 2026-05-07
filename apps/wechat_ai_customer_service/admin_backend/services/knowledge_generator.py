@@ -469,16 +469,6 @@ def infer_category(text: str) -> str:
         return "erp_exports"
     if has_any(text, ["客户说", "客服说", "话术", "聊天", "回复风格", "怎么回"]):
         return "chats"
-    policy_terms = [
-        *intent_keywords().get("invoice", []),
-        *intent_keywords().get("payment", []),
-        *intent_keywords().get("after_sales", []),
-        *intent_keywords().get("shipping", []),
-        *intent_keywords().get("handoff", []),
-        "规则",
-    ]
-    if has_any(text, policy_terms):
-        return "policies"
     product_terms = [
         *intent_keywords().get("product", []),
         *product_keywords("quote"),
@@ -487,6 +477,23 @@ def infer_category(text: str) -> str:
         *product_keywords("spec"),
         "sku",
     ]
+    strong_product_markers = ["新增商品", "商品名称", "商品:", "商品：", "sku", "型号", "单价", "售价", "库存"]
+    if has_any(text, strong_product_markers):
+        has_numeric_fact = bool(re.search(r"\d+(?:\.\d+)?\s*(?:元|块|件|台|套|个|把|箱)", text))
+        if has_numeric_fact or has_any(text, ["新增商品", "商品名称", "sku", "型号", "库存"]):
+            return "products"
+    policy_terms = [
+        *intent_keywords().get("invoice", []),
+        *intent_keywords().get("payment", []),
+        *intent_keywords().get("after_sales", []),
+        *intent_keywords().get("shipping", []),
+        *intent_keywords().get("handoff", []),
+        "规则",
+    ]
+    if has_any(text, product_terms) and not has_any(text, policy_terms):
+        return "products"
+    if has_any(text, policy_terms):
+        return "policies"
     if has_any(text, product_terms):
         return "products"
     return "policies"
