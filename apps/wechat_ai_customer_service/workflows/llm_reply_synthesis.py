@@ -99,6 +99,7 @@ def maybe_synthesize_reply(
     product_knowledge: dict[str, Any],
     data_capture: dict[str, Any],
     raw_capture: dict[str, Any],
+    customer_profile: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     settings = config.get("llm_reply_synthesis", {}) or {}
     payload: dict[str, Any] = {
@@ -124,9 +125,10 @@ def maybe_synthesize_reply(
         product_knowledge=product_knowledge,
         data_capture=data_capture,
         raw_capture=raw_capture,
+        customer_profile=customer_profile,
     )
     model_route = select_synthesis_model_route(settings=settings, evidence_pack=evidence_pack)
-    effective_settings = synthesis_settings_for_tier(settings, str(model_route.get("tier") or "pro"))
+    effective_settings = synthesis_settings_for_tier(settings, str(model_route.get("tier") or "flash"))
     if str(model_route.get("tier") or "") != "flash":
         evidence_pack = build_reply_evidence_pack(
             config=config_with_synthesis_settings(config, effective_settings),
@@ -142,9 +144,10 @@ def maybe_synthesize_reply(
             product_knowledge=product_knowledge,
             data_capture=data_capture,
             raw_capture=raw_capture,
+            customer_profile=customer_profile,
         )
         model_route = select_synthesis_model_route(settings=settings, evidence_pack=evidence_pack)
-        effective_settings = synthesis_settings_for_tier(settings, str(model_route.get("tier") or "pro"))
+        effective_settings = synthesis_settings_for_tier(settings, str(model_route.get("tier") or "flash"))
     payload["evidence_summary"] = evidence_pack.get("audit_summary", {})
     payload["intent_tags"] = evidence_pack.get("intent_tags", [])
     payload["model_tier"] = model_route.get("tier")
@@ -325,7 +328,7 @@ def select_synthesis_model_route(*, settings: dict[str, Any], evidence_pack: dic
         tier = infer_tier_from_model_name(str(settings.get("model") or ""))
         return {"tier": tier, "profile": tier, "reasons": ["legacy_explicit_model"]}
     if routing.get("enabled", True) is False:
-        return {"tier": "pro", "profile": "pro", "reasons": ["legacy_model_routing_disabled"]}
+        return {"tier": "flash", "profile": "flash", "reasons": ["legacy_model_routing_disabled_default_flash"]}
 
     force = normalize_route_tier(routing.get("force_model_tier") or settings.get("force_model_tier"))
     if force:
@@ -344,10 +347,10 @@ def select_synthesis_model_route(*, settings: dict[str, Any], evidence_pack: dic
         reasons.append("authority_or_handoff_intent")
     if safety_reasons & pro_safety_reasons:
         reasons.append("high_risk_safety_reason")
-    if bool(safety.get("must_handoff")) and routing.get("pro_when_must_handoff", True) is not False:
+    if bool(safety.get("must_handoff")) and routing.get("pro_when_must_handoff", False) is True:
         reasons.append("must_handoff_quality_priority")
     if (
-        routing.get("pro_when_rag_only_authority", True) is not False
+        routing.get("pro_when_rag_only_authority", False) is True
         and int(audit_summary.get("structured_evidence_count") or 0) <= 0
         and int(audit_summary.get("rag_hit_count") or 0) > 0
         and intent_tags & {"quote", "discount", "stock", "shipping", "invoice", "payment", "after_sales", "handoff"}
@@ -370,7 +373,7 @@ def select_synthesis_model_route(*, settings: dict[str, Any], evidence_pack: dic
 
 def resolve_synthesis_model(*, settings: dict[str, Any], model_route: dict[str, Any]) -> str:
     routing = settings.get("model_routing") if isinstance(settings.get("model_routing"), dict) else {}
-    tier = normalize_route_tier(model_route.get("tier") or settings.get("model_tier")) or "pro"
+    tier = normalize_route_tier(model_route.get("tier") or settings.get("model_tier")) or "flash"
     if not routing and str(settings.get("model") or "").strip():
         return resolve_deepseek_model(explicit_model=str(settings.get("model") or ""), read_secret_fn=read_secret)
     if routing.get("enabled", True) is not False:
@@ -545,9 +548,95 @@ def post_deepseek_synthesis_with_retry(
     return last_response or {"ok": False, "provider": "deepseek", "error": "deepseek_retry_exhausted", "attempt": attempts}
 
 
+def _build_customer_context(profile: dict[str, Any] | None) -> str:
+    """Build a confidence-aware customer context paragraph for the LLM prompt.
+
+    Only includes information that is sufficiently reliable. Low-confidence
+    inferences (e.g. gender) are downplayed or omitted to avoid misleading
+    the model.
+    """
+    if not profile:
+        return ""
+    parts: list[str] = []
+
+    basic = profile.get("basic_info") if isinstance(profile.get("basic_info"), dict) else {}
+    display_name = str(profile.get("display_name") or "").strip()
+    total_messages = int(basic.get("total_messages", 0) or 0)
+    total_replies = int(basic.get("total_replies", 0) or 0)
+
+    # Name and relationship stage — always accurate counters
+    if display_name:
+        stage = "老客户" if total_messages >= 10 else "新客户"
+        parts.append(f"客户：{display_name}（{stage}，客户消息{total_messages}轮，客服回复{total_replies}轮）")
+
+    # Gender — only when confident enough
+    gender = str(basic.get("gender") or "").strip().lower()
+    gender_confidence = float(basic.get("gender_confidence") or 0.0)
+    if gender and gender_confidence >= 0.7:
+        gender_text = "男" if gender == "male" else "女"
+        parts.append(f"性别推断：{gender_text}（置信度{gender_confidence:.0%}）")
+    elif gender and gender_confidence >= 0.5:
+        parts.append("性别推断：不确定，建议避免使用性别化称呼")
+    else:
+        parts.append("性别推断：未知，避免使用先生/女士/哥/姐等性别化称呼")
+
+    # Tags — analytical results, present as reference
+    tags = profile.get("tags") if isinstance(profile.get("tags"), dict) else {}
+    tag_lines: list[str] = []
+    if tags.get("budget_tier"):
+        tag_lines.append(f"预算档位：{tags['budget_tier']}")
+    if tags.get("purchase_stage"):
+        tag_lines.append(f"购买阶段：{tags['purchase_stage']}")
+    if tags.get("price_range_preference"):
+        tag_lines.append(f"价格偏好：{tags['price_range_preference']}")
+    if tags.get("intent_score") is not None:
+        tag_lines.append(f"意向度：{tags['intent_score']}/100")
+    custom_tags = tags.get("custom_tags")
+    if isinstance(custom_tags, list) and custom_tags:
+        tag_lines.append(f"关注标签：{', '.join(str(t) for t in custom_tags)}")
+    if tag_lines:
+        parts.append("客户标签（分析结果，供参考）：" + "；".join(tag_lines))
+
+    # Conversation summary — LLM-generated, usually reliable
+    summary = str(profile.get("conversation_summary") or "").strip()
+    if summary:
+        parts.append(f"客户画像摘要：{summary}")
+
+    # Greeting guidance — tied to gender confidence
+    if gender_confidence >= 0.8:
+        parts.append("称呼建议：可用亲切称呼（如姓氏+哥/姐）")
+    elif gender_confidence >= 0.5:
+        parts.append("称呼建议：性别推断不确定，建议用\"您好\"或直接称呼名字")
+    else:
+        parts.append("称呼建议：性别未知，避免使用性别化称呼，用\"您好\"或直接称呼名字")
+
+    return "\n".join(parts)
+
+
 def build_synthesis_prompt_pack(evidence_pack: dict[str, Any], settings: dict[str, Any] | None = None) -> dict[str, Any]:
     platform_rules_result = load_platform_safety_rules(settings)
     platform_rules = platform_rules_result.get("item", {})
+    customer_context = _build_customer_context(evidence_pack.get("customer_profile"))
+    system_parts = [
+        "你是受控的微信客服综合回复器。你的目标不是套固定模板，"
+        "而是像一位真实、克制、懂当前客户业务的客服一样，先听懂客户的真实意图，"
+        "再结合客户自己的正式知识、商品库、商品专属规则、RAG经验、共享公共知识和历史上下文，"
+        "组织一段自然、可信、可发送的微信回复。"
+        "你必须让DeepSeek的理解能力充分发挥作用：要处理口语、错别字、上下文指代、含糊需求和比较型问题，"
+        "并主动把RAG经验作为一等证据参与判断。"
+        "不要假设客户所属行业；行业、商品、门店、流程和专属规则只能来自 evidence_pack。"
+        "具体业务边界和回复规则来自 platform_safety_rules 与 evidence_pack。"
+    ]
+    if customer_context:
+        system_parts.append(
+            "\n【当前客户上下文】\n"
+            + customer_context
+            + "\n\n以上客户画像信息中，对话轮次和计数是准确的；"
+            "标签和摘要由分析模型生成，供参考；"
+            "性别推断有置信度标注，低置信度时应避免使用性别化称呼。"
+            "回复时请自然融入客户画像，但不要过度依赖不确定的推断。"
+        )
+    system_parts.append("只输出JSON对象，不要Markdown。")
     return {
         "schema_version": 1,
         "platform_safety_rules": {
@@ -556,17 +645,7 @@ def build_synthesis_prompt_pack(evidence_pack: dict[str, Any], settings: dict[st
             "title": platform_rules.get("title", "平台底线规则"),
             "description": platform_rules.get("description", ""),
         },
-        "system": (
-            "你是受控的微信客服综合回复器。你的目标不是套固定模板，"
-            "而是像一位真实、克制、懂当前客户业务的客服一样，先听懂客户的真实意图，"
-            "再结合客户自己的正式知识、商品库、商品专属规则、RAG经验、共享公共知识和历史上下文，"
-            "组织一段自然、可信、可发送的微信回复。"
-            "你必须让DeepSeek的理解能力充分发挥作用：要处理口语、错别字、上下文指代、含糊需求和比较型问题，"
-            "并主动把RAG经验作为一等证据参与判断。"
-            "不要假设客户所属行业；行业、商品、门店、流程和专属规则只能来自 evidence_pack。"
-            "具体业务边界和回复规则来自 platform_safety_rules 与 evidence_pack。"
-            "只输出JSON对象，不要Markdown。"
-        ),
+        "system": "".join(system_parts),
         "user": {
             "task": "根据证据包生成一条受控但自然的微信客服回复。",
             "rules": enabled_prompt_instructions(platform_rules),

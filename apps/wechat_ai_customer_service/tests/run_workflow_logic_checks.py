@@ -84,7 +84,7 @@ def run_checks() -> dict[str, Any]:
         check_rate_limit_notice_and_backoff,
         check_auto_reply_disabled_blocks_runtime_send,
         check_customer_service_console_switches_take_effect,
-        check_deepseek_v4_pro_is_default,
+        check_deepseek_flash_is_default,
         check_llm_reply_application_guards,
         check_llm_boundary_fallback_on_invalid_model_output,
         check_review_queue_reports_pending_and_handoff_items,
@@ -475,15 +475,15 @@ def check_customer_service_console_switches_take_effect() -> None:
             os.environ["WECHAT_KNOWLEDGE_TENANT"] = old_tenant
 
 
-def check_deepseek_v4_pro_is_default() -> None:
+def check_deepseek_flash_is_default() -> None:
     assert_equal(
         resolve_deepseek_model(read_secret_fn=lambda name: ""),
-        "deepseek-v4-pro",
-        "DeepSeek default model should use the 1M-context V4 Pro model",
+        "deepseek-v4-flash",
+        "DeepSeek default model should use the lower-cost V4 Flash model",
     )
     assert_true(
         DEFAULT_DEEPSEEK_CONTEXT_WINDOW_TOKENS >= 1_000_000,
-        "DeepSeek V4 Pro context-window metadata should document 1M-token support",
+        "DeepSeek context-window metadata should document 1M-token support",
     )
     assert_equal(
         resolve_deepseek_tier_model(tier="flash", read_secret_fn=lambda name: ""),

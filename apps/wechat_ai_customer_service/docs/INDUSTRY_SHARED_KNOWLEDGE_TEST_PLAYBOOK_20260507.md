@@ -38,6 +38,13 @@ PY
 - `run_admin_backend_checks.py --chapter foundation` 在当前基线存在 1 个与本次改造无关的历史失败（RAG experience 断言），需单独治理。
 
 ## 3. 实盘演练步骤（强制在线闭环）
+### 前置约定（测试环境）
+- 测试环境默认允许并推荐“本地双端口模拟云端”：
+  - 服务端：`vps_admin`（本地端口 A）
+  - 客户端管理端：`admin_backend`（本地端口 B）
+- 标准验证脚本：`apps/wechat_ai_customer_service/tests/run_vps_local_two_port_shared_sync_checks.py`
+- 在 `WECHAT_CLOUD_REQUIRED=1` 下，若报 `cloud_base_url_missing`，先视为“环境未接通”，不直接判定为代码缺陷。
+
 ### 步骤 A：验证“未连云不可用”
 1. 设置：
    - `WECHAT_CLOUD_REQUIRED=1`

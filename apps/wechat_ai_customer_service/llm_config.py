@@ -11,7 +11,7 @@ from pathlib import Path
 DEFAULT_DEEPSEEK_BASE_URL = "https://api.deepseek.com"
 DEFAULT_DEEPSEEK_PRO_MODEL = "deepseek-v4-pro"
 DEFAULT_DEEPSEEK_FLASH_MODEL = "deepseek-v4-flash"
-DEFAULT_DEEPSEEK_MODEL = DEFAULT_DEEPSEEK_PRO_MODEL
+DEFAULT_DEEPSEEK_MODEL = DEFAULT_DEEPSEEK_FLASH_MODEL
 DEFAULT_DEEPSEEK_CONTEXT_WINDOW_TOKENS = 1_000_000
 DEFAULT_DEEPSEEK_TIMEOUT_SECONDS = 120
 
@@ -87,8 +87,8 @@ def resolve_deepseek_tier_model(
 ) -> str:
     """Resolve the model for a quality tier.
 
-    `DEEPSEEK_MODEL` remains the legacy Pro/default override. Flash and Pro can
-    be configured independently with `DEEPSEEK_FLASH_MODEL` and
+    `DEEPSEEK_MODEL` remains a legacy global override. Flash and Pro can be
+    configured independently with `DEEPSEEK_FLASH_MODEL` and
     `DEEPSEEK_PRO_MODEL` so cost routing does not accidentally collapse back to
     one global model.
     """
@@ -113,7 +113,7 @@ def normalize_deepseek_model_tier(value: str | None) -> str:
         return "flash"
     if text in {"pro", "quality", "reasoning", "deep"}:
         return "pro"
-    return "pro"
+    return "flash"
 
 
 def resolve_deepseek_base_url(

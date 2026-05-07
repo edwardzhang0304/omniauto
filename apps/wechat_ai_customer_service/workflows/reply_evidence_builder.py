@@ -13,6 +13,7 @@ from typing import Any
 
 from apps.wechat_ai_customer_service.platform_understanding_rules import intent_group
 from admin_backend.services.raw_message_store import RawMessageStore
+from apps.wechat_ai_customer_service.admin_backend.services.conversation_history import assemble_conversation_history
 from knowledge_loader import build_evidence_pack
 from knowledge_runtime import KnowledgeRuntime
 
@@ -38,6 +39,7 @@ def build_reply_evidence_pack(
     product_knowledge: dict[str, Any],
     data_capture: dict[str, Any],
     raw_capture: dict[str, Any],
+    customer_profile: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     settings = config.get("llm_reply_synthesis", {}) or {}
     context = dict(target_state.get("conversation_context", {}) or {})
@@ -63,6 +65,13 @@ def build_reply_evidence_pack(
         char_budget=int(settings.get("history_char_budget", DEFAULT_HISTORY_CHAR_BUDGET) or DEFAULT_HISTORY_CHAR_BUDGET),
     )
 
+    history_text_pack = assemble_conversation_history(
+        target_name=target_name,
+        conversation_id=raw_conversation_id(raw_capture),
+        current_batch=batch,
+        config=config,
+    )
+
     evidence_ids = collect_evidence_ids(compact_knowledge)
     return {
         "schema_version": 1,
@@ -73,6 +82,9 @@ def build_reply_evidence_pack(
             "context": context,
             "history": history,
             "history_count": len(history),
+            "history_text": history_text_pack.get("history_text", ""),
+            "current_batch_text": history_text_pack.get("current_batch_text", ""),
+            "conversation_summary": history_text_pack.get("summary", ""),
             "raw_conversation_id": raw_conversation_id(raw_capture),
         },
         "existing_reply": {
@@ -89,6 +101,7 @@ def build_reply_evidence_pack(
         "evidence_ids": evidence_ids,
         "safety": compact_knowledge.get("safety", {}),
         "intent_tags": compact_knowledge.get("intent_tags", []),
+        "customer_profile": _compact_profile(customer_profile),
         "rag": compact_knowledge.get("rag_evidence", {}),
         "audit_summary": {
             "structured_evidence_count": structured_evidence_count(compact_knowledge),
@@ -134,6 +147,24 @@ def compact_message(message: dict[str, Any]) -> dict[str, Any]:
         "sender": str(message.get("sender") or ""),
         "time": str(message.get("time") or message.get("message_time") or message.get("observed_at") or ""),
         "content": truncate_text(str(message.get("content") or ""), 600),
+    }
+
+
+def _compact_profile(profile: dict[str, Any] | None) -> dict[str, Any]:
+    if not profile:
+        return {}
+    basic = profile.get("basic_info") if isinstance(profile.get("basic_info"), dict) else {}
+    tags = profile.get("tags") if isinstance(profile.get("tags"), dict) else {}
+    return {
+        "display_name": str(profile.get("display_name") or ""),
+        "status": str(profile.get("status") or "active"),
+        "gender": str(basic.get("gender") or ""),
+        "gender_confidence": float(basic.get("gender_confidence") or 0.0),
+        "region": str(basic.get("region") or ""),
+        "total_messages": int(basic.get("total_messages", 0) or 0),
+        "total_replies": int(basic.get("total_replies", 0) or 0),
+        "conversation_summary": str(profile.get("conversation_summary") or ""),
+        "tags": {k: str(v) for k, v in tags.items()},
     }
 
 

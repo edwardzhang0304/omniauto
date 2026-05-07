@@ -67,8 +67,8 @@
         "payment_boundary",
         "price_approval_required"
       ],
-      "pro_when_must_handoff": true,
-      "pro_when_rag_only_authority": true,
+      "pro_when_must_handoff": false,
+      "pro_when_rag_only_authority": false,
       "pro_when_long_context": false,
       "pro_when_long_message": false,
       "pro_min_history_count": 80,

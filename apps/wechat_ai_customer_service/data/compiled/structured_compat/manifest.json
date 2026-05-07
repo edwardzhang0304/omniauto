@@ -2,7 +2,7 @@
   "schema_version": 1,
   "scope": "wechat_ai_customer_service",
   "source": "three_layer_knowledge",
-  "compiled_at": "2026-05-07T23:18:00",
+  "compiled_at": "2026-05-08T00:23:29",
   "items": [
     {
       "id": "products",

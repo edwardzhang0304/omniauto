@@ -5,7 +5,7 @@
   "status": "active",
   "source": {
     "type": "test_fixture",
-    "batch_token": "CHEJIN_20260507_232932"
+    "batch_token": "CHEJIN_20260508_003431"
   },
   "data": {
     "name": "2021款丰田凯美瑞2.0G豪华版",
@@ -16,7 +16,7 @@
       "丰田凯美瑞",
       "8万预算",
       "自动挡省油",
-      "CHEJIN_20260507_232932"
+      "CHEJIN_20260508_003431"
     ],
     "specs": "2021年上牌，表显4.8万公里，2.0L自动挡，南京现车。",
     "price": 8.98,
@@ -36,8 +36,8 @@
   "review_state": {
     "is_new": true,
     "new_reason": "newly_added_formal_knowledge",
-    "marked_at": "2026-05-07T23:32:27",
-    "updated_at": "2026-05-07T23:32:27",
+    "marked_at": "2026-05-08T00:36:46",
+    "updated_at": "2026-05-08T00:36:46",
     "read_at": "",
     "read_by": "",
     "source": {
@@ -47,8 +47,8 @@
     }
   },
   "metadata": {
-    "created_at": "2026-05-07T23:32:27",
-    "updated_at": "2026-05-07T23:32:27",
+    "created_at": "2026-05-08T00:36:46",
+    "updated_at": "2026-05-08T00:36:46",
     "created_by": "admin",
     "updated_by": "admin"
   }

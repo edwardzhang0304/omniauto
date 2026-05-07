@@ -58,6 +58,9 @@ from apps.wechat_ai_customer_service.admin_backend.services.customer_service_run
 )
 from admin_backend.services.customer_service_settings import CustomerServiceSettings
 from admin_backend.services.raw_message_store import RawMessageStore
+from apps.wechat_ai_customer_service.admin_backend.services.session_monitor import SessionMonitor
+from apps.wechat_ai_customer_service.admin_backend.services.customer_profile_store import CustomerProfileStore
+from apps.wechat_ai_customer_service.admin_backend.services.profile_greeting import GreetingGenerator
 from apps.wechat_ai_customer_service.admin_backend.services.work_queue import WorkQueueService
 from apps.wechat_ai_customer_service.knowledge_paths import active_tenant_id
 
@@ -252,9 +255,39 @@ def run_workflow(args: argparse.Namespace) -> dict[str, Any]:
             "events": [],
         }
 
+        multi_target_cfg = config.get("multi_target") or {}
+        use_multi_target = bool(multi_target_cfg.get("enabled")) and not args.target
+        session_monitor: SessionMonitor | None = None
+        if use_multi_target:
+            whitelist = {t.name for t in targets}
+            session_monitor = SessionMonitor(
+                whitelist=whitelist,
+                max_targets_per_iteration=int(multi_target_cfg.get("max_targets_per_iteration", 5)),
+                min_switch_interval_seconds=int(multi_target_cfg.get("min_switch_interval_seconds", 2)),
+            )
+
         for iteration in range(iterations):
             iteration_events = []
-            for target in targets:
+            if use_multi_target and session_monitor is not None:
+                active = session_monitor.poll(connector)
+                if active:
+                    dynamic_targets = [
+                        TargetConfig(
+                            name=a.name,
+                            enabled=True,
+                            exact=a.exact,
+                            allow_self_for_test=False,
+                            max_batch_messages=3,
+                        )
+                        for a in active
+                    ]
+                else:
+                    dynamic_targets = []
+                summary["active_sessions"] = session_monitor.all_sessions()
+            else:
+                dynamic_targets = targets
+
+            for target in dynamic_targets:
                 if args.bootstrap:
                     event = bootstrap_target(connector, target, state, config)
                 else:
@@ -272,6 +305,8 @@ def run_workflow(args: argparse.Namespace) -> dict[str, Any]:
                 event["iteration"] = iteration + 1
                 append_audit(audit_path, event)
                 iteration_events.append(event)
+                if use_multi_target and session_monitor is not None:
+                    session_monitor.reset_unread(target.name)
             save_state(state_path, state)
             summary["events"].extend(iteration_events)
             if iteration < iterations - 1:
@@ -340,7 +375,21 @@ def _enqueue_post_reply_work(
                 priority=3,
             )
 
-        # 3. raw_message_archive — periodic cleanup (deduped, low priority)
+        # 3. customer_profile_analysis — async LLM tag extraction
+        profile_cfg = config.get("customer_profiles") or {}
+        if isinstance(profile_cfg, dict) and profile_cfg.get("analysis", {}).get("enabled", True):
+            queue.enqueue(
+                kind="customer_profile_analysis",
+                payload={
+                    "target_name": target.name,
+                    "tenant_id": tenant_id,
+                },
+                queue="customer_service",
+                dedupe_key=f"profile_analysis:{tenant_id}:{target.name}",
+                priority=6,
+            )
+
+        # 4. raw_message_archive — periodic cleanup (deduped, low priority)
         queue.enqueue(
             kind="raw_message_archive",
             payload={"tenant_id": tenant_id, "days": 30},
@@ -394,6 +443,11 @@ def process_target(
     )
     if not batch:
         return base_event(target, "skipped", {"reason": "no eligible unprocessed text messages", "raw_capture": raw_capture})
+
+    # Load or create customer profile
+    profile_store = CustomerProfileStore()
+    profile = profile_store.get_or_create(target_name=target.name, display_name=target.name)
+    profile_store.increment_message_stats(target_name=target.name, is_reply=False)
 
     combined = "\n".join(str(item.get("content") or "") for item in batch)
     message_ids = [str(item.get("id") or "") for item in batch]
@@ -605,6 +659,7 @@ def process_target(
         product_knowledge=product_knowledge,
         data_capture=data_capture,
         raw_capture=raw_capture,
+        customer_profile=profile,
     )
     event["llm_reply_synthesis"] = llm_synthesis
     if llm_synthesis.get("applied"):
@@ -695,6 +750,8 @@ def process_target(
         event["decision"]["reply_text"] = handoff_reply_text
         event["decision"]["need_handoff"] = True
         event["decision"]["handoff_reason"] = reason
+        handoff_reply_text = _apply_greeting(handoff_reply_text, profile, config)
+        event["decision"]["reply_text"] = handoff_reply_text
         verified = connector.send_text_and_verify(target.name, handoff_reply_text, exact=target.exact)
         event["send_result"] = verified
         event["verified"] = bool(verified.get("verified"))
@@ -762,6 +819,8 @@ def process_target(
     should_mark_after_data_write = bool(data_capture.get("write_result", {}).get("ok") and not send)
 
     if send:
+        reply_text = _apply_greeting(reply_text, profile, config)
+        event["decision"]["reply_text"] = reply_text
         verified = connector.send_text_and_verify(target.name, reply_text, exact=target.exact)
         event["send_result"] = verified
         event["verified"] = bool(verified.get("verified"))
@@ -785,6 +844,8 @@ def process_target(
         _enqueue_post_reply_work(target, config, raw_capture, data_capture)
         mark_processed(target_state, batch, reply_text, reply_trace_id=reply_trace_id, send_result=verified)
         record_reply_timestamp(target_state)
+        profile_store = CustomerProfileStore()
+        profile_store.increment_message_stats(target_name=target.name, is_reply=True)
         event["action"] = "sent"
         return event
 
@@ -2306,6 +2367,18 @@ def base_event(target: TargetConfig, action: str, extra: dict[str, Any]) -> dict
     }
     event.update(extra)
     return event
+
+
+def _apply_greeting(reply_text: str, profile: dict[str, Any] | None, config: dict[str, Any]) -> str:
+    """Conditionally inject dynamic greeting based on customer profile."""
+    if not profile:
+        return reply_text
+    cfg = config.get("customer_profiles") or {}
+    greeting_cfg = cfg.get("greeting") if isinstance(cfg, dict) else {}
+    if not greeting_cfg or not greeting_cfg.get("enabled", True):
+        return reply_text
+    generator = GreetingGenerator(profile)
+    return generator.inject_into_reply(reply_text, fallback_name=profile.get("display_name", ""))
 
 
 def load_config(path: Path) -> dict[str, Any]:

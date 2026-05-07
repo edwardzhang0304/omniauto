@@ -6,6 +6,9 @@ const state = {
   customerServiceRuntime: null,
   customerServiceRuntimeTimer: null,
   customerServiceRuntimeBusy: false,
+  customerProfiles: [],
+  selectedCustomerProfile: null,
+  customerProfileMessages: [],
   productCatalog: null,
   selectedProduct: null,
   productDetailMode: "view",
@@ -62,6 +65,7 @@ const titles = {
   knowledge: "正式知识库",
   intake: "资料导入",
   recorder: "AI智能记录员",
+  customer_profiles: "客户画像",
   ai_reference: "RAG经验池",
   diagnostics: "知识检测",
   settings: "系统设置",
@@ -1133,6 +1137,192 @@ async function saveCustomerServiceSettings() {
   });
   state.customerService = payload.item || {};
   renderCustomerService((state.overview || {}).counts || {});
+}
+
+async function loadCustomerProfiles() {
+  if (!state.authToken) return;
+  try {
+    const payload = await apiGet("/api/customers");
+    state.customerProfiles = payload.items || [];
+    renderCustomerProfileList();
+    if (state.selectedCustomerProfile) {
+      const refreshed = state.customerProfiles.find((p) => p.profile_id === state.selectedCustomerProfile.profile_id);
+      if (refreshed) {
+        state.selectedCustomerProfile = refreshed;
+        renderCustomerProfileDetail();
+      }
+    }
+  } catch (error) {
+    console.warn(error);
+  }
+}
+
+function renderCustomerProfileList() {
+  const container = document.getElementById("customer-profile-list");
+  if (!container) return;
+  const search = (document.getElementById("customer-profile-search")?.value || "").toLowerCase().trim();
+  let items = state.customerProfiles || [];
+  if (search) {
+    items = items.filter((p) => {
+      const name = (p.display_name || p.target_name || "").toLowerCase();
+      const tags = JSON.stringify(p.tags || {}).toLowerCase();
+      return name.includes(search) || tags.includes(search);
+    });
+  }
+  if (!items.length) {
+    container.innerHTML = `<div class="status-card info"><strong>暂无客户档案</strong><span>客户首次发消息后会自动创建。</span></div>`;
+    return;
+  }
+  container.innerHTML = items.map((p) => {
+    const name = escapeHtml(p.display_name || p.target_name || "未命名");
+    const basic = p.basic_info || {};
+    const msgCount = basic.total_messages || 0;
+    const replyCount = basic.total_replies || 0;
+    const tags = p.tags || {};
+    const tagPills = Object.entries(tags).slice(0, 3).map(([k, v]) => `<span class="tag-pill">${escapeHtml(String(k))}:${escapeHtml(String(v))}</span>`).join("");
+    const isSelected = state.selectedCustomerProfile?.profile_id === p.profile_id;
+    return `
+      <div class="profile-list-item ${isSelected ? "is-selected" : ""}" data-profile-id="${escapeHtml(p.profile_id || "")}">
+        <div class="profile-list-name">${name}</div>
+        <div class="profile-list-meta">
+          <span>消息 ${msgCount}</span>
+          <span>回复 ${replyCount}</span>
+        </div>
+        <div class="profile-list-tags">${tagPills}</div>
+      </div>
+    `;
+  }).join("");
+  container.querySelectorAll(".profile-list-item").forEach((el) => {
+    el.addEventListener("click", () => selectCustomerProfile(el.dataset.profileId));
+  });
+}
+
+async function selectCustomerProfile(profileId) {
+  const profile = state.customerProfiles.find((p) => p.profile_id === profileId);
+  if (!profile) return;
+  state.selectedCustomerProfile = profile;
+  state.customerProfileMessages = [];
+  renderCustomerProfileList();
+  renderCustomerProfileDetail();
+  try {
+    const msgPayload = await apiGet(`/api/customers/${encodeURIComponent(profileId)}/messages?limit=100`);
+    state.customerProfileMessages = msgPayload.items || [];
+    renderCustomerProfileMessages();
+  } catch (error) {
+    console.warn(error);
+  }
+}
+
+function renderCustomerProfileDetail() {
+  const container = document.getElementById("customer-profile-detail");
+  if (!container) return;
+  const p = state.selectedCustomerProfile;
+  if (!p) {
+    container.innerHTML = `<div class="status-card info"><strong>选择左侧客户查看详情</strong></div>`;
+    return;
+  }
+  const basic = p.basic_info || {};
+  const tags = p.tags || {};
+  const tagPills = Object.entries(tags).map(([k, v]) => `
+    <span class="tag-pill is-editable" data-tag-key="${escapeHtml(k)}">
+      ${escapeHtml(String(k))}: ${escapeHtml(String(v))}
+      <button class="tag-remove" data-tag-key="${escapeHtml(k)}" title="删除">×</button>
+    </span>
+  `).join("");
+  container.innerHTML = `
+    <div class="profile-detail-card">
+      <div class="profile-detail-header">
+        <h3>${escapeHtml(p.display_name || p.target_name || "未命名")}</h3>
+        <div class="profile-detail-status">${escapeHtml(p.status || "active")}</div>
+      </div>
+      <div class="profile-detail-section">
+        <h4>基础信息</h4>
+        <div class="profile-detail-grid">
+          <div><label>性别</label><span>${escapeHtml(basic.gender || "未知")} ${basic.gender_confidence ? `(${(basic.gender_confidence * 100).toFixed(0)}%)` : ""}</span></div>
+          <div><label>地区</label><span>${escapeHtml(basic.region || "-")}</span></div>
+          <div><label>首次联系</label><span>${escapeHtml(basic.first_contact_at || "-")}</span></div>
+          <div><label>最近联系</label><span>${escapeHtml(basic.last_contact_at || "-")}</span></div>
+          <div><label>总消息数</label><span>${basic.total_messages || 0}</span></div>
+          <div><label>总回复数</label><span>${basic.total_replies || 0}</span></div>
+        </div>
+      </div>
+      <div class="profile-detail-section">
+        <h4>会话摘要</h4>
+        <p class="profile-summary">${escapeHtml(p.conversation_summary || "暂无摘要")}</p>
+      </div>
+      <div class="profile-detail-section">
+        <h4>标签</h4>
+        <div class="tag-list">${tagPills || "<span class=\"muted\">暂无标签</span>"}</div>
+        <div class="tag-add-row">
+          <input id="new-tag-key" type="text" placeholder="标签名" class="small-input" />
+          <input id="new-tag-value" type="text" placeholder="标签值" class="small-input" />
+          <button class="secondary-button compact-button" id="add-customer-tag">添加</button>
+        </div>
+      </div>
+      <div class="profile-detail-section">
+        <h4>最近聊天记录</h4>
+        <div class="message-timeline" id="customer-profile-messages">正在加载...</div>
+      </div>
+    </div>
+  `;
+  container.querySelectorAll(".tag-remove").forEach((btn) => {
+    btn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      removeCustomerTag(p.profile_id, btn.dataset.tagKey);
+    });
+  });
+  container.querySelector("#add-customer-tag")?.addEventListener("click", () => {
+    const key = document.getElementById("new-tag-key")?.value?.trim();
+    const value = document.getElementById("new-tag-value")?.value?.trim();
+    if (key) addCustomerTag(p.profile_id, key, value);
+  });
+  renderCustomerProfileMessages();
+}
+
+function renderCustomerProfileMessages() {
+  const container = document.getElementById("customer-profile-messages");
+  if (!container) return;
+  const messages = state.customerProfileMessages || [];
+  if (!messages.length) {
+    container.innerHTML = `<div class="muted">暂无聊天记录</div>`;
+    return;
+  }
+  container.innerHTML = messages.map((m) => {
+    const sender = escapeHtml(m.sender || "客户");
+    const content = escapeHtml(m.content || "");
+    const time = escapeHtml(m.message_time || m.observed_at || "");
+    const isSelf = m.sender_role === "self" || m.sender === "self";
+    return `
+      <div class="timeline-item ${isSelf ? "is-self" : "is-contact"}">
+        <div class="timeline-meta">
+          <span class="timeline-sender">${sender}</span>
+          <span class="timeline-time">${time}</span>
+        </div>
+        <div class="timeline-content">${content}</div>
+      </div>
+    `;
+  }).join("");
+}
+
+async function addCustomerTag(profileId, key, value) {
+  try {
+    await apiJson(`/api/customers/${encodeURIComponent(profileId)}/tags`, {
+      method: "POST",
+      body: JSON.stringify({key, value}),
+    });
+    await loadCustomerProfiles();
+  } catch (error) {
+    alert(error.message);
+  }
+}
+
+async function removeCustomerTag(profileId, key) {
+  try {
+    await apiJson(`/api/customers/${encodeURIComponent(profileId)}/tags/${encodeURIComponent(key)}`, {method: "DELETE"});
+    await loadCustomerProfiles();
+  } catch (error) {
+    alert(error.message);
+  }
 }
 
 async function loadOverview() {
@@ -5200,6 +5390,7 @@ async function loadActiveSubsection() {
   if (state.activeView === "recorder") await loadRecorder();
   if (state.activeView === "product_catalog") await loadProductCatalog();
   if (state.activeView === "customer_service") await loadCustomerService();
+  if (state.activeView === "customer_profiles") await loadCustomerProfiles();
 }
 
 bindNavigation();
@@ -5268,6 +5459,8 @@ document.getElementById("llm-config-toggle")?.addEventListener("click", toggleLl
 document.getElementById("local-password-form")?.addEventListener("submit", (event) => changeLocalPassword(event).catch((error) => alert(error.message)));
 document.getElementById("local-email-form")?.addEventListener("submit", (event) => bindLocalEmail(event).catch((error) => alert(error.message)));
 document.getElementById("local-logout-button")?.addEventListener("click", () => logoutLocal().catch((error) => alert(error.message)));
+document.getElementById("refresh-customer-profiles")?.addEventListener("click", () => loadCustomerProfiles().catch((error) => alert(error.message)));
+document.getElementById("customer-profile-search")?.addEventListener("input", () => renderCustomerProfileList());
 
 document.body.classList.toggle("auth-locked", !state.authToken);
 initializeLocalLogin();

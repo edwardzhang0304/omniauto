@@ -67,6 +67,21 @@ def handle_knowledge_compile(payload: dict[str, Any]) -> dict[str, Any]:
         return {"ok": False, "error": repr(exc)}
 
 
+def handle_customer_profile_analysis(payload: dict[str, Any]) -> dict[str, Any]:
+    """Analyze customer conversation and update profile tags via LLM."""
+    target_name = str(payload.get("target_name") or "").strip()
+    tenant_id = active_tenant_id(payload.get("tenant_id"))
+    if not target_name:
+        return {"ok": False, "error": "missing target_name"}
+    try:
+        from apps.wechat_ai_customer_service.admin_backend.services.customer_profile_analyzer import CustomerProfileAnalyzer
+
+        analyzer = CustomerProfileAnalyzer(tenant_id=tenant_id)
+        return analyzer.analyze(target_name)
+    except Exception as exc:
+        return {"ok": False, "error": repr(exc)}
+
+
 def handle_conversation_summary(payload: dict[str, Any]) -> dict[str, Any]:
     """Summarize a long conversation (placeholder — not yet implemented)."""
     return {
@@ -124,6 +139,7 @@ JOB_HANDLERS: dict[str, Any] = {
     "customer_data_sync": handle_customer_data_sync,
     "raw_message_archive": handle_raw_message_archive,
     "diagnostics_deep_check": handle_diagnostics_deep_check,
+    "customer_profile_analysis": handle_customer_profile_analysis,
 }
 
 

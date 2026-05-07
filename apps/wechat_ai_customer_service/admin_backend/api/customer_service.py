@@ -8,6 +8,7 @@ from fastapi import APIRouter, Query, Request
 
 from ..services.customer_service_settings import CustomerServiceSettings
 from ..services.customer_service_runtime import CustomerServiceRuntime
+from ..services.session_monitor import SessionMonitor
 
 
 router = APIRouter(prefix="/api/customer-service", tags=["customer-service"])
@@ -39,3 +40,9 @@ def start_runtime(request: Request, tenant_id: str | None = Query(default=None))
 @router.post("/runtime/stop")
 def stop_runtime(tenant_id: str | None = Query(default=None)) -> dict[str, Any]:
     return CustomerServiceRuntime(tenant_id=tenant_id).stop()
+
+
+@router.get("/sessions")
+def list_sessions(tenant_id: str | None = Query(default=None)) -> dict[str, Any]:
+    monitor = SessionMonitor(tenant_id=tenant_id)
+    return {"ok": True, "sessions": monitor.all_sessions()}

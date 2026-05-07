@@ -157,7 +157,7 @@ def call_deepseek_interpretation(pack: dict[str, Any]) -> dict[str, Any]:
     if not api_key:
         return {"ok": False, "error": "DEEPSEEK_API_KEY is not set"}
     base_url = resolve_deepseek_base_url(read_secret_fn=read_secret)
-    model = resolve_deepseek_tier_model(tier="pro", read_secret_fn=read_secret)
+    model = resolve_deepseek_tier_model(tier="flash", read_secret_fn=read_secret)
     prompt = {
         "task": "请把一条微信客服AI经验解释成普通商人能看懂的审核建议。必须只输出 JSON 对象。",
         "strict_rules": [
