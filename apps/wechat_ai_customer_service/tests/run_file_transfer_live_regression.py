@@ -87,6 +87,25 @@ def run_live_regression(args: argparse.Namespace) -> dict[str, Any]:
         )
     )
 
+    if bootstrap.get("ok") is not True:
+        bootstrap_error = str(bootstrap.get("error") or "bootstrap_failed")
+        gate = bootstrap.get("cloud_gate") if isinstance(bootstrap.get("cloud_gate"), dict) else {}
+        gate_reason = str(gate.get("reason") or "")
+        blocked_error = bootstrap_error if not gate_reason else f"{bootstrap_error}:{gate_reason}"
+        failures = [
+            {
+                "name": "bootstrap",
+                "index": 0,
+                "ok": False,
+                "error": blocked_error,
+                "output": {"bootstrap": bootstrap},
+            }
+        ]
+        payload = build_result_payload(args, config, rag_seed, live_run_id, bootstrap, failures, selected_scenarios, run_count=0)
+        payload["ok"] = False
+        write_result(args.result_path, payload)
+        return payload
+
     results = previous_results[:]
     run_count = 0
     for index, scenario in selected_scenarios:
@@ -269,6 +288,13 @@ def live_outbound_text(args: argparse.Namespace, text: str, *, scenario_index: i
 
 def assert_scenario(scenario: dict[str, Any], output: dict[str, Any]) -> None:
     event = output.get("event", {}) or {}
+    workflow = output.get("workflow", {}) or {}
+    if workflow.get("ok") is not True:
+        error_code = str(workflow.get("error") or "workflow_failed")
+        gate = workflow.get("cloud_gate") if isinstance(workflow.get("cloud_gate"), dict) else {}
+        gate_reason = str(gate.get("reason") or "")
+        detail = error_code if not gate_reason else f"{error_code}:{gate_reason}"
+        raise AssertionError(f"workflow blocked or failed: {detail}")
     expected_action = str(scenario.get("expect_action") or "")
     if expected_action and event.get("action") != expected_action:
         raise AssertionError(f"action expected {expected_action!r}, got {event.get('action')!r}")
@@ -337,8 +363,6 @@ def assert_scenario(scenario: dict[str, Any], output: dict[str, Any]) -> None:
         if str(needle) not in reason_text:
             raise AssertionError(f"handoff reason expected to contain {needle!r}, got {reason_text!r}")
 
-    if output.get("workflow", {}).get("ok") is not True:
-        raise AssertionError(f"workflow failed: {output.get('workflow')}")
     if output.get("outbound") and any(item.get("verified") is False for item in output["outbound"]):
         raise AssertionError("one or more outbound sends were not verified")
     if event.get("send_result") and event.get("verified") is False:
