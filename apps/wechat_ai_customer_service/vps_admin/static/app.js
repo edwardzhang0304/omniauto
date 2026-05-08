@@ -2,6 +2,7 @@ const state = {
   token: localStorage.getItem("vpsAdminToken") || "",
   view: "overview",
   data: {},
+  sharedIndustryFilter: (localStorage.getItem("vpsSharedIndustryFilter") || "").trim() || "global",
   loginChallenge: null,
   initChallenge: null,
   passwordChallenge: null,
@@ -354,7 +355,7 @@ async function refresh() {
       api("/v1/admin/industries"),
       api("/v1/admin/customer-data"),
       api("/v1/admin/shared/overview"),
-      api("/v1/admin/shared/library?include_inactive=true"),
+      api(`/v1/admin/shared/library?include_inactive=true${state.sharedIndustryFilter ? `&industry_id=${encodeURIComponent(state.sharedIndustryFilter)}` : ""}`),
       api("/v1/admin/nodes"),
       api("/v1/admin/commands"),
       api("/v1/admin/backups"),
@@ -543,8 +544,13 @@ function renderSharedKnowledge() {
   const proposals = state.data.proposals || [];
   const pendingProposals = proposals.filter((item) => item.status === "pending_review");
   const archivedProposals = proposals.filter((item) => ["rejected", "void"].includes(item.status));
+  const industries = state.data.industries || [];
+  const currentFilter = state.sharedIndustryFilter || "";
+  const filterHtml = industries.length
+    ? `<div class="filter-bar"><label>行业筛选：</label><select id="shared-industry-filter"><option value="global" ${currentFilter === "global" ? "selected" : ""}>全行业通用</option>${industries.map((ind) => `<option value="${escapeHtml(ind.industry_id)}" ${ind.industry_id === currentFilter ? "selected" : ""}>${escapeHtml(ind.name || ind.industry_id)}</option>`).join("")}</select></div>`
+    : "";
   renderInto("shared-cards", metricCards([["候选待审", pendingProposals.length], ["正式库条目", state.data.sharedLibrary.length || 0], ["已发布补丁", state.data.patches.length || 0], ["已归档候选", archivedProposals.length]]));
-  renderInto("shared-library-list", `<h3>正式共享库</h3>${state.data.sharedLibrary.map((item) => `
+  renderInto("shared-library-list", `${filterHtml}<h3>正式共享库</h3>${state.data.sharedLibrary.map((item) => `
     <details class="record-row collapsible-record">
       <summary class="collapse-summary">
         <div class="row-title"><strong>${escapeHtml(item.title || item.item_id)}</strong><span class="status-chip ${item.status === "active" ? "ok" : "warning"}">${escapeHtml(item.status || "active")}</span></div>
@@ -580,6 +586,14 @@ function renderSharedKnowledge() {
       </div>
     </div>
   `).join("") || empty("暂无已发布补丁。采纳候选后会自动生成补丁。")}`);
+  const filterEl = document.getElementById("shared-industry-filter");
+  if (filterEl) {
+    filterEl.addEventListener("change", (e) => {
+      state.sharedIndustryFilter = e.target.value;
+      localStorage.setItem("vpsSharedIndustryFilter", e.target.value);
+      refresh();
+    });
+  }
 }
 
 function patchSignatureClass(item) {

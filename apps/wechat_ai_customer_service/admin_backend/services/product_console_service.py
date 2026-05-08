@@ -2,9 +2,19 @@
 
 from __future__ import annotations
 
+import json
 import re
+import urllib.request
 from pathlib import Path
 from typing import Any
+
+from apps.wechat_ai_customer_service.llm_config import (
+    read_secret,
+    resolve_deepseek_base_url,
+    resolve_deepseek_max_tokens,
+    resolve_deepseek_tier_model,
+    resolve_deepseek_timeout,
+)
 
 from .knowledge_base_store import KnowledgeBaseStore
 from .knowledge_compiler import KnowledgeCompiler

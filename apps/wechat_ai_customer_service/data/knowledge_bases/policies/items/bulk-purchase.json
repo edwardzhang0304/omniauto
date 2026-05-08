@@ -2,7 +2,7 @@
   "schema_version": 1,
   "category_id": "policies",
   "id": "bulk-purchase",
-  "status": "active",
+  "status": "archived",
   "source": {
     "type": "deepseek_upload_learning",
     "path": "D:\\AI\\AI_RPA\\apps\\wechat_ai_customer_service\\data\\raw_inbox\\products\\upload_60f852261dbb5fe6_01_products_new_office_devices.xlsx.txt",

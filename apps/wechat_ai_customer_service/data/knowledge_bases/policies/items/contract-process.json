@@ -2,7 +2,7 @@
   "schema_version": 1,
   "category_id": "policies",
   "id": "contract-process",
-  "status": "active",
+  "status": "archived",
   "source": {
     "type": "deepseek_upload_learning",
     "path": "D:\\AI\\AI_RPA\\apps\\wechat_ai_customer_service\\data\\raw_inbox\\products\\upload_c54b9fd38e442a30_05_mixed_company_faq.txt",

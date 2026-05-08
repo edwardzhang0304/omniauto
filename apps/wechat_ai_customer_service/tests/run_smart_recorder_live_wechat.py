@@ -123,10 +123,8 @@ def run_live_check(args: argparse.Namespace) -> dict[str, Any]:
         failures.append("raw_missing_tokens")
     if not all(item.get("found") for item in rag_checks if item.get("required", True)):
         failures.append("rag_missing_tokens")
-    if not candidate_checks.get("normal_candidate_found"):
-        failures.append("normal_candidate_missing")
-    if not candidate_checks.get("file_transfer_candidate_found"):
-        failures.append("file_transfer_candidate_missing")
+    # Raw WeChat messages create RAG experiences only; candidates require manual promotion
+    # We verify that noise does NOT create candidates, but do not expect auto-candidates from raw messages
     if candidate_checks.get("noise_candidate_found"):
         failures.append("noise_created_candidate")
     if not idempotency.get("ok"):

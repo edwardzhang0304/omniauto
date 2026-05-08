@@ -179,6 +179,22 @@ def analyze_intent(text: str, context: dict[str, Any] | None = None) -> IntentAs
 
     if data_capture.get("is_customer_data"):
         if data_capture.get("complete"):
+            # If customer data includes appointment or visit signals, handoff for human confirmation.
+            appointment_signals = {"到店", "预约", "上门", "看车", "试驾", "体验"}
+            if any(signal in normalized for signal in appointment_signals):
+                return IntentAssistResult(
+                    enabled=True,
+                    mode="heuristic",
+                    intent="customer_data_complete",
+                    confidence=0.95,
+                    suggested_reply="客户资料已记录，涉及到店/预约安排我会转给销售人工确认。",
+                    recommended_action="capture_data_and_handoff",
+                    safe_to_auto_send=True,
+                    needs_handoff=True,
+                    reason="customer_data_complete_with_appointment",
+                    fields=fields,
+                    missing_fields=[],
+                )
             return IntentAssistResult(
                 enabled=True,
                 mode="heuristic",

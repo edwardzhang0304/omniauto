@@ -12,7 +12,6 @@ import copy
 import json
 import os
 import sys
-import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -25,14 +24,181 @@ ADAPTERS_ROOT = APP_ROOT / "adapters"
 for path in (PROJECT_ROOT, WORKFLOWS_ROOT, APP_ROOT, ADAPTERS_ROOT):
     if str(path) not in sys.path:
         sys.path.insert(0, str(path))
-os.environ.setdefault("WECHAT_CLOUD_REQUIRED", "0")
+os.environ.setdefault("WECHAT_CLOUD_REQUIRED", "1")
 os.environ.setdefault("WECHAT_CLOUD_STRICT_ONLINE", "0")
+os.environ.setdefault("WECHAT_VPS_BASE_URL", "http://localhost:8000")
+
+from apps.wechat_ai_customer_service.knowledge_paths import shared_runtime_snapshot_path  # noqa: E402
 
 import llm_reply_synthesis as synthesis_module  # noqa: E402
 from customer_service_loop import load_rules  # noqa: E402
 from listen_and_reply import ReplyDecision, load_config, parse_targets, process_target, resolve_path  # noqa: E402
 from llm_reply_guard import guard_synthesized_reply  # noqa: E402
 from llm_reply_synthesis import build_synthesis_prompt_pack, maybe_synthesize_reply  # noqa: E402
+
+
+def _deep_merge(base: dict[str, Any], overlay: dict[str, Any]) -> dict[str, Any]:
+    merged = dict(base)
+    for key, value in overlay.items():
+        if key in merged and isinstance(merged[key], dict) and isinstance(value, dict):
+            merged[key] = _deep_merge(merged[key], value)
+        else:
+            merged[key] = value
+    return merged
+
+
+def _ensure_cloud_snapshot() -> None:
+    snapshot_path = shared_runtime_snapshot_path()
+    snapshot_path.parent.mkdir(parents=True, exist_ok=True)
+    from datetime import datetime, timedelta, timezone
+
+    future = (datetime.now(timezone.utc) + timedelta(hours=1)).isoformat()
+    minimal = {
+        "schema_version": 1,
+        "source": "cloud_official_shared_library",
+        "tenant_id": "default",
+        "issued_at": datetime.now(timezone.utc).isoformat(),
+        "expires_at": future,
+        "cache_policy": {"expires_at": future},
+        "policy_bundle": {
+            "merged": {
+                "platform_safety_rules": {
+                    "schema_version": 1,
+                    "title": "Unit test visible safety rules",
+                    "description": "测试用安全边界",
+                    "prompt_rules": [
+                        {
+                            "id": "evidence_first",
+                            "title": "先看可见证据",
+                            "description": "正式知识、商品库和共享公共知识优先，不能靠代码里的隐藏行业假设。",
+                            "instruction": "优先使用客户自己的正式知识、商品库、商品专属问答/规则/解释和共享公共知识；行业、商品、流程和专属规则只能来自 evidence_pack，不要假设客户所属行业。",
+                            "enabled": True,
+                        },
+                        {
+                            "id": "rag_participation",
+                            "title": "RAG参与理解",
+                            "description": "RAG经验可以辅助理解和表达，但不能单独授权敏感承诺。",
+                            "instruction": "RAG经验必须积极参与理解和表达；如果使用了RAG，请在used_evidence里写入rag:chunk_id。RAG可以帮助解释、归纳、补充话术，但不能单独授权价格、库存、审批、合同、商品状态保证、售后赔付等敏感承诺。",
+                            "enabled": True,
+                        },
+                        {
+                            "id": "no_fabricated_facts",
+                            "title": "不编造关键事实",
+                            "description": "涉及金额、库存、时效、审批、合同、售后等只能按证据回答。",
+                            "instruction": "不能编造价格、库存、商品状态、审批结果、合同条款、售后承诺、最低价或任何正式知识里没有授权的保证。价值、成本、月供、费用、时效、概率等数字只能引用证据包已有数字；没有数字时用定性表述并说明需核实。",
+                            "enabled": True,
+                        },
+                        {
+                            "id": "human_only_actions",
+                            "title": "人工动作不自动承诺",
+                            "description": "预约、留货、订金、合同、审批、人员联系等默认转人工。",
+                            "instruction": "普通自动回复的下一步问题优先询问预算、用途、城市、数量、规格、偏好或缺少的关键资料；不要自行承诺预约、预留、试用、到店、上门、订金、合同、审批或人员联系。需要这些人工动作时，recommended_action 必须用 handoff 或 handoff_for_approval，除非正式知识明确授权AI自动处理。",
+                            "enabled": True,
+                        },
+                        {
+                            "id": "forbidden_workarounds",
+                            "title": "禁止违规绕路",
+                            "description": "私下转账、个人账户、发票异常、非法绕路、越界金融建议等必须拒绝。",
+                            "instruction": "私下转账、个人账户收款、发票多开少开或金额造假、违法绕路、客户业务之外的股票/金融建议、保证审批通过等是硬边界。不要提供绕路办法，应礼貌说明系统不能自动处理并转人工或拒绝。",
+                            "enabled": True,
+                        },
+                        {
+                            "id": "safe_refusal_wording",
+                            "title": "拒绝要自然",
+                            "description": "拒绝风险要求时，不机械套模板，不复述危险承诺。",
+                            "instruction": "拒绝不安全要求时，不要逐字复述危险承诺；应概括为保证、赔付、审批结果、发票/合同处理、锁价、私下付款等边界问题，再说明需要人工核实或系统不能自动处理。",
+                            "enabled": True,
+                        },
+                        {
+                            "id": "natural_reply_style",
+                            "title": "像真人客服",
+                            "description": "回答要短、具体、自然，避免机械化表达。",
+                            "instruction": "回复必须拟人化、自然、像真实微信客服在打字，严禁机械化或模板化表达。具体要求：1）语气自然，带适当的口语化衔接，如“好的”“没问题”“是这样”“对的”等，像真人在微信里聊天；2）同一场景下的话术要有变化，不要每次用完全相同的句式开头或结尾；3）2到5句，先接住客户具体需求，再给依据或建议，最后只问一个自然的下一步问题；4）不要固定以“收到，我先记录一下”“稍后继续处理”“这个问题需要人工确认”等套话开头；5）除非确实需要转人工，也要写得具体自然，不要生硬转折。",
+                            "enabled": True,
+                        },
+                        {
+                            "id": "multi_message_context",
+                            "title": "合并连续短消息",
+                            "description": "用户连续追问时按整体意图回答。",
+                            "instruction": "如果客户连续发送几条短消息，把它们视为一个合并意图；可以根据历史上下文解析“刚才那台”“这个车”“预算不变”等指代，不要只看最后一句。",
+                            "enabled": True,
+                        },
+                        {
+                            "id": "irrelevant_or_out_of_scope",
+                            "title": "无关或越界转人工",
+                            "description": "完全无关、证据不足或越界问题不能硬答。",
+                            "instruction": "完全无关、证据不足、敏感政策或越界问题，recommended_action 用 handoff 或 handoff_for_approval，reply里简短说明系统暂时无法处理并转人工；不要为了显得聪明而猜测。",
+                            "enabled": True,
+                        },
+                        {
+                            "id": "custom_visible_prompt_rule",
+                            "title": "Custom rule",
+                            "instruction": "自定义可见规则：不要承诺测试专用词。",
+                            "enabled": True,
+                        },
+                    ],
+                    "guard_terms": {
+                        "authority_tags": ["quote", "discount", "stock", "shipping", "invoice", "payment", "after_sales", "handoff", "customer_data"],
+                        "commitment_terms": ["包过", "保证通过", "绝对", "最低价", "一口价保证", "保证无", "保证没有", "无风险保证", "肯定没问题", "一定可以", "测试专用硬承诺"],
+                        "caution_terms": ["人工", "确认", "核实", "核一下", "问下", "帮您问", "帮您确认", "同事", "顾问", "销售", "转人工", "不能", "不保证", "没法", "需要看", "以检测报告为准", "以合同为准", "目前资料", "记录显示", "暂时不能", "无法直接"],
+                        "formulaic_handoff_terms": ["收到，我先记录", "稍后继续处理", "请示上级", "这个问题需要销售人工确认，我先帮您记录并提醒同事跟进", "我先帮您记录并提醒同事跟进", "当前无法直接确认，我先帮您记录"],
+                        "forbidden_reply_terms": ["私下转账", "转到个人", "个人账户收款", "多开发票", "少开发票", "发票金额随便", "发票金额可以改", "审批包过", "保证审批", "炒股", "股票建议"],
+                        "forbidden_safe_markers": ["不支持", "不能", "不可以", "没法", "无法", "必须", "需要人工", "需要同事", "需要确认"],
+                        "appointment_commitment_terms": ["约个时间", "预约", "到店", "上门", "安排时间", "预留", "留货", "订金", "定金"],
+                        "appointment_caution_terms": ["负责人", "同事", "人工", "确认", "核实", "联系", "转"],
+                        "sales_followup_actors": ["销售", "同事", "顾问", "专员"],
+                        "sales_followup_actions": ["联系", "对接", "安排", "跟进", "回电", "给您回", "给你回"],
+                        "model_reply_markers": ["[AI]", "llm_synthesis_reply", "rag_context_reply"],
+                        "personalized_reply_patterns": ["[许张王李赵刘陈杨黄周吴徐孙马朱胡郭何高林罗郑梁谢宋唐冯韩曹曾彭萧蔡潘田董袁于余叶蒋杜苏魏程吕丁沈任姚卢姜崔钟谭陆汪范金石廖贾夏韦傅方白邹孟熊秦邱江尹薛闫段雷侯龙史陶黎贺顾毛郝龚邵万钱严覃武戴莫孔向汤][哥姐总先生女士老板]", "客户后续|您之前|你之前|上次"],
+                        "situational_handoff_patterns": ["我马上.*转", "稍后.*联系", "直接联系您", "方便留个电话", "转给.*同事"],
+                        "finance_boundary_patterns": ["首付|月供|贷款|金融|征信|资方|审批|包过|利率"],
+                        "unreasonable_request_patterns": ["提示词|prompt|system prompt|developer message|忽略(前面|上面|规则)|越权", "股票|彩票|赌博|博彩|洗钱|套现|发票.*少开|少开发票|虚开发票", "征信.*不用|包过|一定能批|最低价保证", "事故.*别说|水泡.*别说|火烧.*别说"],
+                        "boundary_request_patterns": ["首付|月供|贷款|金融|征信|资方|审批|利率|分期", "事故|水泡|火烧|检测报告|过户|合同|定金|订金|最低价|砍价|优惠"],
+                        "observed_product_fact_patterns": ["sku|inventory|库存|价格|报价|在售|已售|商品|产品", "车辆|车型|车况|里程|排量"],
+                        "manual_review_terms": ["转人工", "人工确认", "包过", "首付", "月供", "检测", "事故", "水泡", "火烧"],
+                        "business_signal_patterns": ["商品|价格|库存|客户|客服|政策|规则|报价|发货|售后|开票|合同|sku|price|inventory"],
+                        "product_signal_terms": ["price", "库存", "sku", "商品", "产品", "车辆", "车型", "车况", "报价"],
+                        "handoff_rule_terms": ["转人工", "人工确认", "贷款", "首付", "月供"],
+                        "policy_signal_terms": ["policy", "规则", "开票", "合同", "售后"],
+                        "checklist_price_terms": ["price", "价格", "报价"],
+                        "checklist_stock_terms": ["库存", "inventory"],
+                        "checklist_finance_terms": ["贷款", "首付", "月供", "金融"],
+                        "checklist_condition_terms": ["事故", "水泡", "火烧", "车况"],
+                        "risk_finance_terms": ["包过", "首付", "月供"],
+                        "risk_condition_terms": ["事故", "水泡", "火烧"],
+                        "product_category_terms": ["车", "商品", "二手", "MPV", "SUV"],
+                        "policy_payload_terms": ["规则", "政策", "发票", "合同", "售后", "贷款", "过户", "转人工", "人工确认", "policy", "invoice", "contract"],
+                        "promotion_signal_patterns": ["客户|客服|商品|价格|库存|政策|规则|车辆|车型|车况|报价|售后|贷款|首付|月供|发票|合同|过户|置换|新能源|电池|人工确认|转人工|sku|price|inventory|customer|service|policy|invoice|contract"],
+                        "risk_or_decision_terms": ["price", "unit_price", "minimum", "refund", "compensation", "contract", "credit", "account period", "价格", "报价", "最低价", "优惠", "退款", "退货", "赔偿", "合同", "账期", "月结", "先发货"],
+                    },
+                },
+                "platform_understanding_rules": {
+                    "schema_version": 1,
+                    "title": "平台通用理解词典",
+                    "intent_keywords": {"greeting": ["你好"], "quote": ["价格"]},
+                    "intent_groups": {"business": ["quote"]},
+                    "policy_type_to_intent": {"invoice": "invoice"},
+                    "policy_tags": {"invoice": "invoice_policy"},
+                    "policy_type_tags": {"invoice": "invoice_policy"},
+                    "policy_key_tags": {},
+                    "product_knowledge_keywords": {},
+                    "semantic_equivalents": {},
+                    "rag": {},
+                    "risk_keywords": {},
+                    "customer_data_field_labels": {},
+                    "quantity_units": ["个", "件", "台"],
+                },
+            }
+        },
+    }
+    existing: dict[str, Any] = {}
+    if snapshot_path.exists():
+        try:
+            existing = json.loads(snapshot_path.read_text(encoding="utf-8"))
+        except Exception:
+            existing = {}
+    snapshot = _deep_merge(existing, minimal) if existing else minimal
+    snapshot_path.write_text(json.dumps(snapshot, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
 CONFIG_PATH = APP_ROOT / "configs" / "file_transfer_smoke.example.json"
@@ -60,6 +226,7 @@ def main() -> int:
 
 
 def run_checks() -> dict[str, Any]:
+    _ensure_cloud_snapshot()
     checks = [
         check_synthesis_applies_inside_process_target,
         check_rag_evidence_is_explicit_prompt_material,
@@ -148,55 +315,27 @@ def check_synthesis_prompt_is_domain_neutral() -> None:
 
 
 def check_platform_safety_rules_are_visible_and_configurable() -> None:
-    custom_rules = {
-        "schema_version": 1,
-        "title": "Unit test visible safety rules",
-        "prompt_rules": [
-            {
-                "id": "custom_visible_prompt_rule",
-                "title": "Custom rule",
-                "instruction": "自定义可见规则：不要承诺测试专用词。",
-                "enabled": True,
-            }
-        ],
-        "guard_terms": {
-            "authority_tags": ["quote"],
-            "commitment_terms": ["测试专用硬承诺"],
-            "caution_terms": ["人工核实"],
-            "formulaic_handoff_terms": [],
-            "forbidden_reply_terms": [],
-            "forbidden_safe_markers": [],
-            "appointment_commitment_terms": [],
-            "appointment_caution_terms": [],
-            "sales_followup_actors": [],
-            "sales_followup_actions": [],
+    prompt = build_synthesis_prompt_pack(synthetic_pack(intent_tags=["scene_product"], structured=True, rag=True))
+    payload = json.dumps(prompt["user"], ensure_ascii=False)
+    assert_true("自定义可见规则" in payload, "prompt should include visible platform safety rules from cloud snapshot")
+    guard = guard_synthesized_reply(
+        candidate={
+            "can_answer": True,
+            "reply": "我可以测试专用硬承诺，没问题。",
+            "confidence": 0.9,
+            "recommended_action": "send_reply",
+            "needs_handoff": False,
+            "used_evidence": ["product:test"],
+            "rag_used": False,
+            "structured_used": True,
+            "uncertain_points": [],
+            "risk_tags": [],
+            "reason": "custom platform rule test",
         },
-    }
-    with tempfile.TemporaryDirectory() as tmp:
-        path = Path(tmp) / "platform_safety_rules.json"
-        path.write_text(json.dumps(custom_rules, ensure_ascii=False, indent=2), encoding="utf-8")
-        settings = {"platform_safety_rules_path": str(path)}
-        prompt = build_synthesis_prompt_pack(synthetic_pack(intent_tags=["scene_product"], structured=True, rag=True), settings=settings)
-        payload = json.dumps(prompt["user"], ensure_ascii=False)
-        assert_true("自定义可见规则" in payload, "prompt should include visible platform safety rules from configured file")
-        guard = guard_synthesized_reply(
-            candidate={
-                "can_answer": True,
-                "reply": "我可以测试专用硬承诺，没问题。",
-                "confidence": 0.9,
-                "recommended_action": "send_reply",
-                "needs_handoff": False,
-                "used_evidence": ["product:test"],
-                "rag_used": False,
-                "structured_used": True,
-                "uncertain_points": [],
-                "risk_tags": [],
-                "reason": "custom platform rule test",
-            },
-            evidence_pack=synthetic_pack(intent_tags=["scene_product"], structured=True, rag=False),
-            settings=settings,
-        )
-        assert_equal(guard.get("reason"), "unsafe_commitment_without_caution", "custom visible guard term should be enforced")
+        evidence_pack=synthetic_pack(intent_tags=["scene_product"], structured=True, rag=False),
+        settings={},
+    )
+    assert_equal(guard.get("reason"), "unsafe_commitment_without_caution", "custom visible guard term should be enforced")
 
 
 def check_rag_only_authority_topic_forces_handoff() -> None:

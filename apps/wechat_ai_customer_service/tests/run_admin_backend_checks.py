@@ -27,8 +27,9 @@ TEST_ARTIFACTS = PROJECT_ROOT / "runtime" / "apps" / "wechat_ai_customer_service
 VERSIONS_ROOT = APP_ROOT / "data" / "versions"
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
-os.environ.setdefault("WECHAT_CLOUD_REQUIRED", "0")
+os.environ.setdefault("WECHAT_CLOUD_REQUIRED", "1")
 os.environ.setdefault("WECHAT_CLOUD_STRICT_ONLINE", "0")
+os.environ.setdefault("WECHAT_VPS_BASE_URL", "http://localhost:8000")
 
 from apps.wechat_ai_customer_service.admin_backend.app import create_app  # noqa: E402
 from apps.wechat_ai_customer_service.admin_backend.services.diagnostics_service import DiagnosticsService  # noqa: E402
@@ -39,11 +40,92 @@ from apps.wechat_ai_customer_service.admin_backend.services.learning_service imp
 from apps.wechat_ai_customer_service.admin_backend.services import rag_admin_service as rag_admin_service_module  # noqa: E402
 from apps.wechat_ai_customer_service.admin_backend.services import rag_experience_interpreter as rag_interpreter_module  # noqa: E402
 from apps.wechat_ai_customer_service.admin_backend.services import source_authority_policy as source_authority_module  # noqa: E402
-from apps.wechat_ai_customer_service.knowledge_paths import active_tenant_id, default_admin_knowledge_base_root, tenant_product_item_knowledge_root  # noqa: E402
+from apps.wechat_ai_customer_service.knowledge_paths import active_tenant_id, default_admin_knowledge_base_root, shared_runtime_snapshot_path, tenant_product_item_knowledge_root  # noqa: E402
 from apps.wechat_ai_customer_service.storage import get_postgres_store, load_storage_config  # noqa: E402
 from apps.wechat_ai_customer_service.workflows import generate_review_candidates as review_candidate_generator  # noqa: E402
 from apps.wechat_ai_customer_service.workflows.rag_experience_store import RagExperienceStore  # noqa: E402
 from apps.wechat_ai_customer_service.workflows.rag_layer import RagService  # noqa: E402
+
+
+def _deep_merge(base: dict[str, Any], overlay: dict[str, Any]) -> dict[str, Any]:
+    merged = dict(base)
+    for key, value in overlay.items():
+        if key in merged and isinstance(merged[key], dict) and isinstance(value, dict):
+            merged[key] = _deep_merge(merged[key], value)
+        else:
+            merged[key] = value
+    return merged
+
+
+def _ensure_cloud_snapshot() -> None:
+    snapshot_path = shared_runtime_snapshot_path()
+    snapshot_path.parent.mkdir(parents=True, exist_ok=True)
+    from datetime import datetime, timedelta, timezone
+
+    future = (datetime.now(timezone.utc) + timedelta(hours=1)).isoformat()
+    minimal = {
+        "schema_version": 1,
+        "source": "cloud_official_shared_library",
+        "tenant_id": "default",
+        "issued_at": datetime.now(timezone.utc).isoformat(),
+        "expires_at": future,
+        "cache_policy": {"expires_at": future},
+        "policy_bundle": {
+            "merged": {
+                "platform_safety_rules": {
+                    "schema_version": 1,
+                    "title": "平台底线规则",
+                    "description": "测试用安全边界",
+                    "prompt_rules": [
+                        {"id": "evidence_first", "title": "先看可见证据", "description": "优先使用证据", "instruction": "优先使用客户自己的正式知识、商品库、商品专属问答/规则/解释和共享公共知识；行业、商品、流程和专属规则只能来自 evidence_pack，不要假设客户所属行业。", "enabled": True}
+                    ],
+                    "guard_terms": {
+                        "commitment_terms": ["保证", "承诺", "一定"],
+                        "caution_terms": ["人工核实"],
+                        "authority_tags": ["quote"],
+                        "formulaic_handoff_terms": [],
+                        "forbidden_reply_terms": [],
+                        "forbidden_safe_markers": [],
+                        "appointment_commitment_terms": [],
+                        "appointment_caution_terms": [],
+                        "sales_followup_actors": [],
+                        "sales_followup_actions": [],
+                    },
+                },
+                "platform_understanding_rules": {
+                    "schema_version": 1,
+                    "title": "平台通用理解词典",
+                    "description": "测试用理解词典",
+                    "intent_keywords": {"greeting": ["你好"], "quote": ["价格"]},
+                    "intent_groups": {"business": ["quote"]},
+                    "policy_type_to_intent": {"invoice": "invoice"},
+                    "policy_tags": {"invoice": "invoice_policy"},
+                    "policy_type_tags": {"invoice": "invoice_policy"},
+                    "policy_key_tags": {},
+                    "product_knowledge_keywords": {"stock": ["库存"]},
+                    "semantic_equivalents": {"推荐": ["建议"]},
+                    "rag": {},
+                    "risk_keywords": {},
+                    "customer_data_field_labels": {"phone": ["电话", "手机"]},
+                    "quantity_units": ["个", "件", "台"],
+                },
+            }
+        },
+    }
+    if snapshot_path.exists():
+        try:
+            existing = json.loads(snapshot_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            existing = {}
+        if isinstance(existing, dict) and existing:
+            snapshot = _deep_merge(existing, minimal)
+            snapshot.setdefault("expires_at", future)
+            cache_policy = snapshot.setdefault("cache_policy", {})
+            if isinstance(cache_policy, dict):
+                cache_policy.setdefault("expires_at", future)
+            snapshot_path.write_text(json.dumps(snapshot, ensure_ascii=False, indent=2), encoding="utf-8")
+            return
+    snapshot_path.write_text(json.dumps(minimal, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
 CHAPTERS = ["foundation", "readonly", "drafts", "generator", "candidates", "diagnostics", "all"]
@@ -70,6 +152,7 @@ def main() -> int:
 
 
 def run_checks(chapter: str) -> dict[str, Any]:
+    _ensure_cloud_snapshot()
     client = TestClient(create_app())
     checks = checks_for_chapter(chapter)
     results = []

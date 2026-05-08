@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 import time
 from argparse import Namespace
@@ -23,6 +24,8 @@ ADAPTERS_ROOT = APP_ROOT / "adapters"
 for path in (WORKFLOWS_ROOT, APP_ROOT, ADAPTERS_ROOT):
     if str(path) not in sys.path:
         sys.path.insert(0, str(path))
+os.environ.setdefault("WECHAT_CLOUD_REQUIRED", "0")
+os.environ.setdefault("WECHAT_CLOUD_STRICT_ONLINE", "0")
 
 from approved_outbound_send import run as run_outbound  # noqa: E402
 from listen_and_reply import load_config, resolve_path, run_workflow  # noqa: E402
@@ -55,6 +58,19 @@ def main() -> int:
 
 
 def run_live_regression(args: argparse.Namespace) -> dict[str, Any]:
+    # Ensure customer service is enabled so live regression messages are processed
+    from admin_backend.services.customer_service_settings import CustomerServiceSettings
+    CustomerServiceSettings().save({
+        "enabled": True,
+        "reply_mode": "guarded_auto",
+        "record_messages": True,
+        "auto_learn": True,
+        "use_llm": True,
+        "rag_enabled": True,
+        "data_capture_enabled": True,
+        "handoff_enabled": True,
+        "operator_alert_enabled": True,
+    })
     config = load_config(args.config)
     scenarios = json.loads(args.scenarios.read_text(encoding="utf-8"))
     if args.reset_state:

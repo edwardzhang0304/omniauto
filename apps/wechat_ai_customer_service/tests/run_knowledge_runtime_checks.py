@@ -26,7 +26,7 @@ from apps.wechat_ai_customer_service.admin_backend.services.knowledge_base_store
 from apps.wechat_ai_customer_service.admin_backend.services.formal_review_state import acknowledge_item  # noqa: E402
 from apps.wechat_ai_customer_service.admin_backend.services.knowledge_registry import KnowledgeRegistry  # noqa: E402
 from apps.wechat_ai_customer_service.admin_backend.services.knowledge_schema_manager import KnowledgeSchemaManager  # noqa: E402
-from apps.wechat_ai_customer_service.knowledge_paths import SHARED_KNOWLEDGE_ROOT, default_admin_knowledge_base_root, shared_runtime_cache_root, tenant_context, tenant_knowledge_base_root, tenant_root  # noqa: E402
+from apps.wechat_ai_customer_service.knowledge_paths import SHARED_KNOWLEDGE_ROOT, default_admin_knowledge_base_root, shared_runtime_cache_root, shared_runtime_snapshot_path, tenant_context, tenant_knowledge_base_root, tenant_root  # noqa: E402
 from evidence_resolver import EvidenceResolver  # noqa: E402
 from knowledge_runtime import KnowledgeRuntime  # noqa: E402
 
@@ -398,13 +398,20 @@ def prepare_shared_runtime_cache_fixture() -> bool:
     if backup_root.exists():
         shutil.rmtree(backup_root)
     backup_root.parent.mkdir(parents=True, exist_ok=True)
+    previous_snapshot = None
     if had_previous:
+        prev_snapshot_path = cache_root / "snapshot.json"
+        if prev_snapshot_path.exists():
+            try:
+                previous_snapshot = json.loads(prev_snapshot_path.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError):
+                pass
         shutil.copytree(cache_root, backup_root)
         shutil.rmtree(cache_root)
     if source_root.exists():
         cache_root.parent.mkdir(parents=True, exist_ok=True)
         shutil.copytree(source_root, cache_root)
-        write_cloud_cache_snapshot_fixture(cache_root)
+        write_cloud_cache_snapshot_fixture(cache_root, previous_snapshot=previous_snapshot)
     return had_previous
 
 
@@ -432,8 +439,24 @@ def write_json_file(path: Path, payload: dict[str, Any]) -> None:
     path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
 
-def write_cloud_cache_snapshot_fixture(cache_root: Path) -> None:
+def write_cloud_cache_snapshot_fixture(cache_root: Path, previous_snapshot: dict[str, Any] | None = None) -> None:
     now = datetime.now(timezone.utc)
+    # Preserve policy_bundle from the real cloud snapshot so intent_keywords remain available.
+    existing_snapshot: dict[str, Any] = previous_snapshot or {}
+    if not existing_snapshot:
+        real_snapshot_path = shared_runtime_snapshot_path()
+        if real_snapshot_path.exists():
+            try:
+                existing_snapshot = json.loads(real_snapshot_path.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError):
+                pass
+    policy_bundle = existing_snapshot.get("policy_bundle", {})
+    # policy_bundle structure: {global: {platform_understanding_rules: {...}}, industry: {...}, merged: {platform_understanding_rules: {...}}}
+    pur = (
+        policy_bundle.get("merged", {}).get("platform_understanding_rules", {})
+        or policy_bundle.get("global", {}).get("platform_understanding_rules", {})
+        or {}
+    )
     snapshot = {
         "schema_version": 1,
         "source": "cloud_official_shared_library",
@@ -459,6 +482,13 @@ def write_cloud_cache_snapshot_fixture(cache_root: Path) -> None:
         "categories": [{"category_id": "global_guidelines", "item_count": 1}],
         "items": [],
     }
+    if policy_bundle:
+        snapshot["policy_bundle"] = policy_bundle
+        # Flatten platform_understanding_rules so normalize_platform_understanding_rules can find intent_keywords at top level.
+        if pur:
+            for key in ("intent_keywords", "intent_groups", "policy_type_to_intent", "policy_tags", "policy_type_tags", "policy_key_tags", "product_knowledge_keywords", "semantic_equivalents", "rag", "risk_keywords", "customer_data_field_labels", "quantity_units"):
+                if key in pur:
+                    snapshot[key] = pur[key]
     write_json_file(cache_root / "snapshot.json", snapshot)
 
 

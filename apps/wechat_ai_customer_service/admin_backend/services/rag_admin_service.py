@@ -295,10 +295,10 @@ class RagAdminService:
         if str(item.get("status") or "active") == "promoted":
             return {"ok": False, "message": "rag experience has already been promoted"}
         review = item.get("experience_review") if isinstance(item.get("experience_review"), dict) else {}
-        if str(review.get("status") or "") in {"kept", AUTO_KEPT_REVIEW_STATUS, AUTO_TRIAGE_REVIEW_STATUS}:
+        if str(review.get("status") or "") in {"kept", AUTO_KEPT_REVIEW_STATUS}:
             return {
                 "ok": False,
-                "message": "这条RAG经验已经有处理状态；如需重新升级，请先点击“重新待处理”，再按AI建议操作。",
+                "message": "这条RAG经验已经被人为保留；如需重新升级，请先点击\"重新待处理\"，再按AI建议操作。",
                 "review_status": str(review.get("status") or ""),
             }
         formal_items = collect_formal_items()

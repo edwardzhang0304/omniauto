@@ -325,7 +325,7 @@ def check_rag_hits_are_summarized_in_intent_context_only_as_sources() -> None:
 
     try:
         knowledge_loader.RagService = FakeRagService
-        pack = knowledge_loader.build_evidence_pack("我开便利店，想找个放饮料的冷柜，有推荐吗？")
+        pack = knowledge_loader.build_evidence_pack("我开便利店，想找个放饮料的冷柜，有哪些推荐？")
     finally:
         knowledge_loader.RagService = original_rag_service
 

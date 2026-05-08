@@ -29,6 +29,7 @@ const state = {
   recorderConversations: [],
   recorderMessages: [],
   selectedRecorderConversation: null,
+  recorderMessageCache: {},
   activeReferenceTab: "experiences",
   productScopedEditContext: null,
   diagnosticHighlight: null,
@@ -51,8 +52,6 @@ const state = {
   passwordChallenge: null,
   emailChallenge: null,
   security: null,
-  platformSafetyRules: null,
-  platformUnderstandingRules: null,
   llmConfig: null,
 };
 const localDeviceId = getOrCreateDeviceId("localConsoleDeviceId");
@@ -745,154 +744,6 @@ function renderLocalSecurity() {
       <strong>${escapeHtml(String(security.trusted_device_days || 30))} 天</strong>
     </div>
   `;
-}
-
-async function loadPlatformSafetyRules() {
-  const payload = await apiGet("/api/system/platform-safety-rules");
-  state.platformSafetyRules = payload;
-  renderPlatformSafetyRules();
-}
-
-async function loadPlatformUnderstandingRules() {
-  const payload = await apiGet("/api/system/platform-understanding-rules");
-  state.platformUnderstandingRules = payload;
-  renderPlatformUnderstandingRules();
-}
-
-function renderPlatformSafetyRules() {
-  const payload = state.platformSafetyRules || {};
-  const item = payload.item || {};
-  const summary = document.getElementById("platform-safety-summary");
-  const editor = document.getElementById("platform-safety-json");
-  const saveButton = document.getElementById("save-platform-safety");
-  const promptRules = Array.isArray(item.prompt_rules) ? item.prompt_rules : [];
-  const guardTerms = item.guard_terms && typeof item.guard_terms === "object" ? item.guard_terms : {};
-  const enabledRules = promptRules.filter((rule) => rule?.enabled !== false).length;
-  const termCount = Object.values(guardTerms).reduce((total, value) => total + (Array.isArray(value) ? value.length : 0), 0);
-  if (summary) {
-    summary.innerHTML = `
-      <div>
-        <span>规则文件</span>
-        <strong>${escapeHtml(payload.path || "未配置")}</strong>
-      </div>
-      <div>
-        <span>生效提示规则</span>
-        <strong>${enabledRules} 条</strong>
-      </div>
-      <div>
-        <span>底线词条</span>
-        <strong>${termCount} 个</strong>
-      </div>
-      <div>
-        <span>编辑权限</span>
-        <strong>${payload.editable ? "admin 可编辑" : "只读"}</strong>
-      </div>
-    `;
-  }
-  if (editor) {
-    editor.value = JSON.stringify(item, null, 2);
-    editor.readOnly = !payload.editable;
-  }
-  if (saveButton) {
-    saveButton.disabled = !payload.editable;
-    saveButton.title = payload.editable ? "保存平台底线规则" : "只有 admin 可以编辑平台底线规则";
-  }
-}
-
-function renderPlatformUnderstandingRules() {
-  const payload = state.platformUnderstandingRules || {};
-  const item = payload.item || {};
-  const summary = document.getElementById("platform-understanding-summary");
-  const editor = document.getElementById("platform-understanding-json");
-  const saveButton = document.getElementById("save-platform-understanding");
-  const intentKeywords = item.intent_keywords && typeof item.intent_keywords === "object" ? item.intent_keywords : {};
-  const intentCount = Object.values(intentKeywords).reduce((total, value) => total + (Array.isArray(value) ? value.length : 0), 0);
-  const productKeywords = item.product_knowledge_keywords && typeof item.product_knowledge_keywords === "object" ? item.product_knowledge_keywords : {};
-  const productCount = Object.values(productKeywords).reduce((total, value) => total + (Array.isArray(value) ? value.length : 0), 0);
-  const semantic = item.semantic_equivalents && typeof item.semantic_equivalents === "object" ? item.semantic_equivalents : {};
-  const semanticCount = Object.keys(semantic).length;
-  const rag = item.rag && typeof item.rag === "object" ? item.rag : {};
-  const ragCount = Object.values(rag).reduce((total, value) => total + (Array.isArray(value) ? value.length : 0), 0);
-  const customerLabels = item.customer_data_field_labels && typeof item.customer_data_field_labels === "object" ? item.customer_data_field_labels : {};
-  const customerLabelCount = Object.values(customerLabels).reduce((total, value) => total + (Array.isArray(value) ? value.length : 0), 0);
-  if (summary) {
-    summary.innerHTML = `
-      <div>
-        <span>词典文件</span>
-        <strong>${escapeHtml(payload.path || "未配置")}</strong>
-      </div>
-      <div>
-        <span>意图词</span>
-        <strong>${intentCount} 个</strong>
-      </div>
-      <div>
-        <span>商品理解词</span>
-        <strong>${productCount} 个</strong>
-      </div>
-      <div>
-        <span>检索近义词</span>
-        <strong>${semanticCount} 组</strong>
-      </div>
-      <div>
-        <span>RAG词条</span>
-        <strong>${ragCount} 个</strong>
-      </div>
-      <div>
-        <span>资料字段别名</span>
-        <strong>${customerLabelCount} 个</strong>
-      </div>
-      <div>
-        <span>编辑权限</span>
-        <strong>${payload.editable ? "admin 可编辑" : "只读"}</strong>
-      </div>
-    `;
-  }
-  if (editor) {
-    editor.value = JSON.stringify(item, null, 2);
-    editor.readOnly = !payload.editable;
-  }
-  if (saveButton) {
-    saveButton.disabled = !payload.editable;
-    saveButton.title = payload.editable ? "保存平台通用理解词典" : "只有 admin 可以编辑平台通用理解词典";
-  }
-}
-
-async function savePlatformSafetyRules() {
-  const editor = document.getElementById("platform-safety-json");
-  if (!editor) return;
-  let item;
-  try {
-    item = JSON.parse(editor.value || "{}");
-  } catch (error) {
-    alert(`规则内容不是合法 JSON：${error.message}`);
-    return;
-  }
-  const payload = await apiJson("/api/system/platform-safety-rules", {
-    method: "PUT",
-    body: JSON.stringify({item}),
-  });
-  state.platformSafetyRules = payload;
-  renderPlatformSafetyRules();
-  alert("平台底线规则已保存。");
-}
-
-async function savePlatformUnderstandingRules() {
-  const editor = document.getElementById("platform-understanding-json");
-  if (!editor) return;
-  let item;
-  try {
-    item = JSON.parse(editor.value || "{}");
-  } catch (error) {
-    alert(`词典内容不是合法 JSON：${error.message}`);
-    return;
-  }
-  const payload = await apiJson("/api/system/platform-understanding-rules", {
-    method: "PUT",
-    body: JSON.stringify({item}),
-  });
-  state.platformUnderstandingRules = payload;
-  renderPlatformUnderstandingRules();
-  alert("平台通用理解词典已保存。");
 }
 
 async function loadLlmConfig() {
@@ -4474,14 +4325,22 @@ async function loadRecorder() {
   renderRecorder();
 }
 
-async function loadRecorderMessages(shouldRender = true) {
+async function loadRecorderMessages(shouldRender = true, forceRefresh = false) {
   if (!state.selectedRecorderConversation?.conversation_id) {
     state.recorderMessages = [];
     if (shouldRender) renderRecorderDetail();
     return;
   }
-  const payload = await apiGet(`/api/raw-messages/messages?conversation_id=${encodeURIComponent(state.selectedRecorderConversation.conversation_id)}&limit=80`);
+  const convId = state.selectedRecorderConversation.conversation_id;
+  const cache = state.recorderMessageCache[convId];
+  if (!forceRefresh && cache && Date.now() - cache.loadedAt < 300000) {
+    state.recorderMessages = cache.messages;
+    if (shouldRender) renderRecorderDetail();
+    return;
+  }
+  const payload = await apiGet(`/api/raw-messages/messages?conversation_id=${encodeURIComponent(convId)}&limit=80`);
   state.recorderMessages = payload.items || [];
+  state.recorderMessageCache[convId] = { messages: state.recorderMessages, loadedAt: Date.now() };
   if (shouldRender) renderRecorderDetail();
 }
 
@@ -4523,8 +4382,13 @@ function renderRecorderGroupList() {
   }).join("") : `<div class="empty-state">尚未识别到群聊。点击“识别群列表”后，再选择需要记录的群。</div>`;
   list.querySelectorAll(".recorder-select").forEach((button) => {
     button.addEventListener("click", async () => {
-      state.selectedRecorderConversation = items[Number(button.dataset.index)] || null;
-      renderRecorderGroupList();
+      const newIndex = Number(button.dataset.index);
+      const newConversation = items[newIndex] || null;
+      // Update selection styles without rebuilding the whole list
+      list.querySelectorAll(".recorder-row").forEach((row, idx) => {
+        row.classList.toggle("is-selected", idx === newIndex);
+      });
+      state.selectedRecorderConversation = newConversation;
       await loadRecorderMessages();
     });
   });
@@ -4729,9 +4593,43 @@ async function downloadKnowledgeExport(sortBy) {
   URL.revokeObjectURL(url);
 }
 
+async function loadDiagnosticsData() {
+  if (state.diagnosticsPayload) {
+    renderDiagnostics(state.diagnosticsPayload);
+  }
+}
+
 async function runDiagnostics(mode) {
-  const payload = await apiJson("/api/diagnostics/run", {method: "POST", body: JSON.stringify({mode})});
-  renderDiagnostics(payload);
+  const reportEl = document.getElementById("diagnostics-report");
+  const quickBtn = document.getElementById("quick-diagnostics");
+  const fullBtn = document.getElementById("full-diagnostics");
+
+  if (quickBtn) quickBtn.disabled = true;
+  if (fullBtn) fullBtn.disabled = true;
+
+  reportEl.innerHTML = `
+    <div class="status-card info">
+      <strong>正在检测中...</strong>
+      <span>${mode === "full" ? "全量诊断需要 30-120 秒，请稍候" : "快速检测中..."}</span>
+      <span class="spinner" style="margin-left:8px;"></span>
+    </div>
+  `;
+
+  try {
+    const payload = await apiJson("/api/diagnostics/run", {method: "POST", body: JSON.stringify({mode})});
+    state.diagnosticsPayload = payload;
+    renderDiagnostics(payload);
+  } catch (error) {
+    reportEl.innerHTML = `
+      <div class="status-card error">
+        <strong>检测失败</strong>
+        <span>${escapeHtml(error.message)}</span>
+      </div>
+    `;
+  } finally {
+    if (quickBtn) quickBtn.disabled = false;
+    if (fullBtn) fullBtn.disabled = false;
+  }
 }
 
 function renderDiagnostics(payload) {
@@ -5367,11 +5265,11 @@ async function loadViewData(view) {
       loadVersions().catch(console.error),
       refreshAccountContext().catch(console.error),
       loadLlmConfig().catch(console.error),
-      loadPlatformSafetyRules().catch(console.error),
-      loadPlatformUnderstandingRules().catch(console.error),
     ]);
   }
   if (activeView === "versions") await loadVersions();
+  if (activeView === "customer_profiles") await loadCustomerProfiles();
+  if (activeView === "diagnostics") await loadDiagnosticsData();
 }
 
 async function loadActiveSubsection() {
@@ -5449,10 +5347,6 @@ document.getElementById("quick-diagnostics").addEventListener("click", () => run
 document.getElementById("full-diagnostics").addEventListener("click", () => runDiagnostics("full").catch((error) => alert(error.message)));
 document.getElementById("create-backup").addEventListener("click", () => createBackup().catch((error) => alert(error.message)));
 document.getElementById("refresh-versions").addEventListener("click", () => loadVersions().catch((error) => alert(error.message)));
-document.getElementById("refresh-platform-safety")?.addEventListener("click", () => loadPlatformSafetyRules().catch((error) => alert(error.message)));
-document.getElementById("save-platform-safety")?.addEventListener("click", () => savePlatformSafetyRules().catch((error) => alert(error.message)));
-document.getElementById("refresh-platform-understanding")?.addEventListener("click", () => loadPlatformUnderstandingRules().catch((error) => alert(error.message)));
-document.getElementById("save-platform-understanding")?.addEventListener("click", () => savePlatformUnderstandingRules().catch((error) => alert(error.message)));
 document.getElementById("llm-config-form")?.addEventListener("submit", (event) => saveLlmConfig(event).catch((error) => alert(error.message)));
 document.getElementById("llm-config-test")?.addEventListener("click", () => testLlmConfig().catch((error) => alert(error.message)));
 document.getElementById("llm-config-toggle")?.addEventListener("click", toggleLlmApiKeyVisibility);

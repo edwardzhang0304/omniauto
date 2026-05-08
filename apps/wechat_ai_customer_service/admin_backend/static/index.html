@@ -639,48 +639,6 @@
                 <span>客户端只负责绑定邮箱和填写验证码，SMTP 发信配置由 VPS 服务端统一管理。</span>
               </div>
             </section>
-            <details open class="settings-section collapsible-section">
-              <summary class="section-head sub-head">
-                <div>
-                  <h2>平台底线规则</h2>
-                  <p>这里维护所有账号共用的自动回复安全边界；行业专属规则请放到对应客户的正式知识库。</p>
-                </div>
-                <div class="button-row">
-                  <button class="secondary-button" id="refresh-platform-safety">刷新</button>
-                  <button class="primary-button" id="save-platform-safety">保存规则</button>
-                </div>
-              </summary>
-              <div id="platform-safety-summary" class="security-summary">平台底线规则读取中...</div>
-              <label class="form-field platform-safety-editor">
-                <span>规则内容</span>
-                <textarea id="platform-safety-json" spellcheck="false" placeholder="正在加载平台底线规则"></textarea>
-              </label>
-              <div class="security-note">
-                <strong>规则分层</strong>
-                <span>平台底线规则只放所有行业都适用的边界；二手车、贸易、门店、商品等专属规则必须放在客户自己的正式知识库或商品库。</span>
-              </div>
-            </details>
-            <details open class="settings-section collapsible-section">
-              <summary class="section-head sub-head">
-                <div>
-                  <h2>平台通用理解词典</h2>
-                  <p>这里维护所有账号共用的基础意图词、商品理解词和RAG检索近义词；不写客户专属业务规则。</p>
-                </div>
-                <div class="button-row">
-                  <button class="secondary-button" id="refresh-platform-understanding">刷新</button>
-                  <button class="primary-button" id="save-platform-understanding">保存词典</button>
-                </div>
-              </summary>
-              <div id="platform-understanding-summary" class="security-summary">平台通用理解词典读取中...</div>
-              <label class="form-field platform-safety-editor">
-                <span>词典内容</span>
-                <textarea id="platform-understanding-json" spellcheck="false" placeholder="正在加载平台通用理解词典"></textarea>
-              </label>
-              <div class="security-note">
-                <strong>词典分层</strong>
-                <span>这里适合放"价格、库存、发货、售后、发票、推荐、对比"等通用理解词；客户行业规则、商品规则和话术仍应放到正式知识库或商品库。</span>
-              </div>
-            </details>
             <section class="settings-section muted-section">
               <h2>后续设置</h2>
               <p>后续可以在这里加入界面风格、日志清理、端口检查等辅助功能。</p>

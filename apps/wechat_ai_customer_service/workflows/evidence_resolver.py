@@ -53,6 +53,13 @@ def build_evidence_item(hit: KnowledgeHit, intent_tags: list[str]) -> dict[str, 
     explicit_requires_handoff = data.get("requires_handoff") if data_has_handoff else runtime.get("requires_handoff", False)
     runtime_requires_handoff = bool(runtime.get("requires_handoff", False)) and not data_has_handoff
     shared_risk_control = hit.category_id == "risk_control"
+    # Privacy minimum collection is a guideline, not a handoff trigger, when the customer is providing data.
+    if (
+        shared_risk_control
+        and "customer_data" in intent_tags
+        and str(hit.item_id or "") == "shared_global_privacy_minimum_collection"
+    ):
+        shared_risk_control = False
     requires_handoff = bool(
         runtime_requires_handoff
         or explicit_requires_handoff

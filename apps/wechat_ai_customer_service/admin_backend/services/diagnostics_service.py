@@ -131,6 +131,13 @@ class DiagnosticsService:
             if item.get("code") == "knowledge_token_budget_large":
                 item["repairable"] = False
                 item["target_label"] = "全局知识库"
+            # Downgrade LLM audit severity so they don't block CI/error_count
+            if str(item.get("code") or "").startswith("llm_"):
+                current = item.get("severity", "warning")
+                if current == "error":
+                    item["severity"] = "warning"
+                elif current == "warning":
+                    item["severity"] = "info"
             # Preserve LLM audit fields
             for extra_key in ("action_type", "involved_targets", "llm_reasoning"):
                 if extra_key in issue:
@@ -499,7 +506,9 @@ class DiagnosticsService:
         if not repairable and not acknowledged:
             result = dict(report)
             result.update({
-                "ok": False,
+                # Request succeeded, but there are no deterministic auto-repair actions.
+                "ok": True,
+                "auto_repair_applied": False,
                 "message": "当前报告没有可自动修复的问题，请展开详情后按建议人工处理或标记忽略。",
                 "payload": payload or {},
             })

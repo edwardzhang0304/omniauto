@@ -40,6 +40,28 @@ QUALITY_BLOCK_ACTION_TERMS = {
     "转人工",
 }
 
+# Metadata pollution terms that should not appear in reply_text
+QUALITY_METADATA_POLLUTION_TERMS = {
+    "风险等级：",
+    "政策规则：",
+    "触发关键词：",
+    "允许自动回复：",
+    "必须转人工：",
+    "提醒人工客服：",
+    "规则名称：",
+    "规则类型：",
+    "测试批次：",
+}
+
+# Nonsense / test content terms
+QUALITY_TEST_CONTENT_TERMS = {
+    "duplicate candidate probe",
+    "暂存缺价测试商品",
+    "合并内容测试",
+    "测试折叠床",
+    "测试折叠椅",
+}
+
 
 class RagExperienceStore:
     def __init__(self, *, tenant_id: str | None = None, root: Path | None = None) -> None:
@@ -657,6 +679,9 @@ def score_experience_quality(item: dict[str, Any]) -> dict[str, Any]:
     if len(question) >= 8 and len(reply) >= 12:
         score += 0.05
 
+    has_metadata_pollution = any(term in reply for term in QUALITY_METADATA_POLLUTION_TERMS)
+    has_test_content = any(term in reply for term in QUALITY_TEST_CONTENT_TERMS)
+
     blockers: list[str] = []
     reasons: list[str] = []
     if not has_text:
@@ -664,6 +689,12 @@ def score_experience_quality(item: dict[str, Any]) -> dict[str, Any]:
     if not has_source:
         reasons.append("缺少可追溯的命中资料")
         score -= 0.08
+    if has_metadata_pollution:
+        blockers.append("回复包含元数据污染")
+        score -= 0.35
+    if has_test_content:
+        blockers.append("回复包含测试或无意义内容")
+        score -= 0.35
     if risk_terms:
         blockers.append("命中资料包含风险词")
         score -= 0.25

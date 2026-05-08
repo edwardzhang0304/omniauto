@@ -2,7 +2,7 @@
   "schema_version": 1,
   "category_id": "chats",
   "id": "ai-ai",
-  "status": "active",
+  "status": "archived",
   "source": {
     "type": "rag_experience",
     "experience_id": "rag_exp_816a8be10cee4fd1f666"

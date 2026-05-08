@@ -4,31 +4,13 @@ from __future__ import annotations
 
 import copy
 import json
-import os
-from pathlib import Path
 from typing import Any
 
 from apps.wechat_ai_customer_service.knowledge_paths import shared_runtime_snapshot_path
 
 
-APP_ROOT = Path(__file__).resolve().parent
-PROJECT_ROOT = APP_ROOT.parents[1]
-DEFAULT_PLATFORM_SAFETY_RULES_PATH = APP_ROOT / "configs" / "platform_safety_rules.example.json"
-
-
-def resolve_platform_safety_rules_path(settings: dict[str, Any] | None = None) -> Path:
-    settings = settings or {}
-    explicit = str(settings.get("platform_safety_rules_path") or "").strip()
-    env_value = os.environ.get("WECHAT_PLATFORM_SAFETY_RULES_PATH", "").strip()
-    raw = explicit or env_value or str(DEFAULT_PLATFORM_SAFETY_RULES_PATH)
-    path = Path(raw)
-    if not path.is_absolute():
-        path = PROJECT_ROOT / path
-    return path
-
-
 def load_platform_safety_rules(settings: dict[str, Any] | None = None) -> dict[str, Any]:
-    cloud_required = str(os.getenv("WECHAT_CLOUD_REQUIRED", "1")).strip().lower() in {"1", "true", "yes", "on"}
+    del settings
     cloud = load_platform_safety_rules_from_cloud()
     if cloud is not None:
         item = normalize_platform_safety_rules(cloud)
@@ -40,53 +22,31 @@ def load_platform_safety_rules(settings: dict[str, Any] | None = None) -> dict[s
             "readonly": True,
             "item": item,
         }
-    if cloud_required:
-        item = empty_rules()
-        item["_path"] = "cloud://shared_snapshot/policy_bundle/merged/platform_safety_rules"
-        return {
-            "ok": False,
-            "path": item["_path"],
-            "source": "cloud_shared_snapshot",
-            "readonly": True,
-            "error": "platform_safety_rules_cloud_snapshot_required",
-            "item": item,
-        }
-    path = resolve_platform_safety_rules_path(settings)
-    try:
-        payload = json.loads(path.read_text(encoding="utf-8"))
-    except FileNotFoundError:
-        return {"ok": False, "path": str(path), "error": "platform_safety_rules_file_missing", "item": empty_rules()}
-    except Exception as exc:
-        return {"ok": False, "path": str(path), "error": repr(exc), "item": empty_rules()}
-    if not isinstance(payload, dict):
-        return {"ok": False, "path": str(path), "error": "platform_safety_rules_not_object", "item": empty_rules()}
-    item = normalize_platform_safety_rules(payload)
-    item["_path"] = str(path)
-    return {"ok": True, "path": str(path), "source": "local_file", "readonly": False, "item": item}
+    item = empty_rules()
+    item["_path"] = "cloud://shared_snapshot/policy_bundle/merged/platform_safety_rules"
+    return {
+        "ok": False,
+        "path": item["_path"],
+        "source": "cloud_shared_snapshot",
+        "readonly": True,
+        "error": "platform_safety_rules_cloud_snapshot_required",
+        "item": item,
+    }
 
 
 def save_platform_safety_rules(payload: dict[str, Any], settings: dict[str, Any] | None = None) -> dict[str, Any]:
+    del payload, settings
     cloud = load_platform_safety_rules_from_cloud()
-    cloud_required = str(os.getenv("WECHAT_CLOUD_REQUIRED", "1")).strip().lower() in {"1", "true", "yes", "on"}
-    if cloud_required:
-        item = normalize_platform_safety_rules(cloud) if cloud is not None else empty_rules()
-        item["_path"] = "cloud://shared_snapshot/policy_bundle/merged/platform_safety_rules"
-        return {
-            "ok": False,
-            "path": item["_path"],
-            "source": "cloud_shared_snapshot",
-            "readonly": True,
-            "error": "platform_safety_rules_managed_by_cloud",
-            "item": item,
-        }
-    path = resolve_platform_safety_rules_path(settings)
-    item = normalize_platform_safety_rules(payload)
-    item.pop("_path", None)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_suffix(path.suffix + ".tmp")
-    tmp.write_text(json.dumps(item, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-    tmp.replace(path)
-    return {"ok": True, "path": str(path), "source": "local_file", "readonly": False, "item": item}
+    item = normalize_platform_safety_rules(cloud) if cloud is not None else empty_rules()
+    item["_path"] = "cloud://shared_snapshot/policy_bundle/merged/platform_safety_rules"
+    return {
+        "ok": False,
+        "path": item["_path"],
+        "source": "cloud_shared_snapshot",
+        "readonly": True,
+        "error": "platform_safety_rules_managed_by_cloud",
+        "item": item,
+    }
 
 
 def normalize_platform_safety_rules(payload: dict[str, Any]) -> dict[str, Any]:

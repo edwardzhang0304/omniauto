@@ -13,6 +13,19 @@
     "updated_at": "2026-05-05T20:58:54"
   },
   {
+    "source_id": "source_3117f547f363949e",
+    "tenant_id": "jiangsu_chejin_usedcar_customer_20260501",
+    "layer": "tenant",
+    "source_type": "upload",
+    "category": "policies",
+    "product_id": "",
+    "source_path": "D:\\AI\\omniauto\\apps\\wechat_ai_customer_service\\data\\tenants\\jiangsu_chejin_usedcar_customer_20260501\\raw_inbox\\policies\\upload_300035489de62b2d_chejin_policies_CHEJIN_20260508_203205.txt",
+    "content_hash": "63ecd271314fae6b152979bdd80738a4",
+    "status": "active",
+    "created_at": "2026-05-08T20:32:47",
+    "updated_at": "2026-05-08T20:32:47"
+  },
+  {
     "source_id": "source_316b9017584ef2ad",
     "tenant_id": "jiangsu_chejin_usedcar_customer_20260501",
     "layer": "tenant",
@@ -104,6 +117,19 @@
     "updated_at": "2026-05-05T21:29:11"
   },
   {
+    "source_id": "source_5d91441b8669358e",
+    "tenant_id": "jiangsu_chejin_usedcar_customer_20260501",
+    "layer": "tenant",
+    "source_type": "upload",
+    "category": "products",
+    "product_id": "",
+    "source_path": "D:\\AI\\omniauto\\apps\\wechat_ai_customer_service\\data\\tenants\\jiangsu_chejin_usedcar_customer_20260501\\raw_inbox\\products\\upload_35b0b53f93c4d866_chejin_vehicles_CHEJIN_20260508_202448.txt",
+    "content_hash": "977f1c0acf351f5fe9682b0d4049b90b",
+    "status": "active",
+    "created_at": "2026-05-08T20:24:48",
+    "updated_at": "2026-05-08T20:24:48"
+  },
+  {
     "source_id": "source_6c69bdf8c6a9fc48",
     "tenant_id": "jiangsu_chejin_usedcar_customer_20260501",
     "layer": "tenant",
@@ -115,6 +141,19 @@
     "status": "active",
     "created_at": "2026-05-05T21:42:58",
     "updated_at": "2026-05-05T21:42:58"
+  },
+  {
+    "source_id": "source_6e6f88faf3a842cd",
+    "tenant_id": "jiangsu_chejin_usedcar_customer_20260501",
+    "layer": "tenant",
+    "source_type": "upload",
+    "category": "chats",
+    "product_id": "",
+    "source_path": "D:\\AI\\omniauto\\apps\\wechat_ai_customer_service\\data\\tenants\\jiangsu_chejin_usedcar_customer_20260501\\raw_inbox\\chats\\upload_b253203c109f88bb_chejin_chats_CHEJIN_20260508_210605.txt",
+    "content_hash": "8a7ceb2873094f4fcf8c5c03d7d59652",
+    "status": "active",
+    "created_at": "2026-05-08T21:10:09",
+    "updated_at": "2026-05-08T21:10:09"
   },
   {
     "source_id": "source_78c21bc6cff3241a",
@@ -130,6 +169,45 @@
     "updated_at": "2026-05-05T20:55:40"
   },
   {
+    "source_id": "source_7b1a2c00c9df86b9",
+    "tenant_id": "jiangsu_chejin_usedcar_customer_20260501",
+    "layer": "tenant",
+    "source_type": "upload",
+    "category": "policies",
+    "product_id": "",
+    "source_path": "D:\\AI\\omniauto\\apps\\wechat_ai_customer_service\\data\\tenants\\jiangsu_chejin_usedcar_customer_20260501\\raw_inbox\\policies\\upload_6cc8151317f62911_chejin_policies_CHEJIN_20260508_202448.txt",
+    "content_hash": "568a2d87ca6d5e59eeb4e4a5dda8e6e3",
+    "status": "active",
+    "created_at": "2026-05-08T20:25:28",
+    "updated_at": "2026-05-08T20:25:28"
+  },
+  {
+    "source_id": "source_8a2bbfd63cdc8a87",
+    "tenant_id": "jiangsu_chejin_usedcar_customer_20260501",
+    "layer": "tenant",
+    "source_type": "upload",
+    "category": "policies",
+    "product_id": "",
+    "source_path": "D:\\AI\\omniauto\\apps\\wechat_ai_customer_service\\data\\tenants\\jiangsu_chejin_usedcar_customer_20260501\\raw_inbox\\policies\\upload_65f192bcad27df2e_chejin_policies_CHEJIN_20260508_203901.txt",
+    "content_hash": "5e2737758ff741926cbb7bd9646a66b5",
+    "status": "active",
+    "created_at": "2026-05-08T20:40:16",
+    "updated_at": "2026-05-08T20:40:16"
+  },
+  {
+    "source_id": "source_8a8a321ca1490095",
+    "tenant_id": "jiangsu_chejin_usedcar_customer_20260501",
+    "layer": "tenant",
+    "source_type": "upload",
+    "category": "chats",
+    "product_id": "",
+    "source_path": "D:\\AI\\omniauto\\apps\\wechat_ai_customer_service\\data\\tenants\\jiangsu_chejin_usedcar_customer_20260501\\raw_inbox\\chats\\upload_86c46e73f42f2449_chejin_chats_CHEJIN_20260508_213944.txt",
+    "content_hash": "0eb553f787c0a982060adefe0da6d168",
+    "status": "active",
+    "created_at": "2026-05-08T21:42:55",
+    "updated_at": "2026-05-08T21:42:55"
+  },
+  {
     "source_id": "source_929e1fc1408d014e",
     "tenant_id": "jiangsu_chejin_usedcar_customer_20260501",
     "layer": "tenant",
@@ -143,6 +221,45 @@
     "updated_at": "2026-05-05T20:52:51"
   },
   {
+    "source_id": "source_9a03c60e7887b2b6",
+    "tenant_id": "jiangsu_chejin_usedcar_customer_20260501",
+    "layer": "tenant",
+    "source_type": "upload",
+    "category": "chats",
+    "product_id": "",
+    "source_path": "D:\\AI\\omniauto\\apps\\wechat_ai_customer_service\\data\\tenants\\jiangsu_chejin_usedcar_customer_20260501\\raw_inbox\\chats\\upload_29ae1b9a370dd0af_chejin_chats_CHEJIN_20260508_202448.txt",
+    "content_hash": "0b421520d819e634f6ca98cdef2de51b",
+    "status": "active",
+    "created_at": "2026-05-08T20:26:10",
+    "updated_at": "2026-05-08T20:26:10"
+  },
+  {
+    "source_id": "source_9e1d78047c8d6a39",
+    "tenant_id": "jiangsu_chejin_usedcar_customer_20260501",
+    "layer": "tenant",
+    "source_type": "upload",
+    "category": "chats",
+    "product_id": "",
+    "source_path": "D:\\AI\\omniauto\\apps\\wechat_ai_customer_service\\data\\tenants\\jiangsu_chejin_usedcar_customer_20260501\\raw_inbox\\chats\\upload_aa030d4750e09d6a_chejin_chats_CHEJIN_20260508_203901.txt",
+    "content_hash": "d24b852aa42210c2bb3d4d95b8c88907",
+    "status": "active",
+    "created_at": "2026-05-08T20:41:30",
+    "updated_at": "2026-05-08T20:41:30"
+  },
+  {
+    "source_id": "source_9fcf49385c3ae5f0",
+    "tenant_id": "jiangsu_chejin_usedcar_customer_20260501",
+    "layer": "tenant",
+    "source_type": "upload",
+    "category": "chats",
+    "product_id": "",
+    "source_path": "D:\\AI\\omniauto\\apps\\wechat_ai_customer_service\\data\\tenants\\jiangsu_chejin_usedcar_customer_20260501\\raw_inbox\\chats\\upload_0849a2ce7c517106_chejin_chats_CHEJIN_20260508_203205.txt",
+    "content_hash": "2fac976ef59a2da54ef2fd64e7a4ed6d",
+    "status": "active",
+    "created_at": "2026-05-08T20:33:30",
+    "updated_at": "2026-05-08T20:33:30"
+  },
+  {
     "source_id": "source_a79ad4ee5fd8f21d",
     "tenant_id": "jiangsu_chejin_usedcar_customer_20260501",
     "layer": "tenant",
@@ -154,6 +271,58 @@
     "status": "active",
     "created_at": "2026-05-05T20:52:51",
     "updated_at": "2026-05-05T20:52:51"
+  },
+  {
+    "source_id": "source_a80d81bb19542fdf",
+    "tenant_id": "jiangsu_chejin_usedcar_customer_20260501",
+    "layer": "tenant",
+    "source_type": "upload",
+    "category": "policies",
+    "product_id": "",
+    "source_path": "D:\\AI\\omniauto\\apps\\wechat_ai_customer_service\\data\\tenants\\jiangsu_chejin_usedcar_customer_20260501\\raw_inbox\\policies\\upload_38046808a7dcc314_chejin_policies_CHEJIN_20260508_204654.txt",
+    "content_hash": "688f6147f1eeb4b6f4293a093193b28b",
+    "status": "active",
+    "created_at": "2026-05-08T20:48:14",
+    "updated_at": "2026-05-08T20:48:14"
+  },
+  {
+    "source_id": "source_ba39c45fe5830d0b",
+    "tenant_id": "jiangsu_chejin_usedcar_customer_20260501",
+    "layer": "tenant",
+    "source_type": "upload",
+    "category": "policies",
+    "product_id": "",
+    "source_path": "D:\\AI\\omniauto\\apps\\wechat_ai_customer_service\\data\\tenants\\jiangsu_chejin_usedcar_customer_20260501\\raw_inbox\\policies\\upload_077daa1e82965784_chejin_policies_CHEJIN_20260508_210605.txt",
+    "content_hash": "c6d11f9ba60c2c0b1bc0584c097ba20c",
+    "status": "active",
+    "created_at": "2026-05-08T21:07:55",
+    "updated_at": "2026-05-08T21:07:55"
+  },
+  {
+    "source_id": "source_cacde22aef2a262a",
+    "tenant_id": "jiangsu_chejin_usedcar_customer_20260501",
+    "layer": "tenant",
+    "source_type": "upload",
+    "category": "products",
+    "product_id": "",
+    "source_path": "D:\\AI\\omniauto\\apps\\wechat_ai_customer_service\\data\\tenants\\jiangsu_chejin_usedcar_customer_20260501\\raw_inbox\\products\\upload_ec1460427795c87a_chejin_vehicles_CHEJIN_20260508_210605.txt",
+    "content_hash": "77294e542edeb215bb499080f464ff99",
+    "status": "active",
+    "created_at": "2026-05-08T21:06:05",
+    "updated_at": "2026-05-08T21:06:05"
+  },
+  {
+    "source_id": "source_cd647dbe5bb6df50",
+    "tenant_id": "jiangsu_chejin_usedcar_customer_20260501",
+    "layer": "tenant",
+    "source_type": "upload",
+    "category": "products",
+    "product_id": "",
+    "source_path": "D:\\AI\\omniauto\\apps\\wechat_ai_customer_service\\data\\tenants\\jiangsu_chejin_usedcar_customer_20260501\\raw_inbox\\products\\upload_76df35cb4855534a_chejin_vehicles_CHEJIN_20260508_203205.txt",
+    "content_hash": "492dbded89d04acfcc5c68e5ec22d79d",
+    "status": "active",
+    "created_at": "2026-05-08T20:32:05",
+    "updated_at": "2026-05-08T20:32:05"
   },
   {
     "source_id": "source_d28ec65c406ad2d0",
@@ -195,6 +364,58 @@
     "updated_at": "2026-05-05T20:55:39"
   },
   {
+    "source_id": "source_e38e29f7db4982a3",
+    "tenant_id": "jiangsu_chejin_usedcar_customer_20260501",
+    "layer": "tenant",
+    "source_type": "upload",
+    "category": "products",
+    "product_id": "",
+    "source_path": "D:\\AI\\omniauto\\apps\\wechat_ai_customer_service\\data\\tenants\\jiangsu_chejin_usedcar_customer_20260501\\raw_inbox\\products\\upload_7bddaab63c71b5ec_chejin_vehicles_CHEJIN_20260508_203901.txt",
+    "content_hash": "04879d14262c04b5fa7267d415964fc0",
+    "status": "active",
+    "created_at": "2026-05-08T20:39:02",
+    "updated_at": "2026-05-08T20:39:02"
+  },
+  {
+    "source_id": "source_e6c45e3859b62d94",
+    "tenant_id": "jiangsu_chejin_usedcar_customer_20260501",
+    "layer": "tenant",
+    "source_type": "upload",
+    "category": "products",
+    "product_id": "",
+    "source_path": "D:\\AI\\omniauto\\apps\\wechat_ai_customer_service\\data\\tenants\\jiangsu_chejin_usedcar_customer_20260501\\raw_inbox\\products\\upload_9cc8390c29acef33_chejin_vehicles_CHEJIN_20260508_204654.txt",
+    "content_hash": "310319c18fb54577fdc9cd1a1d487184",
+    "status": "active",
+    "created_at": "2026-05-08T20:46:55",
+    "updated_at": "2026-05-08T20:46:55"
+  },
+  {
+    "source_id": "source_ec17dfccdfdd71cc",
+    "tenant_id": "jiangsu_chejin_usedcar_customer_20260501",
+    "layer": "tenant",
+    "source_type": "upload",
+    "category": "chats",
+    "product_id": "",
+    "source_path": "D:\\AI\\omniauto\\apps\\wechat_ai_customer_service\\data\\tenants\\jiangsu_chejin_usedcar_customer_20260501\\raw_inbox\\chats\\upload_dff769dd5e80da10_chejin_chats_CHEJIN_20260508_204654.txt",
+    "content_hash": "b3995f12b0dce2c1b521c092d016e9bd",
+    "status": "active",
+    "created_at": "2026-05-08T20:49:36",
+    "updated_at": "2026-05-08T20:49:36"
+  },
+  {
+    "source_id": "source_f507ddcdd0c781c9",
+    "tenant_id": "jiangsu_chejin_usedcar_customer_20260501",
+    "layer": "tenant",
+    "source_type": "upload",
+    "category": "products",
+    "product_id": "",
+    "source_path": "D:\\AI\\omniauto\\apps\\wechat_ai_customer_service\\data\\tenants\\jiangsu_chejin_usedcar_customer_20260501\\raw_inbox\\products\\upload_b54383def935b7b7_chejin_vehicles_CHEJIN_20260508_213944.txt",
+    "content_hash": "ffafa110e7e9a2920cec455ec334a6ff",
+    "status": "active",
+    "created_at": "2026-05-08T21:39:45",
+    "updated_at": "2026-05-08T21:39:45"
+  },
+  {
     "source_id": "source_f95396f6ca16cf28",
     "tenant_id": "jiangsu_chejin_usedcar_customer_20260501",
     "layer": "tenant",
@@ -206,6 +427,19 @@
     "status": "active",
     "created_at": "2026-05-05T21:42:59",
     "updated_at": "2026-05-05T21:42:59"
+  },
+  {
+    "source_id": "source_f963bec7d126acb1",
+    "tenant_id": "jiangsu_chejin_usedcar_customer_20260501",
+    "layer": "tenant",
+    "source_type": "upload",
+    "category": "policies",
+    "product_id": "",
+    "source_path": "D:\\AI\\omniauto\\apps\\wechat_ai_customer_service\\data\\tenants\\jiangsu_chejin_usedcar_customer_20260501\\raw_inbox\\policies\\upload_39327d0b2e0bfa0e_chejin_policies_CHEJIN_20260508_213944.txt",
+    "content_hash": "1f7ed4c15ccb9fcbd547a393287a7bb7",
+    "status": "active",
+    "created_at": "2026-05-08T21:41:27",
+    "updated_at": "2026-05-08T21:41:27"
   },
   {
     "source_id": "source_fcf01fd22b4b7dc6",
@@ -247,6 +481,19 @@
     "updated_at": "2026-05-05T21:43:00"
   },
   {
+    "source_id": "source_153435b2254c5d1c",
+    "tenant_id": "jiangsu_chejin_usedcar_customer_20260501",
+    "layer": "tenant",
+    "source_type": "wechat_raw_message",
+    "category": "file_transfer",
+    "product_id": "",
+    "source_path": "D:\\AI\\omniauto\\runtime\\apps\\wechat_ai_customer_service\\tenants\\jiangsu_chejin_usedcar_customer_20260501\\raw_messages\\learning_batches\\raw_batch_9d4f9f6defd687e5c044.txt",
+    "content_hash": "1bbcd888baa7595c9ffb7710804f09c8",
+    "status": "active",
+    "created_at": "2026-05-08T21:16:18",
+    "updated_at": "2026-05-08T21:16:18"
+  },
+  {
     "source_id": "source_1b465965b3d08cdd",
     "tenant_id": "jiangsu_chejin_usedcar_customer_20260501",
     "layer": "tenant",
@@ -273,6 +520,19 @@
     "updated_at": "2026-05-05T21:43:05"
   },
   {
+    "source_id": "source_4d844fe1e784779d",
+    "tenant_id": "jiangsu_chejin_usedcar_customer_20260501",
+    "layer": "tenant",
+    "source_type": "wechat_raw_message",
+    "category": "group",
+    "product_id": "",
+    "source_path": "D:\\AI\\omniauto\\runtime\\apps\\wechat_ai_customer_service\\tenants\\jiangsu_chejin_usedcar_customer_20260501\\raw_messages\\learning_batches\\raw_batch_e3b37f50f0d05c696809.txt",
+    "content_hash": "669b0c4a343191004c5711899403b480",
+    "status": "active",
+    "created_at": "2026-05-08T21:13:55",
+    "updated_at": "2026-05-08T21:13:55"
+  },
+  {
     "source_id": "source_500bc0e3b6ad53ab",
     "tenant_id": "jiangsu_chejin_usedcar_customer_20260501",
     "layer": "tenant",
@@ -297,6 +557,19 @@
     "status": "active",
     "created_at": "2026-05-05T21:43:02",
     "updated_at": "2026-05-05T21:43:02"
+  },
+  {
+    "source_id": "source_5ece5aecdfeaa96e",
+    "tenant_id": "jiangsu_chejin_usedcar_customer_20260501",
+    "layer": "tenant",
+    "source_type": "wechat_raw_message",
+    "category": "file_transfer",
+    "product_id": "",
+    "source_path": "D:\\AI\\omniauto\\runtime\\apps\\wechat_ai_customer_service\\tenants\\jiangsu_chejin_usedcar_customer_20260501\\raw_messages\\learning_batches\\raw_batch_126a71b9cea3bea5d65f.txt",
+    "content_hash": "a3fea8269f2b9e03aee44e8e9fc8ddfc",
+    "status": "active",
+    "created_at": "2026-05-08T21:46:34",
+    "updated_at": "2026-05-08T21:46:34"
   },
   {
     "source_id": "source_633641a75e83d324",
@@ -336,6 +609,19 @@
     "status": "active",
     "created_at": "2026-05-05T20:59:03",
     "updated_at": "2026-05-05T20:59:03"
+  },
+  {
+    "source_id": "source_92bf5ddaa7d6dacf",
+    "tenant_id": "jiangsu_chejin_usedcar_customer_20260501",
+    "layer": "tenant",
+    "source_type": "wechat_raw_message",
+    "category": "group",
+    "product_id": "",
+    "source_path": "D:\\AI\\omniauto\\runtime\\apps\\wechat_ai_customer_service\\tenants\\jiangsu_chejin_usedcar_customer_20260501\\raw_messages\\learning_batches\\raw_batch_5e1dd22c5c9ec885d912.txt",
+    "content_hash": "e16dc82792026ff133b8b93591304ff9",
+    "status": "active",
+    "created_at": "2026-05-08T21:45:15",
+    "updated_at": "2026-05-08T21:45:15"
   },
   {
     "source_id": "source_b72a7ef7759a6e86",

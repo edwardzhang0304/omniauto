@@ -124,7 +124,13 @@ def build_structured_evidence_pack(
 def build_category_evidence_pack(text: str, *, context: dict[str, Any] | None = None) -> dict[str, Any]:
     context = context or {}
     category_pack = EvidenceResolver(KnowledgeRuntime()).resolve(text, context=context)
-    intent_tags = sorted(set(category_pack.get("intent_tags", []) or []) | set(detect_intent_tags(text)))
+    resolver_tags = set(category_pack.get("intent_tags", []) or [])
+    detected_tags = set(detect_intent_tags(text))
+    # If the resolver already inferred meaningful intents, don't let local keyword detection
+    # inject "unknown" back and override the inferred classification.
+    if resolver_tags - {"unknown"}:
+        detected_tags.discard("unknown")
+    intent_tags = sorted(resolver_tags | detected_tags)
     evidence = legacy_evidence_from_category_pack(category_pack)
     safety = build_safety_summary(intent_tags, evidence, text)
     rag_evidence = build_rag_runtime_evidence(text, intent_tags=intent_tags, evidence=evidence, context=context)
@@ -291,7 +297,7 @@ def should_use_rag(intent_tags: list[str], evidence: dict[str, Any], *, text: st
     has_business_evidence = any(evidence.get(key) for key in ("products", "faq", "policies", "product_scoped"))
     if not has_business_evidence:
         return True
-    if tag_set & {"scene_product", "spec", "warranty", "small_talk", "unknown"}:
+    if tag_set & {"scene_product", "spec", "warranty", "small_talk", "unknown", "catalog"}:
         return True
     return False
 
@@ -578,7 +584,14 @@ def merge_style_evidence(evidence: dict[str, Any], style_data: dict[str, Any], i
 
 def build_safety_summary(intent_tags: list[str], evidence: dict[str, Any], text: str) -> dict[str, Any]:
     tag_set = set(intent_tags)
-    faq_requires_handoff = any(item.get("needs_handoff") for item in evidence.get("faq", []) or [])
+    # Privacy minimum collection is a guideline, not a handoff trigger, when the customer is providing data.
+    faq_requires_handoff = any(
+        item.get("needs_handoff")
+        for item in evidence.get("faq", []) or []
+        if not (
+            item.get("intent") == "shared_global_privacy_minimum_collection" and "customer_data" in tag_set
+        )
+    )
     discount_check = evaluate_discount_request(text, evidence)
     must_handoff = bool(tag_set & {"handoff"} or faq_requires_handoff)
     has_business_evidence = has_authoritative_business_evidence(intent_tags, evidence)
@@ -590,11 +603,13 @@ def build_safety_summary(intent_tags: list[str], evidence: dict[str, Any], text:
     if discount_check.get("needs_handoff"):
         must_handoff = True
         reasons.append(str(discount_check.get("reason") or "discount_requires_approval"))
+    has_chat_evidence = bool(evidence.get("style_examples"))
     style_only = bool(tag_set & {"small_talk", "greeting"}) and not (tag_set - {"small_talk", "greeting"})
     customer_data_only = "customer_data" in tag_set and not (tag_set - {"customer_data"})
     if not has_business_evidence and not style_only and not customer_data_only:
-        reasons.append("no_relevant_business_evidence")
-        must_handoff = True
+        if "unknown" in tag_set or not has_chat_evidence or (tag_set & intent_group("business")):
+            reasons.append("no_relevant_business_evidence")
+            must_handoff = True
     elif "unknown" in tag_set and not has_business_evidence:
         reasons.append("no_relevant_business_evidence")
         must_handoff = True

@@ -28,7 +28,10 @@ def policy_type_to_intent() -> dict[str, str]:
 
 
 def product_context_intents() -> set[str]:
-    return intent_group("product_context")
+    group = intent_group("product_context")
+    if group:
+        return group
+    return {"shipping", "warranty", "spec", "quote", "stock", "discount", "scene_product"}
 
 
 def business_intents() -> set[str]:

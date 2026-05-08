@@ -8,7 +8,7 @@
     "legacy_target": "style_examples"
   },
   "data": {
-    "customer_message": "",
+    "customer_message": "哈哈我先随便看看",
     "service_reply": "哈哈没事，您先慢慢看。我这边主要帮您查商品、报价和发货售后，看到合适的产品直接发我名称和数量就行。",
     "intent_tags": [
       "small_talk"

@@ -828,13 +828,12 @@ class SharedKnowledgeService:
             items = list(state.get("shared_library", {}).values())
             if not include_inactive:
                 items = [item for item in items if str(item.get("status") or "active") == "active"]
-            industry_filter = normalize_shared_item_industry_id(industry_id) if str(industry_id or "").strip() else ""
-            if industry_filter:
-                items = [
-                    item
-                    for item in items
-                    if normalize_shared_item_industry_id(item.get("industry_id") or GLOBAL_INDUSTRY_ID) == industry_filter
-                ]
+            industry_filter = normalize_shared_item_industry_id(industry_id) if str(industry_id or "").strip() else GLOBAL_INDUSTRY_ID
+            items = [
+                item
+                for item in items
+                if normalize_shared_item_industry_id(item.get("industry_id") or GLOBAL_INDUSTRY_ID) == industry_filter
+            ]
             normalized = [public_shared_library_record(item) for item in items]
             return sorted(normalized, key=lambda item: str(item.get("updated_at") or item.get("created_at") or ""), reverse=True)
 

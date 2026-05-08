@@ -19,13 +19,13 @@
       "电子发票",
       "发票资料"
     ],
-    "answer": "合并内容测试",
+    "answer": "我们可以开具增值税普通发票和专用发票。开票信息需要提供单位名称和税号，付款后1-3个工作日内开具并邮寄或发送电子发票。",
     "allow_auto_reply": true,
     "requires_handoff": false,
     "handoff_reason": "",
     "operator_alert": false,
     "risk_level": "normal",
-    "name": "合并后的发票与物流政策"
+    "name": "发票政策"
   },
   "runtime": {
     "allow_auto_reply": true,

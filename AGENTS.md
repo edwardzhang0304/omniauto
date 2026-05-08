@@ -25,3 +25,12 @@ For `apps/wechat_ai_customer_service`, the test environment has an approved loca
   - local dual-port simulation, or
   - a real reachable VPS base URL.
 - For live regression scripts, if bootstrap is blocked by `cloud_authoritative_access_required` + `cloud_base_url_missing`, classify as expected environment block and fix the connection path first.
+
+## Local Test Secrets Policy (Project-Specific Override)
+
+For `apps/wechat_ai_customer_service` local/test migration workflows, the repository owner explicitly allows plaintext test credentials in runtime/test artifacts when needed for direct environment migration and replay.
+
+- Do **not** auto-redact or auto-remove plaintext test keys/tokens from local runtime/test files unless explicitly requested by the user in that task.
+- Treat this as an intentional test-environment decision, not an automatic bug.
+- Scope: local runtime/test artifacts and migration payloads only.
+- Production/public release hardening is still a separate step and must be requested explicitly.

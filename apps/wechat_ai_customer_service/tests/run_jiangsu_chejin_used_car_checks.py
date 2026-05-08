@@ -149,7 +149,7 @@ def ensure_customer_account() -> None:
         "display_name": DISPLAY_NAME,
         "role": "customer",
         "email": EMAIL,
-        "password_hash": existing.get("password_hash") or hash_password(PASSWORD),
+        "password_hash": hash_password(PASSWORD),
         "tenant_ids": [TENANT_ID],
         "active_tenant_id": TENANT_ID,
         "resource_scopes": ["*"],

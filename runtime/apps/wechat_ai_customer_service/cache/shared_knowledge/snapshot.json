@@ -1,49 +1,164 @@
 {
   "schema_version": 1,
   "source": "cloud_official_shared_library",
-  "version": "shared_3fb8cfbabbe1e7c607ec",
-  "tenant_id": "jiangsu_chejin_usedcar_customer_20260501",
-  "generated_at": "2026-05-05T19:45:31+00:00",
+  "version": "shared_e514b40cbb72ea80ee8a",
+  "tenant_id": "default",
+  "tenant_industry_id": "used_car",
+  "industry_catalog": [
+    {
+      "industry_id": "used_car",
+      "name": "二手车",
+      "description": "二手车销售与售后咨询场景。",
+      "status": "active"
+    },
+    {
+      "industry_id": "home_appliance",
+      "name": "家电",
+      "description": "家电商品销售、物流安装与售后场景。",
+      "status": "active"
+    },
+    {
+      "industry_id": "fast_food",
+      "name": "快餐",
+      "description": "快餐门店点餐、配送与食品安全咨询场景。",
+      "status": "active"
+    },
+    {
+      "industry_id": "lab_instruments",
+      "name": "实验室仪器",
+      "description": "实验室仪器销售、校准维保与资质咨询场景。",
+      "status": "active"
+    }
+  ],
+  "generated_at": "2026-05-08T12:45:44+00:00",
   "ttl_seconds": 1800,
   "refresh_after_seconds": 300,
-  "issued_at": "2026-05-05T19:45:31+00:00",
-  "refresh_after_at": "2026-05-05T19:50:31+00:00",
-  "expires_at": "2026-05-05T20:15:31+00:00",
-  "lease_id": "shared_lease_20b0cd682e2caed00790",
+  "issued_at": "2026-05-08T14:37:38.543551+00:00",
+  "refresh_after_at": "2026-05-08T12:50:44+00:00",
+  "expires_at": "2026-05-08T15:37:38.543551+00:00",
+  "lease_id": "shared_lease_92d4733bf039b09a8579",
   "cache_policy": {
     "mode": "cloud_authoritative_lease",
     "ttl_seconds": 1800,
     "refresh_after_seconds": 300,
-    "issued_at": "2026-05-05T19:45:31+00:00",
-    "refresh_after_at": "2026-05-05T19:50:31+00:00",
-    "expires_at": "2026-05-05T20:15:31+00:00",
-    "lease_id": "shared_lease_20b0cd682e2caed00790",
+    "issued_at": "2026-05-08T12:45:44+00:00",
+    "refresh_after_at": "2026-05-08T12:50:44+00:00",
+    "expires_at": "2026-05-08T15:37:38.543551+00:00",
+    "lease_id": "shared_lease_92d4733bf039b09a8579",
     "requires_cloud_refresh": true
   },
   "categories": [
     {
       "category_id": "global_guidelines",
       "name": "global_guidelines",
-      "kind": "global",
+      "kind": "mixed",
       "enabled": true,
-      "item_count": 1
+      "item_count": 5,
+      "global_item_count": 2,
+      "industry_item_count": 3
     },
     {
       "category_id": "reply_style",
       "name": "reply_style",
       "kind": "global",
       "enabled": true,
-      "item_count": 2
+      "item_count": 2,
+      "global_item_count": 2,
+      "industry_item_count": 0
     },
     {
       "category_id": "risk_control",
       "name": "risk_control",
-      "kind": "global",
+      "kind": "mixed",
       "enabled": true,
-      "item_count": 7
+      "item_count": 12,
+      "global_item_count": 10,
+      "industry_item_count": 2
     }
   ],
   "items": [
+    {
+      "item_id": "shared_used_car_transfer_docs",
+      "industry_id": "used_car",
+      "category_id": "global_guidelines",
+      "title": "二手车交易资料完整性",
+      "content": "提醒客户交易完成后应交付合法证照与交易凭证，涉及过户办理必须按登记流程执行。",
+      "keywords": [
+        "过户",
+        "登记",
+        "发票",
+        "行驶证",
+        "登记证书"
+      ],
+      "applies_to": "二手车交易流程咨询",
+      "notes": "参考《二手车流通管理办法》第二十二至二十五条",
+      "status": "active",
+      "source": "system_seed_industry_library",
+      "tenant_id": "default",
+      "data": {
+        "title": "二手车交易资料完整性",
+        "guideline_text": "提醒客户交易完成后应交付合法证照与交易凭证，涉及过户办理必须按登记流程执行。"
+      },
+      "created_by": "system_seed",
+      "created_at": "2026-05-07T21:57:53+00:00",
+      "updated_by": "system_seed",
+      "updated_at": "2026-05-07T21:57:53+00:00"
+    },
+    {
+      "item_id": "shared_used_car_test_drive_notice",
+      "industry_id": "used_car",
+      "category_id": "global_guidelines",
+      "title": "二手车试驾安全提示",
+      "content": "试驾沟通需明确有效证件、保险覆盖、试驾路线与责任边界；涉及高风险路况或改装车辆必须人工确认。",
+      "keywords": [
+        "试驾",
+        "保险",
+        "证件",
+        "改装车",
+        "责任"
+      ],
+      "applies_to": "二手车试驾预约与沟通",
+      "notes": "",
+      "status": "active",
+      "source": "system_seed_industry_library",
+      "tenant_id": "default",
+      "data": {
+        "title": "二手车试驾安全提示",
+        "guideline_text": "试驾沟通需明确有效证件、保险覆盖、试驾路线与责任边界；涉及高风险路况或改装车辆必须人工确认。"
+      },
+      "created_by": "system_seed",
+      "created_at": "2026-05-07T21:57:53+00:00",
+      "updated_by": "system_seed",
+      "updated_at": "2026-05-07T21:57:53+00:00"
+    },
+    {
+      "item_id": "shared_used_car_compliance_disclosure",
+      "industry_id": "used_car",
+      "category_id": "global_guidelines",
+      "title": "二手车车况披露规则",
+      "content": "涉及事故、水泡、火烧、里程、过户次数、检修记录等问题，必须基于可验证资料；不确定时先说明待核验。",
+      "keywords": [
+        "车况",
+        "事故",
+        "水泡",
+        "火烧",
+        "里程",
+        "过户"
+      ],
+      "applies_to": "二手车咨询场景",
+      "notes": "参考《二手车流通管理办法》卖方信息披露要求",
+      "status": "active",
+      "source": "system_seed_industry_library",
+      "tenant_id": "default",
+      "data": {
+        "title": "二手车车况披露规则",
+        "guideline_text": "涉及事故、水泡、火烧、里程、过户次数、检修记录等问题，必须基于可验证资料；不确定时先说明待核验。"
+      },
+      "created_by": "system_seed",
+      "created_at": "2026-05-07T21:57:53+00:00",
+      "updated_by": "system_seed",
+      "updated_at": "2026-05-07T21:57:53+00:00"
+    },
     {
       "item_id": "customer_service_style_guidelines",
       "category_id": "global_guidelines",
@@ -99,7 +214,33 @@
       "updated_at": "2026-04-29T17:54:51+00:00",
       "keywords": [],
       "applies_to": "",
-      "notes": ""
+      "notes": "",
+      "industry_id": "global"
+    },
+    {
+      "item_id": "shared_global_evidence_first",
+      "industry_id": "global",
+      "category_id": "global_guidelines",
+      "title": "证据优先回复",
+      "content": "回复必须优先依据正式知识、共享规则和已确认上下文；无证据时明确说明需核实并转人工。",
+      "keywords": [
+        "证据",
+        "核实",
+        "转人工"
+      ],
+      "applies_to": "所有行业的客服对话",
+      "notes": "平台通用规则",
+      "status": "active",
+      "source": "system_seed_industry_library",
+      "tenant_id": "default",
+      "data": {
+        "title": "证据优先回复",
+        "guideline_text": "回复必须优先依据正式知识、共享规则和已确认上下文；无证据时明确说明需核实并转人工。"
+      },
+      "created_by": "system_seed",
+      "created_at": "2026-05-07T21:57:53+00:00",
+      "updated_by": "system_seed",
+      "updated_at": "2026-05-07T21:57:53+00:00"
     },
     {
       "item_id": "shared_027244c6fadcbe636d",
@@ -129,7 +270,8 @@
       "created_by": "platform-admin",
       "created_at": "2026-05-02T20:07:45+00:00",
       "updated_by": "platform-admin",
-      "updated_at": "2026-05-02T20:07:45+00:00"
+      "updated_at": "2026-05-02T20:07:45+00:00",
+      "industry_id": "global"
     },
     {
       "item_id": "shared_23d1898820124cbcff",
@@ -159,7 +301,8 @@
       "created_by": "platform-admin",
       "created_at": "2026-05-02T20:07:56+00:00",
       "updated_by": "platform-admin",
-      "updated_at": "2026-05-02T20:07:56+00:00"
+      "updated_at": "2026-05-02T20:07:56+00:00",
+      "industry_id": "global"
     },
     {
       "item_id": "shared_e0472c24f2467fa627",
@@ -199,7 +342,68 @@
       "created_by": "platform-admin",
       "created_at": "2026-05-02T19:56:46+00:00",
       "updated_by": "platform-admin",
-      "updated_at": "2026-05-02T19:56:46+00:00"
+      "updated_at": "2026-05-02T19:56:46+00:00",
+      "industry_id": "global"
+    },
+    {
+      "item_id": "shared_used_car_deposit_contract_boundary",
+      "industry_id": "used_car",
+      "category_id": "risk_control",
+      "title": "二手车订金合同边界",
+      "content": "订金是否可退、违约责任、车况争议处理必须以书面合同或门店条款为准，自动回复不得替代合同承诺。",
+      "keywords": [
+        "订金",
+        "定金",
+        "可退",
+        "违约",
+        "合同"
+      ],
+      "applies_to": "二手车下订与合同咨询",
+      "notes": "",
+      "status": "active",
+      "source": "system_seed_industry_library",
+      "tenant_id": "default",
+      "data": {
+        "title": "二手车订金合同边界",
+        "guideline_text": "订金是否可退、违约责任、车况争议处理必须以书面合同或门店条款为准，自动回复不得替代合同承诺。",
+        "allow_auto_reply": false,
+        "requires_handoff": true,
+        "handoff_reason": "used_car_contract_manual_review"
+      },
+      "created_by": "system_seed",
+      "created_at": "2026-05-07T21:57:53+00:00",
+      "updated_by": "system_seed",
+      "updated_at": "2026-05-07T21:57:53+00:00"
+    },
+    {
+      "item_id": "shared_used_car_finance_handoff",
+      "industry_id": "used_car",
+      "category_id": "risk_control",
+      "title": "二手车金融审批风险边界",
+      "content": "征信、审批通过率、放款时效等不能保证；只能说明流程与所需资料，并转人工顾问。",
+      "keywords": [
+        "征信",
+        "审批",
+        "放款",
+        "首付",
+        "月供"
+      ],
+      "applies_to": "二手车金融问答",
+      "notes": "",
+      "status": "active",
+      "source": "system_seed_industry_library",
+      "tenant_id": "default",
+      "data": {
+        "title": "二手车金融审批风险边界",
+        "guideline_text": "征信、审批通过率、放款时效等不能保证；只能说明流程与所需资料，并转人工顾问。",
+        "allow_auto_reply": false,
+        "requires_handoff": true,
+        "handoff_reason": "used_car_finance_manual_review"
+      },
+      "created_by": "system_seed",
+      "created_at": "2026-05-07T21:57:53+00:00",
+      "updated_by": "system_seed",
+      "updated_at": "2026-05-07T21:57:53+00:00"
     },
     {
       "item_id": "shared_1cc5b96184ae89ae92",
@@ -231,7 +435,38 @@
       "created_by": "platform-admin",
       "created_at": "2026-05-02T20:07:58+00:00",
       "updated_by": "platform-admin",
-      "updated_at": "2026-05-02T20:07:58+00:00"
+      "updated_at": "2026-05-02T20:07:58+00:00",
+      "industry_id": "global"
+    },
+    {
+      "item_id": "shared_global_no_fabrication",
+      "industry_id": "global",
+      "category_id": "risk_control",
+      "title": "关键事实不得编造",
+      "content": "价格、库存、合同、赔付、资质、时效等关键事实没有证据时，不得生成确定性承诺。",
+      "keywords": [
+        "价格",
+        "库存",
+        "合同",
+        "赔付",
+        "资质"
+      ],
+      "applies_to": "所有行业的高风险问答",
+      "notes": "平台通用风险边界",
+      "status": "active",
+      "source": "system_seed_industry_library",
+      "tenant_id": "default",
+      "data": {
+        "title": "关键事实不得编造",
+        "guideline_text": "价格、库存、合同、赔付、资质、时效等关键事实没有证据时，不得生成确定性承诺。",
+        "allow_auto_reply": false,
+        "requires_handoff": true,
+        "handoff_reason": "missing_authoritative_evidence"
+      },
+      "created_by": "system_seed",
+      "created_at": "2026-05-07T21:57:53+00:00",
+      "updated_by": "system_seed",
+      "updated_at": "2026-05-07T21:57:53+00:00"
     },
     {
       "item_id": "shared_09b9e2d49f1b22d6ed",
@@ -267,7 +502,8 @@
       "created_by": "platform-admin",
       "created_at": "2026-05-02T19:47:41+00:00",
       "updated_by": "platform-admin",
-      "updated_at": "2026-05-02T19:47:41+00:00"
+      "updated_at": "2026-05-02T19:47:41+00:00",
+      "industry_id": "global"
     },
     {
       "item_id": "shared_a7bb5a31f1e8c07eaf",
@@ -297,7 +533,8 @@
       "created_by": "platform-admin",
       "created_at": "2026-05-02T19:57:43+00:00",
       "updated_by": "platform-admin",
-      "updated_at": "2026-05-02T19:57:43+00:00"
+      "updated_at": "2026-05-02T19:57:43+00:00",
+      "industry_id": "global"
     },
     {
       "item_id": "shared_ac685c048a1e46fd99",
@@ -327,7 +564,37 @@
       "created_by": "platform-admin",
       "created_at": "2026-05-02T20:08:03+00:00",
       "updated_by": "platform-admin",
-      "updated_at": "2026-05-02T20:08:03+00:00"
+      "updated_at": "2026-05-02T20:08:03+00:00",
+      "industry_id": "global"
+    },
+    {
+      "item_id": "shared_global_no_private_payment",
+      "industry_id": "global",
+      "category_id": "risk_control",
+      "title": "禁止私下收款引导",
+      "content": "不得引导客户向个人账户、社交账号或非官方渠道转账；涉及收款必须提示以企业官方支付链路为准。",
+      "keywords": [
+        "收款",
+        "转账",
+        "个人账户",
+        "官方渠道"
+      ],
+      "applies_to": "所有行业支付咨询",
+      "notes": "",
+      "status": "active",
+      "source": "system_seed_industry_library",
+      "tenant_id": "default",
+      "data": {
+        "title": "禁止私下收款引导",
+        "guideline_text": "不得引导客户向个人账户、社交账号或非官方渠道转账；涉及收款必须提示以企业官方支付链路为准。",
+        "allow_auto_reply": false,
+        "requires_handoff": true,
+        "handoff_reason": "payment_channel_compliance"
+      },
+      "created_by": "system_seed",
+      "created_at": "2026-05-07T21:57:53+00:00",
+      "updated_by": "system_seed",
+      "updated_at": "2026-05-07T21:57:53+00:00"
     },
     {
       "item_id": "shared_000f9428cac0dc954b",
@@ -357,7 +624,35 @@
       "created_by": "platform-admin",
       "created_at": "2026-05-02T20:08:00+00:00",
       "updated_by": "platform-admin",
-      "updated_at": "2026-05-02T20:08:00+00:00"
+      "updated_at": "2026-05-02T20:08:00+00:00",
+      "industry_id": "global"
+    },
+    {
+      "item_id": "shared_global_privacy_minimum_collection",
+      "industry_id": "global",
+      "category_id": "risk_control",
+      "title": "隐私信息最小化采集",
+      "content": "仅在履约必要时采集姓名、电话、地址等信息，避免索取与交易无关的身份证件、银行卡、验证码等敏感信息。",
+      "keywords": [
+        "隐私",
+        "个人信息",
+        "手机号",
+        "地址",
+        "最小化"
+      ],
+      "applies_to": "所有行业的信息收集场景",
+      "notes": "参考《个人信息保护法》最小必要原则",
+      "status": "active",
+      "source": "system_seed_industry_library",
+      "tenant_id": "default",
+      "data": {
+        "title": "隐私信息最小化采集",
+        "guideline_text": "仅在履约必要时采集姓名、电话、地址等信息，避免索取与交易无关的身份证件、银行卡、验证码等敏感信息。"
+      },
+      "created_by": "system_seed",
+      "created_at": "2026-05-07T21:57:53+00:00",
+      "updated_by": "system_seed",
+      "updated_at": "2026-05-07T21:57:53+00:00"
     },
     {
       "item_id": "shared_768c3062ef147c8dcf",
@@ -393,8 +688,1030 @@
       "created_by": "platform-admin",
       "created_at": "2026-05-02T20:07:53+00:00",
       "updated_by": "platform-admin",
-      "updated_at": "2026-05-02T20:07:53+00:00"
+      "updated_at": "2026-05-02T20:07:53+00:00",
+      "industry_id": "global"
     }
   ],
+  "policy_bundle": {
+    "schema_version": 1,
+    "source": "cloud_official_shared_library",
+    "industry_id": "used_car",
+    "global": {
+      "platform_safety_rules": {
+        "schema_version": 1,
+        "title": "平台底线规则（云端）",
+        "description": "由服务端统一下发的通用安全边界。",
+        "prompt_rules": [
+          {
+            "id": "evidence_first",
+            "title": "先看证据",
+            "description": "正式知识和共享知识优先，不做隐藏假设。",
+            "instruction": "优先依据 evidence_pack 的正式知识、商品库、共享知识与历史上下文回复，不得臆造未给出的业务事实。",
+            "enabled": true
+          },
+          {
+            "id": "no_fabrication",
+            "title": "禁止编造",
+            "description": "关键事实必须可追溯。",
+            "instruction": "价格、库存、时效、审批、合同、赔付、开票、资质等关键信息必须来自证据；无证据时先说明需核实并转人工。",
+            "enabled": true
+          },
+          {
+            "id": "human_action_boundary",
+            "title": "人工动作边界",
+            "description": "强约束场景默认转人工。",
+            "instruction": "涉及签约、付款确认、退款赔偿、审批承诺、法律判断、医疗诊断等高风险动作，必须转人工处理。",
+            "enabled": true
+          },
+          {
+            "id": "safe_refusal",
+            "title": "自然拒绝",
+            "description": "拒绝风险请求时给出自然解释。",
+            "instruction": "对违规或越权请求应简洁说明边界并提供可执行的下一步（转人工/补充资料），避免机械模板化重复。",
+            "enabled": true
+          }
+        ],
+        "guard_terms": {
+          "authority_tags": [
+            "quote",
+            "discount",
+            "stock",
+            "shipping",
+            "invoice",
+            "payment",
+            "after_sales",
+            "handoff",
+            "customer_data"
+          ],
+          "commitment_terms": [
+            "包过",
+            "绝对",
+            "一定通过",
+            "保证通过",
+            "最低价保证",
+            "无条件赔付"
+          ],
+          "caution_terms": [
+            "需核实",
+            "需要确认",
+            "人工",
+            "转人工",
+            "无法直接确认",
+            "请以正式单据为准"
+          ],
+          "forbidden_reply_terms": [
+            "私下转账",
+            "个人账户收款",
+            "虚开发票",
+            "假发票",
+            "绕监管",
+            "保证审批通过"
+          ],
+          "forbidden_safe_markers": [
+            "不支持",
+            "不可以",
+            "不能",
+            "需要人工",
+            "需要核实"
+          ],
+          "appointment_commitment_terms": [
+            "预留",
+            "留货",
+            "锁价",
+            "代签",
+            "代付"
+          ],
+          "appointment_caution_terms": [
+            "确认",
+            "核实",
+            "人工",
+            "同事",
+            "负责人"
+          ],
+          "sales_followup_actors": [
+            "销售",
+            "同事",
+            "顾问",
+            "专员"
+          ],
+          "sales_followup_actions": [
+            "联系",
+            "对接",
+            "安排",
+            "回电",
+            "跟进"
+          ]
+        }
+      },
+      "platform_understanding_rules": {
+        "schema_version": 1,
+        "title": "平台通用理解词典（云端）",
+        "description": "由服务端统一下发的基础意图与检索词典。",
+        "intent_keywords": {
+          "greeting": [
+            "你好",
+            "您好",
+            "在吗",
+            "hello"
+          ],
+          "catalog": [
+            "有什么",
+            "有哪些",
+            "商品列表",
+            "产品列表",
+            "推荐下"
+          ],
+          "quote": [
+            "价格",
+            "报价",
+            "多少钱",
+            "费用",
+            "总价"
+          ],
+          "discount": [
+            "优惠",
+            "便宜点",
+            "折扣",
+            "最低",
+            "能少吗"
+          ],
+          "stock": [
+            "库存",
+            "现货",
+            "有货吗"
+          ],
+          "shipping": [
+            "发货",
+            "物流",
+            "多久到",
+            "运费",
+            "配送"
+          ],
+          "invoice": [
+            "发票",
+            "开票",
+            "专票",
+            "普票",
+            "税号"
+          ],
+          "payment": [
+            "付款",
+            "支付",
+            "对公",
+            "收款账号",
+            "账期"
+          ],
+          "after_sales": [
+            "售后",
+            "保修",
+            "退换",
+            "退款",
+            "赔偿"
+          ],
+          "handoff": [
+            "人工",
+            "转人工",
+            "投诉",
+            "法务",
+            "合同纠纷"
+          ],
+          "customer_data": [
+            "姓名",
+            "电话",
+            "地址",
+            "联系人"
+          ]
+        },
+        "intent_groups": {
+          "business": [
+            "catalog",
+            "quote",
+            "discount",
+            "stock",
+            "shipping",
+            "invoice",
+            "payment",
+            "after_sales",
+            "handoff"
+          ],
+          "rag_authority_block": [
+            "quote",
+            "discount",
+            "stock",
+            "shipping",
+            "invoice",
+            "payment",
+            "after_sales",
+            "handoff",
+            "customer_data"
+          ]
+        },
+        "policy_type_to_intent": {
+          "catalog": "catalog",
+          "invoice": "invoice",
+          "payment": "payment",
+          "shipping": "shipping",
+          "after_sales": "after_sales",
+          "manual_required": "handoff"
+        },
+        "policy_tags": {
+          "catalog": "catalog_policy",
+          "invoice": "invoice_policy",
+          "payment": "payment_policy",
+          "shipping": "shipping_policy",
+          "after_sales": "after_sales_policy"
+        },
+        "policy_type_tags": {
+          "catalog": [
+            "catalog"
+          ],
+          "invoice": [
+            "invoice"
+          ],
+          "payment": [
+            "payment"
+          ],
+          "shipping": [
+            "shipping"
+          ],
+          "after_sales": [
+            "after_sales"
+          ],
+          "manual_required": [
+            "handoff"
+          ]
+        },
+        "policy_key_tags": {
+          "catalog_policy": [
+            "catalog"
+          ],
+          "invoice_policy": [
+            "invoice"
+          ],
+          "payment_policy": [
+            "payment"
+          ],
+          "shipping_policy": [
+            "shipping"
+          ],
+          "after_sales_policy": [
+            "after_sales"
+          ]
+        },
+        "product_knowledge_keywords": {
+          "quote": [
+            "价格",
+            "报价",
+            "多少钱",
+            "费用",
+            "总价"
+          ],
+          "stock": [
+            "库存",
+            "现货",
+            "有货"
+          ],
+          "shipping": [
+            "发货",
+            "物流",
+            "时效",
+            "配送"
+          ],
+          "warranty": [
+            "售后",
+            "保修",
+            "退换"
+          ],
+          "discount": [
+            "优惠",
+            "折扣",
+            "最低"
+          ],
+          "spec": [
+            "规格",
+            "型号",
+            "参数",
+            "尺寸"
+          ]
+        },
+        "semantic_equivalents": {
+          "推荐": [
+            "建议",
+            "适合",
+            "可考虑"
+          ],
+          "对比": [
+            "比较",
+            "区别",
+            "怎么选"
+          ],
+          "适合": [
+            "适用",
+            "用途",
+            "场景"
+          ]
+        },
+        "rag": {
+          "high_risk_terms": [
+            "最低价",
+            "赔偿",
+            "退款",
+            "账期",
+            "合同",
+            "保证",
+            "包过"
+          ],
+          "soft_reference_categories": [
+            "product_explanations",
+            "product_faq",
+            "product_rules",
+            "products"
+          ],
+          "soft_reference_source_types": [
+            "product_doc",
+            "manual"
+          ]
+        },
+        "risk_keywords": {
+          "knowledge_intake": [
+            "赔偿",
+            "退款",
+            "账期",
+            "保证",
+            "虚开",
+            "包过"
+          ],
+          "knowledge_generator": [
+            "赔偿",
+            "退款",
+            "账期",
+            "保证",
+            "虚开",
+            "包过"
+          ],
+          "diagnostics": [
+            "赔偿",
+            "退款",
+            "账期",
+            "合同",
+            "保证"
+          ],
+          "hard_handoff": [
+            "必须转人工",
+            "转人工",
+            "法务",
+            "投诉升级"
+          ],
+          "review_warning": [
+            "最低价",
+            "赔偿",
+            "退款",
+            "账期",
+            "保证",
+            "承诺"
+          ]
+        },
+        "customer_data_field_labels": {
+          "name": [
+            "姓名",
+            "联系人"
+          ],
+          "phone": [
+            "电话",
+            "手机号",
+            "联系方式"
+          ],
+          "address": [
+            "地址",
+            "收货地址"
+          ],
+          "product": [
+            "商品",
+            "产品",
+            "需求"
+          ],
+          "quantity": [
+            "数量",
+            "件数"
+          ],
+          "spec": [
+            "规格",
+            "型号",
+            "参数"
+          ],
+          "budget": [
+            "预算",
+            "价格"
+          ],
+          "note": [
+            "备注",
+            "补充说明"
+          ]
+        },
+        "quantity_units": [
+          "台",
+          "个",
+          "件",
+          "套",
+          "箱",
+          "份",
+          "kg",
+          "公斤"
+        ]
+      }
+    },
+    "industry": {
+      "platform_safety_rules": {
+        "prompt_rules": [
+          {
+            "id": "used_car_truthful_disclosure",
+            "title": "车况披露",
+            "description": "事故/水泡/火烧等车况信息必须如实且可核实。",
+            "instruction": "二手车场景下，事故、水泡、火烧、重大维修、里程、过户次数等信息必须基于已确认记录，不得做确定性承诺。",
+            "enabled": true
+          }
+        ],
+        "guard_terms": {
+          "commitment_terms": [
+            "零事故保证",
+            "包你过户",
+            "里程绝对真实",
+            "金融包过"
+          ],
+          "forbidden_reply_terms": [
+            "帮你改里程",
+            "隐瞒事故",
+            "不过户先开走",
+            "包过征信"
+          ]
+        }
+      },
+      "platform_understanding_rules": {
+        "intent_keywords": {
+          "vehicle_condition": [
+            "车况",
+            "事故",
+            "水泡",
+            "火烧",
+            "里程",
+            "检测报告"
+          ],
+          "transfer": [
+            "过户",
+            "转籍",
+            "牌照",
+            "登记"
+          ],
+          "finance": [
+            "首付",
+            "月供",
+            "征信",
+            "分期",
+            "金融方案"
+          ],
+          "contract": [
+            "订金",
+            "定金",
+            "合同",
+            "违约",
+            "赔偿"
+          ]
+        },
+        "intent_groups": {
+          "rag_authority_block": [
+            "vehicle_condition",
+            "transfer",
+            "finance"
+          ]
+        },
+        "risk_keywords": {
+          "hard_handoff": [
+            "重大事故争议",
+            "里程争议",
+            "合同纠纷",
+            "征信投诉",
+            "金融审批投诉"
+          ]
+        }
+      }
+    },
+    "merged": {
+      "platform_safety_rules": {
+        "schema_version": 1,
+        "title": "平台底线规则",
+        "description": "测试用安全边界",
+        "prompt_rules": [
+          {
+            "id": "evidence_first",
+            "title": "先看可见证据",
+            "description": "优先使用证据",
+            "instruction": "优先使用客户自己的正式知识、商品库、商品专属问答/规则/解释和共享公共知识；行业、商品、流程和专属规则只能来自 evidence_pack，不要假设客户所属行业。",
+            "enabled": true
+          }
+        ],
+        "guard_terms": {
+          "authority_tags": [
+            "quote"
+          ],
+          "commitment_terms": [
+            "保证",
+            "承诺",
+            "一定"
+          ],
+          "caution_terms": [
+            "人工核实"
+          ],
+          "forbidden_reply_terms": [],
+          "forbidden_safe_markers": [],
+          "appointment_commitment_terms": [],
+          "appointment_caution_terms": [],
+          "sales_followup_actors": [],
+          "sales_followup_actions": [],
+          "business_signal_patterns": [
+            "冰箱",
+            "办公椅",
+            "滤芯",
+            "净水器",
+            "凯美瑞",
+            "思域",
+            "秦PLUS",
+            "GL8",
+            "宝马",
+            "二手车",
+            "车源",
+            "预算",
+            "自动挡",
+            "省油",
+            "通勤",
+            "置换",
+            "贷款",
+            "首付",
+            "月供",
+            "按揭",
+            "检测",
+            "试驾",
+            "到店",
+            "看车"
+          ],
+          "product_signal_terms": [
+            "价格",
+            "多少钱",
+            "报价",
+            "库存",
+            "现货",
+            "发货",
+            "物流",
+            "规格",
+            "型号",
+            "SKU"
+          ],
+          "manual_review_terms": [
+            "人工",
+            "转人工",
+            "投诉",
+            "赔偿",
+            "退款",
+            "退货",
+            "老板",
+            "经理"
+          ],
+          "policy_signal_terms": [
+            "合同",
+            "发票",
+            "专票",
+            "月结",
+            "盖章",
+            "保修",
+            "售后",
+            "安装"
+          ],
+          "handoff_rule_terms": [
+            "人工确认",
+            "人工审核",
+            "需人工",
+            "请人工"
+          ],
+          "observed_product_fact_patterns": [
+            "价格:",
+            "库存:",
+            "型号:",
+            "SKU:",
+            "规格:"
+          ],
+          "unreasonable_request_patterns": [
+            "外挂",
+            "脚本",
+            "破解",
+            "作弊",
+            "游戏"
+          ],
+          "boundary_request_patterns": [
+            "破损",
+            "赔偿",
+            "退款",
+            "退货",
+            "投诉"
+          ],
+          "checklist_price_terms": [
+            "价格",
+            "多少钱",
+            "报价",
+            "优惠",
+            "折扣",
+            "最低"
+          ],
+          "checklist_stock_terms": [
+            "库存",
+            "现货",
+            "发货",
+            "物流"
+          ],
+          "formulaic_handoff_terms": []
+        }
+      },
+      "platform_understanding_rules": {
+        "schema_version": 1,
+        "title": "平台通用理解词典",
+        "description": "测试用理解词典",
+        "intent_keywords": {
+          "greeting": [
+            "你好"
+          ],
+          "catalog": [
+            "有什么",
+            "有哪些",
+            "商品列表",
+            "产品列表",
+            "推荐下"
+          ],
+          "quote": [
+            "价格",
+            "报价",
+            "多少钱"
+          ],
+          "discount": [
+            "优惠",
+            "便宜点",
+            "折扣",
+            "最低",
+            "能少吗",
+            "按"
+          ],
+          "stock": [
+            "库存",
+            "现货"
+          ],
+          "shipping": [
+            "发货",
+            "物流",
+            "时效",
+            "配送",
+            "包邮"
+          ],
+          "invoice": [
+            "发票",
+            "开票",
+            "专票",
+            "普票",
+            "税号"
+          ],
+          "payment": [
+            "付款",
+            "支付",
+            "月结"
+          ],
+          "after_sales": [
+            "售后",
+            "保修",
+            "退换",
+            "退款",
+            "赔偿"
+          ],
+          "handoff": [
+            "人工",
+            "转人工",
+            "投诉",
+            "合同",
+            "月结",
+            "盖章"
+          ],
+          "customer_data": [
+            "姓名",
+            "电话",
+            "地址",
+            "联系人"
+          ],
+          "vehicle_condition": [
+            "车况",
+            "事故",
+            "水泡",
+            "火烧",
+            "里程",
+            "检测报告"
+          ],
+          "transfer": [
+            "过户",
+            "转籍",
+            "牌照",
+            "登记"
+          ],
+          "finance": [
+            "首付",
+            "月供",
+            "征信",
+            "分期",
+            "金融方案"
+          ],
+          "contract": [
+            "订金",
+            "定金",
+            "合同",
+            "违约",
+            "赔偿"
+          ],
+          "warranty": [
+            "保修",
+            "售后"
+          ],
+          "small_talk": [
+            "哈哈",
+            "呵呵",
+            "随便看看",
+            "看看",
+            "挺快的",
+            "挺不错",
+            "逛逛"
+          ],
+          "company": [
+            "公司",
+            "地址",
+            "电话",
+            "联系方式",
+            "资质"
+          ]
+        },
+        "intent_groups": {
+          "business": [
+            "quote",
+            "discount",
+            "stock",
+            "shipping",
+            "handoff",
+            "contract",
+            "payment"
+          ],
+          "rag_authority_block": [
+            "quote",
+            "discount",
+            "stock",
+            "shipping",
+            "invoice",
+            "payment",
+            "after_sales",
+            "handoff",
+            "customer_data",
+            "contract"
+          ],
+          "rag_soft_reference": [
+            "unknown",
+            "catalog",
+            "scene_product",
+            "spec",
+            "small_talk",
+            "warranty",
+            "company",
+            "greeting"
+          ],
+          "product_related": [
+            "quote",
+            "discount",
+            "stock",
+            "shipping",
+            "warranty",
+            "spec",
+            "scene_product"
+          ],
+          "product_context": [
+            "shipping",
+            "warranty",
+            "spec",
+            "quote",
+            "stock",
+            "discount",
+            "scene_product"
+          ]
+        },
+        "policy_type_to_intent": {
+          "catalog": "catalog",
+          "invoice": "invoice",
+          "payment": "payment",
+          "shipping": "shipping",
+          "after_sales": "after_sales",
+          "manual_required": "handoff"
+        },
+        "policy_tags": {
+          "catalog": "catalog_policy",
+          "invoice": "invoice_policy",
+          "payment": "payment_policy",
+          "shipping": "shipping_policy",
+          "after_sales": "after_sales_policy"
+        },
+        "policy_type_tags": {
+          "catalog": [
+            "catalog"
+          ],
+          "invoice": [
+            "invoice"
+          ],
+          "payment": [
+            "payment"
+          ],
+          "shipping": [
+            "shipping"
+          ],
+          "after_sales": [
+            "after_sales"
+          ],
+          "manual_required": [
+            "handoff"
+          ]
+        },
+        "policy_key_tags": {
+          "catalog_policy": [
+            "catalog"
+          ],
+          "invoice_policy": [
+            "invoice"
+          ],
+          "payment_policy": [
+            "payment"
+          ],
+          "shipping_policy": [
+            "shipping"
+          ],
+          "after_sales_policy": [
+            "after_sales"
+          ]
+        },
+        "product_knowledge_keywords": {
+          "quote": [
+            "价格",
+            "报价",
+            "多少钱"
+          ],
+          "stock": [
+            "库存",
+            "现货"
+          ],
+          "shipping": [
+            "发货",
+            "物流",
+            "时效"
+          ],
+          "warranty": [
+            "售后",
+            "保修"
+          ],
+          "discount": [
+            "优惠",
+            "折扣",
+            "最低",
+            "按"
+          ],
+          "spec": [
+            "规格"
+          ],
+          "catalog": [
+            "有哪些",
+            "有什么",
+            "商品",
+            "产品",
+            "列表"
+          ]
+        },
+        "semantic_equivalents": {
+          "推荐": [
+            "建议"
+          ],
+          "对比": [
+            "比较",
+            "区别",
+            "怎么选"
+          ],
+          "适合": [
+            "适用",
+            "用途",
+            "场景"
+          ]
+        },
+        "rag": {
+          "high_risk_terms": [
+            "最低价",
+            "赔偿",
+            "退款",
+            "账期",
+            "合同",
+            "保证",
+            "包过"
+          ],
+          "soft_reference_categories": [
+            "product_explanations",
+            "product_faq",
+            "product_rules",
+            "products"
+          ],
+          "soft_reference_source_types": [
+            "product_doc",
+            "manual"
+          ]
+        },
+        "risk_keywords": {
+          "knowledge_intake": [
+            "赔偿",
+            "退款",
+            "账期",
+            "保证",
+            "虚开",
+            "包过"
+          ],
+          "knowledge_generator": [
+            "赔偿",
+            "退款",
+            "账期",
+            "保证",
+            "虚开",
+            "包过"
+          ],
+          "diagnostics": [
+            "赔偿",
+            "退款",
+            "账期",
+            "合同",
+            "保证"
+          ],
+          "hard_handoff": [
+            "必须转人工",
+            "转人工",
+            "法务",
+            "投诉升级",
+            "重大事故争议",
+            "里程争议",
+            "合同纠纷",
+            "征信投诉",
+            "金融审批投诉"
+          ],
+          "review_warning": [
+            "最低价",
+            "赔偿",
+            "退款",
+            "账期",
+            "保证",
+            "承诺"
+          ]
+        },
+        "customer_data_field_labels": {
+          "name": [
+            "姓名",
+            "联系人"
+          ],
+          "phone": [
+            "电话",
+            "手机"
+          ],
+          "address": [
+            "地址",
+            "收货地址"
+          ],
+          "product": [
+            "商品",
+            "产品",
+            "需求"
+          ],
+          "quantity": [
+            "数量",
+            "件数"
+          ],
+          "spec": [
+            "规格",
+            "型号",
+            "参数"
+          ],
+          "budget": [
+            "预算",
+            "价格"
+          ],
+          "note": [
+            "备注",
+            "补充说明"
+          ]
+        },
+        "quantity_units": [
+          "个",
+          "件",
+          "台"
+        ]
+      }
+    }
+  },
   "deleted_item_ids": []
 }

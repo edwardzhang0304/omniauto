@@ -979,6 +979,14 @@ def should_operator_handoff(
 ) -> bool:
     if evidence_requires_handoff(intent_assist):
         return True
+    # Intent-assist handoff only overrides when no safe rule matched or the
+    # handoff reason is an explicit signal (e.g. appointment after data capture).
+    if isinstance(intent_assist, dict) and intent_assist.get("needs_handoff"):
+        if not decision.matched or decision.need_handoff:
+            return True
+        reason = str(intent_assist.get("reason") or "")
+        if reason == "customer_data_complete_with_appointment":
+            return True
     if product_knowledge and product_knowledge.get("auto_reply_allowed") is False:
         return True
     if product_knowledge and product_knowledge.get("needs_handoff"):

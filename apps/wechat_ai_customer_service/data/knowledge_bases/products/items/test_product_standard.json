@@ -2,7 +2,7 @@
   "schema_version": 1,
   "category_id": "products",
   "id": "test_product_standard",
-  "status": "active",
+  "status": "archived",
   "source": {
     "type": "admin_draft",
     "legacy_target": "product_knowledge"
