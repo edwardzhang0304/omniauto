@@ -8,6 +8,9 @@ from typing import Any
 from apps.wechat_ai_customer_service.platform_safety_rules import guard_term_set, load_platform_safety_rules
 
 
+HARD_HANDOFF_RISK_TAGS = {"off_topic", "illegal_request", "prompt_injection", "policy_violation", "out_of_scope"}
+
+
 def guard_synthesized_reply(
     *,
     candidate: dict[str, Any],
@@ -31,6 +34,12 @@ def guard_synthesized_reply(
     if not candidate.get("can_answer", True):
         return handoff_decision("llm_cannot_answer", candidate)
 
+    risk_tags = {str(item).strip().lower() for item in (candidate.get("risk_tags", []) or []) if str(item).strip()}
+    if risk_tags & HARD_HANDOFF_RISK_TAGS:
+        enriched = dict(candidate)
+        enriched["reply"] = risk_tag_handoff_reply(risk_tags)
+        return handoff_decision("risk_tag_requires_handoff", enriched)
+
     try:
         confidence = float(candidate.get("confidence") or 0)
     except (TypeError, ValueError):
@@ -50,6 +59,7 @@ def guard_synthesized_reply(
         return {"allowed": False, "action": "fallback", "reason": "empty_reply", "candidate": candidate}
 
     authority_tags = set(str(item) for item in evidence_pack.get("intent_tags", []) or []) & guard_term_set(platform_rules, "authority_tags")
+    intent_tags = {str(item).strip().lower() for item in (evidence_pack.get("intent_tags", []) or []) if str(item).strip()}
     has_structured = has_structured_evidence(evidence_pack)
     rag_used = bool(candidate.get("rag_used"))
     structured_used = bool(candidate.get("structured_used"))
@@ -68,6 +78,9 @@ def guard_synthesized_reply(
             candidate,
             authority_tags=sorted(authority_tags),
         )
+
+    if intent_tags & {"quote", "discount", "contract", "payment"} and has_price_lock_commitment(reply):
+        return handoff_decision("price_lock_commitment_requires_handoff", candidate)
 
     if has_unsafe_commitment(reply, platform_rules) and not has_caution(reply, platform_rules):
         return handoff_decision("unsafe_commitment_without_caution", candidate, include_candidate_reply=False)
@@ -106,6 +119,7 @@ def handoff_decision(
     authority_tags: list[str] | None = None,
     include_candidate_reply: bool = True,
 ) -> dict[str, Any]:
+    platform_rules = load_platform_safety_rules().get("item", {})
     payload: dict[str, Any] = {
         "allowed": True,
         "action": "handoff",
@@ -115,8 +129,8 @@ def handoff_decision(
     if authority_tags:
         payload["authority_tags"] = authority_tags
     reply = str(candidate.get("reply") or "").strip()
-    if include_candidate_reply and handoff_reply_safe(reply):
-        payload["reply"] = reply
+    if include_candidate_reply:
+        payload["reply"] = reply if handoff_reply_safe(reply, platform_rules) else default_handoff_reply(platform_rules)
     return payload
 
 
@@ -132,6 +146,18 @@ def handoff_reply_safe(reply: str, platform_rules: dict[str, Any] | None = None)
     if has_unsafe_commitment(clean, platform_rules) and not has_caution(clean, platform_rules):
         return False
     return has_caution(clean, platform_rules)
+
+
+def default_handoff_reply(platform_rules: dict[str, Any] | None = None) -> str:
+    platform_rules = platform_rules or load_platform_safety_rules().get("item", {})
+    caution_terms = list(guard_term_set(platform_rules, "caution_terms"))
+    caution = caution_terms[0] if caution_terms else "人工核实"
+    return f"这个问题我不能直接给结论，我先转给人工同事{caution}后再回复您。"
+
+
+def risk_tag_handoff_reply(risk_tags: set[str]) -> str:
+    del risk_tags
+    return "这个问题超出自动回复边界，我不能直接给结论；我先转给人工同事核实后再回复您。"
 
 
 def normalize_candidate(candidate: dict[str, Any]) -> dict[str, Any]:
@@ -219,6 +245,22 @@ def has_unsafe_commitment(reply: str, platform_rules: dict[str, Any] | None = No
     platform_rules = platform_rules or load_platform_safety_rules().get("item", {})
     normalized = re.sub(r"\s+", "", reply)
     return any(term in normalized for term in guard_term_set(platform_rules, "commitment_terms"))
+
+
+def has_price_lock_commitment(reply: str) -> bool:
+    clean = re.sub(r"\s+", "", str(reply or ""))
+    if not clean:
+        return False
+    patterns = (
+        r"就是这个价",
+        r"价格.*不会变",
+        r"最低价.*保证",
+        r"今天就能锁定",
+        r"马上锁定",
+        r"直接锁定",
+        r"保价",
+    )
+    return any(re.search(pattern, clean) for pattern in patterns)
 
 
 def has_forbidden_private_payment_or_invoice_reply(reply: str, platform_rules: dict[str, Any] | None = None) -> bool:

@@ -51,6 +51,18 @@ ACTION_LABELS = {
     "already_covered": "正式知识库可能已覆盖",
     "needs_more_info": "需要补充信息后再判断",
 }
+DEFAULT_UNREASONABLE_REQUEST_PATTERNS = (
+    re.compile(
+        r"system\s*prompt|developer\s*message|prompt\s*injection|ignore\s+(all|the)\s+(previous|above)\s+(instructions|rules)|"
+        r"提示词|系统提示|开发者消息|越权",
+        re.I,
+    ),
+    re.compile(r"外挂|作弊|破解|赌博|博彩|洗钱|套现|虚开发票|少开发票", re.I),
+)
+DEFAULT_BOUNDARY_REQUEST_PATTERNS = (
+    re.compile(r"首付|月供|贷款|金融|征信|资方|审批|利率|分期|账期|先发货|最低价|砍价|优惠", re.I),
+    re.compile(r"事故|水泡|火烧|检测报告|过户|合同|定金|订金", re.I),
+)
 
 
 def visible_rule_values(group: str) -> list[str]:
@@ -64,6 +76,13 @@ def text_has_visible_term(text: str, group: str) -> bool:
 
 def text_matches_visible_pattern(text: str, group: str) -> bool:
     return any(re.search(pattern, str(text or ""), re.I) for pattern in visible_rule_values(group))
+
+
+def text_matches_rule_or_fallback(text: str, group: str, fallback_patterns: tuple[re.Pattern[str], ...]) -> bool:
+    if text_matches_visible_pattern(text, group):
+        return True
+    normalized = str(text or "")
+    return any(pattern.search(normalized) for pattern in fallback_patterns)
 
 
 class RagExperienceInterpreter:
@@ -373,7 +392,7 @@ def guardrail_assessment(item: dict[str, Any]) -> dict[str, Any]:
                 contains_model_reply=contains_model_reply,
                 source_types=source_types,
             )
-    if text_matches_visible_pattern(text, "unreasonable_request_patterns"):
+    if text_matches_rule_or_fallback(text, "unreasonable_request_patterns", DEFAULT_UNREASONABLE_REQUEST_PATTERNS):
         return guardrail_decision(
             "customer_request_is_unreasonable_or_out_of_scope",
             "discard",
@@ -383,7 +402,7 @@ def guardrail_assessment(item: dict[str, Any]) -> dict[str, Any]:
             contains_model_reply=contains_model_reply,
             source_types=source_types,
         )
-    if observed_wechat and text_matches_visible_pattern(text, "boundary_request_patterns") and contains_model_reply:
+    if observed_wechat and text_matches_rule_or_fallback(text, "boundary_request_patterns", DEFAULT_BOUNDARY_REQUEST_PATTERNS) and contains_model_reply:
         return guardrail_decision(
             "observed_boundary_reply_not_generalized",
             "discard",
@@ -501,9 +520,19 @@ def auto_keep_assessment(
             "reason": str(guardrail.get("reason") or "这条经验被安全规则拦住，不能自动保留。"),
         }
     text = combined_review_text(item)
+    if text_matches_rule_or_fallback(text, "unreasonable_request_patterns", DEFAULT_UNREASONABLE_REQUEST_PATTERNS):
+        return {
+            "recommended": False,
+            "reason_code": "unreasonable_request",
+            "reason": "这更像客户的不合理要求，不能自动保留为长期经验。",
+        }
+    if text_matches_rule_or_fallback(text, "boundary_request_patterns", DEFAULT_BOUNDARY_REQUEST_PATTERNS):
+        return {
+            "recommended": False,
+            "reason_code": "boundary_case",
+            "reason": "这条内容更像一次边界场景，不自动保留为长期经验。",
+        }
     for group, reason_code, reason in (
-        ("unreasonable_request_patterns", "unreasonable_request", "这更像客户的不合理要求，不能自动保留为长期经验。"),
-        ("boundary_request_patterns", "boundary_case", "这条内容更像一次边界场景，不自动保留为长期经验。"),
         ("observed_product_fact_patterns", "observed_fact", "这条内容包含商品事实、价格或库存线索，不能自动保留为经验。"),
         ("manual_review_terms", "manual_review_term", "这条内容涉及人工确认类风险点，先留给人工判断。"),
         ("checklist_price_terms", "price_term", "这条内容碰到了报价相关信息，不自动保留。"),

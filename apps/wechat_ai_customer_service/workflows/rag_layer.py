@@ -57,6 +57,12 @@ CATEGORY_BOOSTS = {
     "policies": 0.015,
     "rag_experience": 0.01,
 }
+DEFAULT_SEMANTIC_EQUIVALENTS = {
+    "电源": ["供电", "供电方式"],
+    "供电": ["电源", "供电方式"],
+    "民宿客房": ["酒店公寓", "客房"],
+    "酒店公寓": ["民宿客房", "客房"],
+}
 class RagService:
     def __init__(
         self,
@@ -569,7 +575,7 @@ def expand_semantic_terms(text: str, terms: set[str] | list[str] | tuple[str, ..
     expanded = set(base)
     for term in list(base):
         expanded.update(semantic_equivalents(term))
-    configured_equivalents = visible_semantic_equivalents()
+    configured_equivalents = semantic_equivalents_map()
     for term, equivalents in configured_equivalents.items():
         if term in normalized:
             expanded.add(term)
@@ -582,7 +588,7 @@ def expand_semantic_terms(text: str, terms: set[str] | list[str] | tuple[str, ..
 
 def semantic_equivalents(term: str) -> set[str]:
     normalized = normalize_search_text(term)
-    configured_equivalents = visible_semantic_equivalents()
+    configured_equivalents = semantic_equivalents_map()
     equivalents = set(configured_equivalents.get(normalized, ()))
     for key, values in configured_equivalents.items():
         if normalized in values:
@@ -590,6 +596,24 @@ def semantic_equivalents(term: str) -> set[str]:
             equivalents.update(values)
     equivalents.discard(normalized)
     return {normalize_search_text(item) for item in equivalents if normalize_search_text(item)}
+
+
+def semantic_equivalents_map() -> dict[str, set[str]]:
+    merged: dict[str, set[str]] = {}
+    for raw_map in (visible_semantic_equivalents(), DEFAULT_SEMANTIC_EQUIVALENTS):
+        for raw_key, raw_values in raw_map.items():
+            key = normalize_search_text(raw_key)
+            if not key:
+                continue
+            bucket = merged.setdefault(key, set())
+            for raw_value in raw_values:
+                value = normalize_search_text(raw_value)
+                if value and value != key:
+                    bucket.add(value)
+    for key, values in list(merged.items()):
+        for value in values:
+            merged.setdefault(value, set()).add(key)
+    return merged
 
 
 def score_entry(query: str, query_profile: dict[str, Any] | set[str], entry: dict[str, Any], *, product_id: str = "") -> dict[str, float]:
