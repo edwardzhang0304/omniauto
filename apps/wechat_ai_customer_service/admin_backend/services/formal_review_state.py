@@ -45,11 +45,12 @@ def acknowledge_item(item: dict[str, Any], *, actor: str = "admin") -> dict[str,
 def enrich_knowledge_item(item: dict[str, Any]) -> dict[str, Any]:
     result = dict(item)
     review_state = result.get("review_state") if isinstance(result.get("review_state"), dict) else {}
-    badges: list[dict[str, str]] = []
-    if review_state.get("is_new"):
-        badges.append({"key": "new_unread", "label": "新加入", "tone": "danger"})
     source = review_state.get("source") if isinstance(review_state.get("source"), dict) else {}
     source_module = str(source.get("source_module") or "")
+    badges: list[dict[str, str]] = []
+    if review_state.get("is_new"):
+        unread_label = "NEW" if source_module == "rag_overlap" else "新加入"
+        badges.append({"key": "new_unread", "label": unread_label, "tone": "danger"})
     if source_module == "candidate":
         badges.append({"key": "candidate_promoted", "label": "候选晋升", "tone": "info"})
     if source_module == "manual":

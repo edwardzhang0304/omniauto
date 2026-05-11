@@ -234,7 +234,9 @@ def check_admin_api_surfaces() -> dict[str, Any]:
     headers = {"X-Tenant-ID": TEST_TENANT}
     index = client.get("/")
     assert_true("AI智能记录员" in index.text, "admin UI should expose recorder page")
-    assert_true("按类型导出Excel" in index.text, "admin UI should expose type export")
+    assert_true("记录员总开关" in index.text, "admin UI should expose recorder global switch")
+    assert_true("创建结构化导出任务" in index.text, "admin UI should expose structured recorder export action")
+    assert_true("导出知识库Excel（按类型）" in index.text, "admin UI should expose legacy type export")
 
     summary = client.get("/api/raw-messages/summary", headers=headers)
     assert_equal(summary.status_code, 200, "raw message summary endpoint")

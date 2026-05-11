@@ -57,6 +57,12 @@ CATEGORY_BOOSTS = {
     "policies": 0.015,
     "rag_experience": 0.01,
 }
+DEFAULT_SEMANTIC_EQUIVALENTS = {
+    "电源": ["供电", "供电方式"],
+    "供电": ["电源", "供电方式"],
+    "民宿客房": ["酒店公寓", "客房"],
+    "酒店公寓": ["民宿客房", "客房"],
+}
 class RagService:
     def __init__(
         self,
@@ -308,8 +314,20 @@ class RagService:
                 self.rebuild_index()
                 entries = db.list_rag_index(self.tenant_id)
             return {"schema_version": 1, "tenant_id": self.tenant_id, "entries": entries, "built_at": "postgres"}
-        if not self.index_path.exists() or self.index_is_stale():
+        if not self.index_path.exists():
             self.rebuild_index()
+        elif self.index_is_stale():
+            try:
+                # Rebuild through the current service instance so custom roots
+                # (test/eval sandboxes) stay consistent with their own index path.
+                self.rebuild_index()
+            except Exception:
+                try:
+                    from apps.wechat_ai_customer_service.workflows.rag_experience_store import rebuild_rag_index_safely
+
+                    rebuild_rag_index_safely(self.tenant_id, trigger="rag_index_stale_on_load", force_sync=True)
+                except Exception:
+                    pass
         if not self.index_path.exists():
             return {"schema_version": 1, "tenant_id": self.tenant_id, "entries": []}
         return json.loads(self.index_path.read_text(encoding="utf-8"))
@@ -435,7 +453,12 @@ class RagService:
             }
         sources = self.list_sources()
         chunks = self.iter_chunks()
-        index = self.load_index() if self.index_path.exists() else {"entries": []}
+        index = {"entries": [], "built_at": ""}
+        if self.index_path.exists():
+            try:
+                index = json.loads(self.index_path.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError):
+                index = {"entries": [], "built_at": ""}
         return {
             "ok": True,
             "tenant_id": self.tenant_id,
@@ -449,6 +472,7 @@ class RagService:
             "index_exists": self.index_path.exists(),
             "index_path": str(self.index_path),
             "updated_at": str(index.get("built_at") or ""),
+            "index_stale": self.index_is_stale() if self.index_path.exists() else True,
         }
 
 
@@ -569,7 +593,7 @@ def expand_semantic_terms(text: str, terms: set[str] | list[str] | tuple[str, ..
     expanded = set(base)
     for term in list(base):
         expanded.update(semantic_equivalents(term))
-    configured_equivalents = visible_semantic_equivalents()
+    configured_equivalents = semantic_equivalents_map()
     for term, equivalents in configured_equivalents.items():
         if term in normalized:
             expanded.add(term)
@@ -582,7 +606,7 @@ def expand_semantic_terms(text: str, terms: set[str] | list[str] | tuple[str, ..
 
 def semantic_equivalents(term: str) -> set[str]:
     normalized = normalize_search_text(term)
-    configured_equivalents = visible_semantic_equivalents()
+    configured_equivalents = semantic_equivalents_map()
     equivalents = set(configured_equivalents.get(normalized, ()))
     for key, values in configured_equivalents.items():
         if normalized in values:
@@ -590,6 +614,24 @@ def semantic_equivalents(term: str) -> set[str]:
             equivalents.update(values)
     equivalents.discard(normalized)
     return {normalize_search_text(item) for item in equivalents if normalize_search_text(item)}
+
+
+def semantic_equivalents_map() -> dict[str, set[str]]:
+    merged: dict[str, set[str]] = {}
+    for raw_map in (visible_semantic_equivalents(), DEFAULT_SEMANTIC_EQUIVALENTS):
+        for raw_key, raw_values in raw_map.items():
+            key = normalize_search_text(raw_key)
+            if not key:
+                continue
+            bucket = merged.setdefault(key, set())
+            for raw_value in raw_values:
+                value = normalize_search_text(raw_value)
+                if value and value != key:
+                    bucket.add(value)
+    for key, values in list(merged.items()):
+        for value in values:
+            merged.setdefault(value, set()).add(key)
+    return merged
 
 
 def score_entry(query: str, query_profile: dict[str, Any] | set[str], entry: dict[str, Any], *, product_id: str = "") -> dict[str, float]:

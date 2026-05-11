@@ -2,6 +2,9 @@ const state = {
   token: localStorage.getItem("vpsAdminToken") || "",
   view: "overview",
   data: {},
+  recorderBindingDraft: {
+    userId: localStorage.getItem("vpsRecorderBindingUserId") || "",
+  },
   sharedIndustryFilter: (localStorage.getItem("vpsSharedIndustryFilter") || "").trim() || "global",
   loginChallenge: null,
   initChallenge: null,
@@ -345,6 +348,8 @@ async function refresh() {
       proposals,
       patches,
       releases,
+      recorderModules,
+      recorderBindings,
       security,
       smtp,
       audit,
@@ -363,6 +368,8 @@ async function refresh() {
       api("/v1/admin/shared/proposals"),
       api("/v1/admin/shared/patches"),
       api("/v1/admin/releases"),
+      api("/v1/admin/recorder-modules?include_inactive=true"),
+      api("/v1/admin/recorder-module-bindings"),
       api("/v1/auth/security"),
       api("/v1/admin/security/smtp"),
       api("/v1/admin/audit"),
@@ -382,6 +389,8 @@ async function refresh() {
       proposals: proposals.proposals || [],
       patches: patches.patches || [],
       releases: releases.releases || [],
+      recorderModules: recorderModules.items || [],
+      recorderBindings: recorderBindings.items || [],
       security: security.security || {},
       smtp: smtp.smtp || {},
       audit: audit.events || [],
@@ -429,6 +438,7 @@ function renderAll() {
   document.querySelector("#metric-pending").textContent = counts.shared_pending_proposals ?? counts.pending_commands ?? 0;
   renderOverview();
   renderAccounts();
+  renderRecorderModuleAssignments();
   renderCustomerData();
   renderSharedKnowledge();
   renderNodes();
@@ -473,6 +483,134 @@ function renderAccounts() {
       </div>
     </div>
   `).join("") || empty("暂无 customer/guest 账号")}`);
+}
+
+function renderRecorderModuleAssignments() {
+  renderRecorderModuleCards();
+  renderRecorderBindingFormOptions();
+  renderRecorderBindingList();
+}
+
+function renderRecorderModuleCards() {
+  const modules = state.data.recorderModules || [];
+  const rows = modules.map((item) => `
+    <div class="record-row">
+      <div class="row-title">
+        <strong>${escapeHtml(item.module_name || item.module_key)}</strong>
+        <span class="status-chip ${String(item.status || "active") === "active" ? "ok" : "warning"}">${escapeHtml(item.status || "active")}</span>
+      </div>
+      <span>模块Key：${escapeHtml(item.module_key || "")} · 版本：${escapeHtml(item.version || "-")}</span>
+      <span>${escapeHtml(item.config?.description || "无描述")}</span>
+    </div>
+  `).join("");
+  renderInto("recorder-module-cards", rows || empty("暂无可用记录员模块"));
+}
+
+function renderRecorderBindingFormOptions() {
+  const activeModules = (state.data.recorderModules || []).filter((item) => String(item.status || "active") === "active");
+  const moduleOptions = activeModules.length
+    ? activeModules.map((item) => `<option value="${escapeAttr(item.module_key)}">${escapeHtml(item.module_name || item.module_key)} (${escapeHtml(item.version || "-")})</option>`).join("")
+    : `<option value="">暂无可用模块</option>`;
+
+  const userSelect = document.querySelector("#recorder-user-binding-user");
+  const currentUserValue = state.recorderBindingDraft.userId || userSelect?.value || "";
+  if (userSelect) {
+    const users = customerUsers();
+    userSelect.innerHTML = users.length
+      ? users.map((item) => `<option value="${escapeAttr(item.user_id || "")}">${escapeHtml(item.username || item.user_id || "")}</option>`).join("")
+      : `<option value="">暂无客户账号</option>`;
+    const userIds = users.map((item) => String(item.user_id || ""));
+    if (currentUserValue && userIds.includes(currentUserValue)) {
+      userSelect.value = currentUserValue;
+    } else {
+      userSelect.value = String(userSelect.value || "");
+    }
+    state.recorderBindingDraft.userId = String(userSelect.value || "");
+    if (state.recorderBindingDraft.userId) localStorage.setItem("vpsRecorderBindingUserId", state.recorderBindingDraft.userId);
+  }
+
+  ["#recorder-user-binding-module", "#recorder-global-binding-module"].forEach((selector) => {
+    const select = document.querySelector(selector);
+    if (select) select.innerHTML = moduleOptions;
+  });
+
+  syncRecorderBindingFormsFromState();
+}
+
+function renderRecorderBindingList() {
+  const rawBindings = state.data.recorderBindings || [];
+  const bindings = rawBindings.filter((item) => {
+    const scopeType = String(item?.scope_type || "");
+    return scopeType === "user" || scopeType === "global";
+  });
+  const modules = state.data.recorderModules || [];
+  const users = state.data.users || [];
+  const moduleNameByKey = Object.fromEntries(modules.map((item) => [String(item.module_key || ""), String(item.module_name || item.module_key || "")]));
+  const userNameById = Object.fromEntries(users.map((item) => [String(item.user_id || ""), String(item.username || item.user_id || "")]));
+  const hiddenLegacyTenantCount = Math.max(0, rawBindings.length - bindings.length);
+
+  const rows = bindings.map((item) => {
+    const scopeType = String(item.scope_type || "");
+    const scopeId = String(item.scope_id || "");
+    const ownerLabel = scopeType === "user"
+      ? (userNameById[scopeId] || scopeId)
+      : "全局默认";
+    return `
+      <div class="record-row">
+        <div class="row-title">
+          <strong>${escapeHtml(scopeLabel(scopeType))}：${escapeHtml(ownerLabel)}</strong>
+          <span class="status-chip ${item.enabled === false ? "warning" : "ok"}">${item.enabled === false ? "停用" : "启用"}</span>
+        </div>
+        <span>模块：${escapeHtml(moduleNameByKey[String(item.module_key || "")] || String(item.module_key || ""))}</span>
+        <span>更新时间：${escapeHtml(item.updated_at || "-")}</span>
+        <div class="button-row">
+          <button class="secondary-button danger-button" data-action="delete-recorder-binding" data-binding-id="${escapeAttr(item.binding_id || "")}">删除绑定</button>
+        </div>
+      </div>
+    `;
+  }).join("");
+  const legacyTip = hiddenLegacyTenantCount > 0
+    ? `<div class="helper-card"><strong>已隐藏 ${hiddenLegacyTenantCount} 条历史“租户兜底”记录。</strong><span>当前策略仅使用“账号独立绑定 + 全局兜底”。</span></div>`
+    : "";
+  renderInto(
+    "recorder-binding-list",
+    `<h3>当前绑定关系（账号独立绑定 + 全局兜底）</h3>${legacyTip}${rows || empty("暂无模块绑定。")}`
+  );
+}
+
+function scopeLabel(scopeType) {
+  if (scopeType === "user") return "账号绑定";
+  if (scopeType === "global") return "全局兜底";
+  return "未知";
+}
+
+function recorderBindingByScope(scopeType, scopeId) {
+  return (state.data.recorderBindings || []).find(
+    (item) => String(item?.scope_type || "") === String(scopeType || "")
+      && String(item?.scope_id || "") === String(scopeId || "")
+  ) || null;
+}
+
+function setSelectIfExists(select, value) {
+  if (!select) return;
+  const target = String(value || "");
+  if (!target) return;
+  const hasOption = [...select.options].some((option) => String(option.value || "") === target);
+  if (hasOption) select.value = target;
+}
+
+function syncRecorderBindingFormsFromState() {
+  const userId = String(document.querySelector("#recorder-user-binding-user")?.value || state.recorderBindingDraft.userId || "");
+
+  const userBinding = userId ? recorderBindingByScope("user", userId) : null;
+  setSelectIfExists(document.querySelector("#recorder-user-binding-module"), userBinding?.module_key || "");
+  const userEnabled = document.querySelector("#recorder-user-binding-form input[name='enabled']");
+  if (userEnabled) userEnabled.checked = userBinding ? userBinding.enabled !== false : true;
+
+  const globalBinding = recorderBindingByScope("global", "*");
+  setSelectIfExists(document.querySelector("#recorder-global-binding-module"), globalBinding?.module_key || "");
+  const globalEnabled = document.querySelector("#recorder-global-binding-form input[name='enabled']");
+  if (globalEnabled) globalEnabled.checked = globalBinding ? globalBinding.enabled !== false : true;
 }
 
 function renderAccountFormMode() {
@@ -832,6 +970,178 @@ function bindStaticActions() {
     signature: form.get("signature"),
     notes: form.get("notes"),
   }), "版本记录已创建。");
+  bindRecorderModuleForms();
+  bindSharedAiDraft();
+}
+
+function bindRecorderModuleForms() {
+  const userSelect = document.querySelector("#recorder-user-binding-user");
+  if (userSelect) {
+    userSelect.addEventListener("change", () => {
+      state.recorderBindingDraft.userId = String(userSelect.value || "");
+      if (state.recorderBindingDraft.userId) localStorage.setItem("vpsRecorderBindingUserId", state.recorderBindingDraft.userId);
+      syncRecorderBindingFormsFromState();
+    });
+  }
+
+  const userForm = document.querySelector("#recorder-user-binding-form");
+  if (userForm) {
+    userForm.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const form = new FormData(userForm);
+      const userId = String(form.get("scope_user_id") || "");
+      const moduleKey = String(form.get("module_key") || "");
+      if (!userId || !moduleKey) {
+        showMessage("请选择账号和模块。");
+        return;
+      }
+      state.recorderBindingDraft.userId = userId;
+      localStorage.setItem("vpsRecorderBindingUserId", userId);
+      const userName = (customerUsers().find((item) => String(item.user_id || "") === userId)?.username) || userId;
+      await runAction(
+        () => api("/v1/admin/recorder-module-bindings", {
+          method: "POST",
+          body: JSON.stringify({
+            binding_id: `user_${userId}`,
+            scope_type: "user",
+            scope_id: userId,
+            user_id: userId,
+            module_key: moduleKey,
+            enabled: Boolean(form.get("enabled")),
+          }),
+        }),
+        `账号「${userName}」的独立模块绑定已保存。`
+      );
+    });
+  }
+
+  const globalForm = document.querySelector("#recorder-global-binding-form");
+  if (globalForm) {
+    globalForm.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const form = new FormData(globalForm);
+      const moduleKey = String(form.get("module_key") || "");
+      if (!moduleKey) {
+        showMessage("请选择全局默认模块。");
+        return;
+      }
+      await runAction(
+        () => api("/v1/admin/recorder-module-bindings", {
+          method: "POST",
+          body: JSON.stringify({
+            binding_id: "global_default",
+            scope_type: "global",
+            scope_id: "*",
+            module_key: moduleKey,
+            enabled: Boolean(form.get("enabled")),
+          }),
+        }),
+        "全局兜底模块已保存（仅账号未配置时生效）。"
+      );
+    });
+  }
+}
+
+function bindSharedAiDraft() {
+  const toggle = document.querySelector("#shared-ai-draft-toggle");
+  const panel = document.querySelector("#shared-ai-draft-panel");
+  const input = document.querySelector("#shared-ai-draft-input");
+  const sendBtn = document.querySelector("#shared-ai-draft-send");
+  const messages = document.querySelector("#shared-ai-draft-messages");
+  const status = document.querySelector("#shared-ai-draft-status");
+  const actions = document.querySelector("#shared-ai-draft-actions");
+  const applyBtn = document.querySelector("#shared-ai-draft-apply");
+  const resetBtn = document.querySelector("#shared-ai-draft-reset");
+  if (!toggle || !panel) return;
+
+  let currentDraft = null;
+
+  toggle.addEventListener("click", () => {
+    panel.classList.toggle("is-hidden");
+    toggle.textContent = panel.classList.contains("is-hidden") ? "用自然语言创建（AI 对话）" : "收起 AI 对话";
+  });
+
+  function appendMessage(role, text) {
+    const div = document.createElement("div");
+    div.style.cssText = "margin:6px 0;padding:8px 12px;border-radius:8px;max-width:90%;" + (role === "user" ? "background:#e8f0fe;margin-left:auto;" : "background:#f1f3f4;");
+    div.textContent = text;
+    messages.appendChild(div);
+    messages.scrollTop = messages.scrollHeight;
+  }
+
+  async function sendDescription() {
+    const text = input.value.trim();
+    if (!text) return;
+    appendMessage("user", text);
+    input.value = "";
+    status.textContent = "AI 正在整理...";
+    sendBtn.disabled = true;
+    try {
+      const result = await api("/v1/admin/shared/library/draft", {
+        method: "POST",
+        body: JSON.stringify({description: text, use_llm: true}),
+      });
+      currentDraft = result.draft || null;
+      if (currentDraft) {
+        const info = [];
+        info.push(`标题：${currentDraft.title || "（未生成）"}`);
+        info.push(`类别：${currentDraft.category_id || "（未生成）"}`);
+        info.push(`内容：${(currentDraft.content || "").slice(0, 120)}${(currentDraft.content || "").length > 120 ? "..." : ""}`);
+        if (currentDraft.missing_fields?.length) info.push(`缺失字段：${currentDraft.missing_fields.join(", ")}`);
+        if (currentDraft.warnings?.length) info.push(`警告：${currentDraft.warnings.join("；")}`);
+        if (currentDraft.followup_question) info.push(`追问：${currentDraft.followup_question}`);
+        appendMessage("assistant", info.join("\n"));
+        if (result.ready) {
+          status.textContent = "草稿已就绪，可以确认填入表单。";
+          status.className = "status-card ok";
+          actions.classList.remove("is-hidden");
+        } else {
+          status.textContent = currentDraft.followup_question || "草稿不完整，请补充信息后重试。";
+          status.className = "status-card warning";
+          actions.classList.add("is-hidden");
+        }
+      } else {
+        appendMessage("assistant", result.message || "未能生成草稿。");
+        status.textContent = "";
+        actions.classList.add("is-hidden");
+      }
+    } catch (err) {
+      appendMessage("assistant", "出错：" + (err.message || String(err)));
+      status.textContent = "";
+    } finally {
+      sendBtn.disabled = false;
+    }
+  }
+
+  sendBtn?.addEventListener("click", sendDescription);
+  input?.addEventListener("keydown", (e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendDescription(); } });
+
+  applyBtn?.addEventListener("click", () => {
+    if (!currentDraft) return;
+    const form = document.querySelector("#library-form");
+    if (!form) return;
+    const setVal = (name, value) => { const el = form.querySelector(`[name="${name}"]`); if (el) el.value = value || ""; };
+    setVal("title", currentDraft.title);
+    setVal("category_id", currentDraft.category_id);
+    setVal("industry_id", currentDraft.industry_id);
+    setVal("keywords", (currentDraft.keywords || []).join(", "));
+    setVal("applies_to", currentDraft.applies_to);
+    setVal("content", currentDraft.content);
+    setVal("notes", currentDraft.notes);
+    showMessage("AI 草稿已填入表单，请核对后提交。", "ok");
+    panel.classList.add("is-hidden");
+    toggle.textContent = "用自然语言创建（AI 对话）";
+  });
+
+  resetBtn?.addEventListener("click", () => {
+    messages.innerHTML = "";
+    status.textContent = "";
+    status.className = "";
+    actions.classList.add("is-hidden");
+    currentDraft = null;
+    input.value = "";
+    input.focus();
+  });
 }
 
 function accountFormPayload(form) {
@@ -993,6 +1303,10 @@ async function handlePageAction(event) {
       if (!confirm("确认删除这个账号吗？")) return;
       await api(`/v1/admin/users/${encodeURIComponent(button.dataset.userId)}`, {method: "DELETE"});
       showMessage("账号已删除。", "ok");
+    } else if (action === "delete-recorder-binding") {
+      if (!confirm("确认删除这条记录员模块绑定吗？")) return;
+      await api(`/v1/admin/recorder-module-bindings/${encodeURIComponent(button.dataset.bindingId)}`, {method: "DELETE"});
+      showMessage("记录员模块绑定已删除。", "ok");
     } else if (action === "view-package") {
       await showPackageDetail(button.dataset.packageId);
       return;

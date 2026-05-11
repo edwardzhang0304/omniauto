@@ -1,0 +1,65 @@
+{
+  "schema_version": 1,
+  "category_id": "policies",
+  "id": "test_overlap_shipping_20260510_151430",
+  "status": "archived",
+  "source": {
+    "type": "rag_formal_overlap_merge",
+    "stamp": "20260510_151430",
+    "experience_id": "rag_exp_3696a155fb71ec464db5"
+  },
+  "data": {
+    "title": "测试-物流包邮规则-20260510_151430",
+    "policy_type": "after_sales",
+    "keywords": [
+      "包邮",
+      "物流",
+      "偏远地区",
+      "江浙沪"
+    ],
+    "applicability_scope": "global",
+    "answer": "{\n  \"default_carriers\": [\n    \"顺丰\",\n    \"京东物流\",\n    \"德邦\",\n    \"安能物流\"\n  ],\n  \"warehouse\": \"杭州余杭测试仓\",\n  \"same_day_cutoff\": \"工作日 16:00 前付款的现货订单尽量当天出库。\",\n  \"remote_area_note\": \"新疆、西藏、青海、内蒙古及港澳台等偏远地区运费和时效需人工确认；且不参与包邮活动。\",\n  \"tracking_note\": \"发货后会提供物流单号；大件商品默认物流到站，送货上楼需另行确认。\",\n  \"free_shipping_rules\": {\n    \"江浙沪\": {\n      \"min_amount\": 500\n    },\n    \"其他地区\": {\n      \"min_amount\": 1000,\n      \"exclude\": [\n        \"新疆\",\n        \"西藏\",\n        \"内蒙古\",\n        \"青海\",\n        \"港澳台\"\n      ]\n    }\n  }\n}",
+    "allow_auto_reply": false,
+    "requires_handoff": true,
+    "handoff_reason": "赔偿金额不能自动承诺，需人工确认",
+    "operator_alert": false,
+    "risk_level": "normal",
+    "additional_details": {
+      "来源": "AI经验升级",
+      "rag_experience_id": "rag_exp_3696a155fb71ec464db5",
+      "AI合并来源": "formal_overlap_merge",
+      "来源经验ID": "rag_exp_3696a155fb71ec464db5",
+      "原正式知识": "policies/test_overlap_shipping_20260510_151430",
+      "AI识别差异": "正式知识中补充了默认承运商（顺丰等）和时效说明，本经验未提及；正式知识中明确大件商品物流到站需确认送货上楼，本经验无此内容"
+    }
+  },
+  "runtime": {
+    "allow_auto_reply": false,
+    "requires_handoff": true,
+    "risk_level": "normal"
+  },
+  "metadata": {
+    "created_at": "2026-05-10T15:14:30",
+    "updated_at": "2026-05-10T15:15:18",
+    "created_by": "admin",
+    "updated_by": "admin",
+    "knowledge_layer": "tenant"
+  },
+  "_knowledge_layer": "tenant",
+  "review_state": {
+    "is_new": true,
+    "new_reason": "newly_added_formal_knowledge",
+    "marked_at": "2026-05-10T15:15:04",
+    "updated_at": "2026-05-10T15:15:04",
+    "read_at": "",
+    "read_by": "",
+    "source": {
+      "source_module": "rag_overlap",
+      "target_category": "policies",
+      "item_id": "test_overlap_shipping_20260510_151430",
+      "reason": "formal_overlap_ai_merge:rag_exp_3696a155fb71ec464db5",
+      "experience_id": "rag_exp_3696a155fb71ec464db5",
+      "overlap_strategy": "ai_merge_formal_and_experience"
+    }
+  }
+}

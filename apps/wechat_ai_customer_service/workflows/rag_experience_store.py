@@ -162,6 +162,7 @@ class RagExperienceStore:
             },
             "created_at": now_text,
             "updated_at": now_text,
+            "review_state": new_rag_review_state(now_text),
         }
         record["quality"] = score_experience_quality(record)
         db = postgres_store(self.tenant_id)
@@ -192,7 +193,7 @@ class RagExperienceStore:
                 )
                 db_existing["quality"] = score_experience_quality(db_existing)
                 db.upsert_rag_experience(db_existing)
-                rebuild_rag_index_safely(self.tenant_id)
+                rebuild_rag_index_safely(self.tenant_id, force_sync=True)
                 if not config.mirror_files:
                     return db_existing
                 record = db_existing
@@ -222,7 +223,7 @@ class RagExperienceStore:
                 existing["quality"] = score_experience_quality(existing)
                 records[index] = existing
                 self._write(records)
-                rebuild_rag_index_safely(self.tenant_id)
+                rebuild_rag_index_safely(self.tenant_id, force_sync=True)
                 return existing
         # New record: apply real-time LLM quality gate before saving
         _apply_creation_audit(record)
@@ -231,7 +232,7 @@ class RagExperienceStore:
         rebuild_rag_index_safely(self.tenant_id)
         if db and not db_existing:
             db.upsert_rag_experience(record)
-            rebuild_rag_index_safely(self.tenant_id)
+            rebuild_rag_index_safely(self.tenant_id, force_sync=True)
         return record
 
     def record_intake(
@@ -287,6 +288,7 @@ class RagExperienceStore:
             },
             "created_at": now_text,
             "updated_at": now_text,
+            "review_state": new_rag_review_state(now_text),
         }
         record["quality"] = score_record_quality(record)
         _apply_creation_audit(record)
@@ -353,12 +355,12 @@ class RagExperienceStore:
             item["quality"] = score_record_quality(item)
             records[index] = item
             self._write(records)
-            rebuild_rag_index_safely(self.tenant_id)
+            rebuild_rag_index_safely(self.tenant_id, force_sync=True)
             return item
         if db_item:
             records.append(db_item)
             self._write(records)
-            rebuild_rag_index_safely(self.tenant_id)
+            rebuild_rag_index_safely(self.tenant_id, force_sync=True)
             return db_item
         raise KeyError(experience_id)
 
@@ -383,7 +385,7 @@ class RagExperienceStore:
                 item["quality"] = score_record_quality(item)
                 db.upsert_rag_experience(item)
                 if rebuild_index:
-                    rebuild_rag_index_safely(self.tenant_id)
+                    rebuild_rag_index_safely(self.tenant_id, force_sync=True)
                 if not config.mirror_files:
                     return item
                 db_item = item
@@ -398,13 +400,13 @@ class RagExperienceStore:
             records[index] = item
             self._write(records)
             if rebuild_index:
-                rebuild_rag_index_safely(self.tenant_id)
+                rebuild_rag_index_safely(self.tenant_id, force_sync=True)
             return item
         if db_item:
             records.append(db_item)
             self._write(records)
             if rebuild_index:
-                rebuild_rag_index_safely(self.tenant_id)
+                rebuild_rag_index_safely(self.tenant_id, force_sync=True)
             return db_item
         raise KeyError(experience_id)
 
@@ -495,8 +497,25 @@ def merge_experience_record(existing: dict[str, Any], record: dict[str, Any], *,
         usage["reply_count"] = next_usage.get("reply_count")
     usage["last_used_at"] = now_text
     merged["usage"] = usage
+    existing_review_state = existing.get("review_state") if isinstance(existing.get("review_state"), dict) else {}
+    next_review_state = record.get("review_state") if isinstance(record.get("review_state"), dict) else {}
+    if existing_review_state:
+        merged["review_state"] = existing_review_state
+    elif next_review_state:
+        merged["review_state"] = next_review_state
     merged["quality"] = score_record_quality(merged)
     return merged
+
+
+def new_rag_review_state(now_text: str) -> dict[str, Any]:
+    return {
+        "is_new": True,
+        "new_reason": "new_rag_experience",
+        "marked_at": now_text,
+        "updated_at": now_text,
+        "read_at": "",
+        "read_by": "",
+    }
 
 
 def _apply_creation_audit(record: dict[str, Any]) -> None:
@@ -780,9 +799,72 @@ def now() -> str:
     return datetime.now().isoformat(timespec="seconds")
 
 
-def rebuild_rag_index_safely(tenant_id: str) -> None:
+def enqueue_rag_index_rebuild(tenant_id: str, *, trigger: str = "") -> dict[str, Any]:
+    from apps.wechat_ai_customer_service.admin_backend.services.work_queue import WorkQueueService
+
+    queue = WorkQueueService(tenant_id=tenant_id)
+    dedupe_key = f"rag_rebuild_index:{tenant_id}"
+    payload = {
+        "tenant_id": tenant_id,
+        "trigger": trigger or "rag_experience_mutation",
+        "requested_at": now(),
+    }
+    existing = queue.find_active_dedupe(queue="customer_service", dedupe_key=dedupe_key)
+    if existing and str(existing.get("status") or "") == "pending" and int(existing.get("priority", 5) or 5) > 1:
+        queue.cancel(str(existing.get("job_id") or ""), reason="reprioritized_for_fast_rag_rebuild")
+        existing = None
+
+    if existing:
+        job = dict(existing)
+        job["deduped"] = True
+    else:
+        job = queue.enqueue(
+            kind="rag_rebuild_index",
+            payload=payload,
+            queue="customer_service",
+            priority=1,
+            dedupe_key=dedupe_key,
+        )
+    worker_ok = True
+    worker_message = ""
     try:
-        from apps.wechat_ai_customer_service.workflows.rag_layer import RagService
+        from apps.wechat_ai_customer_service.admin_backend.services.customer_service_runtime import CustomerServiceRuntime
+
+        worker_result = CustomerServiceRuntime(tenant_id=tenant_id)._start_worker()
+        worker_ok = bool(worker_result.get("ok"))
+        worker_message = str(worker_result.get("message") or "")
+    except Exception as exc:
+        worker_ok = False
+        worker_message = repr(exc)
+    return {
+        "ok": True,
+        "mode": "queued_async_rebuild",
+        "queue": str(job.get("queue") or "customer_service"),
+        "job_id": str(job.get("job_id") or ""),
+        "status": str(job.get("status") or "pending"),
+        "deduped": bool(job.get("deduped")),
+        "worker_ok": worker_ok,
+        "worker_message": worker_message,
+    }
+
+
+def rebuild_rag_index_safely(tenant_id: str, *, trigger: str = "", force_sync: bool = False) -> None:
+    queued_worker_ok = False
+    try:
+        queued = enqueue_rag_index_rebuild(tenant_id, trigger=trigger)
+        queued_worker_ok = bool(queued.get("worker_ok"))
+    except Exception:
+        queued_worker_ok = False
+    # Keep async queue as the primary path, but provide deterministic local
+    # fallback when the worker cannot start. This preserves immediate
+    # consistency for in-process flows and test probes using rebuild_index=True.
+    if queued_worker_ok and not force_sync:
+        return
+    try:
+        try:
+            from apps.wechat_ai_customer_service.workflows.rag_layer import RagService  # local import to avoid circular import at module load time
+        except Exception:
+            from rag_layer import RagService  # compatibility for tests importing workflows modules directly
 
         RagService(tenant_id=tenant_id).rebuild_index()
     except Exception:

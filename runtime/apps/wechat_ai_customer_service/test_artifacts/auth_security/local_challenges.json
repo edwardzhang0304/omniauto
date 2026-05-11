@@ -1,6 +1,6 @@
 {
-  "local_otp_NDhOea9f-oD7lIxMBfGzVkzvxGwr17ec": {
-    "challenge_id": "local_otp_NDhOea9f-oD7lIxMBfGzVkzvxGwr17ec",
+  "local_otp_nIAy9B5d3MLhf_X6PWYtyRfYYgsRII8v": {
+    "challenge_id": "local_otp_nIAy9B5d3MLhf_X6PWYtyRfYYgsRII8v",
     "purpose": "login",
     "username": "test01",
     "user_id": "customer_test01",
@@ -8,9 +8,9 @@
     "email": "test01@example.local",
     "device_fingerprint": "",
     "device_name": "",
-    "code_hash": "pbkdf2_sha256$120000$a12d28f7421d7a471a9eb3a3e1198110$w5c93amRjO00mjuHbE2K0khQVFhz9fT4rbaO5ggVrcQ=",
+    "code_hash": "pbkdf2_sha256$120000$6a8209a1d425e771b76f18160a06789b$L923sUE1vZct/S6LXjWRJVJnx00+8wn5agEJ8t2GSKI=",
     "attempts_remaining": 5,
-    "expires_at": "2026-05-03T14:03:18+00:00",
-    "created_at": "2026-05-03T13:48:18+00:00"
+    "expires_at": "2026-05-10T18:45:31+00:00",
+    "created_at": "2026-05-10T18:30:31+00:00"
   }
 }

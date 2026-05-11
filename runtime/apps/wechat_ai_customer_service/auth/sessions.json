@@ -2079,5 +2079,605 @@
     "expires_at": "2026-05-06T01:42:58.397916+00:00",
     "source": "local",
     "token": "sess_lWt3Zrivi6_UH7j_B_6-B9fJyl7Zog4H"
+  },
+  {
+    "session_id": "sess_3uW0z-1YREg9gC6uGHnf0CGMY_1_VRD1",
+    "user": {
+      "user_id": "jiangsu_chejin_usedcar_customer_20260501",
+      "role": "customer",
+      "tenant_ids": [
+        "jiangsu_chejin_usedcar_customer_20260501"
+      ],
+      "display_name": "江苏车金二手车测试客户 2026-05-01",
+      "username": "jiangsu_chejin_usedcar_customer_20260501",
+      "resource_scopes": [
+        "*"
+      ]
+    },
+    "active_tenant_id": "jiangsu_chejin_usedcar_customer_20260501",
+    "issued_at": "2026-05-08T05:01:25.367335+00:00",
+    "expires_at": "2026-05-08T17:01:25.367335+00:00",
+    "source": "local",
+    "token": "sess_3uW0z-1YREg9gC6uGHnf0CGMY_1_VRD1"
+  },
+  {
+    "session_id": "sess_WtjB8yk_AEQmcuAJeXRg0duMADl9g4-A",
+    "user": {
+      "user_id": "jiangsu_chejin_usedcar_customer_20260501",
+      "role": "customer",
+      "tenant_ids": [
+        "jiangsu_chejin_usedcar_customer_20260501"
+      ],
+      "display_name": "江苏车金二手车测试客户 2026-05-01",
+      "username": "jiangsu_chejin_usedcar_customer_20260501",
+      "resource_scopes": [
+        "*"
+      ]
+    },
+    "active_tenant_id": "jiangsu_chejin_usedcar_customer_20260501",
+    "issued_at": "2026-05-08T05:07:16.817489+00:00",
+    "expires_at": "2026-05-08T17:07:16.817489+00:00",
+    "source": "local",
+    "token": "sess_WtjB8yk_AEQmcuAJeXRg0duMADl9g4-A"
+  },
+  {
+    "session_id": "sess_uYtg0j9Poj3sX-EAxg1FxbKH-AVuSYrQ",
+    "user": {
+      "user_id": "jiangsu_chejin_usedcar_customer_20260501",
+      "role": "customer",
+      "tenant_ids": [
+        "jiangsu_chejin_usedcar_customer_20260501"
+      ],
+      "display_name": "江苏车金二手车测试客户 2026-05-01",
+      "username": "jiangsu_chejin_usedcar_customer_20260501",
+      "resource_scopes": [
+        "*"
+      ]
+    },
+    "active_tenant_id": "jiangsu_chejin_usedcar_customer_20260501",
+    "issued_at": "2026-05-08T12:24:48.527327+00:00",
+    "expires_at": "2026-05-09T00:24:48.527327+00:00",
+    "source": "local",
+    "token": "sess_uYtg0j9Poj3sX-EAxg1FxbKH-AVuSYrQ"
+  },
+  {
+    "session_id": "sess_5V_-YNaJuPpfCf2v45av7jLCc0Isfhq6",
+    "user": {
+      "user_id": "jiangsu_chejin_usedcar_customer_20260501",
+      "role": "customer",
+      "tenant_ids": [
+        "jiangsu_chejin_usedcar_customer_20260501"
+      ],
+      "display_name": "江苏车金二手车测试客户 2026-05-01",
+      "username": "jiangsu_chejin_usedcar_customer_20260501",
+      "resource_scopes": [
+        "*"
+      ]
+    },
+    "active_tenant_id": "jiangsu_chejin_usedcar_customer_20260501",
+    "issued_at": "2026-05-08T12:32:05.566335+00:00",
+    "expires_at": "2026-05-09T00:32:05.566335+00:00",
+    "source": "local",
+    "token": "sess_5V_-YNaJuPpfCf2v45av7jLCc0Isfhq6"
+  },
+  {
+    "session_id": "sess_SgAHWnyT3IOAaF3chAOb43SkcPlsJsRL",
+    "user": {
+      "user_id": "jiangsu_chejin_usedcar_customer_20260501",
+      "role": "customer",
+      "tenant_ids": [
+        "jiangsu_chejin_usedcar_customer_20260501"
+      ],
+      "display_name": "江苏车金二手车测试客户 2026-05-01",
+      "username": "jiangsu_chejin_usedcar_customer_20260501",
+      "resource_scopes": [
+        "*"
+      ]
+    },
+    "active_tenant_id": "jiangsu_chejin_usedcar_customer_20260501",
+    "issued_at": "2026-05-08T12:39:02.181049+00:00",
+    "expires_at": "2026-05-09T00:39:02.181049+00:00",
+    "source": "local",
+    "token": "sess_SgAHWnyT3IOAaF3chAOb43SkcPlsJsRL"
+  },
+  {
+    "session_id": "sess_xDx6V1AxEwBAZi7MbaHlXfSau_pCeM80",
+    "user": {
+      "user_id": "jiangsu_chejin_usedcar_customer_20260501",
+      "role": "customer",
+      "tenant_ids": [
+        "jiangsu_chejin_usedcar_customer_20260501"
+      ],
+      "display_name": "江苏车金二手车测试客户 2026-05-01",
+      "username": "jiangsu_chejin_usedcar_customer_20260501",
+      "resource_scopes": [
+        "*"
+      ]
+    },
+    "active_tenant_id": "jiangsu_chejin_usedcar_customer_20260501",
+    "issued_at": "2026-05-08T12:46:55.181081+00:00",
+    "expires_at": "2026-05-09T00:46:55.181081+00:00",
+    "source": "local",
+    "token": "sess_xDx6V1AxEwBAZi7MbaHlXfSau_pCeM80"
+  },
+  {
+    "session_id": "sess_35NPlvgsble51TUrdew_l8JAcV4JkLKW",
+    "user": {
+      "user_id": "jiangsu_chejin_usedcar_customer_20260501",
+      "role": "customer",
+      "tenant_ids": [
+        "jiangsu_chejin_usedcar_customer_20260501"
+      ],
+      "display_name": "江苏车金二手车测试客户 2026-05-01",
+      "username": "jiangsu_chejin_usedcar_customer_20260501",
+      "resource_scopes": [
+        "*"
+      ]
+    },
+    "active_tenant_id": "jiangsu_chejin_usedcar_customer_20260501",
+    "issued_at": "2026-05-08T13:06:05.827050+00:00",
+    "expires_at": "2026-05-09T01:06:05.827050+00:00",
+    "source": "local",
+    "token": "sess_35NPlvgsble51TUrdew_l8JAcV4JkLKW"
+  },
+  {
+    "session_id": "sess_0tdyiZo9WeCpHFphJJxewSU5pm2YEo4f",
+    "user": {
+      "user_id": "jiangsu_chejin_usedcar_customer_20260501",
+      "role": "customer",
+      "tenant_ids": [
+        "jiangsu_chejin_usedcar_customer_20260501"
+      ],
+      "display_name": "江苏车金二手车测试客户 2026-05-01",
+      "username": "jiangsu_chejin_usedcar_customer_20260501",
+      "resource_scopes": [
+        "*"
+      ]
+    },
+    "active_tenant_id": "jiangsu_chejin_usedcar_customer_20260501",
+    "issued_at": "2026-05-08T13:39:45.137623+00:00",
+    "expires_at": "2026-05-09T01:39:45.137623+00:00",
+    "source": "local",
+    "token": "sess_0tdyiZo9WeCpHFphJJxewSU5pm2YEo4f"
+  },
+  {
+    "session_id": "sess_EjDuFsM6UZvqMbQhNOhtsPvVtmx0iEO0",
+    "user": {
+      "user_id": "jiangsu_chejin_usedcar_customer_20260501",
+      "role": "customer",
+      "tenant_ids": [
+        "jiangsu_chejin_usedcar_customer_20260501"
+      ],
+      "display_name": "江苏车金二手车测试客户 2026-05-01",
+      "username": "jiangsu_chejin_usedcar_customer_20260501",
+      "resource_scopes": [
+        "*"
+      ]
+    },
+    "active_tenant_id": "jiangsu_chejin_usedcar_customer_20260501",
+    "issued_at": "2026-05-09T07:20:05.093352+00:00",
+    "expires_at": "2026-05-09T19:20:05.093352+00:00",
+    "source": "local",
+    "token": "sess_EjDuFsM6UZvqMbQhNOhtsPvVtmx0iEO0"
+  },
+  {
+    "session_id": "sess_2zWQr_gGpGTJSKlMnJosH-ctpc1gnlMi",
+    "user": {
+      "user_id": "jiangsu_chejin_usedcar_customer_20260501",
+      "role": "customer",
+      "tenant_ids": [
+        "jiangsu_chejin_usedcar_customer_20260501"
+      ],
+      "display_name": "江苏车金二手车测试客户 2026-05-01",
+      "username": "jiangsu_chejin_usedcar_customer_20260501",
+      "resource_scopes": [
+        "*"
+      ]
+    },
+    "active_tenant_id": "jiangsu_chejin_usedcar_customer_20260501",
+    "issued_at": "2026-05-09T07:37:08.939420+00:00",
+    "expires_at": "2026-05-09T19:37:08.939420+00:00",
+    "source": "local",
+    "token": "sess_2zWQr_gGpGTJSKlMnJosH-ctpc1gnlMi"
+  },
+  {
+    "session_id": "vps_JY_Zg-NV2rDVzcU-U3FqcdshlBC3pxwApPqwdAPiL4Q",
+    "user": {
+      "user_id": "customer_test01",
+      "role": "customer",
+      "tenant_ids": [
+        "default"
+      ],
+      "display_name": "测试客户 test01",
+      "username": "test01",
+      "resource_scopes": [
+        "*"
+      ]
+    },
+    "active_tenant_id": "default",
+    "issued_at": "2026-05-09T14:09:02+00:00",
+    "expires_at": "2026-05-10T02:09:02+00:00",
+    "source": "vps",
+    "token": "vps_JY_Zg-NV2rDVzcU-U3FqcdshlBC3pxwApPqwdAPiL4Q"
+  },
+  {
+    "session_id": "vps_bBRnRYlYxR_g8eYIC4kS2_4GrKvnPr_nQWn-LVrZmYg",
+    "user": {
+      "user_id": "customer_test01",
+      "role": "customer",
+      "tenant_ids": [
+        "default"
+      ],
+      "display_name": "测试客户 test01",
+      "username": "test01",
+      "resource_scopes": [
+        "*"
+      ]
+    },
+    "active_tenant_id": "default",
+    "issued_at": "2026-05-09T15:21:51+00:00",
+    "expires_at": "2026-05-10T03:21:51+00:00",
+    "source": "vps",
+    "token": "vps_bBRnRYlYxR_g8eYIC4kS2_4GrKvnPr_nQWn-LVrZmYg"
+  },
+  {
+    "session_id": "vps_JdxdMDOxqVTyNfaF-lQX6ggbgbxJMNjZJY5pquQn4zU",
+    "user": {
+      "user_id": "customer_test01",
+      "role": "customer",
+      "tenant_ids": [
+        "default"
+      ],
+      "display_name": "测试客户 test01",
+      "username": "test01",
+      "resource_scopes": [
+        "*"
+      ]
+    },
+    "active_tenant_id": "default",
+    "issued_at": "2026-05-09T16:05:03+00:00",
+    "expires_at": "2026-05-10T04:05:03+00:00",
+    "source": "vps",
+    "token": "vps_JdxdMDOxqVTyNfaF-lQX6ggbgbxJMNjZJY5pquQn4zU"
+  },
+  {
+    "session_id": "vps_gssLSfJFB9sUbrAEuM2xmm_LxVWbYU0PxQ8VreUcjpE",
+    "user": {
+      "user_id": "customer_test01",
+      "role": "customer",
+      "tenant_ids": [
+        "default"
+      ],
+      "display_name": "测试客户 test01",
+      "username": "test01",
+      "resource_scopes": [
+        "*"
+      ]
+    },
+    "active_tenant_id": "default",
+    "issued_at": "2026-05-09T16:09:01+00:00",
+    "expires_at": "2026-05-10T04:09:01+00:00",
+    "source": "vps",
+    "token": "vps_gssLSfJFB9sUbrAEuM2xmm_LxVWbYU0PxQ8VreUcjpE"
+  },
+  {
+    "session_id": "vps_gnaQmhahHLJP1v-zUJ1BXY_aKu-k5NKRp-5xybl-4sA",
+    "user": {
+      "user_id": "customer_test01",
+      "role": "customer",
+      "tenant_ids": [
+        "default"
+      ],
+      "display_name": "测试客户 test01",
+      "username": "test01",
+      "resource_scopes": [
+        "*"
+      ]
+    },
+    "active_tenant_id": "default",
+    "issued_at": "2026-05-09T16:35:20+00:00",
+    "expires_at": "2026-05-10T04:35:20+00:00",
+    "source": "vps",
+    "token": "vps_gnaQmhahHLJP1v-zUJ1BXY_aKu-k5NKRp-5xybl-4sA"
+  },
+  {
+    "session_id": "vps_2YOKt6dzaRiq_wUKK3RUuGu1GEDs1V8XX-_71Y7OW14",
+    "user": {
+      "user_id": "customer_test01",
+      "role": "customer",
+      "tenant_ids": [
+        "default"
+      ],
+      "display_name": "测试客户 test01",
+      "username": "test01",
+      "resource_scopes": [
+        "*"
+      ]
+    },
+    "active_tenant_id": "default",
+    "issued_at": "2026-05-09T17:21:55+00:00",
+    "expires_at": "2026-05-10T05:21:55+00:00",
+    "source": "vps",
+    "token": "vps_2YOKt6dzaRiq_wUKK3RUuGu1GEDs1V8XX-_71Y7OW14"
+  },
+  {
+    "session_id": "sess_KvqNmGYVXdUO7NnJ8rCc686BL29n8QML",
+    "user": {
+      "user_id": "jiangsu_chejin_usedcar_customer_20260501",
+      "role": "customer",
+      "tenant_ids": [
+        "jiangsu_chejin_usedcar_customer_20260501"
+      ],
+      "display_name": "江苏车金二手车测试客户 2026-05-01",
+      "username": "jiangsu_chejin_usedcar_customer_20260501",
+      "resource_scopes": [
+        "*"
+      ]
+    },
+    "active_tenant_id": "jiangsu_chejin_usedcar_customer_20260501",
+    "issued_at": "2026-05-09T18:05:18.457142+00:00",
+    "expires_at": "2026-05-10T06:05:18.457142+00:00",
+    "source": "local",
+    "token": "sess_KvqNmGYVXdUO7NnJ8rCc686BL29n8QML"
+  },
+  {
+    "session_id": "sess_dGi11qtvqVQbWQ4N0-RvMY7BoXpTI6nn",
+    "user": {
+      "user_id": "jiangsu_chejin_usedcar_customer_20260501",
+      "role": "customer",
+      "tenant_ids": [
+        "jiangsu_chejin_usedcar_customer_20260501"
+      ],
+      "display_name": "江苏车金二手车测试客户 2026-05-01",
+      "username": "jiangsu_chejin_usedcar_customer_20260501",
+      "resource_scopes": [
+        "*"
+      ]
+    },
+    "active_tenant_id": "jiangsu_chejin_usedcar_customer_20260501",
+    "issued_at": "2026-05-09T18:52:04.635155+00:00",
+    "expires_at": "2026-05-10T06:52:04.635155+00:00",
+    "source": "local",
+    "token": "sess_dGi11qtvqVQbWQ4N0-RvMY7BoXpTI6nn"
+  },
+  {
+    "session_id": "sess_Pryq_IJsFeyu1O37dDxWc8HQDB72uCOB",
+    "user": {
+      "user_id": "jiangsu_chejin_usedcar_customer_20260501",
+      "role": "customer",
+      "tenant_ids": [
+        "jiangsu_chejin_usedcar_customer_20260501"
+      ],
+      "display_name": "江苏车金二手车测试客户 2026-05-01",
+      "username": "jiangsu_chejin_usedcar_customer_20260501",
+      "resource_scopes": [
+        "*"
+      ]
+    },
+    "active_tenant_id": "jiangsu_chejin_usedcar_customer_20260501",
+    "issued_at": "2026-05-09T19:58:48.677438+00:00",
+    "expires_at": "2026-05-10T07:58:48.677438+00:00",
+    "source": "local",
+    "token": "sess_Pryq_IJsFeyu1O37dDxWc8HQDB72uCOB"
+  },
+  {
+    "session_id": "vps_jEOhYeeTuXwD_BrJHzVfwfS7uJBMRKJnDVcOI0RVa4k",
+    "user": {
+      "user_id": "customer_test01",
+      "role": "customer",
+      "tenant_ids": [
+        "default"
+      ],
+      "display_name": "测试客户 test01",
+      "username": "test01",
+      "resource_scopes": [
+        "*"
+      ]
+    },
+    "active_tenant_id": "default",
+    "issued_at": "2026-05-10T04:08:17+00:00",
+    "expires_at": "2026-05-10T16:08:17+00:00",
+    "source": "vps",
+    "token": "vps_jEOhYeeTuXwD_BrJHzVfwfS7uJBMRKJnDVcOI0RVa4k"
+  },
+  {
+    "session_id": "vps_MRgJSSwYk9C9cS8bUj8c4Zv1jifhAEjSQaLGEo0poOk",
+    "user": {
+      "user_id": "customer_test01",
+      "role": "customer",
+      "tenant_ids": [
+        "default"
+      ],
+      "display_name": "测试客户 test01",
+      "username": "test01",
+      "resource_scopes": [
+        "*"
+      ]
+    },
+    "active_tenant_id": "default",
+    "issued_at": "2026-05-10T04:16:09+00:00",
+    "expires_at": "2026-05-10T16:16:09+00:00",
+    "source": "vps",
+    "token": "vps_MRgJSSwYk9C9cS8bUj8c4Zv1jifhAEjSQaLGEo0poOk"
+  },
+  {
+    "session_id": "vps_jfjJIfmQoo3aKxsfsIRXf0WoOszGnr1qVlkndYpnpUg",
+    "user": {
+      "user_id": "customer_test01",
+      "role": "customer",
+      "tenant_ids": [
+        "default"
+      ],
+      "display_name": "测试客户 test01",
+      "username": "test01",
+      "resource_scopes": [
+        "*"
+      ]
+    },
+    "active_tenant_id": "default",
+    "issued_at": "2026-05-10T04:24:15+00:00",
+    "expires_at": "2026-05-10T16:24:15+00:00",
+    "source": "vps",
+    "token": "vps_jfjJIfmQoo3aKxsfsIRXf0WoOszGnr1qVlkndYpnpUg"
+  },
+  {
+    "session_id": "vps_dRfcMv3aa428Xak6rdbaq8zSjnZb48Etac7mEiZNJao",
+    "user": {
+      "user_id": "customer_test01",
+      "role": "customer",
+      "tenant_ids": [
+        "default"
+      ],
+      "display_name": "测试客户 test01",
+      "username": "test01",
+      "resource_scopes": [
+        "*"
+      ]
+    },
+    "active_tenant_id": "default",
+    "issued_at": "2026-05-10T11:53:20+00:00",
+    "expires_at": "2026-05-10T23:53:20+00:00",
+    "source": "vps",
+    "token": "vps_dRfcMv3aa428Xak6rdbaq8zSjnZb48Etac7mEiZNJao"
+  },
+  {
+    "session_id": "vps_UGC6dUq_n57J7EEb_WYqXaKTQOm9BAdjHBR9VRuUBxw",
+    "user": {
+      "user_id": "customer_test01",
+      "role": "customer",
+      "tenant_ids": [
+        "default"
+      ],
+      "display_name": "测试客户 test01",
+      "username": "test01",
+      "resource_scopes": [
+        "*"
+      ]
+    },
+    "active_tenant_id": "default",
+    "issued_at": "2026-05-10T16:02:43+00:00",
+    "expires_at": "2026-05-11T04:02:43+00:00",
+    "source": "vps",
+    "token": "vps_UGC6dUq_n57J7EEb_WYqXaKTQOm9BAdjHBR9VRuUBxw"
+  },
+  {
+    "session_id": "vps_rAYw6S0VyvMlj8OD9imOoMjncoPQqpjYAN_UeWBCPpU",
+    "user": {
+      "user_id": "customer_test01",
+      "role": "customer",
+      "tenant_ids": [
+        "default"
+      ],
+      "display_name": "测试客户 test01",
+      "username": "test01",
+      "resource_scopes": [
+        "*"
+      ]
+    },
+    "active_tenant_id": "default",
+    "issued_at": "2026-05-10T16:27:46+00:00",
+    "expires_at": "2026-05-11T04:27:46+00:00",
+    "source": "vps",
+    "token": "vps_rAYw6S0VyvMlj8OD9imOoMjncoPQqpjYAN_UeWBCPpU"
+  },
+  {
+    "session_id": "vps_ZVfjcP95icC3_gcZT6u-MZ_WiXPsdi4rf8qGWaWcyRQ",
+    "user": {
+      "user_id": "customer_test01",
+      "role": "customer",
+      "tenant_ids": [
+        "default"
+      ],
+      "display_name": "测试客户 test01",
+      "username": "test01",
+      "resource_scopes": [
+        "*"
+      ]
+    },
+    "active_tenant_id": "default",
+    "issued_at": "2026-05-10T16:53:27+00:00",
+    "expires_at": "2026-05-11T04:53:27+00:00",
+    "source": "vps",
+    "token": "vps_ZVfjcP95icC3_gcZT6u-MZ_WiXPsdi4rf8qGWaWcyRQ"
+  },
+  {
+    "session_id": "vps__nBWEqD5qMoI2Hv-kd7tw8Y8bw-sfB4w5I3KFZgxp-g",
+    "user": {
+      "user_id": "user_YTE2rdUWFGqX",
+      "role": "customer",
+      "tenant_ids": [
+        "test02"
+      ],
+      "display_name": "test02",
+      "username": "test02",
+      "resource_scopes": [
+        "*"
+      ]
+    },
+    "active_tenant_id": "test02",
+    "issued_at": "2026-05-10T18:34:32+00:00",
+    "expires_at": "2026-05-11T06:34:32+00:00",
+    "source": "vps",
+    "token": "vps__nBWEqD5qMoI2Hv-kd7tw8Y8bw-sfB4w5I3KFZgxp-g"
+  },
+  {
+    "session_id": "vps_OFBSBKTPzsV_fC82F264506DO_xDz1hYQwXvbbDOHsI",
+    "user": {
+      "user_id": "user_YTE2rdUWFGqX",
+      "role": "customer",
+      "tenant_ids": [
+        "test02"
+      ],
+      "display_name": "test02",
+      "username": "test02",
+      "resource_scopes": [
+        "*"
+      ]
+    },
+    "active_tenant_id": "test02",
+    "issued_at": "2026-05-11T03:05:51+00:00",
+    "expires_at": "2026-05-11T15:05:51+00:00",
+    "source": "vps",
+    "token": "vps_OFBSBKTPzsV_fC82F264506DO_xDz1hYQwXvbbDOHsI"
+  },
+  {
+    "session_id": "vps_6Jn2uwlr5ozQnhfxNOUZavr7D4WA-sY-E9Eibh9voBw",
+    "user": {
+      "user_id": "user_YTE2rdUWFGqX",
+      "role": "customer",
+      "tenant_ids": [
+        "test02"
+      ],
+      "display_name": "test02",
+      "username": "test02",
+      "resource_scopes": [
+        "*"
+      ]
+    },
+    "active_tenant_id": "test02",
+    "issued_at": "2026-05-11T05:02:11+00:00",
+    "expires_at": "2026-05-11T17:02:11+00:00",
+    "source": "vps",
+    "token": "vps_6Jn2uwlr5ozQnhfxNOUZavr7D4WA-sY-E9Eibh9voBw"
+  },
+  {
+    "session_id": "vps_coMXXVoEwMsIVTKyxv5ae2y0aH22stwyFc77m3ZJ2IY",
+    "user": {
+      "user_id": "user_YTE2rdUWFGqX",
+      "role": "customer",
+      "tenant_ids": [
+        "test02"
+      ],
+      "display_name": "test02",
+      "username": "test02",
+      "resource_scopes": [
+        "*"
+      ]
+    },
+    "active_tenant_id": "test02",
+    "issued_at": "2026-05-11T05:16:10+00:00",
+    "expires_at": "2026-05-11T17:16:10+00:00",
+    "source": "vps",
+    "token": "vps_coMXXVoEwMsIVTKyxv5ae2y0aH22stwyFc77m3ZJ2IY"
   }
 ]

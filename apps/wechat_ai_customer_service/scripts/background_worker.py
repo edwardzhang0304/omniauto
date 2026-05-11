@@ -26,16 +26,19 @@ from apps.wechat_ai_customer_service.knowledge_paths import active_tenant_id, te
 SHUTDOWN = False
 
 
-def worker_pid_path(tenant_id: str) -> Path:
-    return tenant_runtime_root(tenant_id) / "customer_service" / "worker.pid.json"
+def worker_pid_path(tenant_id: str, queue: str) -> Path:
+    queue_key = "".join(ch if ch.isalnum() or ch in {"_", "-"} else "_" for ch in str(queue or "customer_service"))
+    if queue_key == "customer_service":
+        return tenant_runtime_root(tenant_id) / "customer_service" / "worker.pid.json"
+    return tenant_runtime_root(tenant_id) / "workers" / f"{queue_key}.pid.json"
 
 
 def worker_log_path(tenant_id: str) -> Path:
     return tenant_runtime_root(tenant_id) / "logs" / "background_worker.log"
 
 
-def read_worker_pid_record(tenant_id: str) -> dict[str, Any]:
-    path = worker_pid_path(tenant_id)
+def read_worker_pid_record(tenant_id: str, queue: str) -> dict[str, Any]:
+    path = worker_pid_path(tenant_id, queue)
     if not path.exists():
         return {}
     try:
@@ -45,17 +48,17 @@ def read_worker_pid_record(tenant_id: str) -> dict[str, Any]:
         return {}
 
 
-def write_worker_pid_record(tenant_id: str, payload: dict[str, Any]) -> None:
-    path = worker_pid_path(tenant_id)
+def write_worker_pid_record(tenant_id: str, queue: str, payload: dict[str, Any]) -> None:
+    path = worker_pid_path(tenant_id, queue)
     path.parent.mkdir(parents=True, exist_ok=True)
     temp = path.with_suffix(".json.tmp")
     temp.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
     os.replace(temp, path)
 
 
-def clear_worker_pid_record(tenant_id: str) -> None:
+def clear_worker_pid_record(tenant_id: str, queue: str) -> None:
     try:
-        worker_pid_path(tenant_id).unlink()
+        worker_pid_path(tenant_id, queue).unlink()
     except FileNotFoundError:
         pass
 
@@ -88,7 +91,7 @@ def main() -> int:
     lock_seconds = max(30, int(args.lock_seconds))
 
     # singleton guard
-    existing = read_worker_pid_record(tenant_id)
+    existing = read_worker_pid_record(tenant_id, queue)
     existing_pid = int(existing.get("pid") or 0)
     if existing_pid > 0:
         try:
@@ -106,6 +109,7 @@ def main() -> int:
 
     write_worker_pid_record(
         tenant_id,
+        queue,
         {
             "pid": os.getpid(),
             "tenant_id": tenant_id,
@@ -200,7 +204,7 @@ def main() -> int:
             "error_count": error_count,
         },
     )
-    clear_worker_pid_record(tenant_id)
+    clear_worker_pid_record(tenant_id, queue)
     print(f"Background worker for {tenant_id} shutting down. processed={processed_count}, errors={error_count}", file=sys.stderr)
     return 0
 

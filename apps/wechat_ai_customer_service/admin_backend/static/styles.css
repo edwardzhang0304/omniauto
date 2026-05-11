@@ -1785,6 +1785,16 @@ textarea {
   background: #fef3c7;
 }
 
+.status-chip.info {
+  color: #1e3a8a;
+  background: #dbeafe;
+}
+
+.status-chip.loading {
+  color: #075985;
+  background: #e0f2fe;
+}
+
 .quality-line {
   display: flex;
   flex-wrap: wrap;
@@ -2272,6 +2282,19 @@ textarea {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(320px, 0.42fr);
   gap: 18px;
+}
+
+.product-intake-layout .generator-chat {
+  min-height: 420px;
+  max-height: 560px;
+}
+
+#product-llm-intake-input {
+  min-height: 140px;
+}
+
+#product-llm-intake-status {
+  font-size: 13px;
 }
 
 .generator-chat {
@@ -3130,6 +3153,34 @@ textarea {
   background: var(--surface-raised);
 }
 
+.experience-new-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 22px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  color: #ffffff;
+  background: #d92d20;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1;
+  text-transform: lowercase;
+}
+
+.experience-new-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex: 0 0 auto;
+}
+
+.experience-new-actions .secondary-button {
+  min-height: 26px;
+  padding: 0 10px;
+  font-size: 12px;
+}
+
 .relation-promotion_candidate {
   color: #075985;
   border-color: #bae6fd;
@@ -3225,6 +3276,12 @@ textarea {
   min-width: 0;
 }
 
+.float-drag-handle {
+  cursor: inherit;
+  user-select: none;
+  touch-action: none;
+}
+
 .runtime-status-main p,
 .runtime-status-main small,
 .float-status-line small {
@@ -3277,9 +3334,18 @@ textarea {
   padding: 12px 14px;
   border: 1px solid rgba(148, 163, 184, 0.35);
   border-radius: 14px;
-  background: rgba(255, 255, 255, 0.92);
+  background: rgba(219, 234, 254, 0.78);
   box-shadow: 0 18px 48px rgba(15, 23, 42, 0.18);
   backdrop-filter: blur(16px);
+  cursor: grab;
+}
+
+.customer-service-float.is-dragging .float-drag-handle {
+  cursor: inherit;
+}
+
+.customer-service-float.is-dragging {
+  cursor: grabbing;
 }
 
 .float-actions {

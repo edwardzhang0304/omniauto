@@ -10,6 +10,7 @@
   "schema_version": 1,
   "id": "shared_23d1898820124cbcff",
   "item_id": "shared_23d1898820124cbcff",
+  "industry_id": "global",
   "category_id": "reply_style",
   "status": "active",
   "content": "客户提供的信息不完整时，AI客服应直接说明还缺哪些关键信息，并请客户补充；不要编造缺失资料。",

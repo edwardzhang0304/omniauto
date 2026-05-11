@@ -183,6 +183,34 @@
               </form>
             </div>
             <div class="compact-list" id="user-list"></div>
+            <div class="workflow-section is-visible">
+              <h2>AI智能记录员模块分配</h2>
+              <p>基础采集链路固定不变，这里只切换“聊天整理/导出模板模块”。</p>
+              <div class="inline-help">
+                <strong>生效规则：账号独立绑定；未绑定账号才使用全局兜底</strong>
+                <span>推荐为每个账号单独配置模块，彼此独立互不影响。全局兜底仅用于新账号尚未配置时的临时默认值。</span>
+              </div>
+              <div class="compact-list compact-list-small" id="recorder-module-cards">
+                <div class="status-card loading"><strong><span class="loading-spinner" aria-hidden="true"></span>正在加载记录员模块</strong></div>
+              </div>
+              <form class="form-grid compact-form" id="recorder-user-binding-form">
+                <label class="form-field"><span>目标账号（独立绑定）</span><select name="scope_user_id" id="recorder-user-binding-user"></select></label>
+                <label class="form-field"><span>模块</span><select name="module_key" id="recorder-user-binding-module"></select></label>
+                <label class="checkbox-field"><input name="enabled" type="checkbox" checked /><span>启用绑定</span></label>
+                <button class="primary-button" type="submit">保存账号绑定</button>
+              </form>
+              <details class="workflow-section">
+                <summary>高级配置（可选）：全局兜底</summary>
+                <form class="form-grid compact-form" id="recorder-global-binding-form">
+                  <label class="form-field"><span>全局兜底（仅账号未配置时）</span><select name="module_key" id="recorder-global-binding-module"></select></label>
+                  <label class="checkbox-field"><input name="enabled" type="checkbox" checked /><span>启用绑定</span></label>
+                  <button class="secondary-button" type="submit">保存全局兜底</button>
+                </form>
+              </details>
+              <div class="compact-list" id="recorder-binding-list">
+                <div class="status-card loading"><strong><span class="loading-spinner" aria-hidden="true"></span>正在加载模块绑定</strong></div>
+              </div>
+            </div>
           </article>
 
           <article class="glass-panel content-card view-panel" data-panel="customerData">
@@ -231,6 +259,21 @@
             </div>
             <div class="workflow-section is-visible">
               <h2>新增正式共享知识</h2>
+              <div class="button-row" style="margin-bottom:12px;">
+                <button class="secondary-button" type="button" id="shared-ai-draft-toggle">用自然语言创建（AI 对话）</button>
+              </div>
+              <div class="ai-draft-panel is-hidden glass-panel" id="shared-ai-draft-panel" style="margin-bottom:16px;padding:16px;">
+                <div id="shared-ai-draft-messages" style="max-height:320px;overflow-y:auto;margin-bottom:12px;"></div>
+                <div class="form-field" style="display:flex;gap:8px;">
+                  <input id="shared-ai-draft-input" placeholder="用自然语言描述这条共享知识，例如：客户询问发货时效时，应该告知48小时内发货并说明偏远地区除外" style="flex:1;" />
+                  <button class="primary-button" type="button" id="shared-ai-draft-send">发送</button>
+                </div>
+                <div id="shared-ai-draft-status" style="margin-top:8px;font-size:13px;"></div>
+                <div class="button-row is-hidden" id="shared-ai-draft-actions" style="margin-top:12px;">
+                  <button class="primary-button" type="button" id="shared-ai-draft-apply">确认填入表单</button>
+                  <button class="secondary-button" type="button" id="shared-ai-draft-reset">重新描述</button>
+                </div>
+              </div>
               <form class="shared-library-form compact-form" id="library-form">
                 <label class="form-field"><span>条目 ID</span><input name="item_id" placeholder="可留空自动生成" /></label>
                 <label class="form-field">

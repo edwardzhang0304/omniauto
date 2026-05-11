@@ -6,6 +6,8 @@ import hashlib
 import json
 import re
 import sys
+import urllib.error
+import urllib.request
 from collections import Counter
 from datetime import datetime
 from difflib import SequenceMatcher
@@ -19,16 +21,28 @@ if str(WORKFLOWS_ROOT) not in sys.path:
     sys.path.insert(0, str(WORKFLOWS_ROOT))
 
 from rag_layer import RagService  # noqa: E402
-from rag_experience_store import RagExperienceStore, with_quality  # noqa: E402
+from rag_experience_store import RagExperienceStore, enqueue_rag_index_rebuild, with_quality  # noqa: E402
 from rag_operations import RagOperationsAnalyzer  # noqa: E402
 from generate_review_candidates import LLM_ASSIST_POLICY_VERSION  # noqa: E402
 from apps.wechat_ai_customer_service.knowledge_paths import tenant_review_candidates_root, tenant_runtime_state_root  # noqa: E402
+from apps.wechat_ai_customer_service.llm_config import (  # noqa: E402
+    read_secret,
+    resolve_deepseek_base_url,
+    resolve_deepseek_max_tokens,
+    resolve_deepseek_tier_model,
+    resolve_deepseek_timeout,
+)
 from apps.wechat_ai_customer_service.platform_safety_rules import guard_term_set, load_platform_safety_rules  # noqa: E402
 from apps.wechat_ai_customer_service.workflows.knowledge_runtime import (  # noqa: E402
     KnowledgeRuntime,
     PRODUCT_SCOPED_SCHEMAS,
 )
 from .candidate_store import CandidateStore, upsert_candidate_to_db  # noqa: E402
+from .knowledge_base_store import KnowledgeBaseStore  # noqa: E402
+from .knowledge_compiler import KnowledgeCompiler  # noqa: E402
+from .knowledge_registry import KnowledgeRegistry  # noqa: E402
+from .knowledge_schema_manager import KnowledgeSchemaManager  # noqa: E402
+from .formal_review_state import mark_item_new  # noqa: E402
 from .rag_experience_interpreter import (  # noqa: E402
     INTERPRETATION_VERSION,
     RagExperienceInterpreter,
@@ -84,7 +98,15 @@ class RagAdminService:
         )
 
     def rebuild(self) -> dict[str, Any]:
-        return self.rag.rebuild_index()
+        index = enqueue_rag_index_rebuild(
+            self.experiences.tenant_id,
+            trigger="manual_admin_rebuild",
+        )
+        return {
+            "ok": True,
+            "message": "索引重建任务已提交后台处理。",
+            "index": index,
+        }
 
     def sources(self, payload: dict[str, Any] | None = None) -> dict[str, Any]:
         payload = payload or {}
@@ -143,20 +165,22 @@ class RagAdminService:
             if cached_interpretation and str(cached_interpretation.get("version") or "") == INTERPRETATION_VERSION:
                 triage_patch = build_auto_triage_patch(annotated, apply_guardrails_to_interpretation(cached_interpretation, annotated))
                 if triage_patch:
-                    try:
-                        updated_raw = self.experiences.update_metadata(
-                            str(enriched.get("experience_id") or ""),
-                            triage_patch,
-                            rebuild_index=False,
-                        )
-                        annotated = annotate_experience(with_quality(updated_raw), formal_items) if not fast else annotate_experience_from_cache(with_quality(updated_raw))
-                        annotated = attach_source_dialogue(
-                            annotated,
-                            raw_store=self.raw_messages,
-                            conversation_cache=source_dialogue_cache,
-                        )
-                    except KeyError:
-                        pass
+                    virtual_item = dict(enriched)
+                    virtual_item.update(triage_patch)
+                    review = triage_patch.get("experience_review") if isinstance(triage_patch.get("experience_review"), dict) else {}
+                    review_status = str(review.get("status") or "")
+                    auto_action = str(review.get("auto_triage_action") or "")
+                    if review_status == AUTO_TRIAGE_REVIEW_STATUS and auto_action in {"discard", "already_covered"}:
+                        virtual_item["status"] = "discarded"
+                    virtual_item = with_quality(virtual_item)
+                    annotated = annotate_experience(virtual_item, formal_items) if not fast else annotate_experience_from_cache(virtual_item)
+                    annotated = attach_source_dialogue(
+                        annotated,
+                        raw_store=self.raw_messages,
+                        conversation_cache=source_dialogue_cache,
+                    )
+            if status == "active" and str(annotated.get("status") or "active") != "active":
+                continue
             items.append(annotated)
         relation_counts = Counter(str(item.get("formal_relation") or "unknown") for item in items)
         quality_counts = Counter(str((item.get("quality") or {}).get("band") or "unknown") for item in items)
@@ -186,8 +210,30 @@ class RagAdminService:
     def discard_experience(self, experience_id: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
         payload = payload or {}
         item = self.experiences.discard(experience_id, reason=str(payload.get("reason") or "discarded in admin"))
-        index = self.rag.rebuild_index()
-        return {"ok": True, "item": item, "index": index}
+        return {"ok": True, "item": item, "index": {"ok": True, "mode": "queued_async_rebuild"}}
+
+    def acknowledge_experience(self, experience_id: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
+        payload = payload or {}
+        current = self.find_experience(experience_id)
+        review_state = dict(current.get("review_state") if isinstance(current.get("review_state"), dict) else {})
+        if not review_state:
+            return {"ok": True, "item": current, "index": {"ok": True, "mode": "noop"}}
+        if not bool(review_state.get("is_new")):
+            return {"ok": True, "item": current, "index": {"ok": True, "mode": "noop"}}
+        review_state.update(
+            {
+                "is_new": False,
+                "read_at": now(),
+                "read_by": str(payload.get("actor") or "admin"),
+                "updated_at": now(),
+            }
+        )
+        item = self.experiences.update_metadata(
+            experience_id,
+            {"review_state": review_state},
+            rebuild_index=False,
+        )
+        return {"ok": True, "item": item, "index": {"ok": True, "mode": "queued_async_rebuild"}}
 
     def keep_experience(self, experience_id: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
         payload = payload or {}
@@ -208,8 +254,7 @@ class RagAdminService:
             },
             rebuild_index=True,
         )
-        index = self.rag.rebuild_index()
-        return {"ok": True, "item": item, "index": index}
+        return {"ok": True, "item": item, "index": {"ok": True, "mode": "queued_async_rebuild"}}
 
     def reopen_experience(self, experience_id: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
         payload = payload or {}
@@ -255,8 +300,12 @@ class RagAdminService:
                 {"experience_review": review, "reviewed_by_user": False},
                 rebuild_index=True,
             )
-        index = self.rag.rebuild_index()
-        return {"ok": True, "item": item, "index": index, "rejected_candidate": rejected_candidate}
+        return {
+            "ok": True,
+            "item": item,
+            "index": {"ok": True, "mode": "queued_async_rebuild"},
+            "rejected_candidate": rejected_candidate,
+        }
 
     def update_experience(self, experience_id: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
         payload = payload or {}
@@ -284,8 +333,7 @@ class RagAdminService:
         if not patch:
             return {"ok": False, "message": "no supported fields to update"}
         item = self.experiences.update_metadata(experience_id, patch, rebuild_index=True)
-        index = self.rag.rebuild_index()
-        return {"ok": True, "item": item, "index": index}
+        return {"ok": True, "item": item, "index": {"ok": True, "mode": "queued_async_rebuild"}}
 
     def promote_experience(self, experience_id: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
         payload = payload or {}
@@ -350,8 +398,142 @@ class RagAdminService:
             reason="promoted_to_review_candidate",
             extra={"promoted_at": now(), "promoted_candidate_id": candidate["candidate_id"]},
         )
-        index = self.rag.rebuild_index()
-        return {"ok": True, "candidate": candidate, "item": updated, "index": index, "cache_policy": cache_policy}
+        return {
+            "ok": True,
+            "candidate": candidate,
+            "item": updated,
+            "index": {"ok": True, "mode": "queued_async_rebuild"},
+            "cache_policy": cache_policy,
+        }
+
+    def resolve_formal_overlap(self, experience_id: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
+        payload = payload or {}
+        strategy = str(payload.get("strategy") or "").strip()
+        allowed = {"keep_formal_discard_experience", "replace_formal_with_experience", "ai_merge_formal_and_experience"}
+        if strategy not in allowed:
+            return {"ok": False, "message": f"unsupported overlap strategy: {strategy}"}
+
+        current = self.find_experience(experience_id)
+        if str(current.get("status") or "active") != "active":
+            return {"ok": False, "message": "only active experiences can resolve formal overlap"}
+
+        formal_items = collect_formal_items()
+        formal_revision = formal_items_revision(formal_items)
+        annotated = annotate_experience(with_quality(current), formal_items)
+        annotated["formal_revision"] = formal_revision
+        annotated = attach_source_dialogue(
+            annotated,
+            raw_store=self.raw_messages,
+            conversation_cache={},
+        )
+        if not has_actionable_formal_overlap(annotated):
+            return {
+                "ok": False,
+                "message": "当前经验未检测到可操作的正式知识相近项，无需走相近冲突处理。",
+                "formal_relation": str(annotated.get("formal_relation") or ""),
+                "formal_match": annotated.get("formal_match") or {},
+            }
+        match = annotated.get("formal_match") if isinstance(annotated.get("formal_match"), dict) else {}
+        category_id = str(match.get("category_id") or "")
+        item_id = str(match.get("item_id") or "")
+        formal_record = find_formal_record(formal_items, category_id=category_id, item_id=item_id)
+        if not formal_record:
+            return {
+                "ok": False,
+                "message": "相近正式知识已不存在或已被移除，请刷新后重试。",
+                "formal_relation": str(annotated.get("formal_relation") or ""),
+                "formal_match": match,
+            }
+
+        if strategy == "keep_formal_discard_experience":
+            discarded = self.experiences.discard(
+                experience_id,
+                reason="formal_knowledge_preferred_discard_experience",
+            )
+            return {
+                "ok": True,
+                "strategy": strategy,
+                "item": discarded,
+                "formal_relation": str(annotated.get("formal_relation") or ""),
+                "formal_match": compact_formal_match(formal_record),
+                "message": "已按正式知识库为准，废弃这条经验。",
+                "index": {"ok": True, "mode": "queued_async_rebuild"},
+            }
+
+        if strategy == "replace_formal_with_experience":
+            replaced = save_formal_item(
+                target_category=str(formal_record.get("category_id") or ""),
+                item=replaced_formal_item_with_experience(
+                    formal_record.get("item") if isinstance(formal_record.get("item"), dict) else {},
+                    annotated,
+                    target_category=str(formal_record.get("category_id") or ""),
+                    formal_record=formal_record,
+                ),
+                reason=f"replace_formal_with_experience:{experience_id}",
+                review_source={
+                    "experience_id": experience_id,
+                    "overlap_strategy": strategy,
+                },
+            )
+            discarded = self.experiences.discard(
+                experience_id,
+                reason="replace_formal_with_experience_discard_experience",
+            )
+            return {
+                "ok": True,
+                "strategy": strategy,
+                "item": discarded,
+                "formal_item": replaced.get("item"),
+                "formal_relation": str(annotated.get("formal_relation") or ""),
+                "formal_match": compact_formal_match(formal_record),
+                "compile": replaced.get("compile"),
+                "message": "已按新经验覆盖更新正式知识库，并从RAG经验池移除这条经验。",
+                "index": {"ok": True, "mode": "queued_async_rebuild"},
+            }
+
+        interpretation, cache_policy = self.promotion_interpretation(annotated)
+        annotated["ai_interpretation"] = interpretation
+        triage_patch = build_auto_triage_patch(annotated, interpretation)
+        if triage_patch:
+            try:
+                self.experiences.update_metadata(experience_id, triage_patch, rebuild_index=False)
+            except KeyError:
+                pass
+        try:
+            merged_item = merged_formal_item_with_experience(
+                formal_record.get("item") if isinstance(formal_record.get("item"), dict) else {},
+                annotated,
+                target_category=str(formal_record.get("category_id") or ""),
+                formal_record=formal_record,
+            )
+            saved = save_formal_item(
+                target_category=str(formal_record.get("category_id") or ""),
+                item=merged_item,
+                reason=f"formal_overlap_ai_merge:{experience_id}",
+                review_source={
+                    "experience_id": experience_id,
+                    "overlap_strategy": strategy,
+                },
+            )
+            discarded = self.experiences.discard(
+                experience_id,
+                reason="formal_overlap_ai_merge_discard_experience",
+            )
+        except ValueError as exc:
+            return {"ok": False, "message": str(exc), "formal_match": compact_formal_match(formal_record)}
+        return {
+            "ok": True,
+            "strategy": strategy,
+            "item": discarded,
+            "formal_item": saved.get("item") if isinstance(saved, dict) else {},
+            "formal_relation": str(annotated.get("formal_relation") or ""),
+            "formal_match": compact_formal_match(formal_record),
+            "ai_interpretation": interpretation,
+            "cache_policy": cache_policy,
+            "compile": saved.get("compile") if isinstance(saved, dict) else {},
+            "message": "已完成AI合并并更新正式知识库，这条经验已从RAG经验池移除。",
+            "index": {"ok": True, "mode": "queued_async_rebuild"},
+        }
 
     def promotion_interpretation(self, annotated: dict[str, Any]) -> tuple[dict[str, Any], str]:
         """Reuse AI advice on promotion when its cache is still valid."""
@@ -431,6 +613,491 @@ class RagAdminService:
         raise KeyError(experience_id)
 
 
+def persist_pending_candidate(candidate: dict[str, Any]) -> None:
+    candidate_path = tenant_review_candidates_root() / "pending" / f"{candidate['candidate_id']}.json"
+    candidate_path.parent.mkdir(parents=True, exist_ok=True)
+    candidate_path.write_text(json.dumps(candidate, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    upsert_candidate_to_db(candidate)
+
+
+def has_actionable_formal_overlap(item: dict[str, Any]) -> bool:
+    match = item.get("formal_match") if isinstance(item.get("formal_match"), dict) else {}
+    if not str(match.get("category_id") or "") or not str(match.get("item_id") or ""):
+        return False
+    relation = str(item.get("formal_relation") or "")
+    if relation in {"covered_by_formal", "supports_formal", "conflicts_formal"}:
+        return True
+    try:
+        return float(match.get("similarity") or 0) >= 0.48
+    except (TypeError, ValueError):
+        return False
+
+
+def find_formal_record(formal_items: list[dict[str, Any]], *, category_id: str, item_id: str) -> dict[str, Any] | None:
+    for record in formal_items:
+        if str(record.get("category_id") or "") == category_id and str(record.get("item_id") or "") == item_id:
+            return record
+    return None
+
+
+def archive_formal_item_by_match(*, category_id: str, item_id: str, reason: str) -> dict[str, Any]:
+    registry = KnowledgeRegistry()
+    schema_manager = KnowledgeSchemaManager(registry)
+    base_store = KnowledgeBaseStore(registry, schema_manager)
+    archived = base_store.archive_item(category_id, item_id)
+    if not archived.get("ok"):
+        raise ValueError(str(archived.get("message") or f"failed to archive formal item: {category_id}/{item_id}"))
+    compile_result = KnowledgeCompiler().compile_to_disk()
+    return {"ok": True, "item": archived.get("item"), "compile": compile_result, "reason": reason}
+
+
+def save_formal_item(
+    *,
+    target_category: str,
+    item: dict[str, Any],
+    reason: str,
+    review_source: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    if not target_category:
+        raise ValueError("formal target category is missing")
+    if not isinstance(item, dict) or not item:
+        raise ValueError("formal merged item is missing")
+    registry = KnowledgeRegistry()
+    schema_manager = KnowledgeSchemaManager(registry)
+    base_store = KnowledgeBaseStore(registry, schema_manager)
+    source = {
+        "source_module": "rag_overlap",
+        "target_category": target_category,
+        "item_id": str(item.get("id") or ""),
+        "reason": reason,
+    }
+    if isinstance(review_source, dict):
+        source.update({key: value for key, value in review_source.items() if value not in (None, "")})
+    review_target = dict(item)
+    review_target["review_state"] = {}
+    item_with_new_marker = mark_item_new(review_target, source)
+    result = base_store.save_item(target_category, item_with_new_marker)
+    if not result.get("ok"):
+        raise ValueError(str(result.get("message") or f"failed to save formal item: {target_category}"))
+    compile_result = KnowledgeCompiler().compile_to_disk()
+    return {"ok": True, "item": result.get("item"), "compile": compile_result, "reason": reason}
+
+
+def build_overlap_merge_candidate(item: dict[str, Any], formal_record: dict[str, Any]) -> dict[str, Any]:
+    target_category = str(formal_record.get("category_id") or "")
+    formal_item = formal_record.get("item") if isinstance(formal_record.get("item"), dict) else {}
+    if not target_category or not formal_item:
+        raise ValueError("formal overlap target is missing")
+    source_decision = evaluate_experience_source_authority(item, target_category)
+    if not source_decision.get("allowed"):
+        raise ValueError(str(source_decision.get("message") or source_decision.get("reason") or "source is not authoritative for overlap merge"))
+    merged_item = merged_formal_item_with_experience(formal_item, item, target_category=target_category, formal_record=formal_record)
+    candidate_id = "rag_overlap_merge_" + stable_digest(
+        f"{item.get('experience_id')}:{target_category}:{formal_record.get('item_id')}:{now()}",
+        20,
+    )
+    title = formal_title(formal_item) or str(formal_record.get("item_id") or "")
+    summary = f"AI合并更新：在正式知识「{title}」基础上吸收这条新经验，生成待确认更新。"
+    return {
+        "schema_version": 1,
+        "candidate_id": candidate_id,
+        "generated_at": now(),
+        "source": {
+            "type": "rag_formal_overlap_merge",
+            "experience_id": item.get("experience_id"),
+            "formal_category_id": target_category,
+            "formal_item_id": str(formal_record.get("item_id") or ""),
+            "formal_title": title,
+            "evidence_excerpt": candidate_business_evidence(item),
+        },
+        "detected_tags": ["rag_experience", "formal_overlap", "ai_merge", target_category],
+        "proposal": {
+            "target_category": target_category,
+            "change_type": "rag_formal_overlap_merge",
+            "summary": summary,
+            "suggested_fields": merged_item.get("data") if isinstance(merged_item.get("data"), dict) else {},
+            "formal_patch": {
+                "target_category": target_category,
+                "operation": "upsert_item",
+                "item": merged_item,
+            },
+        },
+        "review": {
+            "status": "pending",
+            "requires_human_approval": True,
+            "allowed_auto_apply": False,
+            "completeness_status": "ready",
+            "rag_experience_id": item.get("experience_id"),
+            "source_authority": source_decision,
+            "llm_assist": {
+                **rag_experience_llm_assist(item),
+                "stage": "rag_formal_overlap_merge_candidate",
+                "reason": "formal_overlap_ai_merge",
+            },
+        },
+        "intake": {
+            "status": "ready",
+            "missing_fields": [],
+            "missing_labels": [],
+            "warnings": [],
+            "confidence": 0.78,
+            "question": "",
+        },
+    }
+
+
+def merged_formal_item_with_experience(
+    formal_item: dict[str, Any],
+    experience_item: dict[str, Any],
+    *,
+    target_category: str,
+    formal_record: dict[str, Any],
+) -> dict[str, Any]:
+    existing_data = formal_item.get("data") if isinstance(formal_item.get("data"), dict) else {}
+    experience_data = candidate_data_for_category(target_category, experience_item)
+    merged_data = merge_payload(existing_data, experience_data, path=("data",), target_category=target_category)
+    merged_details = merged_data.get("additional_details") if isinstance(merged_data.get("additional_details"), dict) else {}
+    comparison = (
+        (experience_item.get("ai_interpretation") or {}).get("formal_knowledge_comparison")
+        if isinstance(experience_item.get("ai_interpretation"), dict)
+        else {}
+    )
+    differences = comparison.get("differences") if isinstance(comparison, dict) and isinstance(comparison.get("differences"), list) else []
+    merged_details.update(
+        {
+            "AI合并来源": "formal_overlap_merge",
+            "来源经验ID": str(experience_item.get("experience_id") or ""),
+            "原正式知识": f"{formal_record.get('category_id')}/{formal_record.get('item_id')}",
+        }
+    )
+    if differences:
+        merged_details["AI识别差异"] = "；".join(str(item) for item in differences if str(item).strip())[:500]
+    merged_data["additional_details"] = compact_dict(merged_details)
+    return {
+        **formal_item,
+        "category_id": target_category,
+        "id": str(formal_item.get("id") or formal_record.get("item_id") or ""),
+        "status": "active",
+        "source": {
+            **(formal_item.get("source") if isinstance(formal_item.get("source"), dict) else {}),
+            "type": "rag_formal_overlap_merge",
+            "experience_id": experience_item.get("experience_id"),
+        },
+        "data": merged_data,
+        "runtime": merge_payload(
+            formal_item.get("runtime") if isinstance(formal_item.get("runtime"), dict) else {},
+            experience_runtime_hints(experience_data),
+            path=("runtime",),
+            target_category=target_category,
+        ),
+    }
+
+
+def replaced_formal_item_with_experience(
+    formal_item: dict[str, Any],
+    experience_item: dict[str, Any],
+    *,
+    target_category: str,
+    formal_record: dict[str, Any],
+) -> dict[str, Any]:
+    if not isinstance(formal_item, dict) or not formal_item:
+        raise ValueError("formal item is missing for replace strategy")
+    experience_data = candidate_data_for_category(target_category, experience_item)
+    if not isinstance(experience_data, dict) or not experience_data:
+        raise ValueError("experience payload is empty and cannot replace formal knowledge")
+    existing_data = formal_item.get("data") if isinstance(formal_item.get("data"), dict) else {}
+    replaced_data = {**experience_data}
+    for key in ("product_id", "sku", "category"):
+        if key not in replaced_data and key in existing_data and existing_data.get(key) not in (None, "", [], {}):
+            replaced_data[key] = existing_data.get(key)
+    details = replaced_data.get("additional_details") if isinstance(replaced_data.get("additional_details"), dict) else {}
+    details.update(
+        {
+            "来源经验ID": str(experience_item.get("experience_id") or ""),
+            "原正式知识": f"{formal_record.get('category_id')}/{formal_record.get('item_id')}",
+            "替换策略": "new_experience_preferred",
+        }
+    )
+    replaced_data["additional_details"] = compact_dict(details)
+    runtime = formal_item.get("runtime") if isinstance(formal_item.get("runtime"), dict) else {}
+    return {
+        **formal_item,
+        "category_id": target_category,
+        "id": str(formal_item.get("id") or formal_record.get("item_id") or ""),
+        "status": "active",
+        "source": {
+            **(formal_item.get("source") if isinstance(formal_item.get("source"), dict) else {}),
+            "type": "rag_formal_overlap_replace",
+            "experience_id": experience_item.get("experience_id"),
+        },
+        "data": replaced_data,
+        "runtime": merge_payload(runtime, experience_runtime_hints(experience_data), path=("runtime",), target_category=target_category),
+    }
+
+
+def experience_runtime_hints(data: dict[str, Any]) -> dict[str, Any]:
+    hints: dict[str, Any] = {}
+    if "allow_auto_reply" in data:
+        hints["allow_auto_reply"] = bool(data.get("allow_auto_reply"))
+    if "requires_handoff" in data:
+        hints["requires_handoff"] = bool(data.get("requires_handoff"))
+    if data.get("operator_alert") is True:
+        hints["operator_alert"] = True
+    return hints
+
+
+def merge_payload(
+    base: Any,
+    incoming: Any,
+    *,
+    path: tuple[str, ...] = (),
+    target_category: str = "",
+) -> Any:
+    if isinstance(base, dict) and isinstance(incoming, dict):
+        merged = {**base}
+        for key, value in incoming.items():
+            if key not in merged:
+                merged[key] = value
+                continue
+            merged[key] = merge_payload(
+                merged.get(key),
+                value,
+                path=(*path, str(key)),
+                target_category=target_category,
+            )
+        return merged
+    if isinstance(base, list) and isinstance(incoming, list):
+        merged = []
+        seen = set()
+        for value in [*base, *incoming]:
+            marker = stable_digest(json.dumps(value, ensure_ascii=False, sort_keys=True), 16)
+            if marker in seen:
+                continue
+            seen.add(marker)
+            merged.append(value)
+        return merged
+    if incoming in (None, "", [], {}):
+        return base
+    if base in (None, "", [], {}):
+        return incoming
+    if isinstance(base, str) and isinstance(incoming, str):
+        merged_text = semantic_merge_text(
+            base,
+            incoming,
+            field_path=path,
+            target_category=target_category,
+        )
+        if merged_text:
+            return merged_text
+        if incoming in base:
+            return base
+        if base in incoming:
+            return incoming
+        return f"{base}\n{incoming}"
+    return incoming
+
+
+SEMANTIC_MERGE_FIELD_KEYS = {
+    "answer",
+    "content",
+    "service_reply",
+    "shipping_policy",
+    "warranty_policy",
+}
+SEMANTIC_MERGE_PATH_KEYS = {"reply_templates"}
+SHIPPING_SIGNAL_TERMS = (
+    "包邮",
+    "运费",
+    "发货",
+    "物流",
+    "偏远",
+    "remote_area",
+    "same_day_cutoff",
+    "tracking_note",
+    "carriers",
+)
+
+
+def semantic_merge_text(
+    base_text: str,
+    incoming_text: str,
+    *,
+    field_path: tuple[str, ...],
+    target_category: str = "",
+) -> str:
+    left = str(base_text or "").strip()
+    right = str(incoming_text or "").strip()
+    if not left:
+        return right
+    if not right:
+        return left
+    if right in left:
+        return left
+    if left in right:
+        return right
+    if not should_run_semantic_text_merge(field_path, left, right):
+        return ""
+    llm_merged = llm_merge_text(left, right, field_path=field_path, target_category=target_category)
+    if llm_merged:
+        return llm_merged
+    heuristic_merged = heuristic_merge_shipping_rule(left, right)
+    if heuristic_merged:
+        return heuristic_merged
+    return ""
+
+
+def should_run_semantic_text_merge(field_path: tuple[str, ...], base_text: str, incoming_text: str) -> bool:
+    key = str(field_path[-1]).lower() if field_path else ""
+    if key in SEMANTIC_MERGE_FIELD_KEYS:
+        return True
+    path_keys = {str(part).lower() for part in field_path}
+    if path_keys & SEMANTIC_MERGE_PATH_KEYS:
+        return True
+    text = f"{base_text}\n{incoming_text}".lower()
+    if any(term.lower() in text for term in SHIPPING_SIGNAL_TERMS):
+        return True
+    if looks_like_json_text(base_text):
+        return True
+    return False
+
+
+def llm_merge_text(
+    base_text: str,
+    incoming_text: str,
+    *,
+    field_path: tuple[str, ...],
+    target_category: str,
+) -> str:
+    api_key = read_secret("DEEPSEEK_API_KEY")
+    if not api_key:
+        return ""
+    base_is_json = looks_like_json_text(base_text)
+    prompt = {
+        "task": "合并同一字段的旧值与新值，输出一个最终版本，去重并保持语义一致。",
+        "rules": [
+            "不能简单拼接文本；必须做语义融合，避免重复。",
+            "不能丢失原有有效信息；新信息若与旧信息冲突，应以更具体、更新的业务规则为准。",
+            "如果旧值是 JSON 对象文本，优先保持 JSON 结构；在合适字段补充新规则。",
+            "如果出现包邮/物流/偏远地区规则，需归并成一套清晰规则，避免多条互相覆盖或冲突。",
+            "只输出 JSON 对象，不要输出 Markdown。",
+        ],
+        "context": {
+            "target_category": target_category,
+            "field_path": "/".join(field_path),
+            "base_is_json": base_is_json,
+        },
+        "response_shape": {
+            "merged_text": "string, 合并后的最终字段值",
+            "merged_json": "object|null, 当应保持 JSON 结构时填 object，否则填 null",
+            "notes": "string, 简短说明",
+        },
+        "base_text": truncate(base_text, 3200),
+        "incoming_text": truncate(incoming_text, 3200),
+    }
+    payload = {
+        "model": resolve_deepseek_tier_model(tier="flash", read_secret_fn=read_secret),
+        "messages": [
+            {"role": "system", "content": "你是电商客服知识库合并助手。严格按要求输出 JSON 对象。"},
+            {"role": "user", "content": json.dumps(prompt, ensure_ascii=False)},
+        ],
+        "temperature": 0.1,
+        "max_tokens": resolve_deepseek_max_tokens(1400, read_secret_fn=read_secret),
+        "response_format": {"type": "json_object"},
+    }
+    request = urllib.request.Request(
+        url=resolve_deepseek_base_url(read_secret_fn=read_secret).rstrip("/") + "/chat/completions",
+        data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
+        headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=resolve_deepseek_timeout(60, read_secret_fn=read_secret)) as response:
+            raw = response.read().decode("utf-8")
+        data = json.loads(raw or "{}")
+    except (urllib.error.HTTPError, urllib.error.URLError, TimeoutError, OSError, json.JSONDecodeError):
+        return ""
+    content = str(data.get("choices", [{}])[0].get("message", {}).get("content", "") or "")
+    parsed = parse_structured_payload(content)
+    if not isinstance(parsed, dict) or not parsed:
+        return ""
+    merged_json = parsed.get("merged_json")
+    if isinstance(merged_json, (dict, list)):
+        return json.dumps(merged_json, ensure_ascii=False, indent=2)
+    merged_text = str(parsed.get("merged_text") or "").strip()
+    if merged_text:
+        return merged_text
+    return ""
+
+
+def heuristic_merge_shipping_rule(base_text: str, incoming_text: str) -> str:
+    if not has_shipping_signal(base_text + "\n" + incoming_text):
+        return ""
+    base_payload = parse_structured_payload(base_text)
+    if not isinstance(base_payload, dict) or not base_payload:
+        return ""
+    merged = dict(base_payload)
+    incoming_rule = normalize_sentence(incoming_text)
+    if not incoming_rule:
+        return ""
+    rule_key = next(
+        (
+            key
+            for key in ("free_shipping_rule", "free_shipping_policy", "shipping_discount_rule", "shipping_rule", "包邮规则")
+            if key in merged
+        ),
+        "free_shipping_rule",
+    )
+    merged[rule_key] = merge_sentence(str(merged.get(rule_key) or "").strip(), incoming_rule)
+    if any(term in incoming_rule for term in ("偏远", "新疆", "西藏", "青海", "内蒙", "港澳台")):
+        remote_note = str(merged.get("remote_area_note") or "").strip()
+        merged["remote_area_note"] = merge_sentence(remote_note, extract_remote_clause(incoming_rule) or incoming_rule)
+    return json.dumps(merged, ensure_ascii=False, indent=2)
+
+
+def has_shipping_signal(text: str) -> bool:
+    value = str(text or "").lower()
+    return any(term.lower() in value for term in SHIPPING_SIGNAL_TERMS)
+
+
+def merge_sentence(base: str, incoming: str) -> str:
+    left = normalize_sentence(base)
+    right = normalize_sentence(incoming)
+    if not left:
+        return right
+    if not right:
+        return left
+    if right in left:
+        return left
+    if left in right:
+        return right
+    return f"{left.rstrip('。；;')}；{right.lstrip('。；;')}"
+
+
+def normalize_sentence(value: str) -> str:
+    return re.sub(r"\s+", " ", str(value or "")).strip()
+
+
+def extract_remote_clause(text: str) -> str:
+    parts = re.split(r"[。；;]\s*", str(text or ""))
+    for part in parts:
+        snippet = part.strip()
+        if not snippet:
+            continue
+        if any(term in snippet for term in ("偏远", "新疆", "西藏", "青海", "内蒙", "港澳台")):
+            return snippet
+    return ""
+
+
+def looks_like_json_text(text: str) -> bool:
+    value = str(text or "").strip()
+    if not value:
+        return False
+    if value[0] not in "{[":
+        return False
+    parsed = parse_structured_payload(value)
+    return isinstance(parsed, dict) and bool(parsed)
+
+
 def collect_formal_items() -> list[dict[str, Any]]:
     runtime = KnowledgeRuntime()
     category_ids = [str(item.get("id") or "") for item in runtime.list_categories(enabled_only=True)]
@@ -480,6 +1147,14 @@ def formal_items_revision(items: list[dict[str, Any]]) -> str:
     return stable_digest(json.dumps(payload, ensure_ascii=False, sort_keys=True), 24)
 
 
+def auto_triage_should_discard(review: dict[str, Any] | None) -> bool:
+    if not isinstance(review, dict):
+        return False
+    if str(review.get("status") or "") != AUTO_TRIAGE_REVIEW_STATUS:
+        return False
+    return str(review.get("auto_triage_action") or "") in {"discard", "already_covered"}
+
+
 def annotate_experience(item: dict[str, Any], formal_items: list[dict[str, Any]]) -> dict[str, Any]:
     annotated = dict(item)
     status = str(item.get("status") or "active")
@@ -504,6 +1179,9 @@ def annotate_experience(item: dict[str, Any], formal_items: list[dict[str, Any]]
     elif review_status == AUTO_KEPT_REVIEW_STATUS:
         relation = "auto_kept_experience"
         action = "system_auto_kept_as_experience"
+    elif auto_triage_should_discard(review):
+        relation = "discarded"
+        action = "already_discarded"
     elif review_status == "kept":
         relation = "kept_experience"
         action = "kept_as_experience"
@@ -546,6 +1224,9 @@ def annotate_experience_from_cache(item: dict[str, Any]) -> dict[str, Any]:
         if review_status == AUTO_KEPT_REVIEW_STATUS:
             annotated["formal_relation"] = "auto_kept_experience"
             annotated["recommended_action"] = "system_auto_kept_as_experience"
+        elif auto_triage_should_discard(review):
+            annotated["formal_relation"] = "discarded"
+            annotated["recommended_action"] = "already_discarded"
         elif review_status == "kept":
             annotated["formal_relation"] = "kept_experience"
             annotated["recommended_action"] = "kept_as_experience"

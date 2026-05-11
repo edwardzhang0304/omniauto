@@ -1,6 +1,6 @@
 [
   {
-    "session_id": "sess_xyC2Renouu5Fkv6Z-KdxKUVvyXFF9Tku",
+    "session_id": "sess_BMyOBNUTORgWCga00nHzPsaL-pYXZMDE",
     "user": {
       "user_id": "customer_test01",
       "role": "customer",
@@ -14,13 +14,13 @@
       ]
     },
     "active_tenant_id": "default",
-    "issued_at": "2026-05-05T13:31:54.720655+00:00",
-    "expires_at": "2026-05-06T01:31:54.720655+00:00",
+    "issued_at": "2026-05-09T19:57:25.962833+00:00",
+    "expires_at": "2026-05-10T07:57:25.962833+00:00",
     "source": "local",
-    "token": "sess_xyC2Renouu5Fkv6Z-KdxKUVvyXFF9Tku"
+    "token": "sess_BMyOBNUTORgWCga00nHzPsaL-pYXZMDE"
   },
   {
-    "session_id": "sess_vzht3k7saaLFHo-GTOU56sdEvcBZ8kpK",
+    "session_id": "sess_PIt4f-P3dBJ1kRmHE2L14R5a66d1fgc0",
     "user": {
       "user_id": "customer_test01",
       "role": "customer",
@@ -34,10 +34,10 @@
       ]
     },
     "active_tenant_id": "default",
-    "issued_at": "2026-05-05T13:31:54.993741+00:00",
-    "expires_at": "2026-05-06T01:31:54.993741+00:00",
+    "issued_at": "2026-05-09T19:57:26.010873+00:00",
+    "expires_at": "2026-05-10T07:57:26.010873+00:00",
     "source": "local",
-    "token": "sess_vzht3k7saaLFHo-GTOU56sdEvcBZ8kpK"
+    "token": "sess_PIt4f-P3dBJ1kRmHE2L14R5a66d1fgc0"
   },
   {
     "session_id": "local-shared-admin-session",
@@ -60,7 +60,7 @@
     "token": "local-shared-admin-session"
   },
   {
-    "session_id": "sess_xMByDA8nq6HF5TJ9iIpT8gY1FdqL93RX",
+    "session_id": "sess_lbjPsGxlp2H4aczwccHVqOs-iAlma3AM",
     "user": {
       "user_id": "customer_test01",
       "role": "customer",
@@ -74,9 +74,9 @@
       ]
     },
     "active_tenant_id": "default",
-    "issued_at": "2026-05-05T13:31:55.353737+00:00",
-    "expires_at": "2026-05-06T01:31:55.353737+00:00",
+    "issued_at": "2026-05-09T19:57:26.067536+00:00",
+    "expires_at": "2026-05-10T07:57:26.067536+00:00",
     "source": "local",
-    "token": "sess_xMByDA8nq6HF5TJ9iIpT8gY1FdqL93RX"
+    "token": "sess_lbjPsGxlp2H4aczwccHVqOs-iAlma3AM"
   }
 ]

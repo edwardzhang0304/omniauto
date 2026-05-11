@@ -118,7 +118,8 @@ def rag_reply_allowed_for_decision(
         return False
     if product_knowledge and product_knowledge.get("matched"):
         return bool(settings.get("apply_to_matched_product", False))
-    if candidate_intent == "small_talk" or candidate_action == "reply_small_talk" or "small_talk" in intent_tags:
+    small_talk_only = bool(intent_tags) and intent_tags <= {"small_talk", "greeting", "unknown"}
+    if candidate_intent == "small_talk" or candidate_action == "reply_small_talk" or ("small_talk" in intent_tags and small_talk_only):
         return bool(settings.get("apply_to_small_talk", True))
     if not matched or reason == "no_rule_matched":
         if not bool(settings.get("apply_to_unmatched", True)):

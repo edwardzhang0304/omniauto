@@ -8,10 +8,12 @@
       "sync_enabled": true,
       "metadata": {
         "source": "local_current_client",
-        "account_username": "test01"
+        "account_username": "test01",
+        "industry_id": "home_appliance"
       },
       "created_at": "2026-04-29T08:49:14+00:00",
-      "updated_at": "2026-04-29T16:48:45+00:00"
+      "updated_at": "2026-04-29T16:48:45+00:00",
+      "industry_id": "home_appliance"
     },
     "recorder_live_customer_20260501": {
       "tenant_id": "recorder_live_customer_20260501",
@@ -33,10 +35,12 @@
             "schedule": "manual"
           }
         },
-        "updated_at": "2026-05-01T07:32:21+00:00"
+        "updated_at": "2026-05-01T07:32:21+00:00",
+        "industry_id": "home_appliance"
       },
       "created_at": "2026-05-01T07:31:51+00:00",
-      "updated_at": "2026-05-01T07:32:21+00:00"
+      "updated_at": "2026-05-01T07:32:21+00:00",
+      "industry_id": "home_appliance"
     },
     "jiangsu_chejin_usedcar_customer_20260501": {
       "tenant_id": "jiangsu_chejin_usedcar_customer_20260501",
@@ -58,10 +62,12 @@
             "schedule": "manual"
           }
         },
-        "updated_at": "2026-05-01T20:22:26+00:00"
+        "updated_at": "2026-05-01T20:22:26+00:00",
+        "industry_id": "used_car"
       },
       "created_at": "2026-05-01T08:09:49+00:00",
-      "updated_at": "2026-05-01T20:22:26+00:00"
+      "updated_at": "2026-05-01T20:22:26+00:00",
+      "industry_id": "used_car"
     },
     "smart_recorder_test": {
       "tenant_id": "smart_recorder_test",
@@ -70,10 +76,54 @@
       "sync_enabled": true,
       "metadata": {
         "source": "local_client_account",
-        "account_username": "smart_recorder_test"
+        "account_username": "smart_recorder_test",
+        "industry_id": "home_appliance"
       },
       "created_at": "2026-05-02T13:41:37+00:00",
-      "updated_at": "2026-05-02T13:41:37+00:00"
+      "updated_at": "2026-05-02T13:41:37+00:00",
+      "industry_id": "home_appliance"
+    },
+    "smart_recorder_test_debug": {
+      "tenant_id": "smart_recorder_test_debug",
+      "display_name": "smart_recorder_test_debug",
+      "status": "active",
+      "sync_enabled": true,
+      "industry_id": "home_appliance",
+      "metadata": {
+        "source": "local_client_account",
+        "account_username": "smart_recorder_test_debug",
+        "industry_id": "home_appliance"
+      },
+      "created_at": "2026-05-08T16:18:22+00:00",
+      "updated_at": "2026-05-08T16:18:22+00:00"
+    },
+    "rag_enterprise_eval": {
+      "tenant_id": "rag_enterprise_eval",
+      "display_name": "rag_enterprise_eval",
+      "status": "active",
+      "sync_enabled": true,
+      "industry_id": "home_appliance",
+      "metadata": {
+        "source": "local_client_account",
+        "account_username": "rag_enterprise_eval",
+        "industry_id": "home_appliance"
+      },
+      "created_at": "2026-05-09T18:20:49+00:00",
+      "updated_at": "2026-05-09T18:20:49+00:00"
+    },
+    "test02": {
+      "tenant_id": "test02",
+      "display_name": "test02",
+      "status": "active",
+      "sync_enabled": false,
+      "industry_id": "lab_instruments",
+      "metadata": {
+        "source": "customer_account",
+        "account_username": "test02",
+        "industry_id": "lab_instruments"
+      },
+      "created_at": "2026-05-10T17:31:27+00:00",
+      "updated_at": "2026-05-10T17:31:27+00:00"
     }
   },
   "users": {
@@ -95,24 +145,6 @@
       "email": "xu__cong@126.com",
       "initialized_at": "2026-04-30T18:08:34+00:00"
     },
-    "recorder_live_customer_20260501": {
-      "user_id": "recorder_live_customer_20260501",
-      "username": "recorder_live_customer_20260501",
-      "display_name": "记录员真机测试客户 2026-05-01",
-      "email": "recorder_live_customer_20260501@example.local",
-      "role": "customer",
-      "tenant_ids": [
-        "recorder_live_customer_20260501"
-      ],
-      "resource_scopes": [
-        "*"
-      ],
-      "status": "active",
-      "source": "local_client_account",
-      "created_at": "2026-05-01T07:31:51+00:00",
-      "updated_at": "2026-05-01T07:32:21+00:00",
-      "password_hash": "pbkdf2_sha256$120000$825711a1858b2cff14e6761691c2c219$8aiK5rQCjZwplTGKshncM7fAmS23chVUu72DFRX0m9U="
-    },
     "jiangsu_chejin_usedcar_customer_20260501": {
       "user_id": "jiangsu_chejin_usedcar_customer_20260501",
       "username": "jiangsu_chejin_usedcar_customer_20260501",
@@ -128,8 +160,27 @@
       "status": "active",
       "source": "local_client_account",
       "created_at": "2026-05-01T08:09:49+00:00",
-      "updated_at": "2026-05-05T13:42:57+00:00",
-      "password_hash": "pbkdf2_sha256$120000$ea2a34bddd6780c95e14d681ff2d4483$uZCwJDlp14/fe9jtUdr7bWDiV/Q+4HyshYTaYzPPJOs="
+      "updated_at": "2026-05-09T20:05:09+00:00",
+      "password_hash": "pbkdf2_sha256$120000$8a1f5fc46d61f742aa9f486a5ee7cdb6$Vjy8TInOxEEzzqPs0dbwVhNYD80mqtlheeJS6b5LzA4="
+    },
+    "user_YTE2rdUWFGqX": {
+      "user_id": "user_YTE2rdUWFGqX",
+      "username": "test02",
+      "display_name": "test02",
+      "email": "xu__cong@126.com",
+      "role": "customer",
+      "tenant_ids": [
+        "test02"
+      ],
+      "industry_id": "lab_instruments",
+      "resource_scopes": [
+        "*"
+      ],
+      "status": "active",
+      "created_at": "2026-05-10T17:31:27+00:00",
+      "updated_at": "2026-05-10T18:33:48+00:00",
+      "password_hash": "pbkdf2_sha256$120000$6ec729d68aaefe852fd7d056ecdbff66$wRhcYCootNq7DA/c3aR8YPKnOZCQ38JwblnQ1rDXu60=",
+      "initialized_at": "2026-05-10T18:33:48+00:00"
     }
   },
   "sessions": {
@@ -312,6 +363,486 @@
       "expires_at": "2026-05-06T05:58:43+00:00",
       "source": "vps",
       "token": "vps_z2q7lT16ixTPdGBTG9K8GV1YOSTMr1hvPlxfsxAz0NI"
+    },
+    "vps_KVuCUlY0ToRHOtwYdsa8wfC3d7Z9AbPt3aW3Rv3zVPg": {
+      "session_id": "vps_KVuCUlY0ToRHOtwYdsa8wfC3d7Z9AbPt3aW3Rv3zVPg",
+      "user": {
+        "user_id": "platform-admin",
+        "role": "admin",
+        "tenant_ids": [
+          "*"
+        ],
+        "display_name": "Platform Admin",
+        "username": "admin",
+        "resource_scopes": [
+          "*"
+        ]
+      },
+      "active_tenant_id": "default",
+      "issued_at": "2026-05-07T21:57:53+00:00",
+      "expires_at": "2026-05-08T09:57:53+00:00",
+      "source": "vps",
+      "token": "vps_KVuCUlY0ToRHOtwYdsa8wfC3d7Z9AbPt3aW3Rv3zVPg"
+    },
+    "vps_4QwDuUelq8QPToC9xWZjrCbrZL1DWYMVAuU387PH8tg": {
+      "session_id": "vps_4QwDuUelq8QPToC9xWZjrCbrZL1DWYMVAuU387PH8tg",
+      "user": {
+        "user_id": "platform-admin",
+        "role": "admin",
+        "tenant_ids": [
+          "*"
+        ],
+        "display_name": "Platform Admin",
+        "username": "admin",
+        "resource_scopes": [
+          "*"
+        ]
+      },
+      "active_tenant_id": "default",
+      "issued_at": "2026-05-08T04:35:13+00:00",
+      "expires_at": "2026-05-08T16:35:13+00:00",
+      "source": "vps",
+      "token": "vps_4QwDuUelq8QPToC9xWZjrCbrZL1DWYMVAuU387PH8tg"
+    },
+    "vps_vj1Axl7SCoz8PAZ4Mo5p47IVjz5fgUOjFc2NzNoZcD4": {
+      "session_id": "vps_vj1Axl7SCoz8PAZ4Mo5p47IVjz5fgUOjFc2NzNoZcD4",
+      "user": {
+        "user_id": "platform-admin",
+        "role": "admin",
+        "tenant_ids": [
+          "*"
+        ],
+        "display_name": "Platform Admin",
+        "username": "admin",
+        "resource_scopes": [
+          "*"
+        ]
+      },
+      "active_tenant_id": "default",
+      "issued_at": "2026-05-09T02:04:50+00:00",
+      "expires_at": "2026-05-09T14:04:50+00:00",
+      "source": "vps",
+      "token": "vps_vj1Axl7SCoz8PAZ4Mo5p47IVjz5fgUOjFc2NzNoZcD4"
+    },
+    "vps_7wbkp8s-gcZcg5lyigZu6Yl_SrVdpzV45jQxeb4T2lY": {
+      "session_id": "vps_7wbkp8s-gcZcg5lyigZu6Yl_SrVdpzV45jQxeb4T2lY",
+      "user": {
+        "user_id": "platform-admin",
+        "role": "admin",
+        "tenant_ids": [
+          "*"
+        ],
+        "display_name": "Platform Admin",
+        "username": "admin",
+        "resource_scopes": [
+          "*"
+        ]
+      },
+      "active_tenant_id": "default",
+      "issued_at": "2026-05-09T14:08:19+00:00",
+      "expires_at": "2026-05-10T02:08:19+00:00",
+      "source": "vps",
+      "token": "vps_7wbkp8s-gcZcg5lyigZu6Yl_SrVdpzV45jQxeb4T2lY"
+    },
+    "vps_JY_Zg-NV2rDVzcU-U3FqcdshlBC3pxwApPqwdAPiL4Q": {
+      "session_id": "vps_JY_Zg-NV2rDVzcU-U3FqcdshlBC3pxwApPqwdAPiL4Q",
+      "user": {
+        "user_id": "customer_test01",
+        "role": "customer",
+        "tenant_ids": [
+          "default"
+        ],
+        "display_name": "测试客户 test01",
+        "username": "test01",
+        "resource_scopes": [
+          "*"
+        ]
+      },
+      "active_tenant_id": "default",
+      "issued_at": "2026-05-09T14:09:02+00:00",
+      "expires_at": "2026-05-10T02:09:02+00:00",
+      "source": "vps",
+      "token": "vps_JY_Zg-NV2rDVzcU-U3FqcdshlBC3pxwApPqwdAPiL4Q"
+    },
+    "vps_bBRnRYlYxR_g8eYIC4kS2_4GrKvnPr_nQWn-LVrZmYg": {
+      "session_id": "vps_bBRnRYlYxR_g8eYIC4kS2_4GrKvnPr_nQWn-LVrZmYg",
+      "user": {
+        "user_id": "customer_test01",
+        "role": "customer",
+        "tenant_ids": [
+          "default"
+        ],
+        "display_name": "测试客户 test01",
+        "username": "test01",
+        "resource_scopes": [
+          "*"
+        ]
+      },
+      "active_tenant_id": "default",
+      "issued_at": "2026-05-09T15:21:51+00:00",
+      "expires_at": "2026-05-10T03:21:51+00:00",
+      "source": "vps",
+      "token": "vps_bBRnRYlYxR_g8eYIC4kS2_4GrKvnPr_nQWn-LVrZmYg"
+    },
+    "vps_JdxdMDOxqVTyNfaF-lQX6ggbgbxJMNjZJY5pquQn4zU": {
+      "session_id": "vps_JdxdMDOxqVTyNfaF-lQX6ggbgbxJMNjZJY5pquQn4zU",
+      "user": {
+        "user_id": "customer_test01",
+        "role": "customer",
+        "tenant_ids": [
+          "default"
+        ],
+        "display_name": "测试客户 test01",
+        "username": "test01",
+        "resource_scopes": [
+          "*"
+        ]
+      },
+      "active_tenant_id": "default",
+      "issued_at": "2026-05-09T16:05:03+00:00",
+      "expires_at": "2026-05-10T04:05:03+00:00",
+      "source": "vps",
+      "token": "vps_JdxdMDOxqVTyNfaF-lQX6ggbgbxJMNjZJY5pquQn4zU"
+    },
+    "vps_gssLSfJFB9sUbrAEuM2xmm_LxVWbYU0PxQ8VreUcjpE": {
+      "session_id": "vps_gssLSfJFB9sUbrAEuM2xmm_LxVWbYU0PxQ8VreUcjpE",
+      "user": {
+        "user_id": "customer_test01",
+        "role": "customer",
+        "tenant_ids": [
+          "default"
+        ],
+        "display_name": "测试客户 test01",
+        "username": "test01",
+        "resource_scopes": [
+          "*"
+        ]
+      },
+      "active_tenant_id": "default",
+      "issued_at": "2026-05-09T16:09:01+00:00",
+      "expires_at": "2026-05-10T04:09:01+00:00",
+      "source": "vps",
+      "token": "vps_gssLSfJFB9sUbrAEuM2xmm_LxVWbYU0PxQ8VreUcjpE"
+    },
+    "vps_gnaQmhahHLJP1v-zUJ1BXY_aKu-k5NKRp-5xybl-4sA": {
+      "session_id": "vps_gnaQmhahHLJP1v-zUJ1BXY_aKu-k5NKRp-5xybl-4sA",
+      "user": {
+        "user_id": "customer_test01",
+        "role": "customer",
+        "tenant_ids": [
+          "default"
+        ],
+        "display_name": "测试客户 test01",
+        "username": "test01",
+        "resource_scopes": [
+          "*"
+        ]
+      },
+      "active_tenant_id": "default",
+      "issued_at": "2026-05-09T16:35:20+00:00",
+      "expires_at": "2026-05-10T04:35:20+00:00",
+      "source": "vps",
+      "token": "vps_gnaQmhahHLJP1v-zUJ1BXY_aKu-k5NKRp-5xybl-4sA"
+    },
+    "vps_2YOKt6dzaRiq_wUKK3RUuGu1GEDs1V8XX-_71Y7OW14": {
+      "session_id": "vps_2YOKt6dzaRiq_wUKK3RUuGu1GEDs1V8XX-_71Y7OW14",
+      "user": {
+        "user_id": "customer_test01",
+        "role": "customer",
+        "tenant_ids": [
+          "default"
+        ],
+        "display_name": "测试客户 test01",
+        "username": "test01",
+        "resource_scopes": [
+          "*"
+        ]
+      },
+      "active_tenant_id": "default",
+      "issued_at": "2026-05-09T17:21:55+00:00",
+      "expires_at": "2026-05-10T05:21:55+00:00",
+      "source": "vps",
+      "token": "vps_2YOKt6dzaRiq_wUKK3RUuGu1GEDs1V8XX-_71Y7OW14"
+    },
+    "vps_VxTOHZN-78Hk2yCfTuFWXuC6s3DfClo9majh5mvaSQY": {
+      "session_id": "vps_VxTOHZN-78Hk2yCfTuFWXuC6s3DfClo9majh5mvaSQY",
+      "user": {
+        "user_id": "platform-admin",
+        "role": "admin",
+        "tenant_ids": [
+          "*"
+        ],
+        "display_name": "Platform Admin",
+        "username": "admin",
+        "resource_scopes": [
+          "*"
+        ]
+      },
+      "active_tenant_id": "default",
+      "issued_at": "2026-05-10T03:30:05+00:00",
+      "expires_at": "2026-05-10T15:30:05+00:00",
+      "source": "vps",
+      "token": "vps_VxTOHZN-78Hk2yCfTuFWXuC6s3DfClo9majh5mvaSQY"
+    },
+    "vps_jEOhYeeTuXwD_BrJHzVfwfS7uJBMRKJnDVcOI0RVa4k": {
+      "session_id": "vps_jEOhYeeTuXwD_BrJHzVfwfS7uJBMRKJnDVcOI0RVa4k",
+      "user": {
+        "user_id": "customer_test01",
+        "role": "customer",
+        "tenant_ids": [
+          "default"
+        ],
+        "display_name": "测试客户 test01",
+        "username": "test01",
+        "resource_scopes": [
+          "*"
+        ]
+      },
+      "active_tenant_id": "default",
+      "issued_at": "2026-05-10T04:08:17+00:00",
+      "expires_at": "2026-05-10T16:08:17+00:00",
+      "source": "vps",
+      "token": "vps_jEOhYeeTuXwD_BrJHzVfwfS7uJBMRKJnDVcOI0RVa4k"
+    },
+    "vps_MRgJSSwYk9C9cS8bUj8c4Zv1jifhAEjSQaLGEo0poOk": {
+      "session_id": "vps_MRgJSSwYk9C9cS8bUj8c4Zv1jifhAEjSQaLGEo0poOk",
+      "user": {
+        "user_id": "customer_test01",
+        "role": "customer",
+        "tenant_ids": [
+          "default"
+        ],
+        "display_name": "测试客户 test01",
+        "username": "test01",
+        "resource_scopes": [
+          "*"
+        ]
+      },
+      "active_tenant_id": "default",
+      "issued_at": "2026-05-10T04:16:09+00:00",
+      "expires_at": "2026-05-10T16:16:09+00:00",
+      "source": "vps",
+      "token": "vps_MRgJSSwYk9C9cS8bUj8c4Zv1jifhAEjSQaLGEo0poOk"
+    },
+    "vps_jfjJIfmQoo3aKxsfsIRXf0WoOszGnr1qVlkndYpnpUg": {
+      "session_id": "vps_jfjJIfmQoo3aKxsfsIRXf0WoOszGnr1qVlkndYpnpUg",
+      "user": {
+        "user_id": "customer_test01",
+        "role": "customer",
+        "tenant_ids": [
+          "default"
+        ],
+        "display_name": "测试客户 test01",
+        "username": "test01",
+        "resource_scopes": [
+          "*"
+        ]
+      },
+      "active_tenant_id": "default",
+      "issued_at": "2026-05-10T04:24:15+00:00",
+      "expires_at": "2026-05-10T16:24:15+00:00",
+      "source": "vps",
+      "token": "vps_jfjJIfmQoo3aKxsfsIRXf0WoOszGnr1qVlkndYpnpUg"
+    },
+    "vps_dRfcMv3aa428Xak6rdbaq8zSjnZb48Etac7mEiZNJao": {
+      "session_id": "vps_dRfcMv3aa428Xak6rdbaq8zSjnZb48Etac7mEiZNJao",
+      "user": {
+        "user_id": "customer_test01",
+        "role": "customer",
+        "tenant_ids": [
+          "default"
+        ],
+        "display_name": "测试客户 test01",
+        "username": "test01",
+        "resource_scopes": [
+          "*"
+        ]
+      },
+      "active_tenant_id": "default",
+      "issued_at": "2026-05-10T11:53:20+00:00",
+      "expires_at": "2026-05-10T23:53:20+00:00",
+      "source": "vps",
+      "token": "vps_dRfcMv3aa428Xak6rdbaq8zSjnZb48Etac7mEiZNJao"
+    },
+    "vps_UGC6dUq_n57J7EEb_WYqXaKTQOm9BAdjHBR9VRuUBxw": {
+      "session_id": "vps_UGC6dUq_n57J7EEb_WYqXaKTQOm9BAdjHBR9VRuUBxw",
+      "user": {
+        "user_id": "customer_test01",
+        "role": "customer",
+        "tenant_ids": [
+          "default"
+        ],
+        "display_name": "测试客户 test01",
+        "username": "test01",
+        "resource_scopes": [
+          "*"
+        ]
+      },
+      "active_tenant_id": "default",
+      "issued_at": "2026-05-10T16:02:43+00:00",
+      "expires_at": "2026-05-11T04:02:43+00:00",
+      "source": "vps",
+      "token": "vps_UGC6dUq_n57J7EEb_WYqXaKTQOm9BAdjHBR9VRuUBxw"
+    },
+    "vps_rAYw6S0VyvMlj8OD9imOoMjncoPQqpjYAN_UeWBCPpU": {
+      "session_id": "vps_rAYw6S0VyvMlj8OD9imOoMjncoPQqpjYAN_UeWBCPpU",
+      "user": {
+        "user_id": "customer_test01",
+        "role": "customer",
+        "tenant_ids": [
+          "default"
+        ],
+        "display_name": "测试客户 test01",
+        "username": "test01",
+        "resource_scopes": [
+          "*"
+        ]
+      },
+      "active_tenant_id": "default",
+      "issued_at": "2026-05-10T16:27:46+00:00",
+      "expires_at": "2026-05-11T04:27:46+00:00",
+      "source": "vps",
+      "token": "vps_rAYw6S0VyvMlj8OD9imOoMjncoPQqpjYAN_UeWBCPpU"
+    },
+    "vps_ZVfjcP95icC3_gcZT6u-MZ_WiXPsdi4rf8qGWaWcyRQ": {
+      "session_id": "vps_ZVfjcP95icC3_gcZT6u-MZ_WiXPsdi4rf8qGWaWcyRQ",
+      "user": {
+        "user_id": "customer_test01",
+        "role": "customer",
+        "tenant_ids": [
+          "default"
+        ],
+        "display_name": "测试客户 test01",
+        "username": "test01",
+        "resource_scopes": [
+          "*"
+        ]
+      },
+      "active_tenant_id": "default",
+      "issued_at": "2026-05-10T16:53:27+00:00",
+      "expires_at": "2026-05-11T04:53:27+00:00",
+      "source": "vps",
+      "token": "vps_ZVfjcP95icC3_gcZT6u-MZ_WiXPsdi4rf8qGWaWcyRQ"
+    },
+    "vps_8ulInASvnR4SwR5fmMkqUjQAbOQLS6UgJ8PD-aP00pU": {
+      "session_id": "vps_8ulInASvnR4SwR5fmMkqUjQAbOQLS6UgJ8PD-aP00pU",
+      "user": {
+        "user_id": "customer_test01",
+        "role": "customer",
+        "tenant_ids": [
+          "default"
+        ],
+        "display_name": "测试客户 test01",
+        "username": "test01",
+        "resource_scopes": [
+          "*"
+        ]
+      },
+      "active_tenant_id": "default",
+      "issued_at": "2026-05-10T17:05:52+00:00",
+      "expires_at": "2026-05-11T05:05:52+00:00",
+      "source": "vps",
+      "token": "vps_8ulInASvnR4SwR5fmMkqUjQAbOQLS6UgJ8PD-aP00pU"
+    },
+    "vps_XeMl6nOSZpg2qdXcUc3rjDPRg1B5a9nNTFCHv6gohu0": {
+      "session_id": "vps_XeMl6nOSZpg2qdXcUc3rjDPRg1B5a9nNTFCHv6gohu0",
+      "user": {
+        "user_id": "platform-admin",
+        "role": "admin",
+        "tenant_ids": [
+          "*"
+        ],
+        "display_name": "Platform Admin",
+        "username": "admin",
+        "resource_scopes": [
+          "*"
+        ]
+      },
+      "active_tenant_id": "default",
+      "issued_at": "2026-05-10T17:30:36+00:00",
+      "expires_at": "2026-05-11T05:30:36+00:00",
+      "source": "vps",
+      "token": "vps_XeMl6nOSZpg2qdXcUc3rjDPRg1B5a9nNTFCHv6gohu0"
+    },
+    "vps__nBWEqD5qMoI2Hv-kd7tw8Y8bw-sfB4w5I3KFZgxp-g": {
+      "session_id": "vps__nBWEqD5qMoI2Hv-kd7tw8Y8bw-sfB4w5I3KFZgxp-g",
+      "user": {
+        "user_id": "user_YTE2rdUWFGqX",
+        "role": "customer",
+        "tenant_ids": [
+          "test02"
+        ],
+        "display_name": "test02",
+        "username": "test02",
+        "resource_scopes": [
+          "*"
+        ]
+      },
+      "active_tenant_id": "test02",
+      "issued_at": "2026-05-10T18:34:32+00:00",
+      "expires_at": "2026-05-11T06:34:32+00:00",
+      "source": "vps",
+      "token": "vps__nBWEqD5qMoI2Hv-kd7tw8Y8bw-sfB4w5I3KFZgxp-g"
+    },
+    "vps_OFBSBKTPzsV_fC82F264506DO_xDz1hYQwXvbbDOHsI": {
+      "session_id": "vps_OFBSBKTPzsV_fC82F264506DO_xDz1hYQwXvbbDOHsI",
+      "user": {
+        "user_id": "user_YTE2rdUWFGqX",
+        "role": "customer",
+        "tenant_ids": [
+          "test02"
+        ],
+        "display_name": "test02",
+        "username": "test02",
+        "resource_scopes": [
+          "*"
+        ]
+      },
+      "active_tenant_id": "test02",
+      "issued_at": "2026-05-11T03:05:51+00:00",
+      "expires_at": "2026-05-11T15:05:51+00:00",
+      "source": "vps",
+      "token": "vps_OFBSBKTPzsV_fC82F264506DO_xDz1hYQwXvbbDOHsI"
+    },
+    "vps_6Jn2uwlr5ozQnhfxNOUZavr7D4WA-sY-E9Eibh9voBw": {
+      "session_id": "vps_6Jn2uwlr5ozQnhfxNOUZavr7D4WA-sY-E9Eibh9voBw",
+      "user": {
+        "user_id": "user_YTE2rdUWFGqX",
+        "role": "customer",
+        "tenant_ids": [
+          "test02"
+        ],
+        "display_name": "test02",
+        "username": "test02",
+        "resource_scopes": [
+          "*"
+        ]
+      },
+      "active_tenant_id": "test02",
+      "issued_at": "2026-05-11T05:02:11+00:00",
+      "expires_at": "2026-05-11T17:02:11+00:00",
+      "source": "vps",
+      "token": "vps_6Jn2uwlr5ozQnhfxNOUZavr7D4WA-sY-E9Eibh9voBw"
+    },
+    "vps_coMXXVoEwMsIVTKyxv5ae2y0aH22stwyFc77m3ZJ2IY": {
+      "session_id": "vps_coMXXVoEwMsIVTKyxv5ae2y0aH22stwyFc77m3ZJ2IY",
+      "user": {
+        "user_id": "user_YTE2rdUWFGqX",
+        "role": "customer",
+        "tenant_ids": [
+          "test02"
+        ],
+        "display_name": "test02",
+        "username": "test02",
+        "resource_scopes": [
+          "*"
+        ]
+      },
+      "active_tenant_id": "test02",
+      "issued_at": "2026-05-11T05:16:10+00:00",
+      "expires_at": "2026-05-11T17:16:10+00:00",
+      "source": "vps",
+      "token": "vps_coMXXVoEwMsIVTKyxv5ae2y0aH22stwyFc77m3ZJ2IY"
     }
   },
   "local_nodes": {
@@ -338,6 +869,56 @@
         "hostname": "LAPTOP-PT3DCHM7",
         "platform": "Windows-10-10.0.19045-SP0",
         "runtime_root": "D:\\AI\\AI_RPA\\runtime\\apps\\wechat_ai_customer_service"
+      }
+    },
+    "local_ab4dd8a99b8cbf21": {
+      "node_id": "local_ab4dd8a99b8cbf21",
+      "display_name": "test02 客户端",
+      "tenant_ids": [
+        "test02"
+      ],
+      "status": "online",
+      "version": "local-dev",
+      "capabilities": [
+        "backup_tenant",
+        "backup_all",
+        "pull_shared_patch",
+        "check_update",
+        "restore_backup",
+        "push_update"
+      ],
+      "node_token": "node_eK21Xb1E7xh6szlDEOIZ6mzKwZWNFDJV",
+      "registered_at": "2026-05-11T05:16:11+00:00",
+      "last_seen_at": "2026-05-11T06:26:12+00:00",
+      "metadata": {
+        "hostname": "LAPTOP-HJGDTB1M",
+        "platform": "Windows-11-10.0.26200-SP0",
+        "runtime_root": "D:\\AI\\omniauto\\runtime\\apps\\wechat_ai_customer_service"
+      }
+    },
+    "cloud_gate_login_smoke_node": {
+      "node_id": "cloud_gate_login_smoke_node",
+      "display_name": "Local Console Cloud Gate Bootstrap",
+      "tenant_ids": [
+        "default"
+      ],
+      "status": "online",
+      "version": "local-dev",
+      "capabilities": [
+        "backup_tenant",
+        "backup_all",
+        "pull_shared_patch",
+        "check_update",
+        "restore_backup",
+        "push_update"
+      ],
+      "node_token": "node_Yy-R6fAgv4wgnLzT5VdzcxmSh6pqy-HQ",
+      "registered_at": "2026-05-09T14:01:11+00:00",
+      "last_seen_at": "2026-05-09T14:08:21+00:00",
+      "metadata": {
+        "hostname": "LAPTOP-HJGDTB1M",
+        "platform": "Windows-11-10.0.26200-SP0",
+        "runtime_root": "D:\\AI\\omniauto\\runtime\\apps\\wechat_ai_customer_service"
       }
     }
   },
@@ -1947,184 +2528,184 @@
   "releases": {},
   "audit_events": [
     {
-      "event_id": "audit_20260504061243504981_17a752",
+      "event_id": "audit_20260511030551590066_f9c169",
+      "actor_id": "user_YTE2rdUWFGqX",
+      "action": "register_node",
+      "target_type": "local_node",
+      "target_id": "local_ab4dd8a99b8cbf21",
+      "detail": {},
+      "created_at": "2026-05-11T03:05:51+00:00"
+    },
+    {
+      "event_id": "audit_20260511031646815685_93daca",
       "actor_id": "local-node",
       "action": "register_node",
       "target_type": "local_node",
-      "target_id": "local_8bcbb764d81d3f68",
+      "target_id": "local_ab4dd8a99b8cbf21",
       "detail": {},
-      "created_at": "2026-05-04T06:12:43+00:00"
+      "created_at": "2026-05-11T03:16:46+00:00"
     },
     {
-      "event_id": "audit_20260504062142487663_75b029",
+      "event_id": "audit_20260511031646839866_4a04a8",
       "actor_id": "local-node",
       "action": "register_node",
       "target_type": "local_node",
-      "target_id": "local_8bcbb764d81d3f68",
+      "target_id": "local_ab4dd8a99b8cbf21",
       "detail": {},
-      "created_at": "2026-05-04T06:21:42+00:00"
+      "created_at": "2026-05-11T03:16:46+00:00"
     },
     {
-      "event_id": "audit_20260504091405065675_8de13a",
+      "event_id": "audit_20260511031647079000_b3f329",
+      "actor_id": "user_YTE2rdUWFGqX",
+      "action": "register_node",
+      "target_type": "local_node",
+      "target_id": "local_ab4dd8a99b8cbf21",
+      "detail": {},
+      "created_at": "2026-05-11T03:16:47+00:00"
+    },
+    {
+      "event_id": "audit_20260511032341701885_07ff1c",
       "actor_id": "local-node",
       "action": "register_node",
       "target_type": "local_node",
-      "target_id": "local_8bcbb764d81d3f68",
+      "target_id": "local_ab4dd8a99b8cbf21",
       "detail": {},
-      "created_at": "2026-05-04T09:14:05+00:00"
+      "created_at": "2026-05-11T03:23:41+00:00"
     },
     {
-      "event_id": "audit_20260504103520895004_ce3838",
+      "event_id": "audit_20260511032341725893_529ae0",
       "actor_id": "local-node",
       "action": "register_node",
       "target_type": "local_node",
-      "target_id": "local_8bcbb764d81d3f68",
+      "target_id": "local_ab4dd8a99b8cbf21",
       "detail": {},
-      "created_at": "2026-05-04T10:35:20+00:00"
+      "created_at": "2026-05-11T03:23:41+00:00"
     },
     {
-      "event_id": "audit_20260504110829058847_264eb3",
+      "event_id": "audit_20260511032341977467_6eb052",
+      "actor_id": "user_YTE2rdUWFGqX",
+      "action": "register_node",
+      "target_type": "local_node",
+      "target_id": "local_ab4dd8a99b8cbf21",
+      "detail": {},
+      "created_at": "2026-05-11T03:23:41+00:00"
+    },
+    {
+      "event_id": "audit_20260511050201185218_cf38f3",
       "actor_id": "local-node",
       "action": "register_node",
       "target_type": "local_node",
-      "target_id": "local_8bcbb764d81d3f68",
+      "target_id": "local_ab4dd8a99b8cbf21",
       "detail": {},
-      "created_at": "2026-05-04T11:08:29+00:00"
+      "created_at": "2026-05-11T05:02:01+00:00"
     },
     {
-      "event_id": "audit_20260504140832015026_697b2d",
+      "event_id": "audit_20260511050201207737_d2278c",
       "actor_id": "local-node",
       "action": "register_node",
       "target_type": "local_node",
-      "target_id": "local_8bcbb764d81d3f68",
+      "target_id": "local_ab4dd8a99b8cbf21",
       "detail": {},
-      "created_at": "2026-05-04T14:08:32+00:00"
+      "created_at": "2026-05-11T05:02:01+00:00"
     },
     {
-      "event_id": "audit_20260504141012996626_889910",
+      "event_id": "audit_20260511050211052616_e64265",
       "actor_id": "local-node",
       "action": "register_node",
       "target_type": "local_node",
-      "target_id": "local_8bcbb764d81d3f68",
+      "target_id": "local_ab4dd8a99b8cbf21",
       "detail": {},
-      "created_at": "2026-05-04T14:10:12+00:00"
+      "created_at": "2026-05-11T05:02:11+00:00"
     },
     {
-      "event_id": "audit_20260504143812742179_2f4f8d",
+      "event_id": "audit_20260511050211226673_ad5e41",
       "actor_id": "local-node",
       "action": "register_node",
       "target_type": "local_node",
-      "target_id": "local_8bcbb764d81d3f68",
+      "target_id": "local_ab4dd8a99b8cbf21",
       "detail": {},
-      "created_at": "2026-05-04T14:38:12+00:00"
+      "created_at": "2026-05-11T05:02:11+00:00"
     },
     {
-      "event_id": "audit_20260504144509908528_fa12f1",
-      "actor_id": "local-node",
-      "action": "register_node",
-      "target_type": "local_node",
-      "target_id": "local_8bcbb764d81d3f68",
-      "detail": {},
-      "created_at": "2026-05-04T14:45:09+00:00"
-    },
-    {
-      "event_id": "audit_20260504145856166148_3ae3ba",
-      "actor_id": "local-node",
-      "action": "register_node",
-      "target_type": "local_node",
-      "target_id": "local_8bcbb764d81d3f68",
-      "detail": {},
-      "created_at": "2026-05-04T14:58:56+00:00"
-    },
-    {
-      "event_id": "audit_20260504152425346563_ff444c",
-      "actor_id": "local-node",
-      "action": "register_node",
-      "target_type": "local_node",
-      "target_id": "local_8bcbb764d81d3f68",
-      "detail": {},
-      "created_at": "2026-05-04T15:24:25+00:00"
-    },
-    {
-      "event_id": "audit_20260504160442375493_11718a",
-      "actor_id": "local-node",
-      "action": "register_node",
-      "target_type": "local_node",
-      "target_id": "local_8bcbb764d81d3f68",
-      "detail": {},
-      "created_at": "2026-05-04T16:04:42+00:00"
-    },
-    {
-      "event_id": "audit_20260504162346321856_c0c761",
-      "actor_id": "local-node",
-      "action": "register_node",
-      "target_type": "local_node",
-      "target_id": "local_8bcbb764d81d3f68",
-      "detail": {},
-      "created_at": "2026-05-04T16:23:46+00:00"
-    },
-    {
-      "event_id": "audit_20260504163017366993_f63894",
-      "actor_id": "local-node",
-      "action": "register_node",
-      "target_type": "local_node",
-      "target_id": "local_8bcbb764d81d3f68",
-      "detail": {},
-      "created_at": "2026-05-04T16:30:17+00:00"
-    },
-    {
-      "event_id": "audit_20260504164423703411_5e1ff4",
-      "actor_id": "local-node",
-      "action": "register_node",
-      "target_type": "local_node",
-      "target_id": "local_8bcbb764d81d3f68",
-      "detail": {},
-      "created_at": "2026-05-04T16:44:23+00:00"
-    },
-    {
-      "event_id": "audit_20260504171934502918_103c93",
-      "actor_id": "local-node",
-      "action": "register_node",
-      "target_type": "local_node",
-      "target_id": "local_8bcbb764d81d3f68",
-      "detail": {},
-      "created_at": "2026-05-04T17:19:34+00:00"
-    },
-    {
-      "event_id": "audit_20260505175742925515_e59b2d",
-      "actor_id": "local-node",
-      "action": "register_node",
-      "target_type": "local_node",
-      "target_id": "local_8bcbb764d81d3f68",
-      "detail": {},
-      "created_at": "2026-05-05T17:57:42+00:00"
-    },
-    {
-      "event_id": "audit_20260505175751731834_3e3a9d",
-      "actor_id": "local-node",
-      "action": "register_node",
-      "target_type": "local_node",
-      "target_id": "local_8bcbb764d81d3f68",
-      "detail": {},
-      "created_at": "2026-05-05T17:57:51+00:00"
-    },
-    {
-      "event_id": "audit_20260505175843325184_6a4ace",
-      "actor_id": "platform-admin",
+      "event_id": "audit_20260511050211487820_8f5dea",
+      "actor_id": "user_YTE2rdUWFGqX",
       "action": "login",
       "target_type": "session",
-      "target_id": "vps_z2q7lT16ixTPdGBTG9K8GV1YOSTMr1hvPlxfsxAz0NI",
+      "target_id": "vps_6Jn2uwlr5ozQnhfxNOUZavr7D4WA-sY-E9Eibh9voBw",
       "detail": {},
-      "created_at": "2026-05-05T17:58:43+00:00"
+      "created_at": "2026-05-11T05:02:11+00:00"
     },
     {
-      "event_id": "audit_20260505182442945233_84086e",
+      "event_id": "audit_20260511050211616311_6c2fee",
+      "actor_id": "user_YTE2rdUWFGqX",
+      "action": "register_node",
+      "target_type": "local_node",
+      "target_id": "local_ab4dd8a99b8cbf21",
+      "detail": {},
+      "created_at": "2026-05-11T05:02:11+00:00"
+    },
+    {
+      "event_id": "audit_20260511051546975065_7531d7",
       "actor_id": "local-node",
       "action": "register_node",
       "target_type": "local_node",
-      "target_id": "local_8bcbb764d81d3f68",
+      "target_id": "local_ab4dd8a99b8cbf21",
       "detail": {},
-      "created_at": "2026-05-05T18:24:42+00:00"
+      "created_at": "2026-05-11T05:15:46+00:00"
+    },
+    {
+      "event_id": "audit_20260511051547000072_72bd49",
+      "actor_id": "local-node",
+      "action": "register_node",
+      "target_type": "local_node",
+      "target_id": "local_ab4dd8a99b8cbf21",
+      "detail": {},
+      "created_at": "2026-05-11T05:15:47+00:00"
+    },
+    {
+      "event_id": "audit_20260511051602121650_fab74b",
+      "actor_id": "local-node",
+      "action": "register_node",
+      "target_type": "local_node",
+      "target_id": "local_ab4dd8a99b8cbf21",
+      "detail": {},
+      "created_at": "2026-05-11T05:16:02+00:00"
+    },
+    {
+      "event_id": "audit_20260511051610484095_d871f7",
+      "actor_id": "local-node",
+      "action": "register_node",
+      "target_type": "local_node",
+      "target_id": "local_ab4dd8a99b8cbf21",
+      "detail": {},
+      "created_at": "2026-05-11T05:16:10+00:00"
+    },
+    {
+      "event_id": "audit_20260511051610649308_7dbed7",
+      "actor_id": "local-node",
+      "action": "register_node",
+      "target_type": "local_node",
+      "target_id": "local_ab4dd8a99b8cbf21",
+      "detail": {},
+      "created_at": "2026-05-11T05:16:10+00:00"
+    },
+    {
+      "event_id": "audit_20260511051610930048_ff7f59",
+      "actor_id": "user_YTE2rdUWFGqX",
+      "action": "login",
+      "target_type": "session",
+      "target_id": "vps_coMXXVoEwMsIVTKyxv5ae2y0aH22stwyFc77m3ZJ2IY",
+      "detail": {},
+      "created_at": "2026-05-11T05:16:10+00:00"
+    },
+    {
+      "event_id": "audit_20260511051611036093_cd062c",
+      "actor_id": "user_YTE2rdUWFGqX",
+      "action": "register_node",
+      "target_type": "local_node",
+      "target_id": "local_ab4dd8a99b8cbf21",
+      "detail": {},
+      "created_at": "2026-05-11T05:16:11+00:00"
     }
   ],
   "customer_data_packages": {
@@ -7277,6 +7858,719 @@
       "created_at": "2026-05-02T20:08:03+00:00",
       "updated_by": "platform-admin",
       "updated_at": "2026-05-02T20:08:03+00:00"
+    },
+    "shared_global_evidence_first": {
+      "item_id": "shared_global_evidence_first",
+      "industry_id": "global",
+      "category_id": "global_guidelines",
+      "title": "证据优先回复",
+      "content": "回复必须优先依据正式知识、共享规则和已确认上下文；无证据时明确说明需核实并转人工。",
+      "keywords": [
+        "证据",
+        "核实",
+        "转人工"
+      ],
+      "applies_to": "所有行业的客服对话",
+      "notes": "平台通用规则",
+      "status": "active",
+      "source": "system_seed_industry_library",
+      "tenant_id": "default",
+      "data": {
+        "title": "证据优先回复",
+        "guideline_text": "回复必须优先依据正式知识、共享规则和已确认上下文；无证据时明确说明需核实并转人工。"
+      },
+      "created_by": "system_seed",
+      "created_at": "2026-05-07T21:57:53+00:00",
+      "updated_by": "system_seed",
+      "updated_at": "2026-05-07T21:57:53+00:00"
+    },
+    "shared_global_no_fabrication": {
+      "item_id": "shared_global_no_fabrication",
+      "industry_id": "global",
+      "category_id": "risk_control",
+      "title": "关键事实不得编造",
+      "content": "价格、库存、合同、赔付、资质、时效等关键事实没有证据时，不得生成确定性承诺。",
+      "keywords": [
+        "价格",
+        "库存",
+        "合同",
+        "赔付",
+        "资质"
+      ],
+      "applies_to": "所有行业的高风险问答",
+      "notes": "平台通用风险边界",
+      "status": "active",
+      "source": "system_seed_industry_library",
+      "tenant_id": "default",
+      "data": {
+        "title": "关键事实不得编造",
+        "guideline_text": "价格、库存、合同、赔付、资质、时效等关键事实没有证据时，不得生成确定性承诺。",
+        "allow_auto_reply": false,
+        "requires_handoff": true,
+        "handoff_reason": "missing_authoritative_evidence"
+      },
+      "created_by": "system_seed",
+      "created_at": "2026-05-07T21:57:53+00:00",
+      "updated_by": "system_seed",
+      "updated_at": "2026-05-07T21:57:53+00:00"
+    },
+    "shared_global_privacy_minimum_collection": {
+      "item_id": "shared_global_privacy_minimum_collection",
+      "industry_id": "global",
+      "category_id": "risk_control",
+      "title": "隐私信息最小化采集",
+      "content": "仅在履约必要时采集姓名、电话、地址等信息，避免索取与交易无关的身份证件、银行卡、验证码等敏感信息。",
+      "keywords": [
+        "隐私",
+        "个人信息",
+        "手机号",
+        "地址",
+        "最小化"
+      ],
+      "applies_to": "所有行业的信息收集场景",
+      "notes": "参考《个人信息保护法》最小必要原则",
+      "status": "active",
+      "source": "system_seed_industry_library",
+      "tenant_id": "default",
+      "data": {
+        "title": "隐私信息最小化采集",
+        "guideline_text": "仅在履约必要时采集姓名、电话、地址等信息，避免索取与交易无关的身份证件、银行卡、验证码等敏感信息。"
+      },
+      "created_by": "system_seed",
+      "created_at": "2026-05-07T21:57:53+00:00",
+      "updated_by": "system_seed",
+      "updated_at": "2026-05-07T21:57:53+00:00"
+    },
+    "shared_global_no_private_payment": {
+      "item_id": "shared_global_no_private_payment",
+      "industry_id": "global",
+      "category_id": "risk_control",
+      "title": "禁止私下收款引导",
+      "content": "不得引导客户向个人账户、社交账号或非官方渠道转账；涉及收款必须提示以企业官方支付链路为准。",
+      "keywords": [
+        "收款",
+        "转账",
+        "个人账户",
+        "官方渠道"
+      ],
+      "applies_to": "所有行业支付咨询",
+      "notes": "",
+      "status": "active",
+      "source": "system_seed_industry_library",
+      "tenant_id": "default",
+      "data": {
+        "title": "禁止私下收款引导",
+        "guideline_text": "不得引导客户向个人账户、社交账号或非官方渠道转账；涉及收款必须提示以企业官方支付链路为准。",
+        "allow_auto_reply": false,
+        "requires_handoff": true,
+        "handoff_reason": "payment_channel_compliance"
+      },
+      "created_by": "system_seed",
+      "created_at": "2026-05-07T21:57:53+00:00",
+      "updated_by": "system_seed",
+      "updated_at": "2026-05-07T21:57:53+00:00"
+    },
+    "shared_used_car_compliance_disclosure": {
+      "item_id": "shared_used_car_compliance_disclosure",
+      "industry_id": "used_car",
+      "category_id": "global_guidelines",
+      "title": "二手车车况披露规则",
+      "content": "涉及事故、水泡、火烧、里程、过户次数、检修记录等问题，必须基于可验证资料；不确定时先说明待核验。",
+      "keywords": [
+        "车况",
+        "事故",
+        "水泡",
+        "火烧",
+        "里程",
+        "过户"
+      ],
+      "applies_to": "二手车咨询场景",
+      "notes": "参考《二手车流通管理办法》卖方信息披露要求",
+      "status": "active",
+      "source": "system_seed_industry_library",
+      "tenant_id": "default",
+      "data": {
+        "title": "二手车车况披露规则",
+        "guideline_text": "涉及事故、水泡、火烧、里程、过户次数、检修记录等问题，必须基于可验证资料；不确定时先说明待核验。"
+      },
+      "created_by": "system_seed",
+      "created_at": "2026-05-07T21:57:53+00:00",
+      "updated_by": "system_seed",
+      "updated_at": "2026-05-07T21:57:53+00:00"
+    },
+    "shared_used_car_transfer_docs": {
+      "item_id": "shared_used_car_transfer_docs",
+      "industry_id": "used_car",
+      "category_id": "global_guidelines",
+      "title": "二手车交易资料完整性",
+      "content": "提醒客户交易完成后应交付合法证照与交易凭证，涉及过户办理必须按登记流程执行。",
+      "keywords": [
+        "过户",
+        "登记",
+        "发票",
+        "行驶证",
+        "登记证书"
+      ],
+      "applies_to": "二手车交易流程咨询",
+      "notes": "参考《二手车流通管理办法》第二十二至二十五条",
+      "status": "active",
+      "source": "system_seed_industry_library",
+      "tenant_id": "default",
+      "data": {
+        "title": "二手车交易资料完整性",
+        "guideline_text": "提醒客户交易完成后应交付合法证照与交易凭证，涉及过户办理必须按登记流程执行。"
+      },
+      "created_by": "system_seed",
+      "created_at": "2026-05-07T21:57:53+00:00",
+      "updated_by": "system_seed",
+      "updated_at": "2026-05-07T21:57:53+00:00"
+    },
+    "shared_used_car_finance_handoff": {
+      "item_id": "shared_used_car_finance_handoff",
+      "industry_id": "used_car",
+      "category_id": "risk_control",
+      "title": "二手车金融审批风险边界",
+      "content": "征信、审批通过率、放款时效等不能保证；只能说明流程与所需资料，并转人工顾问。",
+      "keywords": [
+        "征信",
+        "审批",
+        "放款",
+        "首付",
+        "月供"
+      ],
+      "applies_to": "二手车金融问答",
+      "notes": "",
+      "status": "active",
+      "source": "system_seed_industry_library",
+      "tenant_id": "default",
+      "data": {
+        "title": "二手车金融审批风险边界",
+        "guideline_text": "征信、审批通过率、放款时效等不能保证；只能说明流程与所需资料，并转人工顾问。",
+        "allow_auto_reply": false,
+        "requires_handoff": true,
+        "handoff_reason": "used_car_finance_manual_review"
+      },
+      "created_by": "system_seed",
+      "created_at": "2026-05-07T21:57:53+00:00",
+      "updated_by": "system_seed",
+      "updated_at": "2026-05-07T21:57:53+00:00"
+    },
+    "shared_used_car_test_drive_notice": {
+      "item_id": "shared_used_car_test_drive_notice",
+      "industry_id": "used_car",
+      "category_id": "global_guidelines",
+      "title": "二手车试驾安全提示",
+      "content": "试驾沟通需明确有效证件、保险覆盖、试驾路线与责任边界；涉及高风险路况或改装车辆必须人工确认。",
+      "keywords": [
+        "试驾",
+        "保险",
+        "证件",
+        "改装车",
+        "责任"
+      ],
+      "applies_to": "二手车试驾预约与沟通",
+      "notes": "",
+      "status": "active",
+      "source": "system_seed_industry_library",
+      "tenant_id": "default",
+      "data": {
+        "title": "二手车试驾安全提示",
+        "guideline_text": "试驾沟通需明确有效证件、保险覆盖、试驾路线与责任边界；涉及高风险路况或改装车辆必须人工确认。"
+      },
+      "created_by": "system_seed",
+      "created_at": "2026-05-07T21:57:53+00:00",
+      "updated_by": "system_seed",
+      "updated_at": "2026-05-07T21:57:53+00:00"
+    },
+    "shared_used_car_deposit_contract_boundary": {
+      "item_id": "shared_used_car_deposit_contract_boundary",
+      "industry_id": "used_car",
+      "category_id": "risk_control",
+      "title": "二手车订金合同边界",
+      "content": "订金是否可退、违约责任、车况争议处理必须以书面合同或门店条款为准，自动回复不得替代合同承诺。",
+      "keywords": [
+        "订金",
+        "定金",
+        "可退",
+        "违约",
+        "合同"
+      ],
+      "applies_to": "二手车下订与合同咨询",
+      "notes": "",
+      "status": "active",
+      "source": "system_seed_industry_library",
+      "tenant_id": "default",
+      "data": {
+        "title": "二手车订金合同边界",
+        "guideline_text": "订金是否可退、违约责任、车况争议处理必须以书面合同或门店条款为准，自动回复不得替代合同承诺。",
+        "allow_auto_reply": false,
+        "requires_handoff": true,
+        "handoff_reason": "used_car_contract_manual_review"
+      },
+      "created_by": "system_seed",
+      "created_at": "2026-05-07T21:57:53+00:00",
+      "updated_by": "system_seed",
+      "updated_at": "2026-05-07T21:57:53+00:00"
+    },
+    "shared_home_appliance_three_guarantees": {
+      "item_id": "shared_home_appliance_three_guarantees",
+      "industry_id": "home_appliance",
+      "category_id": "global_guidelines",
+      "title": "家电三包与售后说明",
+      "content": "家电售后答复需围绕三包、质保期、维修记录与票据凭证，避免超出标准承诺。",
+      "keywords": [
+        "三包",
+        "质保",
+        "维修",
+        "票据",
+        "售后"
+      ],
+      "applies_to": "家电售后咨询",
+      "notes": "参考《部分商品修理更换退货责任规定》",
+      "status": "active",
+      "source": "system_seed_industry_library",
+      "tenant_id": "default",
+      "data": {
+        "title": "家电三包与售后说明",
+        "guideline_text": "家电售后答复需围绕三包、质保期、维修记录与票据凭证，避免超出标准承诺。"
+      },
+      "created_by": "system_seed",
+      "created_at": "2026-05-07T21:57:53+00:00",
+      "updated_by": "system_seed",
+      "updated_at": "2026-05-07T21:57:53+00:00"
+    },
+    "shared_home_appliance_install_scope": {
+      "item_id": "shared_home_appliance_install_scope",
+      "industry_id": "home_appliance",
+      "category_id": "risk_control",
+      "title": "家电安装改造边界",
+      "content": "涉及电气/燃气改造、墙体承重、额外施工的请求，必须由人工确认现场条件和服务范围。",
+      "keywords": [
+        "安装",
+        "电改",
+        "燃气",
+        "打孔",
+        "承重"
+      ],
+      "applies_to": "家电安装咨询",
+      "notes": "",
+      "status": "active",
+      "source": "system_seed_industry_library",
+      "tenant_id": "default",
+      "data": {
+        "title": "家电安装改造边界",
+        "guideline_text": "涉及电气/燃气改造、墙体承重、额外施工的请求，必须由人工确认现场条件和服务范围。",
+        "allow_auto_reply": false,
+        "requires_handoff": true,
+        "handoff_reason": "home_appliance_install_manual_review"
+      },
+      "created_by": "system_seed",
+      "created_at": "2026-05-07T21:57:53+00:00",
+      "updated_by": "system_seed",
+      "updated_at": "2026-05-07T21:57:53+00:00"
+    },
+    "shared_home_appliance_delivery_style": {
+      "item_id": "shared_home_appliance_delivery_style",
+      "industry_id": "home_appliance",
+      "category_id": "reply_style",
+      "title": "家电配送时效回复口径",
+      "content": "先给出可确认的配送区间，再提示受库存、仓配与预约档期影响，必要时转人工排期。",
+      "keywords": [
+        "配送",
+        "时效",
+        "预约",
+        "库存"
+      ],
+      "applies_to": "家电物流咨询",
+      "notes": "",
+      "status": "active",
+      "source": "system_seed_industry_library",
+      "tenant_id": "default",
+      "data": {
+        "title": "家电配送时效回复口径",
+        "guideline_text": "先给出可确认的配送区间，再提示受库存、仓配与预约档期影响，必要时转人工排期。"
+      },
+      "created_by": "system_seed",
+      "created_at": "2026-05-07T21:57:53+00:00",
+      "updated_by": "system_seed",
+      "updated_at": "2026-05-07T21:57:53+00:00"
+    },
+    "shared_home_appliance_energy_label_notice": {
+      "item_id": "shared_home_appliance_energy_label_notice",
+      "industry_id": "home_appliance",
+      "category_id": "global_guidelines",
+      "title": "家电能效与功率说明",
+      "content": "能效等级、额定功率、用电环境相关答复应引用规格参数，不得臆测省电比例或改写官方标识信息。",
+      "keywords": [
+        "能效",
+        "功率",
+        "耗电",
+        "参数",
+        "规格"
+      ],
+      "applies_to": "家电选购参数咨询",
+      "notes": "",
+      "status": "active",
+      "source": "system_seed_industry_library",
+      "tenant_id": "default",
+      "data": {
+        "title": "家电能效与功率说明",
+        "guideline_text": "能效等级、额定功率、用电环境相关答复应引用规格参数，不得臆测省电比例或改写官方标识信息。"
+      },
+      "created_by": "system_seed",
+      "created_at": "2026-05-07T21:57:53+00:00",
+      "updated_by": "system_seed",
+      "updated_at": "2026-05-07T21:57:53+00:00"
+    },
+    "shared_home_appliance_refund_policy_boundary": {
+      "item_id": "shared_home_appliance_refund_policy_boundary",
+      "industry_id": "home_appliance",
+      "category_id": "risk_control",
+      "title": "家电退换与损耗争议边界",
+      "content": "安装后退换、外观损伤、运输损耗、旧机回收折价等争议需依据验收记录处理，自动回复不得直接给出赔付承诺。",
+      "keywords": [
+        "退换",
+        "损耗",
+        "外观损伤",
+        "验收",
+        "赔付"
+      ],
+      "applies_to": "家电售后争议",
+      "notes": "",
+      "status": "active",
+      "source": "system_seed_industry_library",
+      "tenant_id": "default",
+      "data": {
+        "title": "家电退换与损耗争议边界",
+        "guideline_text": "安装后退换、外观损伤、运输损耗、旧机回收折价等争议需依据验收记录处理，自动回复不得直接给出赔付承诺。",
+        "allow_auto_reply": false,
+        "requires_handoff": true,
+        "handoff_reason": "home_appliance_after_sales_dispute"
+      },
+      "created_by": "system_seed",
+      "created_at": "2026-05-07T21:57:53+00:00",
+      "updated_by": "system_seed",
+      "updated_at": "2026-05-07T21:57:53+00:00"
+    },
+    "shared_fast_food_food_safety": {
+      "item_id": "shared_fast_food_food_safety",
+      "industry_id": "fast_food",
+      "category_id": "risk_control",
+      "title": "快餐食品安全优先",
+      "content": "遇到疑似异物、变质、食安风险、严重过敏反应时，优先提示停止食用并立即转人工处理。",
+      "keywords": [
+        "异物",
+        "变质",
+        "过敏",
+        "食物中毒",
+        "食品安全"
+      ],
+      "applies_to": "快餐投诉与风险反馈",
+      "notes": "参考《食品安全法》与《餐饮服务食品安全操作规范》",
+      "status": "active",
+      "source": "system_seed_industry_library",
+      "tenant_id": "default",
+      "data": {
+        "title": "快餐食品安全优先",
+        "guideline_text": "遇到疑似异物、变质、食安风险、严重过敏反应时，优先提示停止食用并立即转人工处理。",
+        "allow_auto_reply": false,
+        "requires_handoff": true,
+        "handoff_reason": "fast_food_safety_manual_escalation"
+      },
+      "created_by": "system_seed",
+      "created_at": "2026-05-07T21:57:53+00:00",
+      "updated_by": "system_seed",
+      "updated_at": "2026-05-07T21:57:53+00:00"
+    },
+    "shared_fast_food_order_recheck": {
+      "item_id": "shared_fast_food_order_recheck",
+      "industry_id": "fast_food",
+      "category_id": "global_guidelines",
+      "title": "快餐订单确认要素",
+      "content": "自动回复应优先确认门店、用餐方式、餐品、份数、忌口/过敏原与联系方式，减少错单漏单。",
+      "keywords": [
+        "点餐",
+        "堂食",
+        "外卖",
+        "份数",
+        "忌口",
+        "过敏原"
+      ],
+      "applies_to": "快餐下单前沟通",
+      "notes": "",
+      "status": "active",
+      "source": "system_seed_industry_library",
+      "tenant_id": "default",
+      "data": {
+        "title": "快餐订单确认要素",
+        "guideline_text": "自动回复应优先确认门店、用餐方式、餐品、份数、忌口/过敏原与联系方式，减少错单漏单。"
+      },
+      "created_by": "system_seed",
+      "created_at": "2026-05-07T21:57:53+00:00",
+      "updated_by": "system_seed",
+      "updated_at": "2026-05-07T21:57:53+00:00"
+    },
+    "shared_fast_food_delivery_style": {
+      "item_id": "shared_fast_food_delivery_style",
+      "industry_id": "fast_food",
+      "category_id": "reply_style",
+      "title": "快餐配送异常回复口径",
+      "content": "对超时、洒漏、漏单场景先致歉，明确补救路径（补发/退款/人工处理）并收集最小必要信息。",
+      "keywords": [
+        "超时",
+        "洒漏",
+        "漏单",
+        "补发",
+        "退款"
+      ],
+      "applies_to": "快餐配送异常",
+      "notes": "",
+      "status": "active",
+      "source": "system_seed_industry_library",
+      "tenant_id": "default",
+      "data": {
+        "title": "快餐配送异常回复口径",
+        "guideline_text": "对超时、洒漏、漏单场景先致歉，明确补救路径（补发/退款/人工处理）并收集最小必要信息。"
+      },
+      "created_by": "system_seed",
+      "created_at": "2026-05-07T21:57:53+00:00",
+      "updated_by": "system_seed",
+      "updated_at": "2026-05-07T21:57:53+00:00"
+    },
+    "shared_fast_food_allergen_boundary": {
+      "item_id": "shared_fast_food_allergen_boundary",
+      "industry_id": "fast_food",
+      "category_id": "risk_control",
+      "title": "快餐过敏原提示边界",
+      "content": "涉及严重过敏史、儿童/孕妇敏感食材咨询时，必须提示以门店配方公告和人工确认为准，不得给出医疗诊断建议。",
+      "keywords": [
+        "过敏原",
+        "花生",
+        "乳制品",
+        "儿童",
+        "孕妇"
+      ],
+      "applies_to": "快餐配料与过敏咨询",
+      "notes": "",
+      "status": "active",
+      "source": "system_seed_industry_library",
+      "tenant_id": "default",
+      "data": {
+        "title": "快餐过敏原提示边界",
+        "guideline_text": "涉及严重过敏史、儿童/孕妇敏感食材咨询时，必须提示以门店配方公告和人工确认为准，不得给出医疗诊断建议。",
+        "allow_auto_reply": false,
+        "requires_handoff": true,
+        "handoff_reason": "fast_food_allergen_manual_review"
+      },
+      "created_by": "system_seed",
+      "created_at": "2026-05-07T21:57:53+00:00",
+      "updated_by": "system_seed",
+      "updated_at": "2026-05-07T21:57:53+00:00"
+    },
+    "shared_fast_food_temperature_notice": {
+      "item_id": "shared_fast_food_temperature_notice",
+      "industry_id": "fast_food",
+      "category_id": "global_guidelines",
+      "title": "快餐出餐温控提示",
+      "content": "对保温时长、复热建议、冷链餐品时效等应使用门店标准口径；不确定时提醒尽快食用并转人工确认。",
+      "keywords": [
+        "保温",
+        "复热",
+        "冷链",
+        "时效",
+        "尽快食用"
+      ],
+      "applies_to": "快餐食用安全咨询",
+      "notes": "",
+      "status": "active",
+      "source": "system_seed_industry_library",
+      "tenant_id": "default",
+      "data": {
+        "title": "快餐出餐温控提示",
+        "guideline_text": "对保温时长、复热建议、冷链餐品时效等应使用门店标准口径；不确定时提醒尽快食用并转人工确认。"
+      },
+      "created_by": "system_seed",
+      "created_at": "2026-05-07T21:57:53+00:00",
+      "updated_by": "system_seed",
+      "updated_at": "2026-05-07T21:57:53+00:00"
+    },
+    "shared_lab_instruments_calibration_scope": {
+      "item_id": "shared_lab_instruments_calibration_scope",
+      "industry_id": "lab_instruments",
+      "category_id": "global_guidelines",
+      "title": "仪器校准与检定口径",
+      "content": "精度、不确定度、合规结论需基于有效校准/检定证书与资质范围，不得超范围承诺。",
+      "keywords": [
+        "校准",
+        "检定",
+        "证书",
+        "不确定度",
+        "资质"
+      ],
+      "applies_to": "实验室仪器技术咨询",
+      "notes": "参考《计量法》《检验检测机构资质认定管理办法》",
+      "status": "active",
+      "source": "system_seed_industry_library",
+      "tenant_id": "default",
+      "data": {
+        "title": "仪器校准与检定口径",
+        "guideline_text": "精度、不确定度、合规结论需基于有效校准/检定证书与资质范围，不得超范围承诺。"
+      },
+      "created_by": "system_seed",
+      "created_at": "2026-05-07T21:57:53+00:00",
+      "updated_by": "system_seed",
+      "updated_at": "2026-05-07T21:57:53+00:00"
+    },
+    "shared_lab_instruments_compliance_handoff": {
+      "item_id": "shared_lab_instruments_compliance_handoff",
+      "industry_id": "lab_instruments",
+      "category_id": "risk_control",
+      "title": "实验室资质合规边界",
+      "content": "涉及认证结论、法规豁免、官方资质解释时，必须转人工合规或技术负责人确认。",
+      "keywords": [
+        "CMA",
+        "CNAS",
+        "认证",
+        "法规",
+        "合规"
+      ],
+      "applies_to": "资质合规与审计问答",
+      "notes": "",
+      "status": "active",
+      "source": "system_seed_industry_library",
+      "tenant_id": "default",
+      "data": {
+        "title": "实验室资质合规边界",
+        "guideline_text": "涉及认证结论、法规豁免、官方资质解释时，必须转人工合规或技术负责人确认。",
+        "allow_auto_reply": false,
+        "requires_handoff": true,
+        "handoff_reason": "lab_compliance_manual_review"
+      },
+      "created_by": "system_seed",
+      "created_at": "2026-05-07T21:57:53+00:00",
+      "updated_by": "system_seed",
+      "updated_at": "2026-05-07T21:57:53+00:00"
+    },
+    "shared_lab_instruments_maintenance_style": {
+      "item_id": "shared_lab_instruments_maintenance_style",
+      "industry_id": "lab_instruments",
+      "category_id": "reply_style",
+      "title": "实验室仪器故障受理口径",
+      "content": "先确认型号、序列号、故障现象、使用环境和校准状态，再给出基础排查建议与送修路径。",
+      "keywords": [
+        "故障",
+        "维修",
+        "序列号",
+        "送修",
+        "保养"
+      ],
+      "applies_to": "实验室仪器售后",
+      "notes": "",
+      "status": "active",
+      "source": "system_seed_industry_library",
+      "tenant_id": "default",
+      "data": {
+        "title": "实验室仪器故障受理口径",
+        "guideline_text": "先确认型号、序列号、故障现象、使用环境和校准状态，再给出基础排查建议与送修路径。"
+      },
+      "created_by": "system_seed",
+      "created_at": "2026-05-07T21:57:53+00:00",
+      "updated_by": "system_seed",
+      "updated_at": "2026-05-07T21:57:53+00:00"
+    },
+    "shared_lab_instruments_hazard_notice": {
+      "item_id": "shared_lab_instruments_hazard_notice",
+      "industry_id": "lab_instruments",
+      "category_id": "risk_control",
+      "title": "危化/生物样品处置边界",
+      "content": "涉及危化品、生物样品、放射源相关操作咨询时，仅可提供设备使用边界提示，不得替代实验室SOP和EHS审批。",
+      "keywords": [
+        "危化品",
+        "生物样品",
+        "放射源",
+        "EHS",
+        "SOP"
+      ],
+      "applies_to": "实验室高风险样品咨询",
+      "notes": "",
+      "status": "active",
+      "source": "system_seed_industry_library",
+      "tenant_id": "default",
+      "data": {
+        "title": "危化/生物样品处置边界",
+        "guideline_text": "涉及危化品、生物样品、放射源相关操作咨询时，仅可提供设备使用边界提示，不得替代实验室SOP和EHS审批。",
+        "allow_auto_reply": false,
+        "requires_handoff": true,
+        "handoff_reason": "lab_hse_manual_review"
+      },
+      "created_by": "system_seed",
+      "created_at": "2026-05-07T21:57:53+00:00",
+      "updated_by": "system_seed",
+      "updated_at": "2026-05-07T21:57:53+00:00"
+    },
+    "shared_lab_instruments_validation_evidence": {
+      "item_id": "shared_lab_instruments_validation_evidence",
+      "industry_id": "lab_instruments",
+      "category_id": "global_guidelines",
+      "title": "仪器软件版本与验证记录",
+      "content": "涉及审计追踪、软件版本、方法学验证、电子签名等合规问答时，应提示以已归档验证记录为准。",
+      "keywords": [
+        "审计追踪",
+        "软件版本",
+        "方法学验证",
+        "电子签名",
+        "合规审计"
+      ],
+      "applies_to": "实验室审计与合规问答",
+      "notes": "",
+      "status": "active",
+      "source": "system_seed_industry_library",
+      "tenant_id": "default",
+      "data": {
+        "title": "仪器软件版本与验证记录",
+        "guideline_text": "涉及审计追踪、软件版本、方法学验证、电子签名等合规问答时，应提示以已归档验证记录为准。"
+      },
+      "created_by": "system_seed",
+      "created_at": "2026-05-07T21:57:53+00:00",
+      "updated_by": "system_seed",
+      "updated_at": "2026-05-07T21:57:53+00:00"
+    },
+    "shared_item_ITvhhZJ51LCp": {
+      "item_id": "shared_item_ITvhhZJ51LCp",
+      "industry_id": "global",
+      "category_id": "reply_style",
+      "title": "个性化回复风格指南",
+      "content": "在对话时，尽量模拟真实人类的语气。先读取数据库中的客户资料，然后根据资料的标签，给出符合印象的称呼和回复风格。",
+      "keywords": [
+        "模拟人类语气",
+        "客户资料",
+        "标签",
+        "称呼",
+        "回复风格"
+      ],
+      "applies_to": "客服对话场景",
+      "notes": "",
+      "status": "active",
+      "source": "admin_console",
+      "tenant_id": "default",
+      "data": {
+        "title": "个性化回复风格指南",
+        "industry_id": "global",
+        "keywords": [
+          "模拟人类语气",
+          "客户资料",
+          "标签",
+          "称呼",
+          "回复风格"
+        ],
+        "applies_to": "客服对话场景",
+        "guideline_text": "在对话时，尽量模拟真实人类的语气。先读取数据库中的客户资料，然后根据资料的标签，给出符合印象的称呼和回复风格。",
+        "notes": ""
+      },
+      "created_by": "platform-admin",
+      "created_at": "2026-05-09T13:37:03+00:00",
+      "updated_by": "platform-admin",
+      "updated_at": "2026-05-09T13:37:03+00:00"
     }
   },
   "admin_credentials": {
@@ -7289,63 +8583,7 @@
       "updated_at": "2026-04-30T17:51:13+00:00"
     }
   },
-  "auth_challenges": {
-    "init_56Dw8v17Ny9MDmroybwM5t7gGnZGl9rf": {
-      "challenge_id": "init_56Dw8v17Ny9MDmroybwM5t7gGnZGl9rf",
-      "purpose": "initialize_account_pending",
-      "username": "jiangsu_chejin_usedcar_customer_20260501",
-      "user_id": "jiangsu_chejin_usedcar_customer_20260501",
-      "user": {
-        "user_id": "jiangsu_chejin_usedcar_customer_20260501",
-        "role": "customer",
-        "tenant_ids": [
-          "jiangsu_chejin_usedcar_customer_20260501"
-        ],
-        "display_name": "江苏车金二手车测试客户 2026-05-01",
-        "username": "jiangsu_chejin_usedcar_customer_20260501",
-        "resource_scopes": [
-          "*"
-        ]
-      },
-      "role": "customer",
-      "active_tenant_id": "jiangsu_chejin_usedcar_customer_20260501",
-      "actor_id": "jiangsu_chejin_usedcar_customer_20260501",
-      "device_fingerprint": "",
-      "device_name": "",
-      "ip_address": "",
-      "expires_at": "2026-05-03T01:19:26+00:00",
-      "created_at": "2026-05-03T00:49:26+00:00"
-    },
-    "otp_-RBkKTmFSS7Kq74aNhwnGYCHu08aBm-J": {
-      "challenge_id": "otp_-RBkKTmFSS7Kq74aNhwnGYCHu08aBm-J",
-      "username": "admin",
-      "user_id": "platform-admin",
-      "user": {
-        "user_id": "platform-admin",
-        "role": "admin",
-        "tenant_ids": [
-          "*"
-        ],
-        "display_name": "Platform Admin",
-        "username": "admin",
-        "resource_scopes": [
-          "*"
-        ]
-      },
-      "active_tenant_id": "default",
-      "actor_id": "platform-admin",
-      "device_fingerprint": "",
-      "device_name": "",
-      "ip_address": "",
-      "attempts_remaining": 5,
-      "expires_at": "2026-05-03T01:04:26+00:00",
-      "created_at": "2026-05-03T00:49:26+00:00",
-      "purpose": "login",
-      "email": "197286184@qq.com",
-      "code_hash": "pbkdf2_sha256$120000$d988f74b0b86d554b915e7ae066b460f$ey8iI4SP696w2t/4RFePOKl0i4XRP0PDBUoGPvdIK78=",
-      "last_sent_at": "2026-05-03T00:49:29+00:00"
-    }
-  },
+  "auth_challenges": {},
   "trusted_devices": {
     "667e7f1174908ee39258d8712542b653c09b6ce75d396ce2393e79587561076a": {
       "fingerprint": "667e7f1174908ee39258d8712542b653c09b6ce75d396ce2393e79587561076a",
@@ -7373,6 +8611,42 @@
       "trusted_until": "2026-06-01T16:49:04+00:00",
       "created_at": "2026-05-02T16:49:04+00:00",
       "last_seen_at": "2026-05-02T16:49:04+00:00"
+    },
+    "2c3e1400143744816ab3e881b8ad1c9bad5b402e4dc099776cb0e2462b3a585a": {
+      "fingerprint": "2c3e1400143744816ab3e881b8ad1c9bad5b402e4dc099776cb0e2462b3a585a",
+      "user_id": "platform-admin",
+      "device_name": "Win32 zh-CN",
+      "ip_address": "127.0.0.1",
+      "trusted_until": "2026-06-06T21:57:53+00:00",
+      "created_at": "2026-05-07T21:57:53+00:00",
+      "last_seen_at": "2026-05-07T21:57:53+00:00"
+    },
+    "a7360f2be5fa4e23650f337f320312b405a1edfca7b000933f547e74eebbd976": {
+      "fingerprint": "a7360f2be5fa4e23650f337f320312b405a1edfca7b000933f547e74eebbd976",
+      "user_id": "platform-admin",
+      "device_name": "Win32 zh-CN",
+      "ip_address": "127.0.0.1",
+      "trusted_until": "2026-06-07T04:35:13+00:00",
+      "created_at": "2026-05-08T04:35:13+00:00",
+      "last_seen_at": "2026-05-10T17:30:36+00:00"
+    },
+    "c1dcdf880206a49c5166abfe9a29fb35ccc0ef99c49a8372573821be61113525": {
+      "fingerprint": "c1dcdf880206a49c5166abfe9a29fb35ccc0ef99c49a8372573821be61113525",
+      "user_id": "customer_test01",
+      "device_name": "Win32 zh-CN",
+      "ip_address": "127.0.0.1",
+      "trusted_until": "2026-06-08T14:09:02+00:00",
+      "created_at": "2026-05-09T14:09:02+00:00",
+      "last_seen_at": "2026-05-10T17:05:52+00:00"
+    },
+    "b7bd52793177b011d1304ab7a956d772996ef1a2dc1367bd81fa8072959af1ad": {
+      "fingerprint": "b7bd52793177b011d1304ab7a956d772996ef1a2dc1367bd81fa8072959af1ad",
+      "user_id": "user_YTE2rdUWFGqX",
+      "device_name": "Win32 zh-CN",
+      "ip_address": "127.0.0.1",
+      "trusted_until": "2026-06-09T18:34:32+00:00",
+      "created_at": "2026-05-10T18:34:32+00:00",
+      "last_seen_at": "2026-05-11T05:16:10+00:00"
     }
   },
   "smtp_config": {
@@ -7784,6 +9058,78 @@
       "llm_used": true,
       "checked_at": "2026-05-02T19:52:28+00:00",
       "updated_at": "2026-05-02T19:52:28+00:00"
+    }
+  },
+  "recorder_modules": {
+    "raw_message_log_v1": {
+      "module_key": "raw_message_log_v1",
+      "module_name": "通用原始消息导出V1",
+      "module_type": "chat_extract_export",
+      "status": "active",
+      "version": "1.0.0",
+      "config": {
+        "description": "Generic baseline export that writes raw messages to a readable workbook."
+      },
+      "builtin": true,
+      "created_at": "2026-05-09T11:28:42+00:00",
+      "updated_at": "2026-05-09T11:28:42+00:00"
+    },
+    "order_sheet_lab_v1": {
+      "module_key": "order_sheet_lab_v1",
+      "module_name": "实验仪器订货表V1",
+      "module_type": "chat_extract_export",
+      "status": "active",
+      "version": "1.0.0",
+      "config": {
+        "description": "Rule-first order extraction with optional LLM supplementation, exports to order-sheet style workbook.",
+        "date_output_mode": "MMDD_text",
+        "allow_empty_cost_fields": true,
+        "llm_enabled": true,
+        "llm_max_rows_per_run": 40,
+        "supported_content_types": [
+          "text",
+          "quote"
+        ]
+      },
+      "builtin": true,
+      "created_at": "2026-05-09T11:28:42+00:00",
+      "updated_at": "2026-05-09T11:28:42+00:00"
+    }
+  },
+  "recorder_module_bindings": {
+    "global_default": {
+      "binding_id": "global_default",
+      "scope_type": "global",
+      "scope_id": "*",
+      "tenant_id": "",
+      "user_id": "",
+      "module_key": "raw_message_log_v1",
+      "enabled": true,
+      "created_at": "2026-05-10T17:42:21+00:00",
+      "updated_at": "2026-05-10T18:17:15+00:00"
+    },
+    "user_user_YTE2rdUWFGqX": {
+      "binding_id": "user_user_YTE2rdUWFGqX",
+      "scope_type": "user",
+      "scope_id": "user_YTE2rdUWFGqX",
+      "tenant_id": "",
+      "user_id": "user_YTE2rdUWFGqX",
+      "module_key": "order_sheet_lab_v1",
+      "enabled": true,
+      "created_at": "2026-05-10T17:42:32+00:00",
+      "updated_at": "2026-05-10T18:17:02+00:00"
+    },
+    "user_customer_test01": {
+      "binding_id": "user_customer_test01",
+      "scope_type": "user",
+      "scope_id": "customer_test01",
+      "tenant_id": "default",
+      "user_id": "customer_test01",
+      "module_key": "order_sheet_lab_v1",
+      "enabled": true,
+      "priority": 10,
+      "created_at": "2026-05-10T17:48:34+00:00",
+      "updated_at": "2026-05-10T17:48:34+00:00"
     }
   }
 }

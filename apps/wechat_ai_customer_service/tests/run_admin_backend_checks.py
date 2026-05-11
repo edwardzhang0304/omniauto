@@ -7,6 +7,7 @@ import json
 import os
 import shutil
 import sys
+import uuid
 import zipfile
 from io import BytesIO
 from pathlib import Path
@@ -27,9 +28,10 @@ TEST_ARTIFACTS = PROJECT_ROOT / "runtime" / "apps" / "wechat_ai_customer_service
 VERSIONS_ROOT = APP_ROOT / "data" / "versions"
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
-os.environ.setdefault("WECHAT_CLOUD_REQUIRED", "1")
+os.environ.setdefault("WECHAT_CLOUD_REQUIRED", "0")
 os.environ.setdefault("WECHAT_CLOUD_STRICT_ONLINE", "0")
 os.environ.setdefault("WECHAT_VPS_BASE_URL", "http://localhost:8000")
+os.environ.setdefault("WECHAT_CLOUD_REQUIRE_NODE_VERIFIED", "0")
 
 from apps.wechat_ai_customer_service.admin_backend.app import create_app  # noqa: E402
 from apps.wechat_ai_customer_service.admin_backend.services.diagnostics_service import DiagnosticsService  # noqa: E402
@@ -84,6 +86,10 @@ def _ensure_cloud_snapshot() -> None:
                         "caution_terms": ["人工核实"],
                         "authority_tags": ["quote"],
                         "formulaic_handoff_terms": [],
+                        "model_reply_markers": ["客户：", "客服：", "自动回复", "AI回复"],
+                        "personalized_reply_patterns": [r"许聪", r"许哥", r"我手上", r"你们店里", r"到店看车"],
+                        "situational_handoff_patterns": [r"转人工", r"同事跟进", r"人工确认", r"请示"],
+                        "finance_boundary_patterns": [r"首付", r"月供", r"贷款", r"征信"],
                         "forbidden_reply_terms": [],
                         "forbidden_safe_markers": [],
                         "appointment_commitment_terms": [],
@@ -119,10 +125,10 @@ def _ensure_cloud_snapshot() -> None:
             existing = {}
         if isinstance(existing, dict) and existing:
             snapshot = _deep_merge(existing, minimal)
-            snapshot.setdefault("expires_at", future)
+            snapshot["expires_at"] = future
             cache_policy = snapshot.setdefault("cache_policy", {})
             if isinstance(cache_policy, dict):
-                cache_policy.setdefault("expires_at", future)
+                cache_policy["expires_at"] = future
             snapshot_path.write_text(json.dumps(snapshot, ensure_ascii=False, indent=2), encoding="utf-8")
             return
     snapshot_path.write_text(json.dumps(minimal, ensure_ascii=False, indent=2), encoding="utf-8")
@@ -311,6 +317,7 @@ def check_static_assets(client: TestClient) -> None:
     assert_true("create-backup" in js.text, "frontend should expose manual backup action")
     assert_true("sendGeneratorMessage" in js.text, "frontend should expose AI knowledge generator")
     assert_true("confirm-generator" in js.text, "frontend should expose generator confirm action")
+    assert_true("/rag-experience" in js.text, "manual generator confirm should enter rag experience flow")
     assert_true("save-generator-draft" in js.text, "frontend should allow editing generator drafts before save")
     assert_true("/draft" in js.text, "frontend should call generator draft update endpoint")
     assert_true("diagnostic-ignore" in js.text, "frontend should expose diagnostic ignore action")
@@ -359,6 +366,7 @@ def check_static_assets(client: TestClient) -> None:
     assert_true("rag-experience-discard" in js.text, "frontend should expose rag experience discard action")
     assert_true("rag-experience-promote" in js.text, "frontend should expose rag experience promotion action")
     assert_true("rag-experience-keep" in js.text, "frontend should expose keep-in-experience-layer action")
+    assert_true("/resolve-overlap" in js.text, "frontend should expose overlap-resolution actions for similar formal knowledge")
     assert_true("rag-experience-save" in js.text, "frontend should allow editing learned answer points")
     assert_true("rag-experience-toggle" in js.text and "ragExperienceExpanded" in js.text, "frontend should let users expand/collapse AI experience cards")
     assert_true("ragExperienceIsHandled" in js.text and "/reopen" in js.text, "handled AI experiences should only expose reopen action")
@@ -1120,9 +1128,10 @@ def check_customer_service_and_product_console(client: TestClient) -> None:
             )
             assert_equal(restore_price.status_code, 200, "product price restore status")
 
+        product_token = uuid.uuid4().hex[:8]
         command = client.post(
             "/api/product-console/command",
-            json={"message": "新增商品：商品控制台自动化测试套件，单价12元/件，库存3件，24小时发货。", "use_llm": False},
+            json={"message": f"新增商品：商品控制台自动化测试套件{product_token}，单价12元/件，库存3件，24小时发货。", "use_llm": False},
         )
         assert_equal(command.status_code, 200, "product natural-language command status")
         command_payload = command.json()
@@ -1261,6 +1270,7 @@ def check_draft_create_validate_diff_apply_and_rollback(client: TestClient) -> N
 def check_ai_knowledge_generator_flow(client: TestClient) -> None:
     created_item_paths: list[Path] = []
     created_session_ids: list[str] = []
+    created_rag_experience_ids: list[str] = []
     try:
         message = (
             "\u65b0\u589e\u5546\u54c1\uff1a\u7ba1\u7406\u53f0\u751f\u6210\u5668\u6d4b\u8bd5\u5546\u54c1\uff0c"
@@ -1283,6 +1293,31 @@ def check_ai_knowledge_generator_flow(client: TestClient) -> None:
         assert_true(saved.get("ok"), f"generator confirm should be ok: {saved}")
         products = client.get("/api/knowledge/categories/products/items").json().get("items", [])
         assert_true(item_id in {item.get("id") for item in products}, "generated product should be visible")
+
+        rag_created = client.post(
+            "/api/generator/sessions",
+            json={
+                "message": "新增商品：RAG经验回归验证冷柜，单价1999元/台，10台以上1899元，库存50台，24小时发货。",
+                "use_llm": False,
+            },
+        ).json()
+        assert_true(rag_created.get("ok"), f"generator rag session should be ok: {rag_created}")
+        rag_session = rag_created["session"]
+        created_session_ids.append(rag_session["session_id"])
+        assert_equal(rag_session.get("status"), "ready", "generator rag session should be ready before confirm")
+        rag_result = client.post(
+            f"/api/generator/sessions/{rag_session['session_id']}/rag-experience",
+            json={"use_llm": False},
+        ).json()
+        assert_true(rag_result.get("ok"), f"generator rag confirm should be ok: {rag_result}")
+        assert_equal(rag_result.get("session", {}).get("status"), "sent_to_rag_experience", "generator rag confirm should mark session as sent")
+        rag_experience_id = str(rag_result.get("session", {}).get("rag_experience_id") or "")
+        assert_true(bool(rag_experience_id), "generator rag confirm should return rag experience id")
+        created_rag_experience_ids.append(rag_experience_id)
+        rag_items = client.get("/api/rag/experiences", params={"status": "all", "limit": 200}).json().get("items", [])
+        assert_true(any(item.get("experience_id") == rag_experience_id for item in rag_items), "generator rag confirm should persist experience")
+        client.post(f"/api/rag/experiences/{rag_experience_id}/discard", json={"reason": "admin backend generator flow check"})
+        created_rag_experience_ids.remove(rag_experience_id)
 
         scoped_rule = client.post(
             "/api/generator/sessions",
@@ -1394,6 +1429,8 @@ def check_ai_knowledge_generator_flow(client: TestClient) -> None:
         assert_equal(tiers[0]["min_quantity"], 1.0, "first tier quantity")
         assert_equal(tiers[1]["unit_price"], 450.0, "second tier price")
     finally:
+        for experience_id in created_rag_experience_ids:
+            client.post(f"/api/rag/experiences/{experience_id}/discard", json={"reason": "admin backend generator flow cleanup"})
         for path in created_item_paths:
             if path.exists():
                 path.unlink()

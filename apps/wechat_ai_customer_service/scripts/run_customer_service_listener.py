@@ -8,6 +8,7 @@ import os
 import subprocess
 import sys
 import time
+import urllib.request
 from datetime import datetime
 from pathlib import Path
 
@@ -45,6 +46,15 @@ def _ancestor_pids(pid: int) -> set[int]:
     return ancestors
 
 
+def _cmdline_has_listener_script(cmdline: list[str]) -> bool:
+    target = "run_customer_service_listener.py"
+    for arg in cmdline:
+        arg_norm = os.path.normpath(str(arg))
+        if os.path.basename(arg_norm) == target:
+            return True
+    return False
+
+
 def _already_running(tenant_id: str) -> bool:
     """Check if another managed listener for the same tenant is already running."""
     my_pid = os.getpid()
@@ -53,14 +63,13 @@ def _already_running(tenant_id: str) -> bool:
         try:
             pid = proc.info.get("pid")
             cmdline = proc.info.get("cmdline") or []
-            cmd = " ".join(str(item) for item in cmdline)
             name = str(proc.info.get("name") or "").lower()
             if (
                 pid != my_pid
                 and pid not in ancestor_pids
                 and "python" in name
-                and "run_customer_service_listener" in cmd
-                and f"--tenant-id {tenant_id}" in cmd
+                and _cmdline_has_listener_script(cmdline)
+                and f"--tenant-id {tenant_id}" in " ".join(str(item) for item in cmdline)
             ):
                 return True
         except (psutil.NoSuchProcess, psutil.AccessDenied):
@@ -90,6 +99,56 @@ def main() -> int:
     log_path = runtime_log_path(tenant_id)
     log_path.parent.mkdir(parents=True, exist_ok=True)
     workflow = APP_ROOT / "workflows" / "listen_and_reply.py"
+
+    # --- VPS console must be online before starting ---
+    from apps.wechat_ai_customer_service.auth.vps_client import discover_vps_base_url
+
+    vps_url = discover_vps_base_url()
+    if not vps_url:
+        message = "VPS控制台未配置或未启动，自动客服监听无法启动。请先启动VPS控制台。"
+        write_runtime_status("stopped", message, tenant_id=tenant_id)
+        append_log(log_path, {"event": "managed_listener_vps_missing", "tenant_id": tenant_id})
+        print(message, file=sys.stderr)
+        return 3
+    vps_ok = False
+    try:
+        req = urllib.request.Request(vps_url.rstrip("/") + "/v1/health", headers={"Accept": "application/json"}, method="GET")
+        with urllib.request.urlopen(req, timeout=3) as resp:
+            vps_ok = 200 <= int(getattr(resp, "status", 0)) < 300
+    except Exception:
+        vps_ok = False
+    if not vps_ok:
+        message = "VPS控制台不可达，自动客服监听无法启动。请检查VPS控制台是否正常运行。"
+        write_runtime_status("stopped", message, tenant_id=tenant_id)
+        append_log(log_path, {"event": "managed_listener_vps_unhealthy", "tenant_id": tenant_id, "vps_url": vps_url})
+        print(message, file=sys.stderr)
+        return 3
+
+    # --- Write PID record so admin backend can detect this listener ---
+    from apps.wechat_ai_customer_service.admin_backend.services.customer_service_runtime import runtime_pid_path
+
+    pid_record = {
+        "pid": os.getpid(),
+        "tenant_id": tenant_id,
+        "config_path": str(config_path),
+        "started_at": datetime.now().isoformat(timespec="seconds"),
+        "log_path": str(log_path),
+    }
+    pid_path = runtime_pid_path(tenant_id)
+    pid_path.parent.mkdir(parents=True, exist_ok=True)
+    temp = pid_path.with_suffix(".json.tmp")
+    temp.write_text(json.dumps(pid_record, ensure_ascii=False, indent=2), encoding="utf-8")
+    os.replace(temp, pid_path)
+
+    import atexit
+
+    def _cleanup_pid():
+        try:
+            pid_path.unlink()
+        except FileNotFoundError:
+            pass
+
+    atexit.register(_cleanup_pid)
 
     append_log(log_path, {"event": "managed_listener_start", "tenant_id": tenant_id, "config": str(config_path)})
     write_runtime_status("idle", "自动客服监听已启动，等待微信消息。", tenant_id=tenant_id)
@@ -218,4 +277,25 @@ def append_log(path: Path, payload: dict) -> None:
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    try:
+        raise SystemExit(main())
+    except SystemExit:
+        raise
+    except Exception as exc:
+        import traceback
+        crash_log = APP_ROOT / "logs" / "listener_crash.log"
+        crash_log.parent.mkdir(parents=True, exist_ok=True)
+        with crash_log.open("a", encoding="utf-8") as f:
+            f.write(
+                json.dumps(
+                    {
+                        "created_at": datetime.now().isoformat(timespec="seconds"),
+                        "event": "managed_listener_crash",
+                        "error": str(exc),
+                        "traceback": traceback.format_exc(),
+                    },
+                    ensure_ascii=False,
+                )
+                + "\n"
+            )
+        raise

@@ -6,6 +6,7 @@ const state = {
   customerServiceRuntime: null,
   customerServiceRuntimeTimer: null,
   customerServiceRuntimeBusy: false,
+  customerServiceFloatPosition: loadFloatPosition("customerServiceFloatPositionV1"),
   customerProfiles: [],
   selectedCustomerProfile: null,
   customerProfileMessages: [],
@@ -21,6 +22,7 @@ const state = {
   knowledgeMode: "view",
   generatorSession: null,
   generatorMessages: [],
+  generatorConfirmBusy: false,
   selectedCandidate: null,
   learningInProgress: false,
   uploadInProgress: false,
@@ -30,13 +32,21 @@ const state = {
   recorderMessages: [],
   selectedRecorderConversation: null,
   recorderMessageCache: {},
+  recorderModules: [],
+  recorderExportRuns: [],
+  recorderRuntimeStatus: null,
+  recorderExportRunBusy: false,
+  recorderExportPollingTimer: null,
   activeReferenceTab: "experiences",
   productScopedEditContext: null,
   diagnosticHighlight: null,
   ragStatus: null,
   ragHits: [],
   ragExperiences: [],
-  showDiscardedRagExperiences: false,
+  ragExperienceHiddenCount: 0,
+  ragExperienceDiscardedTotal: 0,
+  ragExperienceTotal: 0,
+  showDiscardedRagExperiences: localStorage.getItem("showDiscardedRagExperiences") === "1",
   ragExperienceExpanded: loadStringSet("ragExperienceExpanded"),
   ragInterpretationLoadingIds: new Set(),
   ragActionLoadingIds: new Map(),
@@ -48,13 +58,16 @@ const state = {
   syncStatus: null,
   startupSyncTimer: null,
   loginChallenge: null,
+  cloudLoginLocked: false,
   initChallenge: null,
   passwordChallenge: null,
   emailChallenge: null,
   security: null,
   llmConfig: null,
 };
+const CUSTOMER_SERVICE_FLOAT_POSITION_KEY = "customerServiceFloatPositionV1";
 const localDeviceId = getOrCreateDeviceId("localConsoleDeviceId");
+const RECORDER_EXPORT_DEFAULT_LIMIT = 10000;
 
 const titles = {
   customer_service: "微信智能客服",
@@ -114,7 +127,7 @@ const optionLabels = {
 
 const fieldLabelOverrides = {
   price_tiers: "批量价格",
-  reply_templates: "客服回复内容",
+  reply_templates: "基础话术（弱触发）",
   risk_rules: "风险提醒",
   policy_type: "规则类别",
   min_quantity: "起订量",
@@ -159,6 +172,7 @@ function selectView(view, options = {}) {
   });
   document.getElementById("view-title").textContent = titles[activeView] || "总览";
   syncWorkflowTabs();
+  if (activeView !== "recorder") stopRecorderExportPolling();
 }
 
 function syncWorkflowTabs() {
@@ -228,20 +242,35 @@ function formatApiError(payload, fallback) {
 }
 
 function initializeLocalLogin() {
-  document.body.classList.toggle("auth-locked", !state.authToken);
+  document.body.classList.add("auth-locked");
   const form = document.getElementById("local-login-form");
-  form?.addEventListener("submit", (event) => {
+  form?.addEventListener("submit", async (event) => {
     event.preventDefault();
+    const allowed = await prepareCloudGateForLogin({silent: false, force: true});
+    if (!allowed) return;
     loginLocal(new FormData(form)).catch((error) => showLoginMessage(error.message));
   });
   document.getElementById("local-login-reset")?.addEventListener("click", resetLocalLoginChallenge);
   document.getElementById("local-init-form")?.addEventListener("submit", (event) => initializeLocalAccount(event).catch((error) => showInitMessage(error.message)));
   document.getElementById("local-init-back")?.addEventListener("click", resetLocalInitialization);
+  prepareCloudGateForLogin({silent: true, force: true}).catch(() => {});
   if (state.authToken) {
-    bootstrapAuthenticatedApp().catch((error) => {
-      showLoginMessage(error.message || "登录状态已失效，请重新登录。");
-      lockLocalConsole();
-    });
+    prepareCloudGateForLogin({silent: false, force: true})
+      .then((allowed) => {
+        if (!allowed) {
+          lockLocalConsole();
+          return;
+        }
+        document.body.classList.remove("auth-locked");
+        bootstrapAuthenticatedApp().catch((error) => {
+          showLoginMessage(error.message || "登录状态已失效，请重新登录。");
+          lockLocalConsole();
+        });
+      })
+      .catch((error) => {
+        showLoginMessage(error.message || "登录状态已失效，请重新登录。");
+        lockLocalConsole();
+      });
   }
 }
 
@@ -255,7 +284,7 @@ async function loginLocal(form) {
       });
       const payload = await response.json().catch(() => ({}));
       if (!response.ok || payload.ok === false) {
-        throw new Error(payload.detail || "邮箱绑定验证发起失败，请检查邮箱。");
+        throw new Error(formatApiError(payload, "邮箱绑定验证发起失败，请检查邮箱。"));
       }
       state.loginChallenge.mode = "verify";
       document.getElementById("local-login-bind-email-field")?.classList.add("is-hidden");
@@ -280,7 +309,7 @@ async function loginLocal(form) {
     });
     const payload = await response.json().catch(() => ({}));
     if (!response.ok || payload.ok === false) {
-      throw new Error(payload.detail || "验证码错误或已过期，请重新获取。");
+      throw new Error(formatApiError(payload, "验证码错误或已过期，请重新获取。"));
     }
     await completeLocalLogin(payload.session);
     return;
@@ -297,7 +326,7 @@ async function loginLocal(form) {
   });
   const payload = await response.json().catch(() => ({}));
   if (!response.ok || payload.ok === false) {
-    throw new Error(payload.detail || "登录失败，请检查账号和密码。");
+    throw new Error(formatApiError(payload, "登录失败，请检查账号和密码。"));
   }
   if (!payload.requires_verification && payload.session) {
     await completeLocalLogin(payload.session);
@@ -356,7 +385,7 @@ async function initializeLocalAccount(event) {
       body: JSON.stringify({challenge_id: state.initChallenge.challenge_id, code: form.get("email_code")}),
     });
     const payload = await response.json().catch(() => ({}));
-    if (!response.ok || payload.ok === false) throw new Error(payload.detail || "验证码错误或已过期。");
+    if (!response.ok || payload.ok === false) throw new Error(formatApiError(payload, "验证码错误或已过期。"));
     formElement.reset();
     resetLocalInitialization({silent: true});
     resetLocalLoginChallenge({silent: true});
@@ -376,7 +405,7 @@ async function initializeLocalAccount(event) {
     }),
   });
   const payload = await response.json().catch(() => ({}));
-  if (!response.ok || payload.ok === false) throw new Error(payload.detail || "初始化验证码发送失败。");
+  if (!response.ok || payload.ok === false) throw new Error(formatApiError(payload, "初始化验证码发送失败。"));
   state.initChallenge.mode = "verify";
   document.getElementById("local-init-code-field")?.classList.remove("is-hidden");
   document.getElementById("local-init-submit").textContent = "验证并完成初始化";
@@ -455,6 +484,8 @@ function lockLocalConsole() {
     clearInterval(state.customerServiceRuntimeTimer);
     state.customerServiceRuntimeTimer = null;
   }
+  stopRecorderExportPolling();
+  state.recorderExportRunBusy = false;
   state.authToken = "";
   state.auth = null;
   state.security = null;
@@ -499,6 +530,51 @@ function hideInitMessage() {
   element.classList.add("is-hidden");
 }
 
+function setLocalLoginEnabled(enabled) {
+  const form = document.getElementById("local-login-form");
+  if (!form) return;
+  form.querySelectorAll("input, button").forEach((element) => {
+    element.disabled = !enabled;
+  });
+}
+
+async function prepareCloudGateForLogin({silent = false, force = true} = {}) {
+  try {
+    const response = await fetch("/api/auth/cloud-gate/prepare", {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({
+        tenant_id: state.activeTenantId || "",
+        force: Boolean(force),
+      }),
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      throw new Error(
+        payload?.detail?.message ||
+        payload?.detail ||
+        payload?.message ||
+        "当前客户端未通过云端授权校验。请连接服务端并完成共享行业知识库刷新后再使用。"
+      );
+    }
+    const required = payload.required !== false;
+    const ok = payload.ok !== false;
+    state.cloudLoginLocked = required && !ok;
+    setLocalLoginEnabled(!state.cloudLoginLocked);
+    if (state.cloudLoginLocked) {
+      showLoginMessage(payload.message || "当前客户端未通过云端授权校验。请连接服务端并完成共享行业知识库刷新后再使用。");
+      return false;
+    }
+    if (!silent && !state.loginChallenge) hideLoginMessage();
+    return true;
+  } catch (error) {
+    state.cloudLoginLocked = true;
+    setLocalLoginEnabled(false);
+    showLoginMessage(error.message || "当前客户端未通过云端授权校验。请连接服务端并完成共享行业知识库刷新后再使用。");
+    return false;
+  }
+}
+
 function getOrCreateDeviceId(key) {
   let value = localStorage.getItem(key);
   if (!value) {
@@ -520,6 +596,30 @@ function loadStringSet(key) {
 
 function saveStringSet(key, values) {
   localStorage.setItem(key, JSON.stringify([...values].slice(-200)));
+}
+
+function loadFloatPosition(key) {
+  try {
+    const payload = JSON.parse(localStorage.getItem(key) || "null");
+    if (!payload || typeof payload !== "object") return null;
+    const left = Number(payload.left);
+    const top = Number(payload.top);
+    if (!Number.isFinite(left) || !Number.isFinite(top)) return null;
+    return {left, top};
+  } catch {
+    return null;
+  }
+}
+
+function saveFloatPosition(key, position) {
+  if (!position) return;
+  localStorage.setItem(
+    key,
+    JSON.stringify({
+      left: Math.round(Number(position.left) || 0),
+      top: Math.round(Number(position.top) || 0),
+    }),
+  );
 }
 
 function browserDeviceName() {
@@ -915,7 +1015,7 @@ function renderCustomerServiceRuntime() {
   if (floating) {
     floating.className = `customer-service-float is-${stateName}`;
     floating.innerHTML = `
-      <div class="float-status-line">
+      <div class="float-status-line float-drag-handle" title="按住拖动浮窗位置">
         <span class="${dotClasses}"></span>
         <div>
           <strong>${escapeHtml(stateLabel)}</strong>
@@ -929,7 +1029,115 @@ function renderCustomerServiceRuntime() {
     `;
     floating.querySelector(".customer-runtime-start")?.addEventListener("click", () => startCustomerServiceRuntime().catch((error) => alert(error.message)));
     floating.querySelector(".customer-runtime-stop")?.addEventListener("click", () => stopCustomerServiceRuntime().catch((error) => alert(error.message)));
+    enableCustomerServiceFloatDragging(floating);
   }
+  const otherRunning = (runtime.other_listeners || []).filter((l) => l.tenant_id !== (state.activeTenantId || "default"));
+  if (!runtime.running && otherRunning.length > 0) {
+    const tenantNames = otherRunning.map((l) => l.tenant_id).join("、");
+    const banner = document.getElementById("runtime-tenant-mismatch-banner");
+    if (banner) {
+      banner.classList.remove("is-hidden");
+      banner.textContent = `注意：当前账号没有运行中的监听，但以下账号正在运行：${tenantNames}。如需查看其状态，请切换账号。`;
+    }
+  } else {
+    const banner = document.getElementById("runtime-tenant-mismatch-banner");
+    if (banner) banner.classList.add("is-hidden");
+  }
+}
+
+function clampCustomerServiceFloatPosition(floating, position) {
+  const margin = 8;
+  const rect = floating.getBoundingClientRect();
+  const width = Math.max(220, rect.width || floating.offsetWidth || 0);
+  const height = Math.max(72, rect.height || floating.offsetHeight || 0);
+  const maxLeft = Math.max(margin, window.innerWidth - width - margin);
+  const maxTop = Math.max(margin, window.innerHeight - height - margin);
+  const left = Math.min(maxLeft, Math.max(margin, Number(position?.left) || margin));
+  const top = Math.min(maxTop, Math.max(margin, Number(position?.top) || margin));
+  return {left, top};
+}
+
+function applyCustomerServiceFloatPosition(floating, position, {persist = false} = {}) {
+  if (!position) return;
+  const bounded = clampCustomerServiceFloatPosition(floating, position);
+  floating.style.left = `${Math.round(bounded.left)}px`;
+  floating.style.top = `${Math.round(bounded.top)}px`;
+  floating.style.right = "auto";
+  floating.style.bottom = "auto";
+  state.customerServiceFloatPosition = bounded;
+  if (persist) {
+    saveFloatPosition(CUSTOMER_SERVICE_FLOAT_POSITION_KEY, bounded);
+  }
+}
+
+function clampCustomerServiceFloatInViewport() {
+  const floating = document.getElementById("customer-service-float");
+  if (!floating || !state.customerServiceFloatPosition) return;
+  applyCustomerServiceFloatPosition(floating, state.customerServiceFloatPosition, {persist: true});
+}
+
+function enableCustomerServiceFloatDragging(floating) {
+  if (!floating) return;
+  if (state.customerServiceFloatPosition) {
+    applyCustomerServiceFloatPosition(floating, state.customerServiceFloatPosition, {persist: false});
+  }
+  if (floating.dataset.dragBound === "1") return;
+  floating.dataset.dragBound = "1";
+  floating.addEventListener("pointerdown", (event) => {
+    const target = event.target instanceof Element ? event.target : null;
+    if (!target || !floating.contains(target)) return;
+    if (target.closest("button, a, input, textarea, select, label, [role='button'], .float-actions")) return;
+    if (event.button !== 0) return;
+    event.preventDefault();
+    const dragRect = floating.getBoundingClientRect();
+    const pointerId = event.pointerId;
+    const offsetX = event.clientX - dragRect.left;
+    const offsetY = event.clientY - dragRect.top;
+    floating.classList.add("is-dragging");
+    if (floating.setPointerCapture) {
+      try {
+        floating.setPointerCapture(pointerId);
+      } catch {
+        // ignored
+      }
+    }
+    const onMove = (moveEvent) => {
+      if (moveEvent.pointerId !== pointerId) return;
+      const next = {left: moveEvent.clientX - offsetX, top: moveEvent.clientY - offsetY};
+      applyCustomerServiceFloatPosition(floating, next, {persist: false});
+    };
+    const onStop = (stopEvent) => {
+      if (stopEvent.pointerId !== pointerId) return;
+      document.removeEventListener("pointermove", onMove);
+      document.removeEventListener("pointerup", onStop);
+      document.removeEventListener("pointercancel", onStop);
+      floating.classList.remove("is-dragging");
+      if (floating.releasePointerCapture) {
+        try {
+          floating.releasePointerCapture(pointerId);
+        } catch {
+          // ignored
+        }
+      }
+      if (state.customerServiceFloatPosition) {
+        saveFloatPosition(CUSTOMER_SERVICE_FLOAT_POSITION_KEY, state.customerServiceFloatPosition);
+      }
+    };
+    document.addEventListener("pointermove", onMove);
+    document.addEventListener("pointerup", onStop);
+    document.addEventListener("pointercancel", onStop);
+  });
+}
+
+function initCustomerServiceFloat() {
+  const floating = document.getElementById("customer-service-float");
+  if (!floating) return;
+  const statusLine = floating.querySelector(".float-status-line");
+  if (statusLine && !statusLine.classList.contains("float-drag-handle")) {
+    statusLine.classList.add("float-drag-handle");
+    statusLine.setAttribute("title", "按住拖动浮窗位置");
+  }
+  enableCustomerServiceFloatDragging(floating);
 }
 
 function runtimeStateLabel(stateName) {
@@ -1591,8 +1799,8 @@ function renderProductCatalogDetail(scopedKnowledge = null) {
     <div class="product-scoped-panel">
       <div class="section-heading">
         <div>
-          <span>商品专属知识</span>
-          <strong>这些内容只会在客户问到这个商品时参与回答；和上面的客服回复内容同属当前商品，但不会互相覆盖。</strong>
+          <span>精准触发知识（强触发）</span>
+          <strong>这些内容只会在客户问到这个商品、且命中关键词时参与回答；与上方基础话术互补，不互相覆盖。</strong>
         </div>
       </div>
       ${productScopedHtml("商品专属问答", "product_faq", scoped.product_faq || [], "answer", display.name || data.name || item.id)}
@@ -1637,8 +1845,8 @@ function productReplyTemplatesReadonlyHtml(value, productName) {
   const entries = Object.entries(templates).filter(([, inner]) => !isEmpty(inner));
   return `
     <div class="read-field wide-field product-template-read">
-      <span>客服回复内容</span>
-      <p>这些默认回复绑定在「${escapeHtml(productName || "当前商品")}」上；客户问到这个商品时可作为基础话术。需要更精确触发词时，用下方“商品专属问答/规则/解释”。</p>
+      <span>基础话术（弱触发）</span>
+      <p>这些默认回复绑定在「${escapeHtml(productName || "当前商品")}」上；客户问到这个商品时可作为兜底话术。需要“命中关键词才触发”的内容，请放到下方精准触发知识。</p>
       ${entries.length ? `
         <div class="variable-table">
           <div class="variable-table-head"><strong>场景</strong><strong>回复内容</strong></div>
@@ -1671,7 +1879,7 @@ function productEditFormHtml(item, scoped) {
     </div>
     <div class="helper-card context-card product-edit-help">
       <strong>这里只改当前商品。</strong>
-      <span>商品名称、价格、库存、物流、售后和客服回复内容会同步影响商品库；下方商品专属问答/规则/解释仍然单独维护，但都归属同一件商品。</span>
+      <span>商品名称、价格、库存、物流、售后和基础话术会同步影响商品库；下方精准触发知识仍然单独维护，但都归属同一件商品。</span>
     </div>
     <div class="form-grid product-detail-form">
       ${productTextInput("product-data-name", "商品名称 *", data.name || "")}
@@ -1690,8 +1898,8 @@ function productEditFormHtml(item, scoped) {
     <div class="product-scoped-panel">
       <div class="section-heading">
         <div>
-          <span>商品专属知识</span>
-          <strong>下面三类是带触发词的专属知识，和“客服回复内容”同属当前商品，但不会互相覆盖。</strong>
+          <span>精准触发知识（强触发）</span>
+          <strong>下面三类是带触发词的专属知识；和“基础话术（弱触发）”同属当前商品，但不会互相覆盖。</strong>
         </div>
       </div>
       ${productScopedHtml("商品专属问答", "product_faq", (scoped || {}).product_faq || [], "answer", productName)}
@@ -1725,8 +1933,8 @@ function productReplyTemplateEditorHtml(value, productName) {
   const keys = Array.from(new Set([...Object.keys(templateLabels), ...Object.keys(templates)]));
   return `
     <div class="form-field wide-field reply-template-editor product-reply-template-editor">
-      <span>客服回复内容</span>
-      <div class="object-guide">这些是「${escapeHtml(productName || "当前商品")}」的默认商品话术；它们和下方商品专属知识都绑定当前商品。需要“客户问到某个关键词才用”的内容，请放到商品专属问答/规则/解释。</div>
+      <span>基础话术（弱触发）</span>
+      <div class="object-guide">这些是「${escapeHtml(productName || "当前商品")}」的默认商品话术；它们和下方精准触发知识都绑定当前商品。需要“客户问到某个关键词才用”的内容，请放到商品专属问答/规则/解释。</div>
       ${keys.map((key) => `
         <label class="nested-field">
           <span>${escapeHtml(templateLabels[key] || key)}</span>
@@ -2014,14 +2222,6 @@ async function runProductCommand() {
   else if (state.selectedProduct?.id) await loadProductDetail(state.selectedProduct.id);
 }
 
-function openNewProductGenerator() {
-  state.activeIntakeTab = "generator";
-  selectView("generator");
-  const select = document.getElementById("generator-category");
-  if (select) select.value = "products";
-  document.getElementById("generator-input")?.focus();
-}
-
 function openSelectedProductInFormalKnowledge() {
   if (!state.selectedProduct?.id) return;
   state.activeCategoryId = "products";
@@ -2299,7 +2499,7 @@ function objectRowHtml(key, value, locked = false) {
     <div class="object-row">
       <input data-object-key value="${escapeHtml(key)}" placeholder="变量名" ${locked ? "readonly" : ""} />
       <input data-object-value value="${escapeHtml(value)}" placeholder="内容" />
-      ${locked ? `<span class="lock-note">固定</span>` : `<button class="secondary-button object-remove" type="button">删除</button>`}
+      <button class="secondary-button object-remove" type="button" ${locked ? "title=\"变量名已固定，可删除该行\"" : ""}>删除</button>
     </div>
   `;
 }
@@ -2522,8 +2722,8 @@ async function sendGeneratorMessage() {
   renderGenerator();
   const preferred = document.getElementById("generator-category").value;
   const payload = state.generatorSession
-    ? await apiJson(`/api/generator/sessions/${encodeURIComponent(state.generatorSession.session_id)}/messages`, {method: "POST", body: JSON.stringify({message})})
-    : await apiJson("/api/generator/sessions", {method: "POST", body: JSON.stringify({message, preferred_category_id: preferred})});
+    ? await apiJson(`/api/generator/sessions/${encodeURIComponent(state.generatorSession.session_id)}/messages`, {method: "POST", body: JSON.stringify({message, use_llm: true})})
+    : await apiJson("/api/generator/sessions", {method: "POST", body: JSON.stringify({message, preferred_category_id: preferred, use_llm: true})});
   state.generatorSession = payload.session;
   state.generatorMessages.push({role: "assistant", content: generatorReplyText(payload.session)});
   input.value = "";
@@ -2532,21 +2732,43 @@ async function sendGeneratorMessage() {
 
 function generatorReplyText(session) {
   if (!session) return "";
-  if (session.status === "ready") return "信息已整理完整，可以确认保存。";
+  if (session.status === "ready") return "信息已整理完整，可以确认加入RAG经验池。";
+  if (session.status === "sent_to_rag_experience") return "这条内容已加入RAG经验池，可去“RAG经验池”查看AI建议。";
   if (session.status === "saved") return "已经保存到正式知识库。";
   return session.question || "还需要继续补充关键信息。";
 }
 
+function generatorLlmAssistHtml(session) {
+  const assist = session?.llm_assist || {};
+  if (!assist.policy_version) return "";
+  const status = assist.status || "";
+  const usedModel = status === "model_generated";
+  const statusText = {
+    model_generated: "已使用大模型整理字段",
+    rule_fallback_after_llm: "已尝试大模型，当前为规则兜底",
+    rule_only_disabled_by_request: "本次未启用大模型，仅规则整理",
+  }[status] || "AI整理状态已记录";
+  const reason = assist.reason || (usedModel ? "大模型已参与分类和字段抽取。" : "大模型不可用或未返回合格结构，当前结果来自规则兜底。");
+  return `
+    <div class="status-card ${usedModel ? "ok" : "warning"}">
+      <strong>${escapeHtml(statusText)}</strong>
+      <span>${escapeHtml(reason)}</span>
+    </div>
+  `;
+}
+
 function renderGenerator() {
   const chat = document.getElementById("generator-chat");
+  const confirmButton = document.getElementById("confirm-generator");
   chat.innerHTML = state.generatorMessages.length
     ? state.generatorMessages.map((msg) => `<div class="chat-bubble ${msg.role}">${escapeHtml(msg.content)}</div>`).join("")
-    : `<div class="empty-state">输入一段自然语言，系统会自动整理成可入库的知识。</div>`;
+    : `<div class="empty-state">输入一段自然语言，系统会优先用大模型整理成可加入RAG经验池的结构化内容。</div>`;
   const summary = document.getElementById("generator-summary");
   const session = state.generatorSession;
   if (!session) {
     summary.innerHTML = "";
-    document.getElementById("confirm-generator").disabled = true;
+    confirmButton.disabled = true;
+    confirmButton.textContent = "确认加入RAG经验池";
     return;
   }
   const warnings = session.warnings || [];
@@ -2555,6 +2777,7 @@ function renderGenerator() {
       <strong>${escapeHtml(session.category_name || session.category_id || "待判断")}</strong>
       <span>${escapeHtml(session.provider || "local")} · ${escapeHtml(session.status)}</span>
     </div>
+    ${generatorLlmAssistHtml(session)}
     ${warnings.length ? `<div class="warning-list">${warnings.map((item) => `<span>${escapeHtml(item)}</span>`).join("")}</div>` : ""}
     <div class="summary-table generator-table">
       ${(session.summary_rows || []).map((row) => `<div><span>${escapeHtml(row.label)}</span><strong>${escapeHtml(row.value)}</strong></div>`).join("")}
@@ -2563,13 +2786,17 @@ function renderGenerator() {
   `;
   bindDynamicEditors(summary);
   summary.querySelector("#save-generator-draft")?.addEventListener("click", () => updateGeneratorDraft().catch((error) => alert(error.message)));
-  document.getElementById("confirm-generator").disabled = session.status !== "ready";
+  const confirmReady = session.status === "ready" && !state.generatorConfirmBusy;
+  confirmButton.disabled = !confirmReady;
+  confirmButton.innerHTML = state.generatorConfirmBusy
+    ? '<span class="loading-spinner button-spinner" aria-hidden="true"></span><span>确认中</span>'
+    : "确认加入RAG经验池";
 }
 
 function generatorDraftEditorHtml(session) {
   const category = categoryById(session.category_id);
   const item = session.draft_item || {};
-  if (!category || !item.data || session.status === "saved") return "";
+  if (!category || !item.data || session.status === "saved" || session.status === "sent_to_rag_experience") return "";
   const fields = category.schema?.fields || [];
   return `
     <div class="generator-editor">
@@ -2615,13 +2842,28 @@ async function updateGeneratorDraft() {
 }
 
 async function confirmGenerator() {
-  if (!state.generatorSession?.session_id) return;
-  if (!confirm("确认保存这条知识到正式知识库吗？")) return;
-  const payload = await apiJson(`/api/generator/sessions/${encodeURIComponent(state.generatorSession.session_id)}/confirm`, {method: "POST"});
-  state.generatorSession = payload.session;
-  state.generatorMessages.push({role: "assistant", content: "已保存到正式知识库。"});
+  if (!state.generatorSession?.session_id || state.generatorConfirmBusy) return;
+  if (!confirm("确认将这条内容加入RAG经验池吗？")) return;
+  state.generatorConfirmBusy = true;
   renderGenerator();
-  await Promise.all([loadOverview(), loadKnowledge()]);
+  try {
+    const payload = await apiJson(`/api/generator/sessions/${encodeURIComponent(state.generatorSession.session_id)}/rag-experience`, {
+      method: "POST",
+      body: JSON.stringify({use_llm: true}),
+    });
+    state.generatorSession = payload.session;
+    const experienceId = payload.session?.rag_experience_id || payload.item?.experience_id || "";
+    const tip = experienceId ? `（${experienceId}）` : "";
+    state.generatorMessages.push({role: "assistant", content: `已加入RAG经验池${tip}。`});
+    await Promise.all([
+      loadOverview().catch(console.error),
+      refreshRagExperienceBadge().catch(console.error),
+      loadRagExperiences({fast: true}).catch(console.error),
+    ]);
+  } finally {
+    state.generatorConfirmBusy = false;
+    renderGenerator();
+  }
 }
 
 async function uploadSelectedFile() {
@@ -2743,7 +2985,17 @@ function renderRagAnalytics() {
 async function rebuildRag() {
   const payload = await apiJson("/api/rag/rebuild", {method: "POST", body: JSON.stringify({})});
   await loadRagStatus();
-  document.getElementById("rag-results").innerHTML = `<div class="status-card ok"><strong>索引已重建</strong><span>当前索引片段数：${escapeHtml(payload.entry_count ?? 0)}</span></div>`;
+  const index = payload.index || {};
+  if (String(index.mode || "") === "queued_async_rebuild") {
+    const queuedText = index.deduped
+      ? `后台已有重建任务在运行（任务ID：${index.job_id || "unknown"}）。`
+      : `已提交后台重建任务（任务ID：${index.job_id || "unknown"}）。`;
+    document.getElementById("rag-results").innerHTML = `<div class="status-card info"><strong>索引重建已转后台</strong><span>${escapeHtml(queuedText)}</span></div>`;
+    setTimeout(() => loadRagStatus().catch(() => {}), 1500);
+    setTimeout(() => loadRagStatus().catch(() => {}), 4500);
+    return;
+  }
+  document.getElementById("rag-results").innerHTML = `<div class="status-card ok"><strong>索引已重建</strong><span>当前索引片段数：${escapeHtml(payload.entry_count ?? index.entry_count ?? 0)}</span></div>`;
 }
 
 async function searchRag() {
@@ -2865,18 +3117,34 @@ function renderRagSources(payload = {}) {
   }
 }
 
-async function loadRagExperiences() {
-  const statusParam = state.showDiscardedRagExperiences ? "all" : "active";
-  const payload = await apiGet(`/api/rag/experiences?status=${statusParam}&limit=200`);
-  state.ragExperiences = payload.items || [];
+async function loadRagExperiences(options = {}) {
+  const fast = options.fast === true;
+  const payload = await apiGet(`/api/rag/experiences?status=all&limit=500&fast=${fast ? "true" : "false"}`);
+  const rawItems = payload.items || [];
+  const filteredItems = rawItems.filter((item) => !shouldHideRagExperience(item));
+  const hiddenCount = Math.max(0, rawItems.length - filteredItems.length);
+  const discardedTotal = rawItems.reduce((count, item) => {
+    const displayState = ragExperienceDisplayState(item, item?.formal_relation || item?.status);
+    return count + (displayState === "discarded" ? 1 : 0);
+  }, 0);
+  state.ragExperienceHiddenCount = hiddenCount;
+  state.ragExperienceDiscardedTotal = discardedTotal;
+  state.ragExperienceTotal = Number(payload?.counts?.total ?? rawItems.length) || rawItems.length;
+  state.ragExperiences = filteredItems;
   updateRagExperienceCountBadge(unreviewedRagExperienceCount(state.ragExperiences));
-  renderRagExperiences(payload);
+  renderRagExperiences({
+    ...payload,
+    items: filteredItems,
+    ui_hidden_count: hiddenCount,
+    ui_discarded_total: Number(payload?.counts?.discarded ?? discardedTotal) || discardedTotal,
+    ui_total_count: Number(payload?.counts?.total ?? rawItems.length) || rawItems.length,
+  });
   ensureRagExperienceInterpretations(state.ragExperiences).catch((error) => console.warn("rag experience interpretation failed", error));
 }
 
 async function refreshRagExperienceBadge() {
   const payload = await apiGet("/api/rag/experiences?status=active&limit=200");
-  state.ragExperiences = payload.items || [];
+  state.ragExperiences = (payload.items || []).filter((item) => !shouldHideRagExperience(item));
   updateRagExperienceCountBadge(unreviewedRagExperienceCount(state.ragExperiences));
 }
 
@@ -2930,24 +3198,56 @@ function mergeInterpretedExperiences(items = []) {
 
 function renderRagExperiences(payload = {}) {
   const items = payload.items || state.ragExperiences || [];
-  const counts = payload.counts || {};
-  const relationCounts = payload.relation_counts || {};
-  const qualityCounts = payload.quality_counts || {};
-  const retrievalCounts = payload.retrieval_counts || {};
+  const hiddenCount = Number(payload.ui_hidden_count ?? state.ragExperienceHiddenCount ?? 0);
+  const relationCounts = {};
+  const qualityCounts = {};
+  let activeVisibleCount = 0;
+  let promotedVisibleCount = 0;
+  let discardedVisibleCount = 0;
+  let retrievableCount = 0;
+  for (const item of items) {
+    const relationRaw = item?.formal_relation || item?.status || "novel";
+    const displayState = ragExperienceDisplayState(item, relationRaw);
+    const relation = ragExperienceRelationValue(item, relationRaw, displayState);
+    relationCounts[relation] = Number(relationCounts[relation] || 0) + 1;
+    const band = String((item?.quality || {}).band || "unknown");
+    qualityCounts[band] = Number(qualityCounts[band] || 0) + 1;
+    if (displayState === "discarded") {
+      discardedVisibleCount += 1;
+    } else if (displayState === "promoted") {
+      promotedVisibleCount += 1;
+      activeVisibleCount += 1;
+    } else {
+      activeVisibleCount += 1;
+    }
+    if (experienceRetrievalAllowed(item, item?.quality || {})) retrievableCount += 1;
+  }
   const cards = document.getElementById("rag-experience-cards");
   if (cards) {
+    const autoKeptCount = Number(relationCounts.auto_kept_experience ?? 0);
+    const keptCount = Number(relationCounts.kept_experience ?? 0);
+    const discardedTotal = Number(
+      payload.ui_discarded_total
+      ?? payload?.counts?.discarded
+      ?? (state.showDiscardedRagExperiences ? discardedVisibleCount : discardedVisibleCount + hiddenCount)
+    ) || 0;
+    const totalCount = Number(
+      payload.ui_total_count
+      ?? payload?.counts?.total
+      ?? (state.showDiscardedRagExperiences ? items.length : items.length + hiddenCount)
+    ) || items.length;
     cards.innerHTML = [
-      ["正在使用", counts.active ?? 0],
-      ["可参考", retrievalCounts.retrievable ?? 0],
-      ["需要看看", qualityCounts.low ?? 0],
-      ["已停用", qualityCounts.blocked ?? 0],
+      ["正在使用", activeVisibleCount],
+      ["可参考", retrievableCount],
+      ["需要看看", Number(qualityCounts.low ?? 0)],
+      ["已停用", Number(qualityCounts.blocked ?? 0)],
       ["可转待确认", relationCounts.promotion_candidate ?? 0],
-      ["系统自动保留", relationCounts.auto_kept_experience ?? 0],
-      ["已保留", relationCounts.kept_experience ?? 0],
+      ["已吸纳经验", autoKeptCount + keptCount],
+      ["其中自动吸纳", autoKeptCount],
       ["正式库已覆盖", relationCounts.covered_by_formal ?? 0],
-      ["已转待确认", counts.promoted ?? 0],
-      ["已废弃", counts.discarded ?? 0],
-      ["总经验", counts.total ?? items.length],
+      ["已转待确认", promotedVisibleCount],
+      ["已废弃", discardedTotal],
+      ["总经验", totalCount],
     ]
       .map(([label, value]) => `<div class="metric-card"><span>${escapeHtml(value)}</span><label>${escapeHtml(label)}</label></div>`)
       .join("");
@@ -2955,27 +3255,35 @@ function renderRagExperiences(payload = {}) {
   const list = document.getElementById("rag-experience-list");
   if (!list) return;
   const sortedItems = sortRagExperiencesForReview(items);
+  const hiddenNotice = hiddenCount > 0 && !state.showDiscardedRagExperiences
+    ? `<div class="helper-card"><strong>已隐藏 ${hiddenCount} 条已废弃经验。</strong><span>勾选“显示已废弃”可查看全部历史废弃记录。</span></div>`
+    : "";
   list.innerHTML = sortedItems.length
-    ? sortedItems.map((item) => {
+    ? `${hiddenNotice}${sortedItems.map((item) => {
         const hit = item.rag_hit || {};
         const source = experienceSourceText(item, hit);
         const usageText = experienceUsageText(item);
-        const relation = item.formal_relation || item.status || "novel";
+        const relationRaw = item.formal_relation || item.status || "novel";
         const match = item.formal_match || {};
         const quality = item.quality || {};
         const qualityBand = quality.band || "unknown";
         const qualityReasons = Array.isArray(quality.reasons) ? quality.reasons : [];
-        const isHandled = ragExperienceIsHandled(item, relation);
+        const displayState = ragExperienceDisplayState(item, relationRaw);
+        const relation = ragExperienceRelationValue(item, relationRaw, displayState);
+        const isHandled = displayState !== "pending";
         const canAct = (item.status || "active") === "active" && !isHandled;
+        const overlapCase = canAct && isFormalOverlapCase(item, relation, match);
         let canPromote = canAct && relation !== "covered_by_formal" && relation !== "conflicts_formal";
         const retrievalAllowed = experienceRetrievalAllowed(item, quality);
         const readableSummary = readableExperienceSummary(item, hit);
-        const displayState = ragExperienceDisplayState(item, relation);
+        const reviewState = item.review_state || {};
+        const isNew = Boolean(reviewState.is_new);
         const experienceId = String(item.experience_id || "");
         const isExpanded = state.ragExperienceExpanded.has(experienceId);
         const interpretation = item.ai_interpretation || {};
         const aiRecommendedPromotion = interpretation.recommended_action === "promote_to_pending" && interpretation.promotion_allowed !== false;
         canPromote = canAct && aiRecommendedPromotion && relation !== "covered_by_formal" && relation !== "conflicts_formal";
+        const promoteDisabledReason = "AI 当前没有建议升级为待确认知识。";
         const compactAction = interpretation.action_label || actionLabelFromValue(interpretation.recommended_action) || (canPromote ? "建议审核是否升级" : "建议人工查看");
         const compactMeaning = interpretation.meaning || "等待AI重新理解后显示这条经验的大概意思。";
         const compactReason = interpretation.action_reason || compactMeaning;
@@ -2983,10 +3291,19 @@ function renderRagExperiences(payload = {}) {
         const activeAction = state.ragActionLoadingIds.get(experienceId) || "";
         const isActionLoading = Boolean(activeAction);
         const isDiscarded = (item.status || "active") === "discarded";
+        const overlapKeepFormalLoading = activeAction === "overlap_keep_formal_discard";
+        const overlapReplaceFormalLoading = activeAction === "overlap_replace_formal";
+        const overlapMergeLoading = activeAction === "overlap_merge";
         return `
           <div class="record-row rag-experience-row readable-experience-row is-experience-${escapeHtml(displayState)} ${isDiscarded ? "is-discarded" : ""}" data-experience-id="${escapeHtml(experienceId)}" data-review-state="${escapeHtml(displayState)}" data-collapsed="${isExpanded ? "false" : "true"}">
             <div class="rag-experience-main">
               <div class="experience-collapse-head">
+                ${isNew ? `
+                  <span class="experience-new-actions">
+                    <span class="experience-new-badge">new</span>
+                    <button class="secondary-button rag-experience-ack ${activeAction === "ack" ? "is-loading" : ""}" data-id="${escapeHtml(item.experience_id || "")}" ${isActionLoading ? "disabled" : ""}>${activeAction === "ack" ? `<span class="loading-spinner button-spinner" aria-hidden="true"></span><span>确认中</span>` : "已阅"}</button>
+                  </span>
+                ` : ""}
                 <button type="button" class="experience-collapse-toggle rag-experience-toggle" data-id="${escapeHtml(experienceId)}" aria-expanded="${isExpanded ? "true" : "false"}">
                   <span class="collapse-caret" aria-hidden="true"></span>
                   <strong>AI经验：${escapeHtml(readableSummary)}</strong>
@@ -3012,15 +3329,23 @@ function renderRagExperiences(payload = {}) {
             </div>
             <div class="inline-actions">
               ${canAct ? `<button class="secondary-button rag-experience-interpret ${isInterpreting ? "is-loading" : ""}" data-id="${escapeHtml(item.experience_id || "")}" ${isInterpreting || isActionLoading ? "disabled" : ""}>${isInterpreting ? `<span class="loading-spinner button-spinner" aria-hidden="true"></span><span>整理中</span>` : "AI重新整理"}</button>` : ""}
-              ${canPromote ? `<button class="primary-button rag-experience-promote ${activeAction === "promote" ? "is-loading" : ""}" data-id="${escapeHtml(item.experience_id || "")}" ${isActionLoading ? "disabled" : ""}>${activeAction === "promote" ? `<span class="loading-spinner button-spinner" aria-hidden="true"></span><span>升级中</span>` : "升级为待确认知识"}</button>` : ""}
-              ${canAct ? `<button class="secondary-button rag-experience-keep ${activeAction === "keep" ? "is-loading" : ""}" data-id="${escapeHtml(item.experience_id || "")}" ${isActionLoading ? "disabled" : ""}>${activeAction === "keep" ? `<span class="loading-spinner button-spinner" aria-hidden="true"></span><span>保存中</span>` : "保留为经验"}</button>` : ""}
-              ${canAct ? `<button class="secondary-button rag-experience-discard ${activeAction === "discard" ? "is-loading" : ""}" data-id="${escapeHtml(item.experience_id || "")}" ${isActionLoading ? "disabled" : ""}>${activeAction === "discard" ? `<span class="loading-spinner button-spinner" aria-hidden="true"></span><span>废弃中</span>` : "废弃"}</button>` : ""}
+              ${overlapCase ? `
+                <button class="secondary-button rag-overlap-keep-formal ${overlapKeepFormalLoading ? "is-loading" : ""}" data-id="${escapeHtml(item.experience_id || "")}" ${isActionLoading ? "disabled" : ""}>${overlapKeepFormalLoading ? `<span class="loading-spinner button-spinner" aria-hidden="true"></span><span>处理中</span>` : "以正式知识为准"}</button>
+                <button class="secondary-button rag-overlap-replace-formal ${overlapReplaceFormalLoading ? "is-loading" : ""}" data-id="${escapeHtml(item.experience_id || "")}" ${isActionLoading ? "disabled" : ""}>${overlapReplaceFormalLoading ? `<span class="loading-spinner button-spinner" aria-hidden="true"></span><span>处理中</span>` : "以新经验为准"}</button>
+                <button class="primary-button rag-overlap-merge ${overlapMergeLoading ? "is-loading" : ""}" data-id="${escapeHtml(item.experience_id || "")}" ${isActionLoading ? "disabled" : ""}>${overlapMergeLoading ? `<span class="loading-spinner button-spinner" aria-hidden="true"></span><span>合并中</span>` : "AI分析并合并"}</button>
+              ` : ""}
+              ${!overlapCase && canAct ? `<button class="primary-button rag-experience-promote ${activeAction === "promote" ? "is-loading" : ""}" data-id="${escapeHtml(item.experience_id || "")}" ${isActionLoading || !canPromote ? "disabled" : ""} ${!canPromote ? `title="${escapeHtml(promoteDisabledReason)}"` : ""}>${activeAction === "promote" ? `<span class="loading-spinner button-spinner" aria-hidden="true"></span><span>升级中</span>` : "升级为待确认知识"}</button>` : ""}
+              ${!overlapCase && canAct ? `<button class="secondary-button rag-experience-keep ${activeAction === "keep" ? "is-loading" : ""}" data-id="${escapeHtml(item.experience_id || "")}" ${isActionLoading ? "disabled" : ""}>${activeAction === "keep" ? `<span class="loading-spinner button-spinner" aria-hidden="true"></span><span>保存中</span>` : "保留为经验"}</button>` : ""}
+              ${!overlapCase && canAct ? `<button class="secondary-button rag-experience-discard ${activeAction === "discard" ? "is-loading" : ""}" data-id="${escapeHtml(item.experience_id || "")}" ${isActionLoading ? "disabled" : ""}>${activeAction === "discard" ? `<span class="loading-spinner button-spinner" aria-hidden="true"></span><span>废弃中</span>` : "废弃"}</button>` : ""}
               ${isHandled ? `<button class="secondary-button rag-experience-reopen ${activeAction === "reopen" ? "is-loading" : ""}" data-id="${escapeHtml(item.experience_id || "")}" ${isActionLoading ? "disabled" : ""}>${activeAction === "reopen" ? `<span class="loading-spinner button-spinner" aria-hidden="true"></span><span>恢复中</span>` : "重新待处理"}</button>` : ""}
             </div>
           </div>
         `;
-      }).join("")
-    : `<div class="empty-state">暂无对话经验。系统只有在客服使用参考资料成功回复后，才会在这里生成概括。</div>`;
+      }).join("")}`
+    : `<div class="empty-state">${hiddenCount > 0 && !state.showDiscardedRagExperiences ? `当前有 ${hiddenCount} 条经验已被判定为“已废弃/自动降噪”，默认隐藏。勾选“显示已废弃”即可查看。` : "暂无对话经验。系统只有在客服使用参考资料成功回复后，才会在这里生成概括。"}</div>`;
+  list.querySelectorAll(".rag-experience-ack").forEach((button) => {
+    button.addEventListener("click", () => acknowledgeRagExperience(button.dataset.id).catch((error) => alert(error.message)));
+  });
   list.querySelectorAll(".rag-experience-discard").forEach((button) => {
     button.addEventListener("click", () => discardRagExperience(button.dataset.id).catch((error) => alert(error.message)));
   });
@@ -3038,6 +3363,15 @@ function renderRagExperiences(payload = {}) {
   });
   list.querySelectorAll(".rag-experience-interpret").forEach((button) => {
     button.addEventListener("click", () => interpretRagExperience(button.dataset.id, {force: true}).catch((error) => alert(error.message)));
+  });
+  list.querySelectorAll(".rag-overlap-keep-formal").forEach((button) => {
+    button.addEventListener("click", () => resolveFormalOverlapExperience(button.dataset.id, "keep_formal_discard_experience").catch((error) => alert(error.message)));
+  });
+  list.querySelectorAll(".rag-overlap-replace-formal").forEach((button) => {
+    button.addEventListener("click", () => resolveFormalOverlapExperience(button.dataset.id, "replace_formal_with_experience").catch((error) => alert(error.message)));
+  });
+  list.querySelectorAll(".rag-overlap-merge").forEach((button) => {
+    button.addEventListener("click", () => resolveFormalOverlapExperience(button.dataset.id, "ai_merge_formal_and_experience").catch((error) => alert(error.message)));
   });
   list.querySelectorAll(".rag-experience-toggle").forEach((button) => {
     button.addEventListener("click", () => toggleRagExperience(button));
@@ -3060,6 +3394,99 @@ function toggleRagExperience(button) {
       state.ragExperienceExpanded.delete(id);
     }
     saveStringSet("ragExperienceExpanded", state.ragExperienceExpanded);
+  }
+}
+
+function isFormalOverlapCase(item, relationValue = "", match = {}) {
+  const relation = String(relationValue || item?.formal_relation || "");
+  const formalMatch = match && typeof match === "object" ? match : (item?.formal_match || {});
+  const hasAnchor = Boolean(formalMatch?.category_id && formalMatch?.item_id);
+  if (!hasAnchor) return false;
+  if (["covered_by_formal", "supports_formal", "conflicts_formal"].includes(relation)) return true;
+  const similarity = Number(formalMatch?.similarity || 0);
+  return Number.isFinite(similarity) && similarity >= 0.48;
+}
+
+function overlapStrategyLabel(strategy) {
+  return {
+    keep_formal_discard_experience: "以正式知识为准（废弃本条经验）",
+    replace_formal_with_experience: "以新经验为准（废弃原正式知识）",
+    ai_merge_formal_and_experience: "AI分析并合并两者",
+  }[strategy] || "冲突处理";
+}
+
+async function resolveFormalOverlapExperience(experienceId, strategy) {
+  if (!experienceId) return;
+  if (state.ragActionLoadingIds.has(experienceId)) return;
+  const confirmText = {
+    keep_formal_discard_experience: "确认以正式知识为准并废弃这条经验吗？",
+    replace_formal_with_experience: "确认废弃原正式知识，并以这条新经验为准吗？",
+    ai_merge_formal_and_experience: "确认让 AI 分析并合并两者，并直接更新正式知识库吗？",
+  }[strategy] || "确认执行相近知识处理吗？";
+  if (!confirm(confirmText)) return;
+  const actionKey = {
+    keep_formal_discard_experience: "overlap_keep_formal_discard",
+    replace_formal_with_experience: "overlap_replace_formal",
+    ai_merge_formal_and_experience: "overlap_merge",
+  }[strategy] || "overlap_action";
+  state.ragActionLoadingIds.set(experienceId, actionKey);
+  renderRagExperiences({items: state.ragExperiences});
+  try {
+    const payload = await apiJson(`/api/rag/experiences/${encodeURIComponent(experienceId)}/resolve-overlap`, {
+      method: "POST",
+      body: JSON.stringify({strategy}),
+    });
+    const candidateId = payload?.candidate?.candidate_id || "";
+    const headline = overlapStrategyLabel(strategy);
+    if (candidateId) {
+      alert(`${headline}已完成。\n系统返回候选记录：${candidateId}`);
+    } else if (payload?.message) {
+      alert(payload.message);
+    }
+    await Promise.all([
+      loadRagExperiences({fast: true}),
+      loadRagStatus().catch(() => {}),
+      loadCandidates().catch(() => {}),
+      loadOverview().catch(() => {}),
+      loadKnowledge().catch(() => {}),
+    ]);
+    loadRagExperiences({fast: false}).catch(() => {});
+  } finally {
+    state.ragActionLoadingIds.delete(experienceId);
+    renderRagExperiences({items: state.ragExperiences});
+  }
+}
+
+async function acknowledgeRagExperience(experienceId) {
+  if (!experienceId) return;
+  if (state.ragActionLoadingIds.has(experienceId)) return;
+  state.ragActionLoadingIds.set(experienceId, "ack");
+  renderRagExperiences({items: state.ragExperiences});
+  try {
+    await apiJson(`/api/rag/experiences/${encodeURIComponent(experienceId)}/acknowledge`, {
+      method: "POST",
+      body: "{}",
+    });
+    const nowText = new Date().toISOString();
+    state.ragExperiences = (state.ragExperiences || []).map((item) => {
+      if (String(item?.experience_id || "") !== String(experienceId)) return item;
+      const reviewState = item?.review_state && typeof item.review_state === "object" ? item.review_state : {};
+      return {
+        ...item,
+        review_state: {
+          ...reviewState,
+          is_new: false,
+          read_at: nowText,
+          updated_at: nowText,
+        },
+      };
+    });
+    updateRagExperienceCountBadge(unreviewedRagExperienceCount(state.ragExperiences));
+    renderRagExperiences({items: state.ragExperiences});
+    loadRagExperiences({fast: true}).catch(() => {});
+  } finally {
+    state.ragActionLoadingIds.delete(experienceId);
+    renderRagExperiences({items: state.ragExperiences});
   }
 }
 
@@ -3098,7 +3525,8 @@ async function discardRagExperience(experienceId) {
       method: "POST",
       body: JSON.stringify({reason: "discarded in admin"}),
     });
-    await Promise.all([loadRagExperiences(), loadRagStatus().catch(() => {})]);
+    await Promise.all([loadRagExperiences({fast: true}), loadRagStatus().catch(() => {})]);
+    loadRagExperiences({fast: false}).catch(() => {});
   } finally {
     state.ragActionLoadingIds.delete(experienceId);
     renderRagExperiences({items: state.ragExperiences});
@@ -3115,7 +3543,8 @@ async function keepRagExperience(experienceId) {
       method: "POST",
       body: JSON.stringify({reason: "kept in experience layer"}),
     });
-    await Promise.all([loadRagExperiences(), loadRagStatus().catch(() => {})]);
+    await Promise.all([loadRagExperiences({fast: true}), loadRagStatus().catch(() => {})]);
+    loadRagExperiences({fast: false}).catch(() => {});
   } finally {
     state.ragActionLoadingIds.delete(experienceId);
     renderRagExperiences({items: state.ragExperiences});
@@ -3132,7 +3561,8 @@ async function reopenRagExperience(experienceId) {
       method: "POST",
       body: JSON.stringify({reason: "reopened in admin"}),
     });
-    await Promise.all([loadRagExperiences(), loadRagStatus().catch(() => {}), loadCandidates().catch(() => {})]);
+    await Promise.all([loadRagExperiences({fast: true}), loadRagStatus().catch(() => {}), loadCandidates().catch(() => {})]);
+    loadRagExperiences({fast: false}).catch(() => {});
   } finally {
     state.ragActionLoadingIds.delete(experienceId);
     renderRagExperiences({items: state.ragExperiences});
@@ -3712,11 +4142,18 @@ function experienceUsageExplanation(item, quality = {}) {
     if (kind === "noise") return "这条内容不会参与客户回答。它看起来不像业务知识，确认无用后可以直接废弃。";
     return "这是从资料或聊天记录整理出的审核线索，不会直接参与客户回答。觉得有价值时，点“升级为待确认知识”，再用表单核对后进入正式知识库。";
   }
+  const displayState = ragExperienceDisplayState(item, item?.formal_relation || item?.status);
+  if (displayState === "discarded") {
+    return "这条经验已被废弃（含系统自动降噪废弃），不会参与RAG参考或自动回答。";
+  }
+  if (displayState === "promoted") {
+    return "这条经验已升级为待确认知识，进入后续人工审核流程。";
+  }
   if (experienceReviewStatus(item) === "auto_kept") {
     if (experienceRetrievalAllowed(item, quality)) {
-      return "系统判断这条经验低风险、可复用，已自动保留在RAG经验层。之后客户问到相近问题时，AI可以把它当辅助参考；如果你想进一步变成正式知识，先点“重新待处理”，再决定是否升级。";
+      return "系统判断这条经验低风险、可复用，已自动吸纳为RAG经验。之后客户问到相近问题时，AI可以把它当辅助参考；如果你想进一步变成正式知识，先点“重新待处理”，再决定是否升级。";
     }
-    return "系统已自动保留这条经验，但当前证据或质量还不够稳定，所以暂时不会参与RAG参考。";
+    return "系统已自动吸纳这条经验，但当前证据或质量还不够稳定，所以暂时不会参与RAG参考。";
   }
   if (experienceReviewStatus(item) !== "kept") {
     return "这条经验还没有人工确认，系统不会拿它自动回答客户，也不会作为RAG参考。确认无误后，点“保留为经验”，它才可能作为AI参考。";
@@ -3831,16 +4268,36 @@ function experienceReviewStatus(item) {
   return String((item?.experience_review || {}).status || "");
 }
 
+function isAutoKeptReviewStatus(reviewStatus) {
+  return reviewStatus === "auto_kept";
+}
+
+function autoTriagedAsDiscard(item) {
+  if (experienceReviewStatus(item) !== "auto_triaged") return false;
+  const action = String((item?.experience_review || {}).auto_triage_action || "");
+  return ["discard", "already_covered"].includes(action);
+}
+
 function ragExperienceDisplayState(item, relationValue = "") {
   const status = String(item?.status || "active");
   const relation = String(relationValue || item?.formal_relation || status || "");
   const reviewStatus = experienceReviewStatus(item);
-  if (status === "discarded" || relation === "discarded") return "discarded";
+  if (status === "discarded" || autoTriagedAsDiscard(item)) return "discarded";
   if (status === "promoted" || relation === "promoted") return "promoted";
-  if (reviewStatus === "auto_kept" || relation === "auto_kept_experience") return "auto_kept";
-  if (reviewStatus === "kept" || relation === "kept_experience") return "kept";
-  if (reviewStatus === "auto_triaged") return "auto_triaged";
+  if (reviewStatus === "kept" || isAutoKeptReviewStatus(reviewStatus) || relation === "kept_experience" || relation === "auto_kept_experience") return "kept";
   return "pending";
+}
+
+function ragExperienceRelationValue(item, relationValue = "", displayState = "") {
+  const relation = String(relationValue || item?.formal_relation || item?.status || "novel");
+  const stateValue = displayState || ragExperienceDisplayState(item, relation);
+  if (stateValue === "discarded") return "discarded";
+  if (stateValue === "promoted") return "promoted";
+  if (stateValue === "kept") {
+    return isAutoKeptReviewStatus(experienceReviewStatus(item)) ? "auto_kept_experience" : "kept_experience";
+  }
+  if (relation === "discarded") return "novel";
+  return relation;
 }
 
 function ragExperienceIsHandled(item, relationValue = "") {
@@ -3852,9 +4309,20 @@ function ragExperienceTimestamp(item) {
   return Number.isFinite(value) ? value : 0;
 }
 
+function ragExperienceIsUnread(item) {
+  return Boolean(item?.review_state?.is_new);
+}
+
+function shouldHideRagExperience(item) {
+  if (state.showDiscardedRagExperiences) return false;
+  return ragExperienceDisplayState(item, item?.formal_relation || item?.status) === "discarded";
+}
+
 function sortRagExperiencesForReview(items = []) {
-  const stateRank = {pending: 0, auto_kept: 1, kept: 2, promoted: 3, auto_triaged: 4, discarded: 5};
+  const stateRank = {pending: 0, kept: 1, promoted: 2, discarded: 3};
   return [...items].sort((left, right) => {
+    const unreadDiff = (ragExperienceIsUnread(left) ? 0 : 1) - (ragExperienceIsUnread(right) ? 0 : 1);
+    if (unreadDiff) return unreadDiff;
     const leftState = ragExperienceDisplayState(left, left?.formal_relation || left?.status);
     const rightState = ragExperienceDisplayState(right, right?.formal_relation || right?.status);
     const rankDiff = (stateRank[leftState] ?? 9) - (stateRank[rightState] ?? 9);
@@ -3878,8 +4346,8 @@ function relationText(value) {
     covered_by_formal: "正式库已有",
     supports_formal: "可补充正式库",
     conflicts_formal: "疑似冲突",
-    auto_kept_experience: "系统自动保留",
-    kept_experience: "已保留在经验层",
+    auto_kept_experience: "已吸纳为经验（自动）",
+    kept_experience: "已吸纳为经验",
     promotion_candidate: "建议转待确认",
     promoted: "已转待确认",
     discarded: "已废弃",
@@ -3893,8 +4361,8 @@ function actionText(value) {
     keep_as_supporting_expression: "可保留为正式知识的表达补充。",
     manual_review_conflict: "疑似和正式知识冲突，建议人工检查后处理。",
     promote_to_review_candidate: "建议升级为待确认知识，由人工审核后再入库。",
-    system_auto_kept_as_experience: "系统已自动保留为经验，作为低风险辅助参考。",
-    kept_as_experience: "已由人工确认保留为经验，不再作为新经验提醒。",
+    system_auto_kept_as_experience: "系统已自动吸纳为经验，作为低风险辅助参考。",
+    kept_as_experience: "已由人工确认吸纳为经验，不再作为新经验提醒。",
     already_promoted: "已升级为待确认知识。",
     already_discarded: "已废弃。",
   }[value] || value || "保持观察。";
@@ -3917,9 +4385,11 @@ function experienceStatusText(value) {
 
 function experienceParticipationText(item, quality = {}) {
   if (item.source === "intake") return "审核线索，不直接回答";
-  if (experienceReviewStatus(item) === "auto_triaged") return "系统已自动降噪，不参与回答";
-  if (experienceReviewStatus(item) === "auto_kept") {
-    return experienceRetrievalAllowed(item, quality) ? "系统自动保留，可作为RAG参考" : "系统自动保留，暂不参与回答";
+  const displayState = ragExperienceDisplayState(item, item?.formal_relation || item?.status);
+  if (displayState === "discarded") return "已废弃，不参与回答";
+  if (displayState === "promoted") return "已升级为待确认知识，等待人工审核";
+  if (isAutoKeptReviewStatus(experienceReviewStatus(item))) {
+    return experienceRetrievalAllowed(item, quality) ? "系统已自动吸纳为经验，可作为RAG参考" : "系统已自动吸纳为经验，暂不参与回答";
   }
   const kept = experienceReviewStatus(item) === "kept";
   if (!kept) return "未确认，不参与回答";
@@ -4091,7 +4561,7 @@ function unreviewedRagExperienceCount(items = []) {
   return items.filter((item) => {
     const status = String(item?.status || "active");
     if (status !== "active") return false;
-    return !["kept", "auto_kept", "auto_triaged"].includes(experienceReviewStatus(item));
+    return ragExperienceDisplayState(item, item?.formal_relation || status) === "pending";
   }).length;
 }
 
@@ -4308,12 +4778,17 @@ async function rejectCandidate(candidateId) {
 }
 
 async function loadRecorder() {
-  const [summaryPayload, conversationsPayload] = await Promise.all([
+  const [summaryPayload, conversationsPayload, modulesPayload, runsPayload] = await Promise.all([
     apiGet("/api/recorder/summary"),
     apiGet("/api/recorder/conversations?status=all"),
+    apiGet("/api/recorder/modules").catch(() => ({items: []})),
+    apiGet("/api/recorder/exports/runs?status=all&limit=30&ensure_worker=1").catch(() => ({items: [], runtime: {}})),
   ]);
   state.recorderSummary = summaryPayload.item || {};
   state.recorderConversations = conversationsPayload.items || [];
+  state.recorderModules = modulesPayload.items || [];
+  state.recorderExportRuns = runsPayload.items || [];
+  state.recorderRuntimeStatus = runsPayload.runtime || state.recorderRuntimeStatus || {};
   if (
     state.selectedRecorderConversation?.conversation_id &&
     !state.recorderConversations.some((item) => item.conversation_id === state.selectedRecorderConversation.conversation_id)
@@ -4323,6 +4798,7 @@ async function loadRecorder() {
   state.selectedRecorderConversation = state.selectedRecorderConversation || state.recorderConversations[0] || null;
   await loadRecorderMessages(false);
   renderRecorder();
+  syncRecorderExportPolling();
 }
 
 async function loadRecorderMessages(shouldRender = true, forceRefresh = false) {
@@ -4348,17 +4824,202 @@ function renderRecorder() {
   const summary = state.recorderSummary || {};
   const raw = summary.raw || {};
   const settings = summary.settings || {};
+  const enabled = settings.enabled !== false;
+  setChecked("recorder-enabled", enabled);
+  document.getElementById("recorder-status").textContent = summary.status || recorderStatusText(settings);
   document.getElementById("recorder-notify").checked = Boolean(settings.notify_on_collect);
   document.getElementById("recorder-auto-learn").checked = settings.auto_learn !== false;
   document.getElementById("recorder-use-llm").checked = settings.use_llm !== false;
+  const captureButton = document.getElementById("recorder-capture");
+  if (captureButton) captureButton.disabled = !enabled;
   document.getElementById("recorder-cards").innerHTML = `
     <div class="metric-card"><span>${raw.group_count ?? 0}</span><label>识别群聊</label></div>
     <div class="metric-card"><span>${summary.selected_conversation_count ?? summary.selected_group_count ?? 0}</span><label>正在记录</label></div>
     <div class="metric-card"><span>${raw.message_count ?? 0}</span><label>原始消息</label></div>
     <div class="metric-card"><span>${raw.pending_batch_count ?? 0}</span><label>待整理批次</label></div>
   `;
+  renderRecorderModuleInfo();
+  renderRecorderExportProgress();
+  renderRecorderExportRuns();
   renderRecorderGroupList();
   renderRecorderDetail();
+}
+
+function renderRecorderModuleInfo() {
+  const info = document.getElementById("recorder-module-info");
+  if (!info) return;
+  const modules = state.recorderModules || [];
+  const latestRun = (state.recorderExportRuns || [])[0] || {};
+  const latestModuleKey = String(latestRun.module_key || "");
+  const latestModule = modules.find((item) => String(item.module_key || "") === latestModuleKey);
+  const activeModule = latestModule || modules.find((item) => String(item.status || "active") === "active");
+  const moduleName = activeModule?.module_name || activeModule?.module_key || "未配置";
+  const moduleVersion = activeModule?.version || "-";
+  info.innerHTML = `
+    <strong>当前结构化导出模块：${escapeHtml(moduleName)}</strong>
+    <span>模块Key：${escapeHtml(activeModule?.module_key || "-")} · 版本：${escapeHtml(moduleVersion)}。模块决定“规则+LLM抽取逻辑”和结构化 Excel 模板格式。</span>
+  `;
+}
+
+function recorderRunStatusTone(status) {
+  const key = String(status || "queued");
+  if (key === "succeeded") return "ok";
+  if (key === "failed") return "warning";
+  if (key === "running") return "loading";
+  return "info";
+}
+
+function recorderRunStatusLabel(status) {
+  const key = String(status || "queued");
+  if (key === "queued") return "排队中";
+  if (key === "running") return "处理中";
+  if (key === "succeeded") return "已完成";
+  if (key === "failed") return "失败";
+  return key;
+}
+
+function recorderRunIsActive(status) {
+  const key = String(status || "queued");
+  return key === "queued" || key === "running";
+}
+
+function hasRecorderExportActiveRuns(runs = state.recorderExportRuns || []) {
+  return runs.some((run) => recorderRunIsActive(run.status));
+}
+
+function formatElapsedFrom(startText) {
+  const startMs = Date.parse(String(startText || ""));
+  if (!Number.isFinite(startMs)) return "";
+  const seconds = Math.max(0, Math.floor((Date.now() - startMs) / 1000));
+  if (seconds < 60) return `${seconds}秒`;
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes}分钟`;
+  const hours = Math.floor(minutes / 60);
+  const remainMinutes = minutes % 60;
+  return remainMinutes ? `${hours}小时${remainMinutes}分钟` : `${hours}小时`;
+}
+
+function renderRecorderExportProgress() {
+  const panel = document.getElementById("recorder-export-progress");
+  const createButton = document.getElementById("recorder-export-run-create");
+  const dayButton = document.getElementById("recorder-export-run-day");
+  const weekButton = document.getElementById("recorder-export-run-week");
+  const monthButton = document.getElementById("recorder-export-run-month");
+  const customRangeButton = document.getElementById("recorder-export-run-custom");
+  const clearDateButton = document.getElementById("recorder-export-date-clear");
+  const refreshButton = document.getElementById("recorder-export-runs-refresh");
+  if (createButton) {
+    createButton.classList.toggle("is-loading", state.recorderExportRunBusy);
+    createButton.disabled = !state.authToken || state.recorderExportRunBusy;
+    createButton.innerHTML = state.recorderExportRunBusy
+      ? '<span class="loading-spinner button-spinner" aria-hidden="true"></span><span>创建中</span>'
+      : "导出所有记录（结构化）";
+  }
+  if (dayButton) dayButton.disabled = !state.authToken || state.recorderExportRunBusy;
+  if (weekButton) weekButton.disabled = !state.authToken || state.recorderExportRunBusy;
+  if (monthButton) monthButton.disabled = !state.authToken || state.recorderExportRunBusy;
+  if (customRangeButton) customRangeButton.disabled = !state.authToken || state.recorderExportRunBusy;
+  if (clearDateButton) clearDateButton.disabled = !state.authToken || state.recorderExportRunBusy;
+  if (refreshButton) refreshButton.disabled = !state.authToken || state.recorderExportRunBusy;
+  if (!panel) return;
+
+  const runs = state.recorderExportRuns || [];
+  const latest = runs[0] || null;
+  const activeRuns = runs.filter((run) => recorderRunIsActive(run.status));
+  const runtime = state.recorderRuntimeStatus || {};
+  const workerRunning = runtime.worker_running === true;
+  const queue = runtime.queue_summary || {};
+
+  if (state.recorderExportRunBusy) {
+    panel.innerHTML = `
+      <div class="status-card loading">
+        <strong><span class="loading-spinner" aria-hidden="true"></span>正在创建结构化导出任务</strong>
+        <span>请求已提交，正在写入后台队列。</span>
+      </div>
+    `;
+    return;
+  }
+
+  if (activeRuns.length) {
+    const queuedCount = activeRuns.filter((run) => String(run.status || "") === "queued").length;
+    const runningCount = activeRuns.filter((run) => String(run.status || "") === "running").length;
+    const lead = activeRuns[0] || {};
+    const elapsed = formatElapsedFrom(lead.started_at || lead.created_at || "");
+    const tone = workerRunning ? "loading" : "warning";
+    panel.innerHTML = `
+      <div class="status-card ${tone}">
+        <strong><span class="loading-spinner" aria-hidden="true"></span>${runningCount > 0 ? "结构化导出处理中" : "结构化导出排队中"}</strong>
+        <span>任务数：排队 ${queuedCount} · 处理中 ${runningCount}${elapsed ? ` · 已持续 ${escapeHtml(elapsed)}` : ""}</span>
+        <span>${escapeHtml(workerRunning ? "后台导出 worker 在线，系统正在自动处理。" : "后台导出 worker 暂未检测到在线，系统正在自动拉起。")} 队列：待执行 ${escapeHtml(String(queue.pending ?? 0))} · 执行中 ${escapeHtml(String(queue.running ?? 0))}。</span>
+      </div>
+    `;
+    return;
+  }
+
+  if (latest && String(latest.status || "") === "succeeded") {
+    const rows = Number(latest?.stats?.export_row_count ?? 0);
+    panel.innerHTML = `
+      <div class="status-card ok">
+        <strong>最近一次结构化导出已完成</strong>
+        <span>任务 ${escapeHtml(latest.run_id || "-")} · 导出 ${escapeHtml(String(rows))} 行。可直接点击“下载Excel”。</span>
+      </div>
+    `;
+    return;
+  }
+
+  if (latest && String(latest.status || "") === "failed") {
+    panel.innerHTML = `
+      <div class="status-card warning">
+        <strong>最近一次结构化导出失败</strong>
+        <span>任务 ${escapeHtml(latest.run_id || "-")} · ${escapeHtml(latest.error || "请查看下载报告排查问题。")}</span>
+      </div>
+    `;
+    return;
+  }
+
+  panel.innerHTML = `
+    <div class="status-card">
+      <strong>暂无进行中的结构化导出任务</strong>
+      <span>点击“创建结构化导出任务”后，这里会实时显示排队和处理进度。</span>
+    </div>
+  `;
+}
+
+function renderRecorderExportRuns() {
+  const list = document.getElementById("recorder-export-runs-list");
+  if (!list) return;
+  const runs = state.recorderExportRuns || [];
+  list.innerHTML = `<h3>结构化导出任务（最近30条）</h3>${
+    runs.length
+      ? runs.map((run) => {
+        const status = String(run.status || "queued");
+        const statusTone = recorderRunStatusTone(status);
+        const stats = run.stats || {};
+        const elapsed = recorderRunIsActive(status) ? formatElapsedFrom(run.started_at || run.created_at || "") : "";
+        return `
+          <div class="record-row">
+            <div class="row-title">
+              <strong>${escapeHtml(run.run_id || "")}</strong>
+              <span class="status-chip ${statusTone}">${escapeHtml(recorderRunStatusLabel(status))}</span>
+            </div>
+            <span>模块：${escapeHtml(run.module_name || run.module_key || "-")} · 版本：${escapeHtml(run.module_version || "-")} · 创建：${escapeHtml(run.created_at || "-")}${elapsed ? ` · 已持续 ${escapeHtml(elapsed)}` : ""}</span>
+            <span>输入消息：${escapeHtml(String(stats.input_message_count ?? 0))} · 导出行：${escapeHtml(String(stats.export_row_count ?? 0))} · 需复核：${escapeHtml(String(stats.needs_review_count ?? 0))}</span>
+            ${run.error ? `<span>失败原因：${escapeHtml(run.error)}</span>` : ""}
+            <div class="button-row">
+              <button class="secondary-button recorder-run-download" data-run-id="${escapeAttr(run.run_id || "")}" ${status !== "succeeded" ? "disabled" : ""}>下载Excel</button>
+              <button class="secondary-button recorder-run-report" data-run-id="${escapeAttr(run.run_id || "")}" ${status !== "succeeded" ? "disabled" : ""}>下载报告</button>
+            </div>
+          </div>
+        `;
+      }).join("")
+      : `<div class="empty-state">暂无结构化导出任务。点击“创建结构化导出任务”发起新任务。</div>`
+  }`;
+  list.querySelectorAll(".recorder-run-download").forEach((button) => {
+    button.addEventListener("click", () => downloadRecorderRunArtifact(button.dataset.runId, "xlsx").catch((error) => alert(error.message)));
+  });
+  list.querySelectorAll(".recorder-run-report").forEach((button) => {
+    button.addEventListener("click", () => downloadRecorderRunArtifact(button.dataset.runId, "report").catch((error) => alert(error.message)));
+  });
 }
 
 function renderRecorderGroupList() {
@@ -4542,10 +5203,16 @@ function recorderConversationTypeLabel(value) {
   return "未知会话";
 }
 
+function recorderStatusText(settings = {}) {
+  if (settings.enabled === false) return "已关闭，不会自动采集聊天记录。";
+  return "已开启，可按会话配置采集聊天记录。";
+}
+
 async function saveRecorderSettings() {
   const payload = await apiJson("/api/recorder/settings", {
     method: "PUT",
     body: JSON.stringify({
+      enabled: document.getElementById("recorder-enabled").checked,
       notify_on_collect: document.getElementById("recorder-notify").checked,
       auto_learn: document.getElementById("recorder-auto-learn").checked,
       use_llm: document.getElementById("recorder-use-llm").checked,
@@ -4564,6 +5231,10 @@ async function discoverRecorderSessions() {
 async function captureRecorderNow() {
   const result = await apiJson("/api/recorder/capture", {method: "POST", body: JSON.stringify({send_notifications: true})});
   await loadRecorder();
+  if (result.enabled === false) {
+    alert(result.message || "AI智能记录员已关闭，请先开启后再执行采集。");
+    return;
+  }
   alert(`本轮记录完成：新增 ${result.inserted_count || 0} 条消息。`);
 }
 
@@ -4574,6 +5245,206 @@ async function updateRecorderConversation(conversationId, patch) {
     body: JSON.stringify(patch),
   });
   await loadRecorder();
+}
+
+function pad2(value) {
+  return String(value).padStart(2, "0");
+}
+
+function formatDateInputValue(date) {
+  return `${date.getFullYear()}-${pad2(date.getMonth() + 1)}-${pad2(date.getDate())}`;
+}
+
+function parseDateInputValue(value) {
+  const text = String(value || "").trim();
+  const match = text.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!match) return null;
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  if (!year || month < 1 || month > 12 || day < 1 || day > 31) return null;
+  const date = new Date(year, month - 1, day);
+  if (date.getFullYear() !== year || date.getMonth() !== month - 1 || date.getDate() !== day) return null;
+  return date;
+}
+
+function buildRecorderPresetDateRange(preset) {
+  const now = new Date();
+  if (preset === "day") {
+    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    const dateText = formatDateInputValue(today);
+    return {startDate: dateText, endDate: dateText, label: `按日（${dateText}）`};
+  }
+  if (preset === "week") {
+    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    const weekday = (today.getDay() + 6) % 7;
+    const start = new Date(today);
+    start.setDate(today.getDate() - weekday);
+    const end = new Date(start);
+    end.setDate(start.getDate() + 6);
+    return {
+      startDate: formatDateInputValue(start),
+      endDate: formatDateInputValue(end),
+      label: `按周（${formatDateInputValue(start)} ~ ${formatDateInputValue(end)}）`,
+    };
+  }
+  if (preset === "month") {
+    const start = new Date(now.getFullYear(), now.getMonth(), 1);
+    const end = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+    return {
+      startDate: formatDateInputValue(start),
+      endDate: formatDateInputValue(end),
+      label: `按月（${formatDateInputValue(start)} ~ ${formatDateInputValue(end)}）`,
+    };
+  }
+  return null;
+}
+
+function collectRecorderExportDateRange(options = {}) {
+  const mode = String(options.mode || "");
+  const preset = String(options.preset || "");
+  const startInput = document.getElementById("recorder-export-start-date");
+  const endInput = document.getElementById("recorder-export-end-date");
+  let startDateText = String(startInput?.value || "").trim();
+  let endDateText = String(endInput?.value || "").trim();
+  let label = "全部日期";
+
+  if (mode === "all" && !preset) {
+    return {startTime: "", endTime: "", label};
+  }
+
+  if (preset) {
+    const range = buildRecorderPresetDateRange(preset);
+    if (!range) throw new Error(`不支持的日期快捷导出：${preset}`);
+    startDateText = range.startDate;
+    endDateText = range.endDate;
+    label = range.label;
+    if (startInput) startInput.value = startDateText;
+    if (endInput) endInput.value = endDateText;
+  }
+
+  if (!startDateText && !endDateText) {
+    if (mode === "custom") {
+      throw new Error("请选择开始日期和结束日期后再执行“按日期范围导出”。");
+    }
+    return {startTime: "", endTime: "", label};
+  }
+  if (!startDateText || !endDateText) {
+    throw new Error("请同时选择开始日期和结束日期。");
+  }
+
+  const startDate = parseDateInputValue(startDateText);
+  const endDate = parseDateInputValue(endDateText);
+  if (!startDate || !endDate) throw new Error("日期格式无效，请按 YYYY-MM-DD 选择。");
+  if (startDate.getTime() > endDate.getTime()) throw new Error("开始日期不能晚于结束日期。");
+  return {
+    startTime: `${startDateText} 00:00:00`,
+    endTime: `${endDateText} 23:59:59`,
+    label: `${startDateText} ~ ${endDateText}`,
+  };
+}
+
+function clearRecorderExportDateRange() {
+  const startInput = document.getElementById("recorder-export-start-date");
+  const endInput = document.getElementById("recorder-export-end-date");
+  if (startInput) startInput.value = "";
+  if (endInput) endInput.value = "";
+}
+
+async function createRecorderExportRun(options = {}) {
+  if (state.recorderExportRunBusy) return;
+  const selected = (state.recorderConversations || []).filter((item) => item.selected_by_user);
+  if (!selected.length) {
+    alert("请先在会话列表中选择至少一个“记录中”会话，再发起导出。");
+    return;
+  }
+  const mode = String(options.mode || "");
+  const preset = String(options.preset || "");
+  const dateRange = collectRecorderExportDateRange({mode, preset});
+  state.recorderExportRunBusy = true;
+  renderRecorderExportProgress();
+  const payload = {
+    target_names: selected.map((item) => item.target_name || item.display_name).filter(Boolean),
+    start_time: dateRange.startTime,
+    end_time: dateRange.endTime,
+    limit: RECORDER_EXPORT_DEFAULT_LIMIT,
+    ensure_worker: true,
+  };
+  try {
+    const result = await apiJson("/api/recorder/exports/runs", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+    state.recorderRuntimeStatus = result.runtime || state.recorderRuntimeStatus || {};
+    const runId = result.item?.run_id || "";
+    await refreshRecorderExportRuns({silent: true});
+    if (runId) {
+      alert(`结构化导出任务已创建：${runId}。\n日期范围：${dateRange.label}。\n页面会自动刷新状态，你可以留在本页观察进度。`);
+    }
+  } finally {
+    state.recorderExportRunBusy = false;
+    renderRecorderExportProgress();
+    syncRecorderExportPolling();
+  }
+}
+
+function stopRecorderExportPolling() {
+  if (state.recorderExportPollingTimer) clearInterval(state.recorderExportPollingTimer);
+  state.recorderExportPollingTimer = null;
+}
+
+function syncRecorderExportPolling() {
+  const shouldPoll = Boolean(state.authToken) && state.activeView === "recorder" && hasRecorderExportActiveRuns();
+  if (!shouldPoll) {
+    stopRecorderExportPolling();
+    return;
+  }
+  if (state.recorderExportPollingTimer) return;
+  state.recorderExportPollingTimer = setInterval(() => {
+    if (state.activeView !== "recorder" || !state.authToken) {
+      stopRecorderExportPolling();
+      return;
+    }
+    refreshRecorderExportRuns({silent: true}).catch(() => {});
+  }, 3000);
+}
+
+async function refreshRecorderExportRuns(options = {}) {
+  const {silent = false} = options;
+  try {
+    const payload = await apiGet("/api/recorder/exports/runs?status=all&limit=30&ensure_worker=1");
+    state.recorderExportRuns = payload.items || [];
+    state.recorderRuntimeStatus = payload.runtime || state.recorderRuntimeStatus || {};
+    renderRecorderExportProgress();
+    renderRecorderExportRuns();
+    renderRecorderModuleInfo();
+    syncRecorderExportPolling();
+  } catch (error) {
+    if (!silent) throw error;
+    console.warn("refresh recorder export runs failed", error);
+  }
+}
+
+async function downloadRecorderRunArtifact(runId, kind = "xlsx") {
+  if (!runId) return;
+  const endpoint = kind === "report"
+    ? `/api/recorder/exports/runs/${encodeURIComponent(runId)}/report`
+    : `/api/recorder/exports/runs/${encodeURIComponent(runId)}/download`;
+  const response = await fetch(endpoint, {headers: apiHeaders()});
+  if (!response.ok) throw new Error(await responseErrorMessage(response, endpoint));
+  const blob = await response.blob();
+  const disposition = response.headers.get("content-disposition") || "";
+  const match = disposition.match(/filename="?([^"]+)"?/i);
+  const fallback = kind === "report" ? `${runId}.json` : `${runId}.xlsx`;
+  const filename = match?.[1] || fallback;
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
 }
 
 async function downloadKnowledgeExport(sortBy) {
@@ -5115,10 +5986,23 @@ function escapeHtml(value) {
 
 async function acknowledgeKnowledgeItem() {
   if (!state.selectedKnowledge?.id || !state.activeCategoryId) return;
+  const selectedId = state.selectedKnowledge.id;
   await apiJson(`/api/knowledge/categories/${encodeURIComponent(state.activeCategoryId)}/items/${encodeURIComponent(state.selectedKnowledge.id)}/acknowledge`, {
     method: "POST",
     body: "{}",
   });
+  if (state.selectedKnowledge?.id === selectedId) {
+    state.selectedKnowledge = {
+      ...state.selectedKnowledge,
+      review_state: {
+        ...(state.selectedKnowledge.review_state || {}),
+        is_new: false,
+        read_at: new Date().toISOString(),
+      },
+    };
+    renderKnowledgeList();
+    renderKnowledgeDetail();
+  }
   await Promise.all([loadCategoryItems(), loadOverview()]);
 }
 
@@ -5327,20 +6211,30 @@ document.getElementById("refresh-rag").addEventListener("click", () => loadRagSt
 document.getElementById("rebuild-rag").addEventListener("click", () => rebuildRag().catch((error) => alert(error.message)));
 document.getElementById("rag-search").addEventListener("click", () => searchRag().catch((error) => alert(error.message)));
 document.getElementById("refresh-rag-experiences").addEventListener("click", () => loadRagExperiences().catch((error) => alert(error.message)));
-document.getElementById("show-discarded-rag")?.addEventListener("change", (event) => {
-  state.showDiscardedRagExperiences = event.target.checked;
-  loadRagExperiences().catch((error) => alert(error.message));
-});
+const showDiscardedRagCheckbox = document.getElementById("show-discarded-rag");
+if (showDiscardedRagCheckbox) {
+  showDiscardedRagCheckbox.checked = state.showDiscardedRagExperiences;
+  showDiscardedRagCheckbox.addEventListener("change", (event) => {
+    state.showDiscardedRagExperiences = event.target.checked;
+    localStorage.setItem("showDiscardedRagExperiences", state.showDiscardedRagExperiences ? "1" : "0");
+    loadRagExperiences().catch((error) => alert(error.message));
+  });
+}
 document.getElementById("run-learning").addEventListener("click", () => runLearning().catch((error) => alert(error.message)));
 document.getElementById("refresh-candidates")?.addEventListener("click", () => loadCandidates().catch((error) => alert(error.message)));
 document.getElementById("refresh-customer-service")?.addEventListener("click", () => loadCustomerService().catch((error) => alert(error.message)));
 document.getElementById("customer-save-settings")?.addEventListener("click", () => saveCustomerServiceSettings().catch((error) => alert(error.message)));
 document.getElementById("refresh-product-catalog")?.addEventListener("click", () => loadProductCatalog().catch((error) => alert(error.message)));
-document.getElementById("new-product-from-catalog")?.addEventListener("click", openNewProductGenerator);
 document.getElementById("run-product-command")?.addEventListener("click", () => runProductCommand().catch((error) => alert(error.message)));
 document.getElementById("recorder-discover")?.addEventListener("click", () => discoverRecorderSessions().catch((error) => alert(error.message)));
 document.getElementById("recorder-capture")?.addEventListener("click", () => captureRecorderNow().catch((error) => alert(error.message)));
 document.getElementById("recorder-save-settings")?.addEventListener("click", () => saveRecorderSettings().catch((error) => alert(error.message)));
+document.getElementById("recorder-export-run-create")?.addEventListener("click", () => createRecorderExportRun({mode: "all"}).catch((error) => alert(error.message)));
+document.getElementById("recorder-export-run-day")?.addEventListener("click", () => createRecorderExportRun({preset: "day"}).catch((error) => alert(error.message)));
+document.getElementById("recorder-export-run-week")?.addEventListener("click", () => createRecorderExportRun({preset: "week"}).catch((error) => alert(error.message)));
+document.getElementById("recorder-export-run-month")?.addEventListener("click", () => createRecorderExportRun({preset: "month"}).catch((error) => alert(error.message)));
+document.getElementById("recorder-export-run-custom")?.addEventListener("click", () => createRecorderExportRun({mode: "custom"}).catch((error) => alert(error.message)));
+document.getElementById("recorder-export-date-clear")?.addEventListener("click", clearRecorderExportDateRange);
 document.getElementById("export-knowledge-type")?.addEventListener("click", () => downloadKnowledgeExport("type").catch((error) => alert(error.message)));
 document.getElementById("export-knowledge-time")?.addEventListener("click", () => downloadKnowledgeExport("time").catch((error) => alert(error.message)));
 document.getElementById("quick-diagnostics").addEventListener("click", () => runDiagnostics("quick").catch((error) => alert(error.message)));
@@ -5356,7 +6250,238 @@ document.getElementById("local-logout-button")?.addEventListener("click", () => 
 document.getElementById("refresh-customer-profiles")?.addEventListener("click", () => loadCustomerProfiles().catch((error) => alert(error.message)));
 document.getElementById("customer-profile-search")?.addEventListener("input", () => renderCustomerProfileList());
 
-document.body.classList.toggle("auth-locked", !state.authToken);
+document.getElementById("product-llm-intake-toggle")?.addEventListener("click", toggleProductLlmIntake);
+document.getElementById("close-product-llm-intake-panel")?.addEventListener("click", toggleProductLlmIntake);
+document.getElementById("product-llm-intake-send")?.addEventListener("click", () => sendProductLlmIntake().catch((error) => alert(error.message)));
+document.getElementById("product-llm-intake-input")?.addEventListener("keydown", (e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendProductLlmIntake().catch((error) => alert(error.message)); } });
+document.getElementById("product-llm-intake-apply")?.addEventListener("click", () => applyProductLlmIntake().catch((error) => alert(error.message)));
+document.getElementById("product-llm-intake-reset")?.addEventListener("click", resetProductLlmIntake);
+
+document.body.classList.add("auth-locked");
+initCustomerServiceFloat();
 initializeLocalLogin();
 refreshHealth();
 window.addEventListener("hashchange", activateHashView);
+window.addEventListener("resize", clampCustomerServiceFloatInViewport);
+
+function toggleProductLlmIntake() {
+  const panel = document.getElementById("product-llm-intake-panel");
+  if (!panel) return;
+  panel.classList.toggle("is-hidden");
+  if (!panel.classList.contains("is-hidden")) {
+    ensureProductLlmGreeting();
+    renderProductLlmIntake();
+  }
+}
+
+let productLlmIntakeSession = null;
+let productLlmIntakeApplying = false;
+let productLlmIntakeMessages = [];
+let productLlmIntakeSnapshot = null;
+
+function appendProductLlmMessage(role, text) {
+  const content = String(text || "").trim();
+  if (!content) return;
+  productLlmIntakeMessages.push({role, content});
+  renderProductLlmIntakeChat();
+}
+
+function ensureProductLlmGreeting() {
+  if (productLlmIntakeMessages.length) return;
+  appendProductLlmMessage(
+    "assistant",
+    "请用自然语言描述要新增或修改的商品信息。我会按标准结构整理，并在关键字段缺失时主动追问。"
+  );
+}
+
+function renderProductLlmIntake() {
+  renderProductLlmIntakeChat();
+  renderProductLlmIntakeSummary();
+}
+
+function renderProductLlmIntakeChat() {
+  const chat = document.getElementById("product-llm-intake-messages");
+  if (!chat) return;
+  chat.innerHTML = productLlmIntakeMessages.length
+    ? productLlmIntakeMessages.map((msg) => `<div class="chat-bubble ${msg.role}">${escapeHtml(msg.content)}</div>`).join("")
+    : `<div class="empty-state">在这里描述商品信息，AI 会持续追问并整理结构化结果。</div>`;
+  chat.scrollTop = chat.scrollHeight;
+}
+
+function renderProductLlmIntakeSummary() {
+  const summary = document.getElementById("product-llm-intake-summary");
+  if (!summary) return;
+  if (!productLlmIntakeSnapshot) {
+    summary.innerHTML = "";
+    return;
+  }
+  const payload = productLlmIntakeSnapshot;
+  const mode = payload.session?.mode || "";
+  const statusValue = payload.status || payload.session?.status || "collecting";
+  const preview = payload.assistant_preview || {};
+  const warnings = Array.isArray(payload.warnings) ? payload.warnings : [];
+  const missing = Array.isArray(payload.missing_fields) ? payload.missing_fields : [];
+  const rows = [];
+  if (preview.target_product_name) rows.push({label: "目标商品", value: preview.target_product_name});
+  if (preview.action) rows.push({label: "执行动作", value: resolveProductAssistantApplyLabel(mode, preview.action).replace("确认", "")});
+  if (preview.fields && Object.keys(preview.fields).length) {
+    const isCreateScoped = String(preview.action || "").startsWith("create_product_");
+    rows.push({label: isCreateScoped ? "计划新增内容" : "计划更新字段", value: summaryFields(preview.fields)});
+  }
+  const draftRows = mode === "generator"
+    ? productDraftSummaryRows(payload.draft_item?.data || {})
+    : [];
+  const statusTone = statusValue === "ready" ? "ok" : statusValue === "collecting" ? "warning" : "info";
+  summary.innerHTML = `
+    <div class="status-card ${statusTone}">
+      <strong>${escapeHtml(mode === "generator" ? "商品草稿整理中" : "商品修改计划整理中")}</strong>
+      <span>状态：${escapeHtml(statusValue)}</span>
+    </div>
+    ${warnings.length ? `<div class="warning-list">${warnings.map((item) => `<span>${escapeHtml(item)}</span>`).join("")}</div>` : ""}
+    ${missing.length ? `<div class="warning-list">${missing.map((item) => `<span>${escapeHtml(item)}</span>`).join("")}</div>` : ""}
+    ${(rows.length || draftRows.length) ? `
+      <div class="summary-table generator-table">
+        ${[...rows, ...draftRows].map((row) => `<div><span>${escapeHtml(row.label)}</span><strong>${escapeHtml(row.value)}</strong></div>`).join("")}
+      </div>
+    ` : ""}
+  `;
+}
+
+function productDraftSummaryRows(data) {
+  const keys = ["name", "sku", "category", "specs", "price", "unit", "inventory", "price_tiers", "shipping_policy", "warranty_policy", "aliases", "risk_rules"];
+  const rows = [];
+  keys.forEach((key) => {
+    if (isEmpty(data?.[key])) return;
+    rows.push({label: fieldLabel({id: key, label: key}), value: displayBusinessValue(data[key])});
+  });
+  return rows;
+}
+
+function setProductLlmStatus(kind, title = "", detail = "") {
+  const status = document.getElementById("product-llm-intake-status");
+  if (!status) return;
+  if (!title && !detail) {
+    status.textContent = "";
+    status.className = "";
+    return;
+  }
+  status.className = `status-card ${kind}`;
+  status.innerHTML = `<strong>${escapeHtml(title)}</strong>${detail ? `<span>${escapeHtml(detail)}</span>` : ""}`;
+}
+
+async function sendProductLlmIntake() {
+  const input = document.getElementById("product-llm-intake-input");
+  const sendBtn = document.getElementById("product-llm-intake-send");
+  const actions = document.getElementById("product-llm-intake-actions");
+  const applyBtn = document.getElementById("product-llm-intake-apply");
+  const text = input?.value?.trim();
+  if (!text) return;
+  ensureProductLlmGreeting();
+  appendProductLlmMessage("user", text);
+  if (input) input.value = "";
+  setProductLlmStatus("loading", "AI 正在整理", "正在解析你的最新补充...");
+  if (sendBtn) sendBtn.disabled = true;
+  try {
+    const result = await apiJson("/api/product-console/llm-intake", {
+      method: "POST",
+      body: JSON.stringify({text, session_id: productLlmIntakeSession || "", use_llm: true}),
+    });
+    productLlmIntakeSession = result.session?.session_id || productLlmIntakeSession;
+    productLlmIntakeSnapshot = result;
+    const reply = [];
+    const mode = result.session?.mode || "";
+    const preview = result.assistant_preview || {};
+    const previewAction = preview.action || "";
+    if (result.question) reply.push(result.question);
+    if (preview.summary) reply.push(`执行计划：${preview.summary}`);
+    if (result.missing_fields?.length) reply.push("还缺少：" + result.missing_fields.join("、"));
+    if (result.warnings?.length) reply.push("注意：" + result.warnings.join("；"));
+    if (result.draft_item?.data?.name) reply.push("当前商品名：" + result.draft_item.data.name);
+    if (!reply.length) reply.push("已收到，请继续补充或确认执行。");
+    appendProductLlmMessage("assistant", reply.join("\n"));
+    renderProductLlmIntakeSummary();
+    if (result.direct_apply_allowed) {
+      if (applyBtn) applyBtn.textContent = resolveProductAssistantApplyLabel(mode, previewAction);
+      setProductLlmStatus("ok", mode === "generator" ? "信息已完整，可确认入库" : "信息已完整，可确认执行", "你也可以继续补充，系统会自动刷新计划。");
+      if (actions) actions.classList.remove("is-hidden");
+    } else {
+      if (applyBtn) applyBtn.textContent = "确认执行";
+      setProductLlmStatus("warning", "信息还不完整", "请根据上方提示继续补充。");
+      if (actions) actions.classList.add("is-hidden");
+    }
+  } catch (err) {
+    appendProductLlmMessage("assistant", "出错：" + (err.message || String(err)));
+    setProductLlmStatus("warning", "发送失败", "请稍后重试。");
+  } finally {
+    if (sendBtn) sendBtn.disabled = false;
+  }
+}
+
+async function applyProductLlmIntake() {
+  if (!productLlmIntakeSession || productLlmIntakeApplying) return;
+  const status = document.getElementById("product-llm-intake-status");
+  const applyBtn = document.getElementById("product-llm-intake-apply");
+  const sendBtn = document.getElementById("product-llm-intake-send");
+  const originalLabel = applyBtn?.textContent || "确认执行";
+  productLlmIntakeApplying = true;
+  if (applyBtn) {
+    applyBtn.disabled = true;
+    applyBtn.textContent = "确认中...";
+  }
+  if (sendBtn) sendBtn.disabled = true;
+  if (status) status.innerHTML = '<strong><span class="loading-spinner" aria-hidden="true"></span>正在确认执行</strong><span>请稍候，不要重复点击。</span>';
+  if (status) status.className = "status-card loading";
+  try {
+    const result = await apiJson(`/api/product-console/llm-intake/${encodeURIComponent(productLlmIntakeSession)}/apply`, {method: "POST", body: "{}"});
+    if (result.action === "product_command_applied") {
+      alert("操作已确认并执行。");
+    } else {
+      alert("商品已通过 AI 对话录入并入库。");
+    }
+    resetProductLlmIntake();
+    await loadProductCatalog();
+  } catch (err) {
+    setProductLlmStatus("warning", "执行失败", "请检查输入后重试。");
+    alert("执行失败：" + (err.message || String(err)));
+  } finally {
+    productLlmIntakeApplying = false;
+    if (sendBtn) sendBtn.disabled = false;
+    if (applyBtn) {
+      applyBtn.disabled = false;
+      if (productLlmIntakeSession) applyBtn.textContent = originalLabel;
+    }
+  }
+}
+
+function resetProductLlmIntake() {
+  const status = document.getElementById("product-llm-intake-status");
+  const actions = document.getElementById("product-llm-intake-actions");
+  const applyBtn = document.getElementById("product-llm-intake-apply");
+  productLlmIntakeMessages = [];
+  productLlmIntakeSnapshot = null;
+  renderProductLlmIntake();
+  ensureProductLlmGreeting();
+  if (status) {
+    status.textContent = "";
+    status.className = "";
+  }
+  if (actions) actions.classList.add("is-hidden");
+  if (applyBtn) applyBtn.textContent = "确认执行";
+  productLlmIntakeSession = null;
+  productLlmIntakeApplying = false;
+}
+
+function resolveProductAssistantApplyLabel(mode, action) {
+  if (mode === "generator") return "确认入库";
+  const mapping = {
+    archive: "确认归档",
+    set_inventory: "确认改库存",
+    increase_inventory: "确认补货",
+    decrease_inventory: "确认扣减库存",
+    update_product: "确认更新商品",
+    create_product_faq: "确认新增专属问答",
+    create_product_rules: "确认新增专属规则",
+    create_product_explanations: "确认新增专属解释",
+  };
+  return mapping[action] || "确认执行";
+}

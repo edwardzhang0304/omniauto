@@ -4,14 +4,72 @@
     "default": {
       "tenant_id": "default",
       "display_name": "Default Tenant",
+      "industry_id": "home_appliance",
       "status": "active",
-      "created_at": "2026-05-04T18:23:10+00:00",
-      "updated_at": "2026-05-04T18:23:10+00:00"
+      "created_at": "2026-05-09T19:57:17+00:00",
+      "updated_at": "2026-05-09T19:57:17+00:00",
+      "metadata": {
+        "industry_id": "home_appliance"
+      }
+    },
+    "jiangsu_chejin_usedcar_customer_20260501": {
+      "tenant_id": "jiangsu_chejin_usedcar_customer_20260501",
+      "display_name": "Used Car Tenant",
+      "industry_id": "used_car",
+      "status": "active",
+      "created_at": "2026-05-09T19:57:17+00:00",
+      "updated_at": "2026-05-09T19:57:17+00:00",
+      "metadata": {
+        "industry_id": "used_car"
+      }
+    },
+    "rag_enterprise_eval": {
+      "tenant_id": "rag_enterprise_eval",
+      "display_name": "rag_enterprise_eval",
+      "status": "active",
+      "sync_enabled": true,
+      "industry_id": "home_appliance",
+      "metadata": {
+        "source": "local_client_account",
+        "account_username": "rag_enterprise_eval",
+        "industry_id": "home_appliance"
+      },
+      "created_at": "2026-05-09T19:57:19+00:00",
+      "updated_at": "2026-05-09T19:57:19+00:00"
+    },
+    "smart_recorder_test": {
+      "tenant_id": "smart_recorder_test",
+      "display_name": "smart_recorder_test",
+      "status": "active",
+      "sync_enabled": true,
+      "industry_id": "home_appliance",
+      "metadata": {
+        "source": "local_client_account",
+        "account_username": "smart_recorder_test",
+        "industry_id": "home_appliance"
+      },
+      "created_at": "2026-05-09T19:57:19+00:00",
+      "updated_at": "2026-05-09T19:57:19+00:00"
+    },
+    "smart_recorder_test_debug": {
+      "tenant_id": "smart_recorder_test_debug",
+      "display_name": "smart_recorder_test_debug",
+      "status": "active",
+      "sync_enabled": true,
+      "industry_id": "home_appliance",
+      "metadata": {
+        "source": "local_client_account",
+        "account_username": "smart_recorder_test_debug",
+        "industry_id": "home_appliance"
+      },
+      "created_at": "2026-05-09T19:57:19+00:00",
+      "updated_at": "2026-05-09T19:57:19+00:00"
     }
   },
   "shared_library": {
     "cloud_two_port_guideline": {
       "item_id": "cloud_two_port_guideline",
+      "industry_id": "global",
       "category_id": "global_guidelines",
       "title": "Two Port Cloud Guideline",
       "content": "The local client must refresh official shared knowledge from the cloud lease before using shared public context.",
@@ -39,12 +97,777 @@
         "applies_to": "all customer-service tenants"
       },
       "created_by": "two-port-test",
-      "created_at": "2026-05-04T18:23:10+00:00",
+      "created_at": "2026-05-09T19:57:17+00:00",
       "updated_by": "two-port-test",
-      "updated_at": "2026-05-04T18:23:10+00:00"
+      "updated_at": "2026-05-09T19:57:17+00:00"
+    },
+    "cloud_home_appliance_install_style": {
+      "item_id": "cloud_home_appliance_install_style",
+      "industry_id": "home_appliance",
+      "category_id": "reply_style",
+      "title": "Home Appliance Installation Reply Style",
+      "content": "Home appliance installation must be confirmed with site conditions and service windows.",
+      "keywords": [
+        "install",
+        "home appliance"
+      ],
+      "applies_to": "home appliance consultations",
+      "notes": "industry fixture for two-port sync checks",
+      "status": "active",
+      "source": "two_port_test",
+      "tenant_id": "default",
+      "data": {
+        "schema_version": 1,
+        "id": "cloud_home_appliance_install_style",
+        "category_id": "reply_style",
+        "industry_id": "home_appliance",
+        "title": "Home Appliance Installation Reply Style",
+        "guideline_text": "Home appliance installation must be confirmed with site conditions and service windows.",
+        "keywords": [
+          "install",
+          "home appliance"
+        ],
+        "applies_to": "home appliance consultations"
+      },
+      "created_by": "two-port-test",
+      "created_at": "2026-05-09T19:57:17+00:00",
+      "updated_by": "two-port-test",
+      "updated_at": "2026-05-09T19:57:17+00:00"
+    },
+    "cloud_usedcar_transfer_boundary": {
+      "item_id": "cloud_usedcar_transfer_boundary",
+      "industry_id": "used_car",
+      "category_id": "risk_control",
+      "title": "Used Car Transfer Boundary",
+      "content": "Used-car transfer and registration promises require manual confirmation.",
+      "keywords": [
+        "used car",
+        "transfer",
+        "registration"
+      ],
+      "applies_to": "used-car transfer consultation",
+      "notes": "industry fixture for two-port sync checks",
+      "status": "active",
+      "source": "two_port_test",
+      "tenant_id": "default",
+      "data": {
+        "schema_version": 1,
+        "id": "cloud_usedcar_transfer_boundary",
+        "category_id": "risk_control",
+        "industry_id": "used_car",
+        "title": "Used Car Transfer Boundary",
+        "guideline_text": "Used-car transfer and registration promises require manual confirmation.",
+        "keywords": [
+          "used car",
+          "transfer",
+          "registration"
+        ],
+        "applies_to": "used-car transfer consultation",
+        "allow_auto_reply": false,
+        "requires_handoff": true
+      },
+      "created_by": "two-port-test",
+      "created_at": "2026-05-09T19:57:17+00:00",
+      "updated_by": "two-port-test",
+      "updated_at": "2026-05-09T19:57:17+00:00"
+    },
+    "shared_global_evidence_first": {
+      "item_id": "shared_global_evidence_first",
+      "industry_id": "global",
+      "category_id": "global_guidelines",
+      "title": "证据优先回复",
+      "content": "回复必须优先依据正式知识、共享规则和已确认上下文；无证据时明确说明需核实并转人工。",
+      "keywords": [
+        "证据",
+        "核实",
+        "转人工"
+      ],
+      "applies_to": "所有行业的客服对话",
+      "notes": "平台通用规则",
+      "status": "active",
+      "source": "system_seed_industry_library",
+      "tenant_id": "default",
+      "data": {
+        "title": "证据优先回复",
+        "guideline_text": "回复必须优先依据正式知识、共享规则和已确认上下文；无证据时明确说明需核实并转人工。"
+      },
+      "created_by": "system_seed",
+      "created_at": "2026-05-09T19:57:19+00:00",
+      "updated_by": "system_seed",
+      "updated_at": "2026-05-09T19:57:19+00:00"
+    },
+    "shared_global_no_fabrication": {
+      "item_id": "shared_global_no_fabrication",
+      "industry_id": "global",
+      "category_id": "risk_control",
+      "title": "关键事实不得编造",
+      "content": "价格、库存、合同、赔付、资质、时效等关键事实没有证据时，不得生成确定性承诺。",
+      "keywords": [
+        "价格",
+        "库存",
+        "合同",
+        "赔付",
+        "资质"
+      ],
+      "applies_to": "所有行业的高风险问答",
+      "notes": "平台通用风险边界",
+      "status": "active",
+      "source": "system_seed_industry_library",
+      "tenant_id": "default",
+      "data": {
+        "title": "关键事实不得编造",
+        "guideline_text": "价格、库存、合同、赔付、资质、时效等关键事实没有证据时，不得生成确定性承诺。",
+        "allow_auto_reply": false,
+        "requires_handoff": true,
+        "handoff_reason": "missing_authoritative_evidence"
+      },
+      "created_by": "system_seed",
+      "created_at": "2026-05-09T19:57:19+00:00",
+      "updated_by": "system_seed",
+      "updated_at": "2026-05-09T19:57:19+00:00"
+    },
+    "shared_global_privacy_minimum_collection": {
+      "item_id": "shared_global_privacy_minimum_collection",
+      "industry_id": "global",
+      "category_id": "risk_control",
+      "title": "隐私信息最小化采集",
+      "content": "仅在履约必要时采集姓名、电话、地址等信息，避免索取与交易无关的身份证件、银行卡、验证码等敏感信息。",
+      "keywords": [
+        "隐私",
+        "个人信息",
+        "手机号",
+        "地址",
+        "最小化"
+      ],
+      "applies_to": "所有行业的信息收集场景",
+      "notes": "参考《个人信息保护法》最小必要原则",
+      "status": "active",
+      "source": "system_seed_industry_library",
+      "tenant_id": "default",
+      "data": {
+        "title": "隐私信息最小化采集",
+        "guideline_text": "仅在履约必要时采集姓名、电话、地址等信息，避免索取与交易无关的身份证件、银行卡、验证码等敏感信息。"
+      },
+      "created_by": "system_seed",
+      "created_at": "2026-05-09T19:57:19+00:00",
+      "updated_by": "system_seed",
+      "updated_at": "2026-05-09T19:57:19+00:00"
+    },
+    "shared_global_no_private_payment": {
+      "item_id": "shared_global_no_private_payment",
+      "industry_id": "global",
+      "category_id": "risk_control",
+      "title": "禁止私下收款引导",
+      "content": "不得引导客户向个人账户、社交账号或非官方渠道转账；涉及收款必须提示以企业官方支付链路为准。",
+      "keywords": [
+        "收款",
+        "转账",
+        "个人账户",
+        "官方渠道"
+      ],
+      "applies_to": "所有行业支付咨询",
+      "notes": "",
+      "status": "active",
+      "source": "system_seed_industry_library",
+      "tenant_id": "default",
+      "data": {
+        "title": "禁止私下收款引导",
+        "guideline_text": "不得引导客户向个人账户、社交账号或非官方渠道转账；涉及收款必须提示以企业官方支付链路为准。",
+        "allow_auto_reply": false,
+        "requires_handoff": true,
+        "handoff_reason": "payment_channel_compliance"
+      },
+      "created_by": "system_seed",
+      "created_at": "2026-05-09T19:57:19+00:00",
+      "updated_by": "system_seed",
+      "updated_at": "2026-05-09T19:57:19+00:00"
+    },
+    "shared_used_car_compliance_disclosure": {
+      "item_id": "shared_used_car_compliance_disclosure",
+      "industry_id": "used_car",
+      "category_id": "global_guidelines",
+      "title": "二手车车况披露规则",
+      "content": "涉及事故、水泡、火烧、里程、过户次数、检修记录等问题，必须基于可验证资料；不确定时先说明待核验。",
+      "keywords": [
+        "车况",
+        "事故",
+        "水泡",
+        "火烧",
+        "里程",
+        "过户"
+      ],
+      "applies_to": "二手车咨询场景",
+      "notes": "参考《二手车流通管理办法》卖方信息披露要求",
+      "status": "active",
+      "source": "system_seed_industry_library",
+      "tenant_id": "default",
+      "data": {
+        "title": "二手车车况披露规则",
+        "guideline_text": "涉及事故、水泡、火烧、里程、过户次数、检修记录等问题，必须基于可验证资料；不确定时先说明待核验。"
+      },
+      "created_by": "system_seed",
+      "created_at": "2026-05-09T19:57:19+00:00",
+      "updated_by": "system_seed",
+      "updated_at": "2026-05-09T19:57:19+00:00"
+    },
+    "shared_used_car_transfer_docs": {
+      "item_id": "shared_used_car_transfer_docs",
+      "industry_id": "used_car",
+      "category_id": "global_guidelines",
+      "title": "二手车交易资料完整性",
+      "content": "提醒客户交易完成后应交付合法证照与交易凭证，涉及过户办理必须按登记流程执行。",
+      "keywords": [
+        "过户",
+        "登记",
+        "发票",
+        "行驶证",
+        "登记证书"
+      ],
+      "applies_to": "二手车交易流程咨询",
+      "notes": "参考《二手车流通管理办法》第二十二至二十五条",
+      "status": "active",
+      "source": "system_seed_industry_library",
+      "tenant_id": "default",
+      "data": {
+        "title": "二手车交易资料完整性",
+        "guideline_text": "提醒客户交易完成后应交付合法证照与交易凭证，涉及过户办理必须按登记流程执行。"
+      },
+      "created_by": "system_seed",
+      "created_at": "2026-05-09T19:57:19+00:00",
+      "updated_by": "system_seed",
+      "updated_at": "2026-05-09T19:57:19+00:00"
+    },
+    "shared_used_car_finance_handoff": {
+      "item_id": "shared_used_car_finance_handoff",
+      "industry_id": "used_car",
+      "category_id": "risk_control",
+      "title": "二手车金融审批风险边界",
+      "content": "征信、审批通过率、放款时效等不能保证；只能说明流程与所需资料，并转人工顾问。",
+      "keywords": [
+        "征信",
+        "审批",
+        "放款",
+        "首付",
+        "月供"
+      ],
+      "applies_to": "二手车金融问答",
+      "notes": "",
+      "status": "active",
+      "source": "system_seed_industry_library",
+      "tenant_id": "default",
+      "data": {
+        "title": "二手车金融审批风险边界",
+        "guideline_text": "征信、审批通过率、放款时效等不能保证；只能说明流程与所需资料，并转人工顾问。",
+        "allow_auto_reply": false,
+        "requires_handoff": true,
+        "handoff_reason": "used_car_finance_manual_review"
+      },
+      "created_by": "system_seed",
+      "created_at": "2026-05-09T19:57:19+00:00",
+      "updated_by": "system_seed",
+      "updated_at": "2026-05-09T19:57:19+00:00"
+    },
+    "shared_used_car_test_drive_notice": {
+      "item_id": "shared_used_car_test_drive_notice",
+      "industry_id": "used_car",
+      "category_id": "global_guidelines",
+      "title": "二手车试驾安全提示",
+      "content": "试驾沟通需明确有效证件、保险覆盖、试驾路线与责任边界；涉及高风险路况或改装车辆必须人工确认。",
+      "keywords": [
+        "试驾",
+        "保险",
+        "证件",
+        "改装车",
+        "责任"
+      ],
+      "applies_to": "二手车试驾预约与沟通",
+      "notes": "",
+      "status": "active",
+      "source": "system_seed_industry_library",
+      "tenant_id": "default",
+      "data": {
+        "title": "二手车试驾安全提示",
+        "guideline_text": "试驾沟通需明确有效证件、保险覆盖、试驾路线与责任边界；涉及高风险路况或改装车辆必须人工确认。"
+      },
+      "created_by": "system_seed",
+      "created_at": "2026-05-09T19:57:19+00:00",
+      "updated_by": "system_seed",
+      "updated_at": "2026-05-09T19:57:19+00:00"
+    },
+    "shared_used_car_deposit_contract_boundary": {
+      "item_id": "shared_used_car_deposit_contract_boundary",
+      "industry_id": "used_car",
+      "category_id": "risk_control",
+      "title": "二手车订金合同边界",
+      "content": "订金是否可退、违约责任、车况争议处理必须以书面合同或门店条款为准，自动回复不得替代合同承诺。",
+      "keywords": [
+        "订金",
+        "定金",
+        "可退",
+        "违约",
+        "合同"
+      ],
+      "applies_to": "二手车下订与合同咨询",
+      "notes": "",
+      "status": "active",
+      "source": "system_seed_industry_library",
+      "tenant_id": "default",
+      "data": {
+        "title": "二手车订金合同边界",
+        "guideline_text": "订金是否可退、违约责任、车况争议处理必须以书面合同或门店条款为准，自动回复不得替代合同承诺。",
+        "allow_auto_reply": false,
+        "requires_handoff": true,
+        "handoff_reason": "used_car_contract_manual_review"
+      },
+      "created_by": "system_seed",
+      "created_at": "2026-05-09T19:57:19+00:00",
+      "updated_by": "system_seed",
+      "updated_at": "2026-05-09T19:57:19+00:00"
+    },
+    "shared_home_appliance_three_guarantees": {
+      "item_id": "shared_home_appliance_three_guarantees",
+      "industry_id": "home_appliance",
+      "category_id": "global_guidelines",
+      "title": "家电三包与售后说明",
+      "content": "家电售后答复需围绕三包、质保期、维修记录与票据凭证，避免超出标准承诺。",
+      "keywords": [
+        "三包",
+        "质保",
+        "维修",
+        "票据",
+        "售后"
+      ],
+      "applies_to": "家电售后咨询",
+      "notes": "参考《部分商品修理更换退货责任规定》",
+      "status": "active",
+      "source": "system_seed_industry_library",
+      "tenant_id": "default",
+      "data": {
+        "title": "家电三包与售后说明",
+        "guideline_text": "家电售后答复需围绕三包、质保期、维修记录与票据凭证，避免超出标准承诺。"
+      },
+      "created_by": "system_seed",
+      "created_at": "2026-05-09T19:57:19+00:00",
+      "updated_by": "system_seed",
+      "updated_at": "2026-05-09T19:57:19+00:00"
+    },
+    "shared_home_appliance_install_scope": {
+      "item_id": "shared_home_appliance_install_scope",
+      "industry_id": "home_appliance",
+      "category_id": "risk_control",
+      "title": "家电安装改造边界",
+      "content": "涉及电气/燃气改造、墙体承重、额外施工的请求，必须由人工确认现场条件和服务范围。",
+      "keywords": [
+        "安装",
+        "电改",
+        "燃气",
+        "打孔",
+        "承重"
+      ],
+      "applies_to": "家电安装咨询",
+      "notes": "",
+      "status": "active",
+      "source": "system_seed_industry_library",
+      "tenant_id": "default",
+      "data": {
+        "title": "家电安装改造边界",
+        "guideline_text": "涉及电气/燃气改造、墙体承重、额外施工的请求，必须由人工确认现场条件和服务范围。",
+        "allow_auto_reply": false,
+        "requires_handoff": true,
+        "handoff_reason": "home_appliance_install_manual_review"
+      },
+      "created_by": "system_seed",
+      "created_at": "2026-05-09T19:57:19+00:00",
+      "updated_by": "system_seed",
+      "updated_at": "2026-05-09T19:57:19+00:00"
+    },
+    "shared_home_appliance_delivery_style": {
+      "item_id": "shared_home_appliance_delivery_style",
+      "industry_id": "home_appliance",
+      "category_id": "reply_style",
+      "title": "家电配送时效回复口径",
+      "content": "先给出可确认的配送区间，再提示受库存、仓配与预约档期影响，必要时转人工排期。",
+      "keywords": [
+        "配送",
+        "时效",
+        "预约",
+        "库存"
+      ],
+      "applies_to": "家电物流咨询",
+      "notes": "",
+      "status": "active",
+      "source": "system_seed_industry_library",
+      "tenant_id": "default",
+      "data": {
+        "title": "家电配送时效回复口径",
+        "guideline_text": "先给出可确认的配送区间，再提示受库存、仓配与预约档期影响，必要时转人工排期。"
+      },
+      "created_by": "system_seed",
+      "created_at": "2026-05-09T19:57:19+00:00",
+      "updated_by": "system_seed",
+      "updated_at": "2026-05-09T19:57:19+00:00"
+    },
+    "shared_home_appliance_energy_label_notice": {
+      "item_id": "shared_home_appliance_energy_label_notice",
+      "industry_id": "home_appliance",
+      "category_id": "global_guidelines",
+      "title": "家电能效与功率说明",
+      "content": "能效等级、额定功率、用电环境相关答复应引用规格参数，不得臆测省电比例或改写官方标识信息。",
+      "keywords": [
+        "能效",
+        "功率",
+        "耗电",
+        "参数",
+        "规格"
+      ],
+      "applies_to": "家电选购参数咨询",
+      "notes": "",
+      "status": "active",
+      "source": "system_seed_industry_library",
+      "tenant_id": "default",
+      "data": {
+        "title": "家电能效与功率说明",
+        "guideline_text": "能效等级、额定功率、用电环境相关答复应引用规格参数，不得臆测省电比例或改写官方标识信息。"
+      },
+      "created_by": "system_seed",
+      "created_at": "2026-05-09T19:57:19+00:00",
+      "updated_by": "system_seed",
+      "updated_at": "2026-05-09T19:57:19+00:00"
+    },
+    "shared_home_appliance_refund_policy_boundary": {
+      "item_id": "shared_home_appliance_refund_policy_boundary",
+      "industry_id": "home_appliance",
+      "category_id": "risk_control",
+      "title": "家电退换与损耗争议边界",
+      "content": "安装后退换、外观损伤、运输损耗、旧机回收折价等争议需依据验收记录处理，自动回复不得直接给出赔付承诺。",
+      "keywords": [
+        "退换",
+        "损耗",
+        "外观损伤",
+        "验收",
+        "赔付"
+      ],
+      "applies_to": "家电售后争议",
+      "notes": "",
+      "status": "active",
+      "source": "system_seed_industry_library",
+      "tenant_id": "default",
+      "data": {
+        "title": "家电退换与损耗争议边界",
+        "guideline_text": "安装后退换、外观损伤、运输损耗、旧机回收折价等争议需依据验收记录处理，自动回复不得直接给出赔付承诺。",
+        "allow_auto_reply": false,
+        "requires_handoff": true,
+        "handoff_reason": "home_appliance_after_sales_dispute"
+      },
+      "created_by": "system_seed",
+      "created_at": "2026-05-09T19:57:19+00:00",
+      "updated_by": "system_seed",
+      "updated_at": "2026-05-09T19:57:19+00:00"
+    },
+    "shared_fast_food_food_safety": {
+      "item_id": "shared_fast_food_food_safety",
+      "industry_id": "fast_food",
+      "category_id": "risk_control",
+      "title": "快餐食品安全优先",
+      "content": "遇到疑似异物、变质、食安风险、严重过敏反应时，优先提示停止食用并立即转人工处理。",
+      "keywords": [
+        "异物",
+        "变质",
+        "过敏",
+        "食物中毒",
+        "食品安全"
+      ],
+      "applies_to": "快餐投诉与风险反馈",
+      "notes": "参考《食品安全法》与《餐饮服务食品安全操作规范》",
+      "status": "active",
+      "source": "system_seed_industry_library",
+      "tenant_id": "default",
+      "data": {
+        "title": "快餐食品安全优先",
+        "guideline_text": "遇到疑似异物、变质、食安风险、严重过敏反应时，优先提示停止食用并立即转人工处理。",
+        "allow_auto_reply": false,
+        "requires_handoff": true,
+        "handoff_reason": "fast_food_safety_manual_escalation"
+      },
+      "created_by": "system_seed",
+      "created_at": "2026-05-09T19:57:19+00:00",
+      "updated_by": "system_seed",
+      "updated_at": "2026-05-09T19:57:19+00:00"
+    },
+    "shared_fast_food_order_recheck": {
+      "item_id": "shared_fast_food_order_recheck",
+      "industry_id": "fast_food",
+      "category_id": "global_guidelines",
+      "title": "快餐订单确认要素",
+      "content": "自动回复应优先确认门店、用餐方式、餐品、份数、忌口/过敏原与联系方式，减少错单漏单。",
+      "keywords": [
+        "点餐",
+        "堂食",
+        "外卖",
+        "份数",
+        "忌口",
+        "过敏原"
+      ],
+      "applies_to": "快餐下单前沟通",
+      "notes": "",
+      "status": "active",
+      "source": "system_seed_industry_library",
+      "tenant_id": "default",
+      "data": {
+        "title": "快餐订单确认要素",
+        "guideline_text": "自动回复应优先确认门店、用餐方式、餐品、份数、忌口/过敏原与联系方式，减少错单漏单。"
+      },
+      "created_by": "system_seed",
+      "created_at": "2026-05-09T19:57:19+00:00",
+      "updated_by": "system_seed",
+      "updated_at": "2026-05-09T19:57:19+00:00"
+    },
+    "shared_fast_food_delivery_style": {
+      "item_id": "shared_fast_food_delivery_style",
+      "industry_id": "fast_food",
+      "category_id": "reply_style",
+      "title": "快餐配送异常回复口径",
+      "content": "对超时、洒漏、漏单场景先致歉，明确补救路径（补发/退款/人工处理）并收集最小必要信息。",
+      "keywords": [
+        "超时",
+        "洒漏",
+        "漏单",
+        "补发",
+        "退款"
+      ],
+      "applies_to": "快餐配送异常",
+      "notes": "",
+      "status": "active",
+      "source": "system_seed_industry_library",
+      "tenant_id": "default",
+      "data": {
+        "title": "快餐配送异常回复口径",
+        "guideline_text": "对超时、洒漏、漏单场景先致歉，明确补救路径（补发/退款/人工处理）并收集最小必要信息。"
+      },
+      "created_by": "system_seed",
+      "created_at": "2026-05-09T19:57:19+00:00",
+      "updated_by": "system_seed",
+      "updated_at": "2026-05-09T19:57:19+00:00"
+    },
+    "shared_fast_food_allergen_boundary": {
+      "item_id": "shared_fast_food_allergen_boundary",
+      "industry_id": "fast_food",
+      "category_id": "risk_control",
+      "title": "快餐过敏原提示边界",
+      "content": "涉及严重过敏史、儿童/孕妇敏感食材咨询时，必须提示以门店配方公告和人工确认为准，不得给出医疗诊断建议。",
+      "keywords": [
+        "过敏原",
+        "花生",
+        "乳制品",
+        "儿童",
+        "孕妇"
+      ],
+      "applies_to": "快餐配料与过敏咨询",
+      "notes": "",
+      "status": "active",
+      "source": "system_seed_industry_library",
+      "tenant_id": "default",
+      "data": {
+        "title": "快餐过敏原提示边界",
+        "guideline_text": "涉及严重过敏史、儿童/孕妇敏感食材咨询时，必须提示以门店配方公告和人工确认为准，不得给出医疗诊断建议。",
+        "allow_auto_reply": false,
+        "requires_handoff": true,
+        "handoff_reason": "fast_food_allergen_manual_review"
+      },
+      "created_by": "system_seed",
+      "created_at": "2026-05-09T19:57:19+00:00",
+      "updated_by": "system_seed",
+      "updated_at": "2026-05-09T19:57:19+00:00"
+    },
+    "shared_fast_food_temperature_notice": {
+      "item_id": "shared_fast_food_temperature_notice",
+      "industry_id": "fast_food",
+      "category_id": "global_guidelines",
+      "title": "快餐出餐温控提示",
+      "content": "对保温时长、复热建议、冷链餐品时效等应使用门店标准口径；不确定时提醒尽快食用并转人工确认。",
+      "keywords": [
+        "保温",
+        "复热",
+        "冷链",
+        "时效",
+        "尽快食用"
+      ],
+      "applies_to": "快餐食用安全咨询",
+      "notes": "",
+      "status": "active",
+      "source": "system_seed_industry_library",
+      "tenant_id": "default",
+      "data": {
+        "title": "快餐出餐温控提示",
+        "guideline_text": "对保温时长、复热建议、冷链餐品时效等应使用门店标准口径；不确定时提醒尽快食用并转人工确认。"
+      },
+      "created_by": "system_seed",
+      "created_at": "2026-05-09T19:57:19+00:00",
+      "updated_by": "system_seed",
+      "updated_at": "2026-05-09T19:57:19+00:00"
+    },
+    "shared_lab_instruments_calibration_scope": {
+      "item_id": "shared_lab_instruments_calibration_scope",
+      "industry_id": "lab_instruments",
+      "category_id": "global_guidelines",
+      "title": "仪器校准与检定口径",
+      "content": "精度、不确定度、合规结论需基于有效校准/检定证书与资质范围，不得超范围承诺。",
+      "keywords": [
+        "校准",
+        "检定",
+        "证书",
+        "不确定度",
+        "资质"
+      ],
+      "applies_to": "实验室仪器技术咨询",
+      "notes": "参考《计量法》《检验检测机构资质认定管理办法》",
+      "status": "active",
+      "source": "system_seed_industry_library",
+      "tenant_id": "default",
+      "data": {
+        "title": "仪器校准与检定口径",
+        "guideline_text": "精度、不确定度、合规结论需基于有效校准/检定证书与资质范围，不得超范围承诺。"
+      },
+      "created_by": "system_seed",
+      "created_at": "2026-05-09T19:57:19+00:00",
+      "updated_by": "system_seed",
+      "updated_at": "2026-05-09T19:57:19+00:00"
+    },
+    "shared_lab_instruments_compliance_handoff": {
+      "item_id": "shared_lab_instruments_compliance_handoff",
+      "industry_id": "lab_instruments",
+      "category_id": "risk_control",
+      "title": "实验室资质合规边界",
+      "content": "涉及认证结论、法规豁免、官方资质解释时，必须转人工合规或技术负责人确认。",
+      "keywords": [
+        "CMA",
+        "CNAS",
+        "认证",
+        "法规",
+        "合规"
+      ],
+      "applies_to": "资质合规与审计问答",
+      "notes": "",
+      "status": "active",
+      "source": "system_seed_industry_library",
+      "tenant_id": "default",
+      "data": {
+        "title": "实验室资质合规边界",
+        "guideline_text": "涉及认证结论、法规豁免、官方资质解释时，必须转人工合规或技术负责人确认。",
+        "allow_auto_reply": false,
+        "requires_handoff": true,
+        "handoff_reason": "lab_compliance_manual_review"
+      },
+      "created_by": "system_seed",
+      "created_at": "2026-05-09T19:57:19+00:00",
+      "updated_by": "system_seed",
+      "updated_at": "2026-05-09T19:57:19+00:00"
+    },
+    "shared_lab_instruments_maintenance_style": {
+      "item_id": "shared_lab_instruments_maintenance_style",
+      "industry_id": "lab_instruments",
+      "category_id": "reply_style",
+      "title": "实验室仪器故障受理口径",
+      "content": "先确认型号、序列号、故障现象、使用环境和校准状态，再给出基础排查建议与送修路径。",
+      "keywords": [
+        "故障",
+        "维修",
+        "序列号",
+        "送修",
+        "保养"
+      ],
+      "applies_to": "实验室仪器售后",
+      "notes": "",
+      "status": "active",
+      "source": "system_seed_industry_library",
+      "tenant_id": "default",
+      "data": {
+        "title": "实验室仪器故障受理口径",
+        "guideline_text": "先确认型号、序列号、故障现象、使用环境和校准状态，再给出基础排查建议与送修路径。"
+      },
+      "created_by": "system_seed",
+      "created_at": "2026-05-09T19:57:19+00:00",
+      "updated_by": "system_seed",
+      "updated_at": "2026-05-09T19:57:19+00:00"
+    },
+    "shared_lab_instruments_hazard_notice": {
+      "item_id": "shared_lab_instruments_hazard_notice",
+      "industry_id": "lab_instruments",
+      "category_id": "risk_control",
+      "title": "危化/生物样品处置边界",
+      "content": "涉及危化品、生物样品、放射源相关操作咨询时，仅可提供设备使用边界提示，不得替代实验室SOP和EHS审批。",
+      "keywords": [
+        "危化品",
+        "生物样品",
+        "放射源",
+        "EHS",
+        "SOP"
+      ],
+      "applies_to": "实验室高风险样品咨询",
+      "notes": "",
+      "status": "active",
+      "source": "system_seed_industry_library",
+      "tenant_id": "default",
+      "data": {
+        "title": "危化/生物样品处置边界",
+        "guideline_text": "涉及危化品、生物样品、放射源相关操作咨询时，仅可提供设备使用边界提示，不得替代实验室SOP和EHS审批。",
+        "allow_auto_reply": false,
+        "requires_handoff": true,
+        "handoff_reason": "lab_hse_manual_review"
+      },
+      "created_by": "system_seed",
+      "created_at": "2026-05-09T19:57:19+00:00",
+      "updated_by": "system_seed",
+      "updated_at": "2026-05-09T19:57:19+00:00"
+    },
+    "shared_lab_instruments_validation_evidence": {
+      "item_id": "shared_lab_instruments_validation_evidence",
+      "industry_id": "lab_instruments",
+      "category_id": "global_guidelines",
+      "title": "仪器软件版本与验证记录",
+      "content": "涉及审计追踪、软件版本、方法学验证、电子签名等合规问答时，应提示以已归档验证记录为准。",
+      "keywords": [
+        "审计追踪",
+        "软件版本",
+        "方法学验证",
+        "电子签名",
+        "合规审计"
+      ],
+      "applies_to": "实验室审计与合规问答",
+      "notes": "",
+      "status": "active",
+      "source": "system_seed_industry_library",
+      "tenant_id": "default",
+      "data": {
+        "title": "仪器软件版本与验证记录",
+        "guideline_text": "涉及审计追踪、软件版本、方法学验证、电子签名等合规问答时，应提示以已归档验证记录为准。"
+      },
+      "created_by": "system_seed",
+      "created_at": "2026-05-09T19:57:19+00:00",
+      "updated_by": "system_seed",
+      "updated_at": "2026-05-09T19:57:19+00:00"
     }
   },
-  "users": {},
+  "users": {
+    "jiangsu_chejin_usedcar_customer_20260501": {
+      "user_id": "jiangsu_chejin_usedcar_customer_20260501",
+      "username": "jiangsu_chejin_usedcar_customer_20260501",
+      "display_name": "江苏车金二手车测试客户 2026-05-01",
+      "email": "jiangsu-chejin-usedcar@example.local",
+      "role": "customer",
+      "tenant_ids": [
+        "jiangsu_chejin_usedcar_customer_20260501"
+      ],
+      "resource_scopes": [
+        "*"
+      ],
+      "status": "active",
+      "source": "local_client_account",
+      "created_at": "2026-05-01T08:09:49+00:00",
+      "updated_at": "2026-05-09T19:05:39+00:00",
+      "password_hash": "pbkdf2_sha256$120000$0255594a9a656c234330bc4f233005fa$MqsUU5Wy8h9tLIiWu9JLvKc+a0h6pu2oGJVEUMLp0I0="
+    }
+  },
   "sessions": {},
   "admin_credentials": {},
   "auth_challenges": {},
@@ -67,13 +890,13 @@
         "restore_backup",
         "push_update"
       ],
-      "node_token": "node_jV_zAWvvJU2GPklCrQy484HOMfXIE4iZ",
-      "registered_at": "2026-05-04T18:23:19+00:00",
-      "last_seen_at": "2026-05-04T18:23:19+00:00",
+      "node_token": "node_0-A4uRJ43Tfhp9hy5yzMnY1QdwTA1zxm",
+      "registered_at": "2026-05-09T19:57:19+00:00",
+      "last_seen_at": "2026-05-09T19:57:19+00:00",
       "metadata": {
-        "hostname": "LAPTOP-PT3DCHM7",
-        "platform": "Windows-10-10.0.19045-SP0",
-        "runtime_root": "D:\\AI\\AI_RPA\\runtime\\apps\\wechat_ai_customer_service"
+        "hostname": "LAPTOP-HJGDTB1M",
+        "platform": "Windows-11-10.0.26200-SP0",
+        "runtime_root": "D:\\AI\\omniauto\\runtime\\apps\\wechat_ai_customer_service"
       }
     }
   },
@@ -82,6 +905,8 @@
   "shared_proposals": {},
   "shared_patches": {},
   "shared_scan_state": {},
+  "recorder_modules": {},
+  "recorder_module_bindings": {},
   "backup_requests": {},
   "restore_requests": {},
   "customer_data_packages": {},
@@ -89,13 +914,13 @@
   "releases": {},
   "audit_events": [
     {
-      "event_id": "audit_20260504182319678281_5d0849",
+      "event_id": "audit_20260509195719551905_f90f77",
       "actor_id": "local-node",
       "action": "register_node",
       "target_type": "local_node",
       "target_id": "two_port_node_01",
       "detail": {},
-      "created_at": "2026-05-04T18:23:19+00:00"
+      "created_at": "2026-05-09T19:57:19+00:00"
     }
   ]
 }

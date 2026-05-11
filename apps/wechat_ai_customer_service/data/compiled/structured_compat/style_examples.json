@@ -53,6 +53,40 @@
         "unknown",
         "handoff"
       ]
+    },
+    {
+      "id": "customer_service_style_guidelines",
+      "message": "回复要自然，先接住客户使用场景，再问关键参数。对功率、续航、最低价等不确定内容，不能凭空承诺。适合自动回复的内容：参数收集、常规质保说明、使用场景推荐。需要转人工的内容：最低价、特殊补偿、先发货后付款。",
+      "intent_tags": [
+        "greeting",
+        "small_talk",
+        "scene_product",
+        "quote",
+        "discount",
+        "handoff"
+      ],
+      "tone_tags": [
+        "natural",
+        "truthful",
+        "safe"
+      ],
+      "customer_message": "客服通用表达与边界原则",
+      "details": "source: three_layer_migration；migrated_from: tenant.chats.chat_style_guidelines"
+    },
+    {
+      "id": "shared_global_evidence_first",
+      "message": "回复必须优先依据正式知识、共享规则和已确认上下文；无证据时明确说明需核实并转人工。",
+      "customer_message": "证据优先回复"
+    },
+    {
+      "id": "shared_home_appliance_energy_label_notice",
+      "message": "能效等级、额定功率、用电环境相关答复应引用规格参数，不得臆测省电比例或改写官方标识信息。",
+      "customer_message": "家电能效与功率说明"
+    },
+    {
+      "id": "shared_home_appliance_three_guarantees",
+      "message": "家电售后答复需围绕三包、质保期、维修记录与票据凭证，避免超出标准承诺。",
+      "customer_message": "家电三包与售后说明"
     }
   ]
 }

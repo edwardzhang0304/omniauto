@@ -21,6 +21,7 @@ PUBLIC_PATHS = {
     "/api/auth/login/start",
     "/api/auth/login/bind-email/start",
     "/api/auth/login/verify",
+    "/api/auth/cloud-gate/prepare",
     "/api/auth/initialize/start",
     "/api/auth/initialize/verify",
     "/api/auth/logout",
@@ -28,6 +29,7 @@ PUBLIC_PATHS = {
     "/v1/auth/login/start",
     "/v1/auth/login/bind-email/start",
     "/v1/auth/login/verify",
+    "/v1/auth/cloud-gate/prepare",
     "/v1/auth/initialize/start",
     "/v1/auth/initialize/verify",
 }
@@ -39,6 +41,12 @@ CLOUD_GATE_ALLOWED_PATHS = {
     "/api/sync/register-node",
     "/api/sync/shared/cloud-snapshot",
     "/api/sync/commands/poll",
+    "/api/customer-service/runtime/status",
+    "/api/customer-service/runtime/stop",
+    "/api/customer-service/runtime/start",
+    "/api/recorder/runtime/status",
+    "/api/recorder/runtime/stop",
+    "/api/recorder/runtime/start",
 }
 CLOUD_GATE_ALLOWED_PREFIXES = ()
 
@@ -115,6 +123,8 @@ def resource_for_path(path: str) -> str:
         return "tenant_rag"
     if path.startswith("/api/knowledge") or path.startswith("/api/uploads") or path.startswith("/api/candidates"):
         return "tenant_knowledge"
+    if path.startswith("/api/recorder/modules") or path.startswith("/api/recorder/module-bindings"):
+        return "settings"
     if path.startswith("/api/tenants") or path.startswith("/api/system"):
         return "settings"
     return "tenant_knowledge"

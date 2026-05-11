@@ -2,7 +2,7 @@
   "schema_version": 1,
   "category_id": "products",
   "id": "ap-88",
-  "status": "active",
+  "status": "archived",
   "source": {
     "type": "raw_upload",
     "path": "D:\\AI\\AI_RPA\\apps\\wechat_ai_customer_service\\data\\raw_inbox\\products\\upload_60f852261dbb5fe6_01_products_new_office_devices.xlsx.txt",
@@ -23,7 +23,7 @@
     "unit": "台",
     "inventory": 56.0,
     "shipping_policy": "江浙沪包邮，其他地区按件核算；默认德邦或顺丰大件",
-    "warranty_policy": "整机质保 1 年，滤芯耗材不保修",
+    "warranty_policy": "保障说明更新为：支持7天无理由退货（未拆封）并提供一年保修",
     "risk_rules": [
       "净化效果不能承诺百分百去除，只能按检测环境说明"
     ],
@@ -43,7 +43,8 @@
         "min_quantity": 20.0,
         "unit_price": 1099.0
       }
-    ]
+    ],
+    "additional_details": "更新为：支持7天无理由退货（未拆封）并提供一年保修"
   },
   "runtime": {
     "allow_auto_reply": true,
@@ -52,7 +53,7 @@
   },
   "metadata": {
     "created_at": "2026-04-27T00:55:27",
-    "updated_at": "2026-04-27T00:55:27",
+    "updated_at": "2026-05-09T14:19:28",
     "created_by": "admin",
     "updated_by": "admin"
   }

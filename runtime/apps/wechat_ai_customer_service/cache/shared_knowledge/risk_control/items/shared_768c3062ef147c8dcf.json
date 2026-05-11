@@ -13,6 +13,7 @@
   "schema_version": 1,
   "id": "shared_768c3062ef147c8dcf",
   "item_id": "shared_768c3062ef147c8dcf",
+  "industry_id": "global",
   "category_id": "risk_control",
   "status": "active",
   "content": "投诉、退款、赔偿、法务、违规或伪造资料等高风险诉求必须转人工，AI客服只能记录和安抚，不能直接承诺结果。",
