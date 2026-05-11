@@ -8,6 +8,7 @@ import os
 import platform
 import shutil
 import socket
+import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
@@ -76,8 +77,10 @@ class VpsLocalSyncService:
                 "runtime_root": str(runtime_app_root()),
             },
         }
+        enrollment_token = str(os.getenv("WECHAT_VPS_NODE_ENROLLMENT_TOKEN") or "").strip()
+        headers = {"X-Enrollment-Token": enrollment_token} if enrollment_token else None
         try:
-            response = self.vps.post_json("/v1/local/nodes/register", payload, token=token)
+            response = self.vps.post_json("/v1/local/nodes/register", payload, token=token, headers=headers)
         except VpsClientError as exc:
             return {"ok": False, "tenant_id": tenant, "node_id": node_id, "error": str(exc)}
         node = response.get("node") if isinstance(response.get("node"), dict) else response
@@ -113,8 +116,8 @@ class VpsLocalSyncService:
         if not self.vps.configured:
             return {"ok": True, "tenant_id": tenant, "mode": "offline_unconfigured", "commands": [], "results": []}
         cached_node = self.read_node_cache()
-        node = str(node_id or os.getenv("WECHAT_LOCAL_NODE_ID") or cached_node.get("node_id") or "").strip()
-        node_secret = str(node_token or os.getenv("WECHAT_LOCAL_NODE_TOKEN") or cached_node.get("node_token") or "").strip()
+        node = str(node_id or cached_node.get("node_id") or os.getenv("WECHAT_LOCAL_NODE_ID") or "").strip()
+        node_secret = str(node_token or cached_node.get("node_token") or os.getenv("WECHAT_LOCAL_NODE_TOKEN") or "").strip()
         query = urlencode({"tenant_id": tenant, "node_id": node})
         headers = {"X-Node-Token": node_secret} if node_secret else None
         try:
@@ -223,8 +226,8 @@ class VpsLocalSyncService:
         if requested_since and not force:
             query["since_version"] = requested_since
         node_cache = self.read_node_cache()
-        node_id = str(os.getenv("WECHAT_LOCAL_NODE_ID") or node_cache.get("node_id") or "").strip()
-        node_secret = str(os.getenv("WECHAT_LOCAL_NODE_TOKEN") or node_cache.get("node_token") or "").strip()
+        node_id = str(node_cache.get("node_id") or os.getenv("WECHAT_LOCAL_NODE_ID") or "").strip()
+        node_secret = str(node_cache.get("node_token") or os.getenv("WECHAT_LOCAL_NODE_TOKEN") or "").strip()
         if node_id:
             query["node_id"] = node_id
         headers = {"X-Node-Token": node_secret} if node_secret else None
@@ -431,14 +434,42 @@ def write_shared_cloud_snapshot_cache(snapshot: dict[str, Any]) -> dict[str, Any
     temp_root = root.with_name(root.name + ".tmp")
     ensure_shared_cache_root_safe(temp_root)
     if temp_root.exists():
-        shutil.rmtree(temp_root)
+        remove_tree_with_retry(temp_root)
     temp_root.mkdir(parents=True, exist_ok=True)
     normalized = normalize_shared_cloud_snapshot(snapshot)
     write_json_payload(temp_root / "snapshot.json", normalized)
     materialize_shared_cloud_knowledge_tree(temp_root, normalized)
-    if root.exists():
-        shutil.rmtree(root)
-    temp_root.replace(root)
+    if not root.exists():
+        replace_path_with_retry(temp_root, root)
+    else:
+        try:
+            remove_tree_with_retry(root)
+            replace_path_with_retry(temp_root, root)
+        except OSError as exc:
+            if not is_windows_lock_error(exc):
+                raise
+            # Windows can transiently deny deleting snapshot.json while another
+            # request reads it. Fallback to in-place refresh to avoid gating lockout.
+            apply_shared_cache_overlay(root=root, temp_root=temp_root, snapshot=normalized)
+            remove_tree_with_retry(temp_root)
+    return {
+        "snapshot_version": str(normalized.get("version") or ""),
+        "item_count": len(normalized.get("items", [])),
+        "category_count": len(normalized.get("categories", [])),
+        **shared_cloud_cache_policy_summary(normalized),
+        "cache_root": str(root),
+        "snapshot_path": str(root / "snapshot.json"),
+    }
+
+
+def write_shared_cloud_snapshot_lease_cache(snapshot: dict[str, Any]) -> dict[str, Any]:
+    """Renew/expire lease metadata without rebuilding the full shared cache tree."""
+    root = shared_runtime_cache_root().resolve()
+    ensure_shared_cache_root_safe(root)
+    normalized = normalize_shared_cloud_snapshot(snapshot)
+    if not root.exists():
+        return write_shared_cloud_snapshot_cache(normalized)
+    write_json_payload(root / "snapshot.json", normalized)
     return {
         "snapshot_version": str(normalized.get("version") or ""),
         "item_count": len(normalized.get("items", [])),
@@ -656,9 +687,103 @@ def read_json_payload(path: Path, *, default: Any) -> Any:
 
 def write_json_payload(path: Path, payload: Any) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
+    serialized = json.dumps(payload, ensure_ascii=False, indent=2) + "\n"
     temp = path.with_suffix(path.suffix + ".tmp")
-    temp.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-    temp.replace(path)
+    temp.write_text(serialized, encoding="utf-8")
+    try:
+        replace_path_with_retry(temp, path)
+    except OSError as exc:
+        if not is_windows_lock_error(exc):
+            raise
+        # Fallback for Windows: when the target file is opened in read mode by
+        # another request, rename-replace can fail but direct overwrite usually works.
+        path.write_text(serialized, encoding="utf-8")
+        try:
+            temp.unlink()
+        except OSError:
+            pass
+
+
+def replace_path_with_retry(source: Path, destination: Path) -> None:
+    delays = (0.05, 0.1, 0.2, 0.35, 0.5)
+    last_error: OSError | None = None
+    for index, delay in enumerate(delays):
+        try:
+            source.replace(destination)
+            return
+        except FileNotFoundError:
+            return
+        except OSError as exc:
+            last_error = exc
+            if not is_windows_lock_error(exc):
+                raise
+            if index < len(delays) - 1:
+                time.sleep(delay)
+    if last_error is not None:
+        raise last_error
+
+
+def remove_tree_with_retry(path: Path) -> None:
+    delays = (0.05, 0.1, 0.2, 0.35, 0.5)
+    last_error: OSError | None = None
+    for index, delay in enumerate(delays):
+        try:
+            shutil.rmtree(path)
+            return
+        except FileNotFoundError:
+            return
+        except OSError as exc:
+            last_error = exc
+            if not is_windows_lock_error(exc):
+                raise
+            if index < len(delays) - 1:
+                time.sleep(delay)
+    if last_error is not None:
+        raise last_error
+
+
+def remove_path_with_retry(path: Path) -> None:
+    delays = (0.05, 0.1, 0.2, 0.35, 0.5)
+    last_error: OSError | None = None
+    for index, delay in enumerate(delays):
+        try:
+            if path.is_dir():
+                shutil.rmtree(path)
+            else:
+                path.unlink()
+            return
+        except FileNotFoundError:
+            return
+        except OSError as exc:
+            last_error = exc
+            if not is_windows_lock_error(exc):
+                raise
+            if index < len(delays) - 1:
+                time.sleep(delay)
+    if last_error is not None:
+        raise last_error
+
+
+def apply_shared_cache_overlay(*, root: Path, temp_root: Path, snapshot: dict[str, Any]) -> None:
+    """Refresh shared cache in place without deleting locked snapshot.json."""
+    root.mkdir(parents=True, exist_ok=True)
+    for child in root.iterdir():
+        if child.name == "snapshot.json":
+            continue
+        remove_path_with_retry(child)
+    for child in temp_root.iterdir():
+        if child.name == "snapshot.json":
+            continue
+        target = root / child.name
+        remove_path_with_retry(target)
+        replace_path_with_retry(child, target)
+    write_json_payload(root / "snapshot.json", snapshot)
+
+
+def is_windows_lock_error(exc: OSError) -> bool:
+    if os.name != "nt":
+        return False
+    return int(getattr(exc, "winerror", 0) or 0) in {5, 32}
 
 
 def renew_shared_cloud_snapshot_cache(cached: dict[str, Any], lease_payload: dict[str, Any]) -> dict[str, Any]:
@@ -682,7 +807,7 @@ def renew_shared_cloud_snapshot_cache(cached: dict[str, Any], lease_payload: dic
             merged[key] = lease_payload[key]
     if lease_payload.get("version"):
         merged["version"] = str(lease_payload.get("version") or merged.get("version") or "")
-    result = write_shared_cloud_snapshot_cache(merged)
+    result = write_shared_cloud_snapshot_lease_cache(merged)
     merged.update(
         {
             "snapshot_version": result.get("snapshot_version"),
@@ -708,7 +833,7 @@ def expire_shared_cloud_snapshot_cache(cached: dict[str, Any], *, reason: str = 
         expired["last_error"] = reason[:280]
     expired["cache_policy"] = policy
     try:
-        write_shared_cloud_snapshot_cache(expired)
+        write_shared_cloud_snapshot_lease_cache(expired)
     except Exception:
         return expired
     return read_json_payload(shared_runtime_snapshot_path(), default=expired)

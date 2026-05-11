@@ -36,8 +36,32 @@ def upsert_conversation(payload: dict[str, Any]) -> dict[str, Any]:
 
 
 @router.get("/messages")
-def messages(conversation_id: str = "", query: str = "", limit: int = 100) -> dict[str, Any]:
-    return {"ok": True, "items": RawMessageStore().list_messages(conversation_id=conversation_id, query=query, limit=limit)}
+def messages(
+    conversation_id: str = "",
+    query: str = "",
+    limit: int = 100,
+    offset: int = 0,
+    start_time: str = "",
+    end_time: str = "",
+    sender: str = "",
+    content_type: str = "",
+    conversation_type: str = Query("", pattern="^(|private|group|file_transfer|system|unknown)$"),
+    keywords: str = "",
+) -> dict[str, Any]:
+    keyword_items = [item.strip() for item in str(keywords or "").split(",") if item.strip()]
+    items = RawMessageStore().list_messages_advanced(
+        conversation_id=conversation_id,
+        query=query,
+        limit=limit,
+        offset=offset,
+        start_time=start_time,
+        end_time=end_time,
+        sender=sender,
+        content_type=content_type,
+        conversation_type=conversation_type,
+        keywords=keyword_items,
+    )
+    return {"ok": True, "items": items, "count": len(items)}
 
 
 @router.post("/messages")

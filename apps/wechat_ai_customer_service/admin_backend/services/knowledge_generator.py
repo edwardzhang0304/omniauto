@@ -196,7 +196,30 @@ class KnowledgeGenerator:
             candidate_ids=[],
             original_source={"type": "manual_admin_entry", "session_id": session_id, "category_id": category_id},
         )
-        reviewed = auto_review_rag_experience(experience, store=store, use_llm=use_llm)
+        # Manual admin entries must stay pending for explicit human disposition.
+        reviewed = auto_review_rag_experience(
+            experience,
+            store=store,
+            use_llm=use_llm,
+            apply_auto_triage=False,
+        )
+        experience_id = str(reviewed.get("experience_id") or experience.get("experience_id") or "")
+        if experience_id:
+            try:
+                reviewed = store.update_metadata(
+                    experience_id,
+                    {
+                        "experience_review": {
+                            "status": "pending",
+                            "pending_at": now(),
+                            "pending_reason": "manual_admin_entry_requires_human_disposition",
+                        },
+                        "reviewed_by_user": False,
+                    },
+                    rebuild_index=True,
+                )
+            except KeyError:
+                pass
         session.update(
             {
                 "status": "sent_to_rag_experience",
@@ -529,9 +552,9 @@ def parse_product_scoped(text: str, category_id: str) -> dict[str, Any]:
     product_id = extract_product_id_hint(text)
     title = extract_after_label(text, ["规则名称", "说明主题", "问题标题", "标题", "名称"]) or short_title(text)
     keywords = to_string_list(extract_after_label(text, ["触发关键词", "关键词"]))
-    answer = extract_after_label(text, ["标准回复", "客户回复", "回复", "答案", "话术"])
+    answer = extract_after_label(text, ["标准回复", "客户回复", "回复", "回答", "答案", "话术"])
     content = extract_after_label(text, ["说明内容", "解释内容", "内容"])
-    question = extract_after_label(text, ["客户问题", "问题", "问法"])
+    question = extract_after_label(text, ["客户问题", "客户问", "问题", "问法"])
     if not answer and category_id != "product_explanations":
         answer = extract_customer_reply(text) or clean_multiline(text)
     if not content and category_id == "product_explanations":
@@ -904,8 +927,9 @@ def extract_price_tiers(text: str) -> list[dict[str, float]]:
     tiers: list[dict[str, float]] = []
     unit_words = r"(?:台|件|个|套|只|箱|张|把|条|份|组|批)?"
     price_words = r"(?:元|块|rmb|RMB)?"
+    price_label_words = r"(?:订单价|批发价|阶梯价|优惠价|团购价|单价|每台|每件|每个|每套|每箱|每组)?"
     patterns = [
-        rf"(\d+(?:\.\d+)?)\s*{unit_words}\s*(?:以上|起|起订|及以上|>=)\s*(\d+(?:\.\d+)?)\s*{price_words}(?:\s*/\s*{unit_words})?",
+        rf"(\d+(?:\.\d+)?)\s*{unit_words}\s*(?:以上|起|起订|及以上|>=)\s*(?:[，,、:：=]|且|并且|为|是)?\s*{price_label_words}\s*(?:[:：=]|为|是)?\s*(\d+(?:\.\d+)?)\s*{price_words}(?:\s*/\s*{unit_words})?",
         rf"(?:第[一二三四五六七八九十\d]+档)\s*(\d+(?:\.\d+)?)\s*{unit_words}\s*(?:起订|起|以上|及以上)?\s*[，,、:：]?\s*(\d+(?:\.\d+)?)\s*{price_words}(?:\s*/\s*{unit_words})?",
         rf"(\d+(?:\.\d+)?)\s*{unit_words}\s*[，,、]\s*(\d+(?:\.\d+)?)\s*{price_words}",
     ]

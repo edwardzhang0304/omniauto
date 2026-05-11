@@ -10,6 +10,7 @@
   "schema_version": 1,
   "id": "shared_000f9428cac0dc954b",
   "item_id": "shared_000f9428cac0dc954b",
+  "industry_id": "global",
   "category_id": "risk_control",
   "status": "active",
   "content": "问题超出知识库或客服权限时，AI客服应说明需要进一步核实，并转人工确认后再回复。",

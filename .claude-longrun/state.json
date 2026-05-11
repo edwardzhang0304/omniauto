@@ -1,0 +1,21 @@
+{
+  "objective": "按照开发文档把微信AI客服前后台分离改造逐章落地并测试：P0前台优化→P1后台Worker→全量测试→实盘测试（文件传输助手模拟真人），发现错误就修改迭代直到全部通过，达到可验收状态",
+  "current_phase": "testing",
+  "phase_status": "testing",
+  "completed_phases": ["planning", "implementing"],
+  "next_actions": [
+    "P1 全量测试",
+    "实盘测试：用文件传输助手模拟真人对话"
+  ],
+  "tests_run": [],
+  "known_bugs": [],
+  "blockers": [],
+  "done_criteria": [
+    "P0前台优化全部实施并通过验收标准",
+    "P1后台Worker全部实施并通过验收标准",
+    "全量回归测试通过（7项测试场景）",
+    "实盘测试通过（文件传输助手模拟真人对话20轮以上）",
+    "无已知阻塞性bug"
+  ],
+  "last_verified_at": ""
+}

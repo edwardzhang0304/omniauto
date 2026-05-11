@@ -51,6 +51,7 @@ def main() -> int:
             check_admin_login_hidden_and_reserved,
             check_local_client_accounts_are_mirrored,
             check_tenant_customer_guest_flow,
+            check_recorder_module_assignment_flow,
             check_local_node_and_command_roundtrip,
             check_shared_knowledge_review_flow,
             check_restore_release_and_latest_update,
@@ -132,6 +133,21 @@ def check_local_client_accounts_are_mirrored(client: TestClient) -> None:
         assert_status(tenants, 200, "list tenants with local mirrors")
         tenant_ids = {item.get("tenant_id") for item in tenants.json().get("tenants", [])}
         assert_true({"local_usedcar_tenant", "local_trade_tenant"}.issubset(tenant_ids), "VPS should mirror Local customer data spaces")
+
+        mirrored_user = next(
+            (item for item in users.json().get("users", []) if item.get("username") == "local_trade_customer"),
+            None,
+        )
+        assert_true(mirrored_user is not None, "local mirrored customer should be deletable from VPS console")
+        removed = client.delete(f"/v1/admin/users/{mirrored_user.get('user_id')}", headers=auth_headers(token))
+        assert_status(removed, 200, "delete local mirrored customer")
+        users_after_delete = client.get("/v1/admin/users", headers=auth_headers(token))
+        assert_status(users_after_delete, 200, "list users after deleting local mirror")
+        usernames_after_delete = {item.get("username") for item in users_after_delete.json().get("users", [])}
+        assert_true("local_trade_customer" not in usernames_after_delete, "deleted local mirror must not reappear after refresh")
+        local_payload = json.loads(local_accounts_path.read_text(encoding="utf-8"))
+        local_accounts_after = local_payload.get("accounts", {}) if isinstance(local_payload, dict) else {}
+        assert_true("local_trade_customer" not in local_accounts_after, "delete should remove mirrored account from local accounts state")
     finally:
         if old_path is None:
             os.environ.pop("WECHAT_LOCAL_ACCOUNTS_STATE_PATH", None)
@@ -234,6 +250,52 @@ def check_tenant_customer_guest_flow(client: TestClient) -> None:
     guest_me = client.get("/v1/auth/me", headers=auth_headers(guest_token))
     assert_status(guest_me, 200, "guest login")
     assert_equal(guest_me.json()["session"]["user"]["role"], "guest", "guest role")
+
+
+def check_recorder_module_assignment_flow(client: TestClient) -> None:
+    token = admin_token(client)
+    index = client.get("/")
+    assert_status(index, 200, "load vps admin index")
+    assert_true("AI智能记录员模块分配" in index.text, "vps admin UI should expose recorder module assignment section")
+
+    modules = client.get("/v1/admin/recorder-modules", headers=auth_headers(token))
+    assert_status(modules, 200, "list recorder modules")
+    module_items = modules.json().get("items", [])
+    module_keys = {str(item.get("module_key") or "") for item in module_items}
+    assert_true("raw_message_log_v1" in module_keys, "builtin raw message module should exist")
+    assert_true("order_sheet_lab_v1" in module_keys, "builtin order-sheet module should exist")
+
+    users_payload = client.get("/v1/admin/users", headers=auth_headers(token))
+    assert_status(users_payload, 200, "list users for recorder binding")
+    customer_user = next((item for item in users_payload.json().get("users", []) if item.get("role") == "customer"), None)
+    assert_true(customer_user is not None, "recorder module binding requires at least one customer user")
+    user_id = str(customer_user.get("user_id") or "")
+    tenant_ids = customer_user.get("tenant_ids") if isinstance(customer_user.get("tenant_ids"), list) else []
+    tenant_id = str((tenant_ids[0] if tenant_ids else "") or "default")
+
+    binding_payload = {
+        "binding_id": f"user_{user_id}",
+        "scope_type": "user",
+        "scope_id": user_id,
+        "user_id": user_id,
+        "tenant_id": tenant_id,
+        "module_key": "order_sheet_lab_v1",
+        "enabled": True,
+        "priority": 10,
+    }
+    upserted = client.post("/v1/admin/recorder-module-bindings", headers=auth_headers(token), json=binding_payload)
+    assert_status(upserted, 200, "upsert user recorder module binding")
+    binding_item = upserted.json().get("item", {})
+    assert_equal(binding_item.get("scope_type"), "user", "binding scope type should be user")
+    assert_equal(binding_item.get("module_key"), "order_sheet_lab_v1", "binding should point to order sheet module")
+
+    listed = client.get(
+        f"/v1/admin/recorder-module-bindings?scope_type=user&scope_id={user_id}",
+        headers=auth_headers(token),
+    )
+    assert_status(listed, 200, "list recorder bindings by scope")
+    listed_items = listed.json().get("items", [])
+    assert_true(any(str(item.get("binding_id") or "") == f"user_{user_id}" for item in listed_items), "user binding should be listed")
 
 
 def check_local_node_and_command_roundtrip(client: TestClient) -> None:

@@ -20,6 +20,7 @@ def auto_review_rag_experience(
     store: RagExperienceStore,
     force: bool = False,
     use_llm: bool = True,
+    apply_auto_triage: bool = True,
 ) -> dict[str, Any]:
     """Persist and return AI review advice for a RAG experience.
 
@@ -38,11 +39,23 @@ def auto_review_rag_experience(
         experience_id = str(annotated.get("experience_id") or "")
         if experience_id:
             store.update_metadata(experience_id, {"ai_interpretation": interpretation}, rebuild_index=False)
-    triage_patch = build_auto_triage_patch(annotated, interpretation)
+    triage_patch = build_auto_triage_patch(annotated, interpretation) if apply_auto_triage else {}
     experience_id = str(annotated.get("experience_id") or "")
     if triage_patch and experience_id:
         try:
-            annotated = store.update_metadata(experience_id, triage_patch, rebuild_index=False)
+            review = triage_patch.get("experience_review") if isinstance(triage_patch.get("experience_review"), dict) else {}
+            review_status = str(review.get("status") or "")
+            auto_action = str(review.get("auto_triage_action") or "")
+            if review_status == "auto_triaged" and auto_action in {"discard", "already_covered"}:
+                triage_reason = auto_action
+                annotated = store.update_status(
+                    experience_id,
+                    status="discarded",
+                    reason=f"auto_triaged_{triage_reason}",
+                    extra=triage_patch,
+                )
+            else:
+                annotated = store.update_metadata(experience_id, triage_patch, rebuild_index=False)
             annotated = annotate_experience(with_quality(annotated), collect_formal_items())
         except KeyError:
             pass

@@ -13,6 +13,7 @@
   "schema_version": 1,
   "id": "shared_09b9e2d49f1b22d6ed",
   "item_id": "shared_09b9e2d49f1b22d6ed",
+  "industry_id": "global",
   "category_id": "risk_control",
   "status": "active",
   "content": "涉及合同、盖章、账期、赊销、先货后款等具有法律或财务承诺的事项，AI客服不能直接同意，应记录需求并转人工审核。",

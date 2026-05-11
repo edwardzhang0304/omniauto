@@ -143,7 +143,13 @@ class CustomerServiceRuntime:
 
     def status(self) -> dict[str, Any]:
         pid_record = self._read_pid_record()
-        running = self._pid_alive(int(pid_record.get("pid") or 0))
+        pid = int(pid_record.get("pid") or 0)
+        running = self._pid_alive(pid)
+        if not running and not pid_record:
+            running, scanned_pid = self._scan_listener_running(self.tenant_id)
+            if running:
+                pid = scanned_pid
+                pid_record = {"pid": pid, "tenant_id": self.tenant_id}
         status = read_runtime_status(self.tenant_id)
         gate = cloud_gate_status() if cloud_required_enabled() else {"ok": True, "required": False}
         worker_pid_record = self._read_worker_pid_record()
@@ -158,7 +164,7 @@ class CustomerServiceRuntime:
         status.update(
             {
                 "running": running,
-                "pid": int(pid_record.get("pid") or 0) if running else None,
+                "pid": pid if running else None,
                 "started_at": pid_record.get("started_at") if running else "",
                 "config_path": str(pid_record.get("config_path") or self._config_path_or_empty()),
                 "log_path": str(runtime_log_path(self.tenant_id)),
@@ -171,7 +177,14 @@ class CustomerServiceRuntime:
         if not running:
             status["state"] = "stopped"
             status["message"] = status_default_message("stopped")
+        status["other_listeners"] = self._scan_all_listener_tenants()
         return status
+
+    @staticmethod
+    def _scan_all_listener_tenants() -> list[dict[str, Any]]:
+        """Scan for running listeners across all tenants (dedupe launcher parent/child pairs)."""
+        listeners = CustomerServiceRuntime._list_listener_processes()
+        return [{"pid": item["pid"], "tenant_id": item["tenant_id"] or "unknown"} for item in listeners]
 
     def start(self, *, token: str = "") -> dict[str, Any]:
         current = self.status()
@@ -286,10 +299,18 @@ class CustomerServiceRuntime:
         )
 
     def _python_executable(self) -> Path:
+        override = str(os.getenv("WECHAT_RUNTIME_PYTHON") or "").strip()
+        if override:
+            override_path = Path(override)
+            if override_path.exists():
+                return override_path
+        current = Path(sys.executable)
+        if current.exists():
+            return current
         venv_python = PROJECT_ROOT / ".venv" / "Scripts" / "python.exe"
         if venv_python.exists():
             return venv_python
-        return Path(sys.executable)
+        return current
 
     def _read_pid_record(self) -> dict[str, Any]:
         path = runtime_pid_path(self.tenant_id)
@@ -313,6 +334,85 @@ class CustomerServiceRuntime:
             runtime_pid_path(self.tenant_id).unlink()
         except FileNotFoundError:
             pass
+
+    _LISTENER_SCRIPT_NAME = "run_customer_service_listener.py"
+    _WORKER_SCRIPT_NAME = "background_worker.py"
+
+    @staticmethod
+    def _cmdline_has_script(cmdline: list[str], script_name: str) -> bool:
+        target = script_name
+        for arg in cmdline:
+            arg_norm = os.path.normpath(str(arg))
+            if os.path.basename(arg_norm) == target:
+                return True
+        return False
+
+    @staticmethod
+    def _cmdline_has_listener_script(cmdline: list[str]) -> bool:
+        """Return True if cmdline actually executes the listener script (not just mentions it)."""
+        return CustomerServiceRuntime._cmdline_has_script(cmdline, CustomerServiceRuntime._LISTENER_SCRIPT_NAME)
+
+    @staticmethod
+    def _scan_listener_running(tenant_id: str) -> tuple[bool, int]:
+        """Fallback: scan process list for a running listener matching tenant_id."""
+        for listener in CustomerServiceRuntime._list_listener_processes():
+            if listener.get("tenant_id") == tenant_id:
+                return True, int(listener.get("pid") or 0)
+        return False, 0
+
+    @staticmethod
+    def _extract_tenant_from_cmdline(cmdline: list[str]) -> str:
+        for index, part in enumerate(cmdline):
+            if str(part) == "--tenant-id" and index + 1 < len(cmdline):
+                return str(cmdline[index + 1]).strip()
+        return ""
+
+    @staticmethod
+    def _list_listener_processes() -> list[dict[str, Any]]:
+        my_pid = os.getpid()
+        candidates: dict[int, dict[str, Any]] = {}
+        for proc in psutil.process_iter(["pid", "ppid", "cmdline", "name"]):
+            try:
+                pid = int(proc.info.get("pid") or 0)
+                cmdline = [str(item) for item in (proc.info.get("cmdline") or [])]
+                name = str(proc.info.get("name") or "").lower()
+                if pid <= 0 or pid == my_pid or "python" not in name:
+                    continue
+                if not CustomerServiceRuntime._cmdline_has_listener_script(cmdline):
+                    continue
+                if not CustomerServiceRuntime._pid_alive(pid):
+                    continue
+                candidates[pid] = {
+                    "pid": pid,
+                    "ppid": int(proc.info.get("ppid") or 0),
+                    "tenant_id": CustomerServiceRuntime._extract_tenant_from_cmdline(cmdline),
+                    "cmdline": cmdline,
+                }
+            except (psutil.NoSuchProcess, psutil.AccessDenied):
+                continue
+        if not candidates:
+            return []
+        child_map: dict[int, list[dict[str, Any]]] = {}
+        for info in candidates.values():
+            parent = int(info.get("ppid") or 0)
+            if parent in candidates:
+                child_map.setdefault(parent, []).append(info)
+        effective: list[dict[str, Any]] = []
+        for info in candidates.values():
+            children = child_map.get(int(info["pid"]), [])
+            if not children:
+                effective.append(info)
+                continue
+            parent_tenant = str(info.get("tenant_id") or "")
+            has_same_listener_child = any(
+                (not parent_tenant or parent_tenant == str(child.get("tenant_id") or ""))
+                and CustomerServiceRuntime._cmdline_has_listener_script(child.get("cmdline") or [])
+                for child in children
+            )
+            if not has_same_listener_child:
+                effective.append(info)
+        effective.sort(key=lambda item: int(item.get("pid") or 0))
+        return effective
 
     @staticmethod
     def _pid_alive(pid: int) -> bool:
@@ -350,6 +450,27 @@ class CustomerServiceRuntime:
         existing_pid = int(worker_record.get("pid") or 0)
         if existing_pid and self._pid_alive(existing_pid):
             return {"ok": True, "message": "后台 worker 已经在运行。"}
+        scanned_worker_pids = self._scan_worker_running_pids(self.tenant_id)
+        if scanned_worker_pids:
+            worker_pid = max(scanned_worker_pids)
+            path = worker_pid_path(self.tenant_id)
+            path.parent.mkdir(parents=True, exist_ok=True)
+            temp = path.with_suffix(".json.tmp")
+            temp.write_text(
+                json.dumps(
+                    {
+                        "pid": worker_pid,
+                        "tenant_id": self.tenant_id,
+                        "queue": "customer_service",
+                        "started_at": now_iso(),
+                    },
+                    ensure_ascii=False,
+                    indent=2,
+                ),
+                encoding="utf-8",
+            )
+            os.replace(temp, path)
+            return {"ok": True, "message": "后台 worker 已经在运行。", "worker_pid": worker_pid}
         script_path = APP_ROOT / "scripts" / "background_worker.py"
         if not script_path.exists():
             return {"ok": False, "message": f"缺少后台 worker 脚本：{script_path}"}
@@ -384,10 +505,36 @@ class CustomerServiceRuntime:
 
     def _stop_worker(self) -> None:
         worker_record = self._read_worker_pid_record()
+        pids = set(self._scan_worker_running_pids(self.tenant_id))
         pid = int(worker_record.get("pid") or 0)
-        if pid and self._pid_alive(pid):
-            self._terminate_tree(pid)
+        if pid:
+            pids.add(pid)
+        for worker_pid in sorted(pids):
+            if worker_pid and self._pid_alive(worker_pid):
+                self._terminate_tree(worker_pid)
         try:
             worker_pid_path(self.tenant_id).unlink()
         except FileNotFoundError:
             pass
+
+    @staticmethod
+    def _scan_worker_running_pids(tenant_id: str) -> list[int]:
+        my_pid = os.getpid()
+        pids: set[int] = set()
+        for proc in psutil.process_iter(["pid", "cmdline", "name"]):
+            try:
+                pid = int(proc.info.get("pid") or 0)
+                cmdline = proc.info.get("cmdline") or []
+                name = str(proc.info.get("name") or "").lower()
+                if pid <= 0 or pid == my_pid or "python" not in name:
+                    continue
+                if not CustomerServiceRuntime._cmdline_has_script(cmdline, CustomerServiceRuntime._WORKER_SCRIPT_NAME):
+                    continue
+                cmd_str = " ".join(str(item) for item in cmdline)
+                if f"--tenant-id {tenant_id}" not in cmd_str:
+                    continue
+                if CustomerServiceRuntime._pid_alive(pid):
+                    pids.add(pid)
+            except (psutil.NoSuchProcess, psutil.AccessDenied):
+                continue
+        return sorted(pids)

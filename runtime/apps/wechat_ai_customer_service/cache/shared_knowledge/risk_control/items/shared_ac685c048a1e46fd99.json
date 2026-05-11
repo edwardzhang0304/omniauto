@@ -10,6 +10,7 @@
   "schema_version": 1,
   "id": "shared_ac685c048a1e46fd99",
   "item_id": "shared_ac685c048a1e46fd99",
+  "industry_id": "global",
   "category_id": "risk_control",
   "status": "active",
   "content": "没有足够依据回答的问题，AI客服应避免猜测，先记录客户问题并转人工处理。",

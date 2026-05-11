@@ -4,21 +4,43 @@
   "id": "logistics_policy_details",
   "status": "active",
   "source": {
-    "type": "migration",
-    "path": "structured/product_knowledge.example.json"
+    "type": "rag_formal_overlap_merge",
+    "path": "structured/product_knowledge.example.json",
+    "experience_id": "rag_exp_d6ce2c08409de8615e55"
   },
   "data": {
     "title": "物流政策",
-    "policy_type": "logistics",
+    "policy_type": "logistics\nother",
     "keywords": [
-      "logistics"
+      "logistics",
+      "gen_20260510_113259_8fb1d710",
+      "user_original_description",
+      "original_description",
+      "threshold_jiangzhehu",
+      "applicability_scope",
+      "additional_details",
+      "free_shipping_rule",
+      "manual_admin_entry",
+      "gen_20260510_123949_dff4db06",
+      "free-shipping-policy",
+      "allow_auto_reply",
+      "product_category",
+      "shipping-policy-free-shipping",
+      "gen_20260510_152738_e39ffd57"
     ],
-    "answer": "{\n  \"default_carriers\": [\n    \"顺丰\",\n    \"京东物流\",\n    \"德邦\",\n    \"安能物流\"\n  ],\n  \"warehouse\": \"杭州余杭测试仓\",\n  \"same_day_cutoff\": \"工作日 16:00 前付款的现货订单尽量当天出库。\",\n  \"remote_area_note\": \"新疆、西藏、青海、港澳台及偏远地区运费和时效需人工确认。\",\n  \"tracking_note\": \"发货后会提供物流单号；大件商品默认物流到站，送货上楼需另行确认。\"\n}",
+    "answer": "{\n  \"default_carriers\": [\n    \"顺丰\",\n    \"京东物流\",\n    \"德邦\",\n    \"安能物流\"\n  ],\n  \"warehouse\": \"杭州余杭测试仓\",\n  \"same_day_cutoff\": \"工作日 16:00 前付款的现货订单尽量当天出库。\",\n  \"remote_area_note\": \"新疆、西藏、青海、港澳台及偏远地区运费和时效需人工确认；且不享受包邮政策。\",\n  \"tracking_note\": \"发货后会提供物流单号；大件商品默认物流到站，送货上楼需另行确认。\",\n  \"shipping_policy\": \"江浙沪满500包邮，其他非偏远地区满1000包邮，新疆、西藏、内蒙等偏远地区不包邮\"\n}",
     "allow_auto_reply": true,
     "requires_handoff": false,
     "handoff_reason": "",
     "operator_alert": false,
-    "risk_level": "normal"
+    "risk_level": "normal",
+    "additional_details": {
+      "rag_experience_id": "rag_exp_38c10d39138b02ff1dc4\nrag_exp_ae0865909c157c84b1fa\nrag_exp_d6ce2c08409de8615e55",
+      "AI合并来源": "formal_overlap_merge",
+      "来源经验ID": "rag_exp_d6ce2c08409de8615e55",
+      "原正式知识": "policies/logistics_policy_details",
+      "AI识别差异": "这条经验明确设定了满额门槛：江浙沪满500元，其他非偏远地区满1000元；而正式政策未明确具体金额，仅说明偏远地区需人工确认"
+    }
   },
   "runtime": {
     "allow_auto_reply": true,
@@ -27,8 +49,26 @@
   },
   "metadata": {
     "created_at": "2026-04-26T17:58:50",
-    "updated_at": "2026-04-26T17:58:50",
+    "updated_at": "2026-05-11T00:55:44",
     "created_by": "migration",
-    "updated_by": "migration"
+    "updated_by": "migration",
+    "knowledge_layer": "tenant"
+  },
+  "_knowledge_layer": "tenant",
+  "review_state": {
+    "is_new": false,
+    "new_reason": "newly_added_formal_knowledge",
+    "marked_at": "2026-05-10T15:40:16",
+    "updated_at": "2026-05-11T00:55:44",
+    "read_at": "2026-05-11T00:55:44",
+    "read_by": "admin",
+    "source": {
+      "source_module": "rag_overlap",
+      "target_category": "policies",
+      "item_id": "logistics_policy_details",
+      "reason": "formal_overlap_ai_merge:rag_exp_d6ce2c08409de8615e55",
+      "experience_id": "rag_exp_d6ce2c08409de8615e55",
+      "overlap_strategy": "ai_merge_formal_and_experience"
+    }
   }
 }

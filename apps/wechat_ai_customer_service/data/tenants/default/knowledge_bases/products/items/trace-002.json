@@ -1,0 +1,44 @@
+{
+  "schema_version": 1,
+  "category_id": "products",
+  "id": "trace-002",
+  "status": "archived",
+  "source": {
+    "type": "ai_generator",
+    "session_id": "gen_20260509_142710_f5d43766"
+  },
+  "data": {
+    "name": "trace商品2",
+    "sku": "TRACE-002",
+    "category": "",
+    "aliases": [],
+    "specs": "",
+    "price": 223.0,
+    "unit": "件",
+    "price_tiers": [
+      {
+        "min_quantity": 5.0,
+        "unit_price": 24.0
+      }
+    ],
+    "inventory": 5.0,
+    "shipping_policy": "新增商品：trace商品2，SKU TRACE-002，单价 223 元/件，库存 5 件，24小时发货",
+    "warranty_policy": "",
+    "reply_templates": {},
+    "risk_rules": [],
+    "additional_details": {
+      "用户原始描述": "新增商品：trace商品2，SKU TRACE-002，单价 223 元/件，库存 5 件，24小时发货"
+    }
+  },
+  "runtime": {
+    "allow_auto_reply": true,
+    "requires_handoff": false,
+    "risk_level": "normal"
+  },
+  "metadata": {
+    "created_at": "2026-05-09T14:27:10",
+    "updated_at": "2026-05-09T14:35:15",
+    "created_by": "admin",
+    "updated_by": "admin"
+  }
+}

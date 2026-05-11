@@ -3,38 +3,6 @@
   "currency": "CNY",
   "products": [
     {
-      "id": "ap-88",
-      "name": "静音空气净化器 AP-88",
-      "category": "空气净化设备",
-      "aliases": [
-        "空气净化器",
-        "除甲醛",
-        "会议室净化器",
-        "办公室净化"
-      ],
-      "spec": "适用面积 40-60 平方米，CADR 520m3/h，睡眠档 28dB，滤芯寿命约 6-9 个月",
-      "price": 1299.0,
-      "unit": "台",
-      "stock": 56.0,
-      "lead_time": "江浙沪包邮，其他地区按件核算；默认德邦或顺丰大件",
-      "shipping": "江浙沪包邮，其他地区按件核算；默认德邦或顺丰大件",
-      "warranty": "整机质保 1 年，滤芯耗材不保修",
-      "discount_tiers": [
-        {
-          "min_quantity": 1.0,
-          "unit_price": 1299.0
-        },
-        {
-          "min_quantity": 6.0,
-          "unit_price": 1199.0
-        },
-        {
-          "min_quantity": 20.0,
-          "unit_price": 1099.0
-        }
-      ]
-    },
-    {
       "id": "commercial_fridge_bx_200",
       "name": "商用冰箱 BX-200",
       "category": "制冷设备",
@@ -57,7 +25,7 @@
       "spec": "200L，单门，冷藏 0-10℃，220V，约 58kg",
       "price": 999,
       "unit": "台",
-      "stock": 36,
+      "stock": 7,
       "lead_time": "现货，付款后 48 小时内发出",
       "shipping": "现货，付款后 48 小时内发出\n江浙沪包邮，其他地区按物流实报实销；大件默认物流到站，送货上楼需另行确认",
       "warranty": "整机保修 1 年，压缩机保修 3 年",
@@ -126,7 +94,7 @@
         "舒服点的椅子"
       ],
       "spec": "黑色网布，可升降扶手，静音轮，承重 120kg",
-      "price": 399,
+      "price": 798,
       "unit": "把",
       "stock": 82,
       "lead_time": "现货，付款后 72 小时内发货",
@@ -245,6 +213,23 @@
           "unit_price": 180.0
         }
       ]
+    },
+    {
+      "id": "xiaomi-tv-75-100c",
+      "name": "小米电视75寸",
+      "price": 1999.0,
+      "unit": "台",
+      "stock": 699,
+      "lead_time": "江浙沪包邮",
+      "shipping": "江浙沪包邮",
+      "warranty": "两年保修",
+      "discount_tiers": [
+        {
+          "min_quantity": 10.0,
+          "unit_price": 1899.0
+        }
+      ],
+      "notes": "用户原始描述: 添加商品：小米电视75寸，型号100C，单价1999元，10台起订单价1899元。江浙沪包邮"
     }
   ],
   "faq": [
@@ -643,23 +628,6 @@
       "details": "原始资料摘录: {\"title\": \"超低价申请规则\", \"policy_type\": \"议价规则\", \"keywords\": [\"最低价\", \"赔钱卖\", \"全网最低\", \"独家报价\"], \"answer\": \"涉及最低价、独家价、赔钱价等承诺时，客服不能直接答应，需要回复已记录需求并请示上级后确认。\", \"allow_auto_reply\": false, \"requires_handoff\": true, \"handoff_reason\": \"涉及最低价等承诺需请示上级\", \"operator_alert\": true, \"risk_level\": null, \"additional_details\": {}}"
     },
     {
-      "intent": "after-sales-ap88-noise",
-      "keywords": [
-        "异响",
-        "噪音",
-        "空气净化器",
-        "AP-88",
-        "ap-88",
-        "静音空气净化器AP-88异响处理"
-      ],
-      "answer": "先引导客户拍摄视频并确认滤芯安装方向，无法排除时登记售后工单。",
-      "priority": 70,
-      "needs_handoff": false,
-      "auto_reply_allowed": true,
-      "operator_alert": false,
-      "details": "source_system: 测试ERP-售后模块；export_time: 2026-04-26T21:58:00+08:00；record_type: after_sales；external_id: AS-TEST-20260426-001；product_name: 静音空气净化器 AP-88；customer_region: 江苏苏州；issue: 客户反馈开机 10 分钟后有异响；原始资料摘录: {\"title\": \"静音空气净化器AP-88异响处理\", \"policy_type\": \"after_sales\", \"keywords\": [\"异响\", \"噪音\", \"空气净化器\", \"AP-88\"], \"answer\": \"先引导客户拍摄视频并确认滤芯安装方向，无法排除时登记售后工单。\", \"allow_auto_reply\": true, \"requires_handoff\": false, \"additional_details\": {\"source_system\": \"测试ERP-售后模块\", \"export_time\": \"2026-04-26T21:58:00+08:00\", \"record_type\": \"after_sales\", \"external_id\": \"AS-TEST-202604"
-    },
-    {
       "intent": "door-lock-installation",
       "keywords": [
         "门锁安装",
@@ -687,6 +655,38 @@
       "operator_alert": true,
       "reason": "需要人工确认",
       "details": "user_original_description: 商品ID：fl-920；规则名称：管理台测试安装规则；标准回复：安装服务需要根据城市和门型人工确认。；用户原始描述: 商品ID：fl-920；规则名称：管理台测试安装规则；标准回复：安装服务需要根据城市和门型人工确认。"
+    },
+    {
+      "intent": "product_faq_7_20260510015205_70faf74d",
+      "keywords": [
+        "7天无理由退货",
+        "xiaomi-tv-75-100c",
+        "能7天无理由退货"
+      ],
+      "answer": "在货物未损坏，外包装完好的情况下可以",
+      "priority": 70,
+      "needs_handoff": false,
+      "auto_reply_allowed": true,
+      "operator_alert": false,
+      "details": "user_original_description: 小米电视75寸 客户问：能7天无理由退货吗？应回答：在货物未损坏，外包装完好的情况下可以"
+    },
+    {
+      "intent": "product_faq_item_20260510015350_1ee9adb4",
+      "keywords": [
+        "可以上门安装",
+        "上门安装",
+        "安装费",
+        "150元",
+        "联系人工",
+        "xiaomi-tv-75-100c",
+        "可以上门安装"
+      ],
+      "answer": "可以，上门安装额外加收150元安装费。请联系人工",
+      "priority": 70,
+      "needs_handoff": false,
+      "auto_reply_allowed": true,
+      "operator_alert": false,
+      "details": "user_original_description: 小米电视75寸  客户问：可以上门安装吗？ 回答：可以，上门安装额外加收150元安装费。请联系人工"
     }
   ],
   "after_sales_policy": {
@@ -720,8 +720,9 @@
     ],
     "warehouse": "杭州余杭测试仓",
     "same_day_cutoff": "工作日 16:00 前付款的现货订单尽量当天出库。",
-    "remote_area_note": "新疆、西藏、青海、港澳台及偏远地区运费和时效需人工确认。",
-    "tracking_note": "发货后会提供物流单号；大件商品默认物流到站，送货上楼需另行确认。"
+    "remote_area_note": "新疆、西藏、青海、港澳台及偏远地区运费和时效需人工确认；且不享受包邮政策。",
+    "tracking_note": "发货后会提供物流单号；大件商品默认物流到站，送货上楼需另行确认。",
+    "shipping_policy": "江浙沪满500包邮，其他非偏远地区满1000包邮，新疆、西藏、内蒙等偏远地区不包邮"
   },
   "payment_policy": {
     "methods": [

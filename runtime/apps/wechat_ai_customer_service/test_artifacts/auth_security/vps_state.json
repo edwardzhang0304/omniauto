@@ -6,29 +6,33 @@
       "display_name": "customer_needs_email",
       "status": "active",
       "sync_enabled": false,
+      "industry_id": "home_appliance",
       "metadata": {
         "source": "customer_account",
-        "account_username": "customer_needs_email"
+        "account_username": "customer_needs_email",
+        "industry_id": "home_appliance"
       },
-      "created_at": "2026-05-03T13:48:12+00:00",
-      "updated_at": "2026-05-03T13:48:12+00:00"
+      "created_at": "2026-05-10T18:30:29+00:00",
+      "updated_at": "2026-05-10T18:30:29+00:00"
     },
     "customer_secure": {
       "tenant_id": "customer_secure",
       "display_name": "customer_secure",
       "status": "active",
       "sync_enabled": false,
+      "industry_id": "home_appliance",
       "metadata": {
         "source": "customer_account",
-        "account_username": "customer_secure"
+        "account_username": "customer_secure",
+        "industry_id": "home_appliance"
       },
-      "created_at": "2026-05-03T13:48:14+00:00",
-      "updated_at": "2026-05-03T13:48:14+00:00"
+      "created_at": "2026-05-10T18:30:30+00:00",
+      "updated_at": "2026-05-10T18:30:30+00:00"
     }
   },
   "users": {
-    "user_4tZZnSVeq4C6": {
-      "user_id": "user_4tZZnSVeq4C6",
+    "user_CwpABlpXIBfM": {
+      "user_id": "user_CwpABlpXIBfM",
       "username": "customer_needs_email",
       "display_name": "customer_needs_email",
       "email": "needs@example.local",
@@ -36,17 +40,18 @@
       "tenant_ids": [
         "customer_needs_email"
       ],
+      "industry_id": "",
       "resource_scopes": [
         "*"
       ],
       "status": "active",
-      "created_at": "2026-05-03T13:48:12+00:00",
-      "updated_at": "2026-05-03T13:48:13+00:00",
-      "password_hash": "pbkdf2_sha256$120000$7b6efd35fed8153ee2d0671f6e064565$21M3m26FcbLcQMGW2cXWkyd4QD5iu6IUGfutE3HwTQQ=",
-      "initialized_at": "2026-05-03T13:48:13+00:00"
+      "created_at": "2026-05-10T18:30:29+00:00",
+      "updated_at": "2026-05-10T18:30:29+00:00",
+      "password_hash": "pbkdf2_sha256$120000$a494837621160c1c80c29b825a59c5dd$oR69rBMos23yEBG4tR8WqklulzUBc/h/sAlvRTlHKsc=",
+      "initialized_at": "2026-05-10T18:30:29+00:00"
     },
-    "user_NWn0aUImV5CH": {
-      "user_id": "user_NWn0aUImV5CH",
+    "user_aIzYlj33VVH8": {
+      "user_id": "user_aIzYlj33VVH8",
       "username": "customer_secure",
       "display_name": "customer_secure",
       "email": "customer@example.local",
@@ -54,19 +59,20 @@
       "tenant_ids": [
         "customer_secure"
       ],
+      "industry_id": "",
       "resource_scopes": [
         "*"
       ],
       "status": "active",
-      "created_at": "2026-05-03T13:48:13+00:00",
-      "updated_at": "2026-05-03T13:48:15+00:00",
-      "password_hash": "pbkdf2_sha256$120000$eafe42e749c4318a850645d0ad9829b6$hq8tVyTVUvDJ0Y5JPuwEHQoNjXlKC+7HVvfkzfYrOy8=",
-      "initialized_at": "2026-05-03T13:48:14+00:00"
+      "created_at": "2026-05-10T18:30:29+00:00",
+      "updated_at": "2026-05-10T18:30:30+00:00",
+      "password_hash": "pbkdf2_sha256$120000$2437aabbff86f273153b73b96a4a630b$nQhwirj5+HV9Jej4wHwBlEuS1FDKuGKIjTzpEn2U1yo=",
+      "initialized_at": "2026-05-10T18:30:30+00:00"
     }
   },
   "sessions": {
-    "vps_SefiwHlhhq2N1Ar6Au2sLP_AE4IkIg9XmYLR2P82zuc": {
-      "session_id": "vps_SefiwHlhhq2N1Ar6Au2sLP_AE4IkIg9XmYLR2P82zuc",
+    "vps_eywCl3zqRo0lJOzaWdDyfPAEKqKLlfagRkEaWy21xuo": {
+      "session_id": "vps_eywCl3zqRo0lJOzaWdDyfPAEKqKLlfagRkEaWy21xuo",
       "user": {
         "user_id": "platform-admin",
         "role": "admin",
@@ -80,13 +86,13 @@
         ]
       },
       "active_tenant_id": "default",
-      "issued_at": "2026-05-03T13:48:11+00:00",
-      "expires_at": "2026-05-04T01:48:11+00:00",
+      "issued_at": "2026-05-10T18:30:28+00:00",
+      "expires_at": "2026-05-11T06:30:28+00:00",
       "source": "vps",
-      "token": "vps_SefiwHlhhq2N1Ar6Au2sLP_AE4IkIg9XmYLR2P82zuc"
+      "token": "vps_eywCl3zqRo0lJOzaWdDyfPAEKqKLlfagRkEaWy21xuo"
     },
-    "vps_twukhqN5e8RyiCrC1F4lfQP1VQlf38ZPCgw2a0lLIMM": {
-      "session_id": "vps_twukhqN5e8RyiCrC1F4lfQP1VQlf38ZPCgw2a0lLIMM",
+    "vps_CBLYorXFYHywGIi4q60TTpSnlTW_rJG7_KECY1ZX3Ok": {
+      "session_id": "vps_CBLYorXFYHywGIi4q60TTpSnlTW_rJG7_KECY1ZX3Ok",
       "user": {
         "user_id": "platform-admin",
         "role": "admin",
@@ -100,15 +106,15 @@
         ]
       },
       "active_tenant_id": "default",
-      "issued_at": "2026-05-03T13:48:12+00:00",
-      "expires_at": "2026-05-04T01:48:12+00:00",
+      "issued_at": "2026-05-10T18:30:29+00:00",
+      "expires_at": "2026-05-11T06:30:29+00:00",
       "source": "vps",
-      "token": "vps_twukhqN5e8RyiCrC1F4lfQP1VQlf38ZPCgw2a0lLIMM"
+      "token": "vps_CBLYorXFYHywGIi4q60TTpSnlTW_rJG7_KECY1ZX3Ok"
     },
-    "vps_FSQ3JN85yVpH4Sl4HS2BKL0k4Fue9AeMHIzhDjETz_0": {
-      "session_id": "vps_FSQ3JN85yVpH4Sl4HS2BKL0k4Fue9AeMHIzhDjETz_0",
+    "vps_mRuC0uELkhDTPp9IqTZLEL0XUj-q6KiNCJ8POgcjpeA": {
+      "session_id": "vps_mRuC0uELkhDTPp9IqTZLEL0XUj-q6KiNCJ8POgcjpeA",
       "user": {
-        "user_id": "user_4tZZnSVeq4C6",
+        "user_id": "user_CwpABlpXIBfM",
         "role": "customer",
         "tenant_ids": [
           "customer_needs_email"
@@ -120,15 +126,15 @@
         ]
       },
       "active_tenant_id": "customer_needs_email",
-      "issued_at": "2026-05-03T13:48:13+00:00",
-      "expires_at": "2026-05-04T01:48:13+00:00",
+      "issued_at": "2026-05-10T18:30:29+00:00",
+      "expires_at": "2026-05-11T06:30:29+00:00",
       "source": "vps",
-      "token": "vps_FSQ3JN85yVpH4Sl4HS2BKL0k4Fue9AeMHIzhDjETz_0"
+      "token": "vps_mRuC0uELkhDTPp9IqTZLEL0XUj-q6KiNCJ8POgcjpeA"
     },
-    "vps_XqXRbDDytbw5LZkkHPZtRDZdFQbID0qAF_FdYUkgEpA": {
-      "session_id": "vps_XqXRbDDytbw5LZkkHPZtRDZdFQbID0qAF_FdYUkgEpA",
+    "vps_-TGmraPXS12BIjBgPh3Jo6eNxrOl_tYJ0bcrknkmtcs": {
+      "session_id": "vps_-TGmraPXS12BIjBgPh3Jo6eNxrOl_tYJ0bcrknkmtcs",
       "user": {
-        "user_id": "user_NWn0aUImV5CH",
+        "user_id": "user_aIzYlj33VVH8",
         "role": "customer",
         "tenant_ids": [
           "customer_secure"
@@ -140,10 +146,10 @@
         ]
       },
       "active_tenant_id": "customer_secure",
-      "issued_at": "2026-05-03T13:48:15+00:00",
-      "expires_at": "2026-05-04T01:48:15+00:00",
+      "issued_at": "2026-05-10T18:30:30+00:00",
+      "expires_at": "2026-05-11T06:30:30+00:00",
       "source": "vps",
-      "token": "vps_XqXRbDDytbw5LZkkHPZtRDZdFQbID0qAF_FdYUkgEpA"
+      "token": "vps_-TGmraPXS12BIjBgPh3Jo6eNxrOl_tYJ0bcrknkmtcs"
     }
   },
   "admin_credentials": {
@@ -151,14 +157,14 @@
       "user_id": "platform-admin",
       "username": "admin",
       "email": "admin@example.local",
-      "password_hash": "pbkdf2_sha256$120000$29839a8a8b7f4bdd76e4e76c31753546$7wzFGVbZCeW/9IEMTxSw4PN3aPe2+EFOwk20xh5JPfA=",
-      "initialized_at": "2026-05-03T13:48:10+00:00",
-      "updated_at": "2026-05-03T13:48:11+00:00"
+      "password_hash": "pbkdf2_sha256$120000$b7d81a7324f3d1bf892e658b76158ca2$BR68gvFUbTPzqCWBEkDa31xtITyM+RmI1CgVOCk0kw4=",
+      "initialized_at": "2026-05-10T18:30:28+00:00",
+      "updated_at": "2026-05-10T18:30:29+00:00"
     }
   },
   "auth_challenges": {
-    "otp_5onu9YtafWTcF1NC3PPj-Sd-CQ6nn41z": {
-      "challenge_id": "otp_5onu9YtafWTcF1NC3PPj-Sd-CQ6nn41z",
+    "otp_ZmbitAOnjIfpVopj_yNP3nL4KgHQwx5w": {
+      "challenge_id": "otp_ZmbitAOnjIfpVopj_yNP3nL4KgHQwx5w",
       "username": "admin",
       "user_id": "platform-admin",
       "user": {
@@ -179,12 +185,12 @@
       "device_name": "",
       "ip_address": "testclient",
       "attempts_remaining": 5,
-      "expires_at": "2026-05-03T14:03:16+00:00",
-      "created_at": "2026-05-03T13:48:16+00:00",
+      "expires_at": "2026-05-10T18:45:30+00:00",
+      "created_at": "2026-05-10T18:30:30+00:00",
       "purpose": "login",
       "email": "admin@example.local",
-      "code_hash": "pbkdf2_sha256$120000$77f5ec1f304c57d7f65cc47dee797721$RUdzcT606M3nIcZmisZvRpkk7n96kO4cxP/1tt8ELzM=",
-      "last_sent_at": "2026-05-03T13:48:16+00:00"
+      "code_hash": "pbkdf2_sha256$120000$3dabd2646eaaef06750de70e8e900d6f$hinIUnwTiO48N2t5C+AkSc8ZZyXhl1LOTyIjv+7x9j4=",
+      "last_sent_at": "2026-05-10T18:30:30+00:00"
     }
   },
   "trusted_devices": {
@@ -193,9 +199,9 @@
       "user_id": "platform-admin",
       "device_name": "当前设备",
       "ip_address": "testclient",
-      "trusted_until": "2026-06-02T13:48:11+00:00",
-      "created_at": "2026-05-03T13:48:11+00:00",
-      "last_seen_at": "2026-05-03T13:48:11+00:00"
+      "trusted_until": "2026-06-09T18:30:28+00:00",
+      "created_at": "2026-05-10T18:30:28+00:00",
+      "last_seen_at": "2026-05-10T18:30:29+00:00"
     }
   },
   "smtp_config": {
@@ -212,9 +218,9 @@
     "ttl_minutes": 15,
     "resend_seconds": 60,
     "trusted_device_days": 30,
-    "initialized_at": "2026-05-03T13:48:10+00:00",
+    "initialized_at": "2026-05-10T18:30:28+00:00",
     "updated_by": "platform-admin",
-    "updated_at": "2026-05-03T13:48:15+00:00"
+    "updated_at": "2026-05-10T18:30:30+00:00"
   },
   "local_nodes": {},
   "commands": {},
@@ -223,6 +229,8 @@
   "shared_library": {},
   "shared_patches": {},
   "shared_scan_state": {},
+  "recorder_modules": {},
+  "recorder_module_bindings": {},
   "backup_requests": {},
   "restore_requests": {},
   "customer_data_packages": {},
@@ -230,208 +238,208 @@
   "releases": {},
   "audit_events": [
     {
-      "event_id": "audit_20260503134812887620_63dfe0",
-      "actor_id": "user_4tZZnSVeq4C6",
+      "event_id": "audit_20260510183029610779_9eef2c",
+      "actor_id": "user_CwpABlpXIBfM",
       "action": "start_account_initialization",
       "target_type": "auth_challenge",
-      "target_id": "init_eHWfsbR00fJDjrBYdNcxMka1vkDtgRTK",
+      "target_id": "init_zgKDd3WKGvu_fHR8flh-Nv6t6dhPbm1k",
       "detail": {
         "username": "customer_needs_email",
         "role": "customer"
       },
-      "created_at": "2026-05-03T13:48:12+00:00"
+      "created_at": "2026-05-10T18:30:29+00:00"
     },
     {
-      "event_id": "audit_20260503134813244449_60f16b",
-      "actor_id": "user_4tZZnSVeq4C6",
+      "event_id": "audit_20260510183029712293_8d6a18",
+      "actor_id": "user_CwpABlpXIBfM",
       "action": "send_initialization_code",
       "target_type": "auth_challenge",
-      "target_id": "init_eHWfsbR00fJDjrBYdNcxMka1vkDtgRTK",
+      "target_id": "init_zgKDd3WKGvu_fHR8flh-Nv6t6dhPbm1k",
       "detail": {
         "email": "ne***s@example.local",
         "role": "customer"
       },
-      "created_at": "2026-05-03T13:48:13+00:00"
+      "created_at": "2026-05-10T18:30:29+00:00"
     },
     {
-      "event_id": "audit_20260503134813423210_7ac8f2",
-      "actor_id": "user_4tZZnSVeq4C6",
+      "event_id": "audit_20260510183029773987_1b8f3f",
+      "actor_id": "user_CwpABlpXIBfM",
       "action": "verify_initialize_account",
       "target_type": "auth_challenge",
-      "target_id": "init_eHWfsbR00fJDjrBYdNcxMka1vkDtgRTK",
+      "target_id": "init_zgKDd3WKGvu_fHR8flh-Nv6t6dhPbm1k",
       "detail": {
         "email": "ne***s@example.local"
       },
-      "created_at": "2026-05-03T13:48:13+00:00"
+      "created_at": "2026-05-10T18:30:29+00:00"
     },
     {
-      "event_id": "audit_20260503134813425448_983af7",
-      "actor_id": "user_4tZZnSVeq4C6",
+      "event_id": "audit_20260510183029776513_d0bc7b",
+      "actor_id": "user_CwpABlpXIBfM",
       "action": "complete_account_initialization",
       "target_type": "user",
-      "target_id": "user_4tZZnSVeq4C6",
+      "target_id": "user_CwpABlpXIBfM",
       "detail": {
         "email": "ne***s@example.local",
         "revoked_sessions": 0
       },
-      "created_at": "2026-05-03T13:48:13+00:00"
+      "created_at": "2026-05-10T18:30:29+00:00"
     },
     {
-      "event_id": "audit_20260503134813771031_692e8d",
-      "actor_id": "user_4tZZnSVeq4C6",
+      "event_id": "audit_20260510183029890935_e5ca27",
+      "actor_id": "user_CwpABlpXIBfM",
       "action": "start_email_login",
       "target_type": "auth_challenge",
-      "target_id": "otp_RwKjJrY42xkSBlLJ6bO8PyEidM9mj43V",
+      "target_id": "otp_51VgyTAv2cIn7J8Rn8iH7iwGuN6NOPvS",
       "detail": {
         "username": "customer_needs_email",
         "email": "ne***s@example.local"
       },
-      "created_at": "2026-05-03T13:48:13+00:00"
+      "created_at": "2026-05-10T18:30:29+00:00"
     },
     {
-      "event_id": "audit_20260503134813943533_3df0b1",
-      "actor_id": "user_4tZZnSVeq4C6",
+      "event_id": "audit_20260510183029947546_d32622",
+      "actor_id": "user_CwpABlpXIBfM",
       "action": "verify_login",
       "target_type": "auth_challenge",
-      "target_id": "otp_RwKjJrY42xkSBlLJ6bO8PyEidM9mj43V",
+      "target_id": "otp_51VgyTAv2cIn7J8Rn8iH7iwGuN6NOPvS",
       "detail": {
         "email": "ne***s@example.local"
       },
-      "created_at": "2026-05-03T13:48:13+00:00"
+      "created_at": "2026-05-10T18:30:29+00:00"
     },
     {
-      "event_id": "audit_20260503134813948496_4ae192",
-      "actor_id": "user_4tZZnSVeq4C6",
+      "event_id": "audit_20260510183029954129_db12d3",
+      "actor_id": "user_CwpABlpXIBfM",
       "action": "login",
       "target_type": "session",
-      "target_id": "vps_FSQ3JN85yVpH4Sl4HS2BKL0k4Fue9AeMHIzhDjETz_0",
+      "target_id": "vps_mRuC0uELkhDTPp9IqTZLEL0XUj-q6KiNCJ8POgcjpeA",
       "detail": {},
-      "created_at": "2026-05-03T13:48:13+00:00"
+      "created_at": "2026-05-10T18:30:29+00:00"
     },
     {
-      "event_id": "audit_20260503134814101217_26afe6",
+      "event_id": "audit_20260510183030016393_d12c56",
       "actor_id": "platform-admin",
       "action": "create_user",
       "target_type": "user",
-      "target_id": "user_NWn0aUImV5CH",
+      "target_id": "user_aIzYlj33VVH8",
       "detail": {},
-      "created_at": "2026-05-03T13:48:14+00:00"
+      "created_at": "2026-05-10T18:30:30+00:00"
     },
     {
-      "event_id": "audit_20260503134814252794_89e26b",
-      "actor_id": "user_NWn0aUImV5CH",
+      "event_id": "audit_20260510183030078140_f944c1",
+      "actor_id": "user_aIzYlj33VVH8",
       "action": "start_account_initialization",
       "target_type": "auth_challenge",
-      "target_id": "init_GWzaT3LM7T4-kc5ZD2IkfvD6CBl0-yVV",
+      "target_id": "init_LMEQeJ1A3Gyd1qx826Q5nyjacBGLpV-9",
       "detail": {
         "username": "customer_secure",
         "role": "customer"
       },
-      "created_at": "2026-05-03T13:48:14+00:00"
+      "created_at": "2026-05-10T18:30:30+00:00"
     },
     {
-      "event_id": "audit_20260503134814550478_92e982",
-      "actor_id": "user_NWn0aUImV5CH",
+      "event_id": "audit_20260510183030197250_ee0ba4",
+      "actor_id": "user_aIzYlj33VVH8",
       "action": "send_initialization_code",
       "target_type": "auth_challenge",
-      "target_id": "init_GWzaT3LM7T4-kc5ZD2IkfvD6CBl0-yVV",
+      "target_id": "init_LMEQeJ1A3Gyd1qx826Q5nyjacBGLpV-9",
       "detail": {
         "email": "cu***r@example.local",
         "role": "customer"
       },
-      "created_at": "2026-05-03T13:48:14+00:00"
+      "created_at": "2026-05-10T18:30:30+00:00"
     },
     {
-      "event_id": "audit_20260503134814708676_327a9b",
-      "actor_id": "user_NWn0aUImV5CH",
+      "event_id": "audit_20260510183030265697_7db0c0",
+      "actor_id": "user_aIzYlj33VVH8",
       "action": "verify_initialize_account",
       "target_type": "auth_challenge",
-      "target_id": "init_GWzaT3LM7T4-kc5ZD2IkfvD6CBl0-yVV",
+      "target_id": "init_LMEQeJ1A3Gyd1qx826Q5nyjacBGLpV-9",
       "detail": {
         "email": "cu***r@example.local"
       },
-      "created_at": "2026-05-03T13:48:14+00:00"
+      "created_at": "2026-05-10T18:30:30+00:00"
     },
     {
-      "event_id": "audit_20260503134814711936_89b43f",
-      "actor_id": "user_NWn0aUImV5CH",
+      "event_id": "audit_20260510183030268686_4e7c6f",
+      "actor_id": "user_aIzYlj33VVH8",
       "action": "complete_account_initialization",
       "target_type": "user",
-      "target_id": "user_NWn0aUImV5CH",
+      "target_id": "user_aIzYlj33VVH8",
       "detail": {
         "email": "cu***r@example.local",
         "revoked_sessions": 0
       },
-      "created_at": "2026-05-03T13:48:14+00:00"
+      "created_at": "2026-05-10T18:30:30+00:00"
     },
     {
-      "event_id": "audit_20260503134815052071_340869",
-      "actor_id": "user_NWn0aUImV5CH",
+      "event_id": "audit_20260510183030393373_4d7cfd",
+      "actor_id": "user_aIzYlj33VVH8",
       "action": "start_email_login",
       "target_type": "auth_challenge",
-      "target_id": "otp_SK6JbKxDF1d7QSSGHIA56QbPbx8flfUc",
+      "target_id": "otp_SfsgDDXrazdilQGxyxvudo7zOD1chxJy",
       "detail": {
         "username": "customer_secure",
         "email": "cu***r@example.local"
       },
-      "created_at": "2026-05-03T13:48:15+00:00"
+      "created_at": "2026-05-10T18:30:30+00:00"
     },
     {
-      "event_id": "audit_20260503134815207843_881e54",
-      "actor_id": "user_NWn0aUImV5CH",
+      "event_id": "audit_20260510183030455650_da59fa",
+      "actor_id": "user_aIzYlj33VVH8",
       "action": "verify_login",
       "target_type": "auth_challenge",
-      "target_id": "otp_SK6JbKxDF1d7QSSGHIA56QbPbx8flfUc",
+      "target_id": "otp_SfsgDDXrazdilQGxyxvudo7zOD1chxJy",
       "detail": {
         "email": "cu***r@example.local"
       },
-      "created_at": "2026-05-03T13:48:15+00:00"
+      "created_at": "2026-05-10T18:30:30+00:00"
     },
     {
-      "event_id": "audit_20260503134815210553_e111dd",
-      "actor_id": "user_NWn0aUImV5CH",
+      "event_id": "audit_20260510183030459652_e2eb4a",
+      "actor_id": "user_aIzYlj33VVH8",
       "action": "login",
       "target_type": "session",
-      "target_id": "vps_XqXRbDDytbw5LZkkHPZtRDZdFQbID0qAF_FdYUkgEpA",
+      "target_id": "vps_-TGmraPXS12BIjBgPh3Jo6eNxrOl_tYJ0bcrknkmtcs",
       "detail": {},
-      "created_at": "2026-05-03T13:48:15+00:00"
+      "created_at": "2026-05-10T18:30:30+00:00"
     },
     {
-      "event_id": "audit_20260503134815694595_993264",
-      "actor_id": "user_NWn0aUImV5CH",
+      "event_id": "audit_20260510183030613968_89809f",
+      "actor_id": "user_aIzYlj33VVH8",
       "action": "start_password_change",
       "target_type": "auth_challenge",
-      "target_id": "otp_1E_sp19bxQNmHjDCxhNyvlx6-jnSZKqd",
+      "target_id": "otp_7xXI0OvT9Qn2JqoKYljlaH9p3COGVYmb",
       "detail": {
         "email": "cu***r@example.local"
       },
-      "created_at": "2026-05-03T13:48:15+00:00"
+      "created_at": "2026-05-10T18:30:30+00:00"
     },
     {
-      "event_id": "audit_20260503134815862238_f0389b",
-      "actor_id": "user_NWn0aUImV5CH",
+      "event_id": "audit_20260510183030672452_5f7ac7",
+      "actor_id": "user_aIzYlj33VVH8",
       "action": "verify_change_password",
       "target_type": "auth_challenge",
-      "target_id": "otp_1E_sp19bxQNmHjDCxhNyvlx6-jnSZKqd",
+      "target_id": "otp_7xXI0OvT9Qn2JqoKYljlaH9p3COGVYmb",
       "detail": {
         "email": "cu***r@example.local"
       },
-      "created_at": "2026-05-03T13:48:15+00:00"
+      "created_at": "2026-05-10T18:30:30+00:00"
     },
     {
-      "event_id": "audit_20260503134815868628_c9bbf0",
-      "actor_id": "user_NWn0aUImV5CH",
+      "event_id": "audit_20260510183030674464_cf6d39",
+      "actor_id": "user_aIzYlj33VVH8",
       "action": "change_password",
       "target_type": "user",
-      "target_id": "user_NWn0aUImV5CH",
+      "target_id": "user_aIzYlj33VVH8",
       "detail": {
         "revoked_sessions": 0,
         "verified_by_email": true
       },
-      "created_at": "2026-05-03T13:48:15+00:00"
+      "created_at": "2026-05-10T18:30:30+00:00"
     },
     {
-      "event_id": "audit_20260503134815879653_3f1c84",
+      "event_id": "audit_20260510183030682513_565823",
       "actor_id": "platform-admin",
       "action": "update_smtp_config",
       "target_type": "security",
@@ -440,19 +448,19 @@
         "server": "",
         "otp_required": false
       },
-      "created_at": "2026-05-03T13:48:15+00:00"
+      "created_at": "2026-05-10T18:30:30+00:00"
     },
     {
-      "event_id": "audit_20260503134816273381_1f3768",
+      "event_id": "audit_20260510183030785185_cdfdc3",
       "actor_id": "platform-admin",
       "action": "start_email_login",
       "target_type": "auth_challenge",
-      "target_id": "otp_5onu9YtafWTcF1NC3PPj-Sd-CQ6nn41z",
+      "target_id": "otp_ZmbitAOnjIfpVopj_yNP3nL4KgHQwx5w",
       "detail": {
         "username": "admin",
         "email": "ad***n@example.local"
       },
-      "created_at": "2026-05-03T13:48:16+00:00"
+      "created_at": "2026-05-10T18:30:30+00:00"
     }
   ]
 }

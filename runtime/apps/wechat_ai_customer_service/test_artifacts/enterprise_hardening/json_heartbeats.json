@@ -6,7 +6,7 @@
       "status": "ok",
       "message": "alive",
       "payload": {},
-      "last_seen_at": "2026-05-03T08:47:10"
+      "last_seen_at": "2026-05-10T04:10:40"
     },
     {
       "tenant_id": "hardening_json_monitor",
@@ -14,7 +14,7 @@
       "status": "warning",
       "message": "rate limit",
       "payload": {},
-      "last_seen_at": "2026-05-03T08:47:10"
+      "last_seen_at": "2026-05-10T04:10:40"
     }
   ]
 }

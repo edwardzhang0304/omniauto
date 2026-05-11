@@ -123,17 +123,65 @@ class RawMessageStore:
         }
 
     def list_messages(self, *, conversation_id: str = "", query: str = "", limit: int = 100) -> list[dict[str, Any]]:
+        return self.list_messages_advanced(conversation_id=conversation_id, query=query, limit=limit)
+
+    def list_messages_advanced(
+        self,
+        *,
+        conversation_id: str = "",
+        query: str = "",
+        limit: int = 100,
+        offset: int = 0,
+        start_time: str = "",
+        end_time: str = "",
+        sender: str = "",
+        content_type: str = "",
+        conversation_type: str = "",
+        keywords: list[str] | None = None,
+    ) -> list[dict[str, Any]]:
         db = postgres_store()
         if db:
-            return db.list_raw_messages(self.tenant_id, conversation_id=conversation_id, query=query, limit=limit)
+            return db.list_raw_messages(
+                self.tenant_id,
+                conversation_id=conversation_id,
+                query=query,
+                limit=limit,
+                offset=offset,
+                start_time=start_time,
+                end_time=end_time,
+                sender=sender,
+                content_type=content_type,
+                conversation_type=conversation_type,
+                keywords=[item for item in (keywords or []) if str(item).strip()],
+            )
         records = [item for item in self._read_json(self.messages_path, []) if isinstance(item, dict)]
         if conversation_id:
             records = [item for item in records if str(item.get("conversation_id") or "") == conversation_id]
+        if conversation_type:
+            records = [item for item in records if str(item.get("conversation_type") or "") == conversation_type]
+        if sender:
+            lowered_sender = sender.lower().strip()
+            records = [item for item in records if lowered_sender in str(item.get("sender") or "").lower()]
+        if content_type:
+            records = [item for item in records if str(item.get("content_type") or "").lower() == content_type.lower().strip()]
         if query:
             lowered = query.lower()
             records = [item for item in records if lowered in str(item.get("content") or "").lower()]
+        terms = [str(item).strip().lower() for item in (keywords or []) if str(item).strip()]
+        if terms:
+            records = [
+                item
+                for item in records
+                if all(term in str(item.get("content") or "").lower() for term in terms)
+            ]
+        if start_time:
+            records = [item for item in records if message_time_text(item) >= start_time]
+        if end_time:
+            records = [item for item in records if message_time_text(item) <= end_time]
         records.sort(key=lambda item: str(item.get("observed_at") or ""), reverse=True)
-        return records[: max(1, min(int(limit or 100), 500))]
+        clean_offset = max(0, int(offset or 0))
+        clean_limit = max(1, min(int(limit or 100), 10000))
+        return records[clean_offset : clean_offset + clean_limit]
 
     def create_batch(
         self,
@@ -366,6 +414,10 @@ def normalized_content_fingerprint(value: str) -> str:
 
 def now() -> str:
     return datetime.now().isoformat(timespec="seconds")
+
+
+def message_time_text(message: dict[str, Any]) -> str:
+    return str(message.get("message_time") or message.get("observed_at") or "")
 
 
 def postgres_store():

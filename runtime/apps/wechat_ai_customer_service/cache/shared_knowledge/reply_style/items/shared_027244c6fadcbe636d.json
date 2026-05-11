@@ -10,6 +10,7 @@
   "schema_version": 1,
   "id": "shared_027244c6fadcbe636d",
   "item_id": "shared_027244c6fadcbe636d",
+  "industry_id": "global",
   "category_id": "reply_style",
   "status": "active",
   "content": "客户明确要求人工服务时，AI客服应及时说明正在转接，并提醒客户稍候。",

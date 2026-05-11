@@ -1,6 +1,6 @@
 {
-  "enabled": false,
-  "reply_mode": "manual_assist",
+  "enabled": true,
+  "reply_mode": "guarded_auto",
   "record_messages": true,
   "auto_learn": true,
   "use_llm": true,

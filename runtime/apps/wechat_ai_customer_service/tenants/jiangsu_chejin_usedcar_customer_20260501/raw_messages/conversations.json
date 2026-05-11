@@ -1,10 +1,10 @@
 [
   {
     "tenant_id": "jiangsu_chejin_usedcar_customer_20260501",
-    "conversation_id": "conv_54a96e57c70563ab9c",
-    "conversation_type": "private",
-    "target_name": "车金测试私聊",
-    "display_name": "车金测试私聊",
+    "conversation_id": "conv_87036d2253c2c945ed",
+    "conversation_type": "file_transfer",
+    "target_name": "文件传输助手",
+    "display_name": "文件传输助手",
     "group_name": "",
     "status": "active",
     "exact": true,
@@ -12,15 +12,15 @@
     "learning_enabled": true,
     "notify_enabled": false,
     "selected_by_user": false,
-    "created_at": "2026-05-05T21:43:04",
-    "updated_at": "2026-05-05T21:43:04",
+    "created_at": "2026-05-10T04:10:04",
+    "updated_at": "2026-05-10T04:10:04",
     "source": {
       "type": "customer_service_listener"
     },
     "raw_payload": {
-      "target_name": "车金测试私聊",
-      "display_name": "车金测试私聊",
-      "conversation_type": "private",
+      "target_name": "文件传输助手",
+      "display_name": "文件传输助手",
+      "conversation_type": "file_transfer",
       "status": "active",
       "exact": true,
       "record_self": true,
@@ -44,11 +44,11 @@
     "learning_enabled": true,
     "notify_enabled": false,
     "selected_by_user": false,
-    "created_at": "2026-05-05T21:43:04",
-    "updated_at": "2026-05-05T21:43:04",
+    "created_at": "2026-05-10T04:02:40",
+    "updated_at": "2026-05-10T04:02:40",
     "source": {
       "type": "jiangsu_chejin_offline_recorder",
-      "batch_token": "CHEJIN_20260505_214257"
+      "batch_token": "CHEJIN_20260510_035848"
     },
     "raw_payload": {
       "target_name": "离线回归-记录员群聊",
@@ -59,39 +59,39 @@
       "notify_enabled": false,
       "source": {
         "type": "jiangsu_chejin_offline_recorder",
-        "batch_token": "CHEJIN_20260505_214257"
+        "batch_token": "CHEJIN_20260510_035848"
       }
     }
   },
   {
     "tenant_id": "jiangsu_chejin_usedcar_customer_20260501",
-    "conversation_id": "conv_87036d2253c2c945ed",
-    "conversation_type": "file_transfer",
-    "target_name": "文件传输助手",
-    "display_name": "文件传输助手",
+    "conversation_id": "conv_54a96e57c70563ab9c",
+    "conversation_type": "private",
+    "target_name": "车金测试私聊",
+    "display_name": "车金测试私聊",
     "group_name": "",
     "status": "active",
     "exact": true,
-    "record_self": false,
+    "record_self": true,
     "learning_enabled": true,
     "notify_enabled": false,
-    "selected_by_user": true,
-    "created_at": "2026-05-05T21:43:04",
-    "updated_at": "2026-05-05T21:43:04",
+    "selected_by_user": false,
+    "created_at": "2026-05-10T04:01:50",
+    "updated_at": "2026-05-10T04:01:50",
     "source": {
-      "type": "jiangsu_chejin_offline_recorder",
-      "batch_token": "CHEJIN_20260505_214257"
+      "type": "customer_service_listener"
     },
     "raw_payload": {
-      "target_name": "文件传输助手",
-      "display_name": "文件传输助手",
-      "conversation_type": "file_transfer",
-      "selected_by_user": true,
+      "target_name": "车金测试私聊",
+      "display_name": "车金测试私聊",
+      "conversation_type": "private",
+      "status": "active",
+      "exact": true,
+      "record_self": true,
       "learning_enabled": true,
       "notify_enabled": false,
       "source": {
-        "type": "jiangsu_chejin_offline_recorder",
-        "batch_token": "CHEJIN_20260505_214257"
+        "type": "customer_service_listener"
       }
     }
   },
@@ -108,8 +108,8 @@
     "learning_enabled": true,
     "notify_enabled": false,
     "selected_by_user": false,
-    "created_at": "2026-05-04T04:23:46",
-    "updated_at": "2026-05-04T04:23:46",
+    "created_at": "2026-05-09T13:12:52",
+    "updated_at": "2026-05-09T13:12:52",
     "source": {
       "type": "customer_service_listener"
     },

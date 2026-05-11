@@ -21,6 +21,7 @@ from .services import (
     SecurityConfigService,
     SharedKnowledgeService,
     TenantService,
+    RecorderModuleAssignmentService,
     UserService,
     CustomerDataService,
     OverviewService,
@@ -47,6 +48,7 @@ def create_app(*, state_path: Path | None = None) -> FastAPI:
     app.state.tenant_service = TenantService(store)
     app.state.user_service = UserService(store, auth)
     app.state.customer_data_service = CustomerDataService(store, auth)
+    app.state.recorder_module_assignment_service = RecorderModuleAssignmentService(store)
     app.state.node_service = NodeService(store)
     app.state.command_service = commands
     app.state.shared_service = SharedKnowledgeService(store)
@@ -280,6 +282,46 @@ def create_app(*, state_path: Path | None = None) -> FastAPI:
     def create_user(payload: dict[str, Any], actor: AuthSession = Depends(current_admin)) -> dict[str, Any]:
         return {"ok": True, "user": app.state.user_service.create_user(payload, actor=actor)}
 
+    @app.get("/v1/admin/recorder-modules")
+    def list_recorder_modules(
+        include_inactive: bool = Query(default=True),
+        _: AuthSession = Depends(current_admin),
+    ) -> dict[str, Any]:
+        return {"ok": True, "items": app.state.recorder_module_assignment_service.list_modules(include_inactive=include_inactive)}
+
+    @app.post("/v1/admin/recorder-modules")
+    def upsert_recorder_module(payload: dict[str, Any], actor: AuthSession = Depends(current_admin)) -> dict[str, Any]:
+        return {"ok": True, "item": app.state.recorder_module_assignment_service.upsert_module(payload, actor=actor)}
+
+    @app.get("/v1/admin/recorder-module-bindings")
+    def list_recorder_module_bindings(
+        scope_type: str = Query(default=""),
+        scope_id: str = Query(default=""),
+        tenant_id: str = Query(default=""),
+        user_id: str = Query(default=""),
+        _: AuthSession = Depends(current_admin),
+    ) -> dict[str, Any]:
+        return {
+            "ok": True,
+            "items": app.state.recorder_module_assignment_service.list_bindings(
+                scope_type=scope_type,
+                scope_id=scope_id,
+                tenant_id=tenant_id,
+                user_id=user_id,
+            ),
+        }
+
+    @app.post("/v1/admin/recorder-module-bindings")
+    def upsert_recorder_module_binding(payload: dict[str, Any], actor: AuthSession = Depends(current_admin)) -> dict[str, Any]:
+        return {"ok": True, "item": app.state.recorder_module_assignment_service.upsert_binding(payload, actor=actor)}
+
+    @app.delete("/v1/admin/recorder-module-bindings/{binding_id}")
+    def delete_recorder_module_binding(binding_id: str, actor: AuthSession = Depends(current_admin)) -> dict[str, Any]:
+        deleted = app.state.recorder_module_assignment_service.delete_binding(binding_id, actor=actor)
+        if not deleted:
+            raise HTTPException(status_code=404, detail=f"recorder module binding not found: {binding_id}")
+        return {"ok": True, "deleted": True}
+
     @app.patch("/v1/admin/users/{user_id}")
     def update_user(user_id: str, payload: dict[str, Any], actor: AuthSession = Depends(current_admin)) -> dict[str, Any]:
         return {"ok": True, "user": app.state.user_service.update_user(user_id, payload, actor=actor)}
@@ -354,6 +396,22 @@ def create_app(*, state_path: Path | None = None) -> FastAPI:
     @app.post("/v1/admin/shared/library")
     def create_shared_library_item(payload: dict[str, Any], actor: AuthSession = Depends(current_admin)) -> dict[str, Any]:
         return {"ok": True, "item": app.state.shared_service.create_library_item(payload, actor=actor)}
+
+    @app.post("/v1/admin/shared/library/draft")
+    def draft_shared_library_item(payload: dict[str, Any], actor: AuthSession = Depends(current_admin)) -> dict[str, Any]:
+        description = str((payload or {}).get("description") or (payload or {}).get("text") or "")
+        try:
+            result = app.state.shared_service.draft_from_natural_language(
+                description,
+                actor=actor,
+                use_llm=bool((payload or {}).get("use_llm", True)),
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return {
+            "ok": True,
+            **result,
+        }
 
     @app.get("/v1/admin/shared/library/{item_id}")
     def get_shared_library_item(item_id: str, _: AuthSession = Depends(current_admin)) -> dict[str, Any]:

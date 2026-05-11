@@ -3,11 +3,52 @@
   "targets": {
     "文件传输助手": {
       "processed_message_ids": [
-        "2368b5ab270998b392c5e5c0fe4f395d"
+        "2368b5ab270998b392c5e5c0fe4f395d",
+        "6ffdc3e021f8ec602af510b0e7361a5b",
+        "34c60ec4cdd6f12c6679215136c028ba",
+        "39d950986f59008d65dfecd84b08074a",
+        "c62090c8405ab3f41591d683edd7dd11"
       ],
-      "handoff_message_ids": [],
-      "sent_replies": [],
-      "reply_timestamps": [],
+      "handoff_message_ids": [
+        "6ffdc3e021f8ec602af510b0e7361a5b",
+        "34c60ec4cdd6f12c6679215136c028ba",
+        "39d950986f59008d65dfecd84b08074a",
+        "c62090c8405ab3f41591d683edd7dd11"
+      ],
+      "sent_replies": [
+        {
+          "reply_trace_id": "reply_trace_aef312e866d2a0724ed0",
+          "message_ids": [
+            "6ffdc3e021f8ec602af510b0e7361a5b",
+            "34c60ec4cdd6f12c6679215136c028ba"
+          ],
+          "message_contents": [
+            "买7台商用冰箱能按10台价格吗？\n[live-regression:20260508235450:20:1]",
+            "客户资料\n姓名：周批次\n电话：13700003333\n地址：广州市天河区测试路3号\n产品：商用冰箱\n数量：7台\n[live-regression:20260508235450:20:2]"
+          ],
+          "reply_text": "[OmniAuto客服] 您好，关于您询问的7台商用冰箱按10台价格的问题，由于涉及阶梯价格审批，我暂时无法直接确认。需要为您转接人工同事进一步核实，稍后人工客服会联系您，请留意消息。您的资料已记录，请放心。",
+          "processed_at": "2026-05-09T11:46:31",
+          "send_verified": true
+        },
+        {
+          "reply_trace_id": "reply_trace_eca343ea955badb12c4f",
+          "message_ids": [
+            "39d950986f59008d65dfecd84b08074a",
+            "c62090c8405ab3f41591d683edd7dd11"
+          ],
+          "message_contents": [
+            "买7台商用冰箱能按10台价格吗？\n[live-regression:20260508235450:20:1]",
+            "客户资料\n姓名：周批次\n电话：13700003333\n地址：广州市天河区测试路3号\n产品：商用冰箱\n数量：7台\n[live-regression:20260508235450:20:2]"
+          ],
+          "reply_text": "[OmniAuto客服] 您好，您问的7台商用冰箱按10台价格的问题，涉及阶梯价格审批，我这边暂时无法直接确认。您的资料已经记录，我会转给人工同事核实，稍后联系您，请留意消息。",
+          "processed_at": "2026-05-09T11:50:47",
+          "send_verified": true
+        }
+      ],
+      "reply_timestamps": [
+        "2026-05-09T11:46:31",
+        "2026-05-09T11:50:47"
+      ],
       "bootstrap_events": [
         {
           "message_ids": [
@@ -15,7 +56,172 @@
           ],
           "created_at": "2026-04-26T03:23:27"
         }
+      ],
+      "_intent_router_cache": {
+        "intent": "product_inquiry",
+        "confidence": 0.95,
+        "reasoning": "",
+        "entities": {},
+        "source": "llm",
+        "created_at": "2026-05-09T11:50:22",
+        "ttl_seconds": 60
+      },
+      "operator_alerts": [
+        {
+          "created_at": "2026-05-09T11:46:31",
+          "target": "文件传输助手",
+          "message_ids": [
+            "6ffdc3e021f8ec602af510b0e7361a5b",
+            "34c60ec4cdd6f12c6679215136c028ba"
+          ],
+          "message_contents": [
+            "买7台商用冰箱能按10台价格吗？\n[live-regression:20260508235450:20:1]",
+            "客户资料\n姓名：周批次\n电话：13700003333\n地址：广州市天河区测试路3号\n产品：商用冰箱\n数量：7台\n[live-regression:20260508235450:20:2]"
+          ],
+          "combined_content": "买7台商用冰箱能按10台价格吗？\n[live-regression:20260508235450:20:1]\n客户资料\n姓名：周批次\n电话：13700003333\n地址：广州市天河区测试路3号\n产品：商用冰箱\n数量：7台\n[live-regression:20260508235450:20:2]",
+          "reason": "evidence_safety:matched_faq_requires_handoff,requested_price_below_public_tier,missing_authoritative_evidence,auto_reply_disabled",
+          "reply_text": "[OmniAuto客服] 您好，关于您询问的7台商用冰箱按10台价格的问题，由于涉及阶梯价格审批，我暂时无法直接确认。需要为您转接人工同事进一步核实，稍后人工客服会联系您，请留意消息。您的资料已记录，请放心。",
+          "product_knowledge": null,
+          "status": "open",
+          "delivery": {
+            "type": "jsonl",
+            "path": "D:\\AI\\omniauto\\runtime\\apps\\wechat_ai_customer_service\\logs\\operator_alerts.jsonl",
+            "ok": true
+          },
+          "case_store": {
+            "enabled": true,
+            "ok": true,
+            "case_id": "handoff_276045494cdab7a088c0",
+            "status": "open"
+          }
+        },
+        {
+          "created_at": "2026-05-09T11:50:47",
+          "target": "文件传输助手",
+          "message_ids": [
+            "39d950986f59008d65dfecd84b08074a",
+            "c62090c8405ab3f41591d683edd7dd11"
+          ],
+          "message_contents": [
+            "买7台商用冰箱能按10台价格吗？\n[live-regression:20260508235450:20:1]",
+            "客户资料\n姓名：周批次\n电话：13700003333\n地址：广州市天河区测试路3号\n产品：商用冰箱\n数量：7台\n[live-regression:20260508235450:20:2]"
+          ],
+          "combined_content": "买7台商用冰箱能按10台价格吗？\n[live-regression:20260508235450:20:1]\n客户资料\n姓名：周批次\n电话：13700003333\n地址：广州市天河区测试路3号\n产品：商用冰箱\n数量：7台\n[live-regression:20260508235450:20:2]",
+          "reason": "evidence_safety:matched_faq_requires_handoff,requested_price_below_public_tier,missing_authoritative_evidence,auto_reply_disabled",
+          "reply_text": "[OmniAuto客服] 您好，您问的7台商用冰箱按10台价格的问题，涉及阶梯价格审批，我这边暂时无法直接确认。您的资料已经记录，我会转给人工同事核实，稍后联系您，请留意消息。",
+          "product_knowledge": {
+            "enabled": false
+          },
+          "status": "open",
+          "delivery": {
+            "type": "jsonl",
+            "path": "D:\\AI\\omniauto\\runtime\\apps\\wechat_ai_customer_service\\logs\\operator_alerts.jsonl",
+            "ok": true
+          },
+          "case_store": {
+            "enabled": true,
+            "ok": true,
+            "case_id": "handoff_2cfdd2e34472e78a7046",
+            "status": "open"
+          }
+        }
+      ],
+      "handoff_events": [
+        {
+          "reply_trace_id": "reply_trace_aef312e866d2a0724ed0",
+          "message_ids": [
+            "6ffdc3e021f8ec602af510b0e7361a5b",
+            "34c60ec4cdd6f12c6679215136c028ba"
+          ],
+          "message_contents": [
+            "买7台商用冰箱能按10台价格吗？\n[live-regression:20260508235450:20:1]",
+            "客户资料\n姓名：周批次\n电话：13700003333\n地址：广州市天河区测试路3号\n产品：商用冰箱\n数量：7台\n[live-regression:20260508235450:20:2]"
+          ],
+          "reply_text": "[OmniAuto客服] 您好，关于您询问的7台商用冰箱按10台价格的问题，由于涉及阶梯价格审批，我暂时无法直接确认。需要为您转接人工同事进一步核实，稍后人工客服会联系您，请留意消息。您的资料已记录，请放心。",
+          "reason": "evidence_safety:matched_faq_requires_handoff,requested_price_below_public_tier,missing_authoritative_evidence,auto_reply_disabled",
+          "status": "open",
+          "created_at": "2026-05-09T11:46:31",
+          "operator_alert": {
+            "created_at": "2026-05-09T11:46:31",
+            "target": "文件传输助手",
+            "message_ids": [
+              "6ffdc3e021f8ec602af510b0e7361a5b",
+              "34c60ec4cdd6f12c6679215136c028ba"
+            ],
+            "message_contents": [
+              "买7台商用冰箱能按10台价格吗？\n[live-regression:20260508235450:20:1]",
+              "客户资料\n姓名：周批次\n电话：13700003333\n地址：广州市天河区测试路3号\n产品：商用冰箱\n数量：7台\n[live-regression:20260508235450:20:2]"
+            ],
+            "combined_content": "买7台商用冰箱能按10台价格吗？\n[live-regression:20260508235450:20:1]\n客户资料\n姓名：周批次\n电话：13700003333\n地址：广州市天河区测试路3号\n产品：商用冰箱\n数量：7台\n[live-regression:20260508235450:20:2]",
+            "reason": "evidence_safety:matched_faq_requires_handoff,requested_price_below_public_tier,missing_authoritative_evidence,auto_reply_disabled",
+            "reply_text": "[OmniAuto客服] 您好，关于您询问的7台商用冰箱按10台价格的问题，由于涉及阶梯价格审批，我暂时无法直接确认。需要为您转接人工同事进一步核实，稍后人工客服会联系您，请留意消息。您的资料已记录，请放心。",
+            "product_knowledge": null,
+            "status": "open",
+            "delivery": {
+              "type": "jsonl",
+              "path": "D:\\AI\\omniauto\\runtime\\apps\\wechat_ai_customer_service\\logs\\operator_alerts.jsonl",
+              "ok": true
+            },
+            "case_store": {
+              "enabled": true,
+              "ok": true,
+              "case_id": "handoff_276045494cdab7a088c0",
+              "status": "open"
+            }
+          }
+        },
+        {
+          "reply_trace_id": "reply_trace_eca343ea955badb12c4f",
+          "message_ids": [
+            "39d950986f59008d65dfecd84b08074a",
+            "c62090c8405ab3f41591d683edd7dd11"
+          ],
+          "message_contents": [
+            "买7台商用冰箱能按10台价格吗？\n[live-regression:20260508235450:20:1]",
+            "客户资料\n姓名：周批次\n电话：13700003333\n地址：广州市天河区测试路3号\n产品：商用冰箱\n数量：7台\n[live-regression:20260508235450:20:2]"
+          ],
+          "reply_text": "[OmniAuto客服] 您好，您问的7台商用冰箱按10台价格的问题，涉及阶梯价格审批，我这边暂时无法直接确认。您的资料已经记录，我会转给人工同事核实，稍后联系您，请留意消息。",
+          "reason": "evidence_safety:matched_faq_requires_handoff,requested_price_below_public_tier,missing_authoritative_evidence,auto_reply_disabled",
+          "status": "open",
+          "created_at": "2026-05-09T11:50:47",
+          "operator_alert": {
+            "created_at": "2026-05-09T11:50:47",
+            "target": "文件传输助手",
+            "message_ids": [
+              "39d950986f59008d65dfecd84b08074a",
+              "c62090c8405ab3f41591d683edd7dd11"
+            ],
+            "message_contents": [
+              "买7台商用冰箱能按10台价格吗？\n[live-regression:20260508235450:20:1]",
+              "客户资料\n姓名：周批次\n电话：13700003333\n地址：广州市天河区测试路3号\n产品：商用冰箱\n数量：7台\n[live-regression:20260508235450:20:2]"
+            ],
+            "combined_content": "买7台商用冰箱能按10台价格吗？\n[live-regression:20260508235450:20:1]\n客户资料\n姓名：周批次\n电话：13700003333\n地址：广州市天河区测试路3号\n产品：商用冰箱\n数量：7台\n[live-regression:20260508235450:20:2]",
+            "reason": "evidence_safety:matched_faq_requires_handoff,requested_price_below_public_tier,missing_authoritative_evidence,auto_reply_disabled",
+            "reply_text": "[OmniAuto客服] 您好，您问的7台商用冰箱按10台价格的问题，涉及阶梯价格审批，我这边暂时无法直接确认。您的资料已经记录，我会转给人工同事核实，稍后联系您，请留意消息。",
+            "product_knowledge": {
+              "enabled": false
+            },
+            "status": "open",
+            "delivery": {
+              "type": "jsonl",
+              "path": "D:\\AI\\omniauto\\runtime\\apps\\wechat_ai_customer_service\\logs\\operator_alerts.jsonl",
+              "ok": true
+            },
+            "case_store": {
+              "enabled": true,
+              "ok": true,
+              "case_id": "handoff_2cfdd2e34472e78a7046",
+              "status": "open"
+            }
+          }
+        }
       ]
+    },
+    "许聪": {
+      "processed_message_ids": [],
+      "handoff_message_ids": [],
+      "sent_replies": [],
+      "reply_timestamps": []
     }
   }
 }

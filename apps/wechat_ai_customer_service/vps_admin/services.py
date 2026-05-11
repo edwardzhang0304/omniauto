@@ -7,6 +7,8 @@ import hmac
 import os
 import re
 import secrets
+import urllib.error
+import urllib.request
 from hashlib import sha256
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -16,7 +18,14 @@ from fastapi import HTTPException
 
 from apps.wechat_ai_customer_service.auth.email_verification import EmailVerificationService, email_settings_from_config, normalize_email
 from apps.wechat_ai_customer_service.auth.models import AuthSession, Role
-from apps.wechat_ai_customer_service.auth.session import read_local_account_overrides_from_env
+from apps.wechat_ai_customer_service.auth.session import read_local_account_overrides_from_env, write_local_account_overrides_to_env
+from apps.wechat_ai_customer_service.llm_config import (
+    read_secret,
+    resolve_deepseek_base_url,
+    resolve_deepseek_max_tokens,
+    resolve_deepseek_tier_model,
+    resolve_deepseek_timeout,
+)
 from apps.wechat_ai_customer_service.knowledge_paths import (
     DEFAULT_TENANT_ID,
     TENANTS_ROOT,
@@ -50,11 +59,43 @@ from .auth import (
     hash_password,
     make_id,
     public_user,
+    revoke_user_sessions,
     require_customer_or_guest,
 )
 from .local_data import build_shared_knowledge_snapshot, build_tenant_data_summary
 from apps.wechat_ai_customer_service.exports.readable_export import build_customer_readable_workbook
 from .store import VpsAdminStore, append_audit, now_iso
+
+
+DEFAULT_RECORDER_MODULES = [
+    {
+        "module_key": "raw_message_log_v1",
+        "module_name": "通用原始消息导出V1",
+        "module_type": "chat_extract_export",
+        "status": "active",
+        "version": "1.0.0",
+        "config": {
+            "description": "Generic baseline export that writes raw messages to a readable workbook.",
+        },
+        "builtin": True,
+    },
+    {
+        "module_key": "order_sheet_lab_v1",
+        "module_name": "实验仪器订货表V1",
+        "module_type": "chat_extract_export",
+        "status": "active",
+        "version": "1.0.0",
+        "config": {
+            "description": "Rule-first order extraction with optional LLM supplementation, exports to order-sheet style workbook.",
+            "date_output_mode": "MMDD_text",
+            "allow_empty_cost_fields": True,
+            "llm_enabled": True,
+            "llm_max_rows_per_run": 40,
+            "supported_content_types": ["text", "quote"],
+        },
+        "builtin": True,
+    },
+]
 
 
 class TenantService:
@@ -122,6 +163,136 @@ class TenantService:
             record["updated_at"] = now_iso()
             append_audit(state, actor_id=actor.user.user_id, action="update_tenant", target_type="tenant", target_id=tenant)
             return record
+
+        return self.store.update(mutate)
+
+
+class RecorderModuleAssignmentService:
+    def __init__(self, store: VpsAdminStore) -> None:
+        self.store = store
+
+    def list_modules(self, *, include_inactive: bool = True) -> list[dict[str, Any]]:
+        def mutate(state: dict[str, Any]) -> list[dict[str, Any]]:
+            changed = False
+            modules = state.get("recorder_modules", {})
+            for builtin in DEFAULT_RECORDER_MODULES:
+                module_key = str(builtin.get("module_key") or "")
+                if module_key not in modules:
+                    modules[module_key] = {
+                        **builtin,
+                        "created_at": now_iso(),
+                        "updated_at": now_iso(),
+                    }
+                    changed = True
+            if changed:
+                state["recorder_modules"] = modules
+            items = sorted(modules.values(), key=lambda item: str(item.get("module_key") or ""))
+            if not include_inactive:
+                items = [item for item in items if str(item.get("status") or "active") == "active"]
+            return items
+
+        return self.store.update(mutate)
+
+    def upsert_module(self, payload: dict[str, Any], *, actor: AuthSession) -> dict[str, Any]:
+        module_key = str(payload.get("module_key") or payload.get("key") or "").strip()
+        if not module_key:
+            raise HTTPException(status_code=400, detail="module_key required")
+
+        def mutate(state: dict[str, Any]) -> dict[str, Any]:
+            modules = state.get("recorder_modules", {})
+            existing = modules.get(module_key, {})
+            record = {
+                "module_key": module_key,
+                "module_name": str(payload.get("module_name") or payload.get("name") or existing.get("module_name") or module_key),
+                "module_type": str(payload.get("module_type") or existing.get("module_type") or "chat_extract_export"),
+                "status": str(payload.get("status") or existing.get("status") or "active"),
+                "version": str(payload.get("version") or existing.get("version") or "1.0.0"),
+                "config": payload.get("config") if isinstance(payload.get("config"), dict) else dict(existing.get("config") or {}),
+                "builtin": bool(existing.get("builtin", False)),
+                "created_at": str(existing.get("created_at") or now_iso()),
+                "updated_at": now_iso(),
+            }
+            modules[module_key] = record
+            state["recorder_modules"] = modules
+            append_audit(state, actor_id=actor.user.user_id, action="upsert_recorder_module", target_type="recorder_module", target_id=module_key)
+            return record
+
+        return self.store.update(mutate)
+
+    def list_bindings(
+        self,
+        *,
+        scope_type: str = "",
+        scope_id: str = "",
+        tenant_id: str = "",
+        user_id: str = "",
+    ) -> list[dict[str, Any]]:
+        state = self.store.read()
+        bindings = [
+            item
+            for item in (state.get("recorder_module_bindings") or {}).values()
+            if str(item.get("scope_type") or "") in {"user", "global"}
+        ]
+        if scope_type:
+            bindings = [item for item in bindings if str(item.get("scope_type") or "") == scope_type]
+        if scope_id:
+            bindings = [item for item in bindings if str(item.get("scope_id") or "") == scope_id]
+        if user_id:
+            bindings = [item for item in bindings if str(item.get("user_id") or "") == user_id]
+        bindings.sort(key=lambda item: str(item.get("updated_at") or ""), reverse=True)
+        return bindings
+
+    def upsert_binding(self, payload: dict[str, Any], *, actor: AuthSession) -> dict[str, Any]:
+        scope_type = str(payload.get("scope_type") or "").strip().lower()
+        if scope_type not in {"user", "global"}:
+            raise HTTPException(status_code=400, detail="scope_type must be one of user|global")
+        scope_id = str(payload.get("scope_id") or "").strip()
+        if scope_type == "global":
+            scope_id = "*"
+        if not scope_id:
+            raise HTTPException(status_code=400, detail="scope_id required")
+        module_key = str(payload.get("module_key") or "").strip()
+        if not module_key:
+            raise HTTPException(status_code=400, detail="module_key required")
+        module = next((item for item in self.list_modules(include_inactive=True) if str(item.get("module_key") or "") == module_key), None)
+        if not module:
+            raise HTTPException(status_code=404, detail=f"module not found: {module_key}")
+        if str(module.get("status") or "active") != "active":
+            raise HTTPException(status_code=400, detail=f"module is not active: {module_key}")
+
+        binding_id = str(payload.get("binding_id") or make_id("recorder_binding"))
+        owner_user_id = str(payload.get("user_id") or scope_id if scope_type == "user" else "").strip()
+
+        def mutate(state: dict[str, Any]) -> dict[str, Any]:
+            bindings = state.get("recorder_module_bindings", {})
+            existing = bindings.get(binding_id, {})
+            record = {
+                "binding_id": binding_id,
+                "scope_type": scope_type,
+                "scope_id": scope_id,
+                "tenant_id": "",
+                "user_id": owner_user_id,
+                "module_key": module_key,
+                "enabled": payload.get("enabled", existing.get("enabled", True)) is not False,
+                "created_at": str(existing.get("created_at") or now_iso()),
+                "updated_at": now_iso(),
+            }
+            bindings[binding_id] = record
+            state["recorder_module_bindings"] = bindings
+            append_audit(state, actor_id=actor.user.user_id, action="upsert_recorder_module_binding", target_type="recorder_module_binding", target_id=binding_id)
+            return record
+
+        return self.store.update(mutate)
+
+    def delete_binding(self, binding_id: str, *, actor: AuthSession) -> bool:
+        def mutate(state: dict[str, Any]) -> bool:
+            bindings = state.get("recorder_module_bindings", {})
+            if binding_id not in bindings:
+                return False
+            bindings.pop(binding_id, None)
+            state["recorder_module_bindings"] = bindings
+            append_audit(state, actor_id=actor.user.user_id, action="delete_recorder_module_binding", target_type="recorder_module_binding", target_id=binding_id)
+            return True
 
         return self.store.update(mutate)
 
@@ -435,8 +606,28 @@ class UserService:
             if user_id not in state["users"]:
                 raise HTTPException(status_code=404, detail=f"user not found: {user_id}")
             record = state["users"].pop(user_id)
-            append_audit(state, actor_id=actor.user.user_id, action="delete_user", target_type="user", target_id=user_id)
-            return self.public_user_with_access(record, state=state)
+            removed_local_mirror = remove_local_customer_account_override(record)
+            revoked_sessions = revoke_user_sessions(state, user_id=user_id)
+            trusted_devices = state.get("trusted_devices", {})
+            if isinstance(trusted_devices, dict):
+                for fingerprint, device in list(trusted_devices.items()):
+                    if isinstance(device, dict) and str(device.get("user_id") or "") == user_id:
+                        trusted_devices.pop(fingerprint, None)
+            append_audit(
+                state,
+                actor_id=actor.user.user_id,
+                action="delete_user",
+                target_type="user",
+                target_id=user_id,
+                detail={
+                    "removed_local_mirror": removed_local_mirror,
+                    "revoked_sessions": revoked_sessions,
+                },
+            )
+            payload = self.public_user_with_access(record, state=state)
+            payload["removed_local_mirror"] = removed_local_mirror
+            payload["revoked_sessions"] = revoked_sessions
+            return payload
 
         return self.store.update(mutate)
 
@@ -1282,6 +1473,93 @@ class SharedKnowledgeService:
 
         return self.store.update(mutate)
 
+    def draft_from_natural_language(self, description: str, *, actor: AuthSession, use_llm: bool = True) -> dict[str, Any]:
+        """Use LLM to convert natural language into a structured shared-library draft."""
+        if not description.strip():
+            raise ValueError("描述不能为空")
+        if not use_llm:
+            return {"ok": True, "draft": None, "llm_used": False, "message": "LLM 已禁用，请手动填写表单。"}
+
+        existing_items = self.list_library_items(include_inactive=True)
+        existing_titles = [str(item.get("title") or item.get("item_id") or "") for item in existing_items[:100]]
+
+        system_prompt = (
+            "你是共享知识库整理专家。把管理员的自然语言描述转换成标准化的共享知识条目。"
+            "只输出 JSON 对象，不要任何解释。"
+            "共享知识是跨租户通用的客服规则、回复风格或风险管控原则，不能包含具体客户、具体商品、具体价格等专属信息。"
+        )
+
+        user_prompt = {
+            "description": description,
+            "existing_titles": existing_titles,
+            "instructions": [
+                "把描述整理成共享知识库的标准字段。",
+                "category_id 必须是 global_guidelines（通用规范）、reply_style（回复风格）或 risk_control（风险管控）之一。",
+                "如果信息不完整，把缺失的字段名放入 missing_fields，并给出 followup_question 引导管理员补充。",
+                "如果描述包含具体客户/商品/价格等专属信息，给出 warnings 提示需要脱敏。",
+                "只有当 title、content/guideline_text、category_id 都齐全时，status 才是 ready。",
+            ],
+            "response_format": {
+                "title": "知识标题",
+                "category_id": "global_guidelines|reply_style|risk_control",
+                "industry_id": "global 或具体行业ID",
+                "keywords": ["关键词1", "关键词2"],
+                "applies_to": "适用场景描述",
+                "content": "知识正文内容",
+                "notes": "管理员备注",
+                "status": "ready|draft",
+                "missing_fields": [],
+                "followup_question": "",
+                "warnings": [],
+                "reasoning": "整理思路",
+            },
+        }
+
+        result = call_deepseek_json_with_prompt(
+            system_prompt=system_prompt,
+            user_prompt=json.dumps(user_prompt, ensure_ascii=False),
+            temperature=0.15,
+            max_tokens=1800,
+        )
+
+        draft = result if isinstance(result, dict) else {}
+        if not draft:
+            return {"ok": False, "draft": None, "llm_used": True, "message": "LLM 未能生成有效草稿。"}
+
+        # Normalize draft into shared-library record shape
+        normalized: dict[str, Any] = {
+            "title": str(draft.get("title") or ""),
+            "category_id": str(draft.get("category_id") or "global_guidelines"),
+            "industry_id": str(draft.get("industry_id") or "global"),
+            "keywords": draft.get("keywords") if isinstance(draft.get("keywords"), list) else [],
+            "applies_to": str(draft.get("applies_to") or ""),
+            "content": str(draft.get("content") or draft.get("guideline_text") or ""),
+            "notes": str(draft.get("notes") or ""),
+            "data": {
+                "title": str(draft.get("title") or ""),
+                "category_id": str(draft.get("category_id") or "global_guidelines"),
+                "industry_id": str(draft.get("industry_id") or "global"),
+                "keywords": draft.get("keywords") if isinstance(draft.get("keywords"), list) else [],
+                "applies_to": str(draft.get("applies_to") or ""),
+                "guideline_text": str(draft.get("content") or draft.get("guideline_text") or ""),
+                "notes": str(draft.get("notes") or ""),
+            },
+            "status": str(draft.get("status") or "draft"),
+            "missing_fields": draft.get("missing_fields") if isinstance(draft.get("missing_fields"), list) else [],
+            "followup_question": str(draft.get("followup_question") or ""),
+            "warnings": draft.get("warnings") if isinstance(draft.get("warnings"), list) else [],
+            "reasoning": str(draft.get("reasoning") or ""),
+        }
+
+        is_ready = bool(normalized["status"] == "ready" and normalized["title"] and normalized["content"])
+        return {
+            "ok": True,
+            "draft": normalized,
+            "llm_used": True,
+            "ready": is_ready,
+            "message": "草稿已生成。" + ("请核对后确认入库。" if is_ready else "请先补充缺失信息。"),
+        }
+
 
 class BackupRestoreService:
     def __init__(self, store: VpsAdminStore, commands: CommandService) -> None:
@@ -1678,6 +1956,39 @@ def customer_tenant_record(*, username: str, tenant_id: str, industry_id: str | 
         "created_at": now_iso(),
         "updated_at": now_iso(),
     }
+
+
+def remove_local_customer_account_override(record: dict[str, Any]) -> bool:
+    if not isinstance(record, dict):
+        return False
+    source = str(record.get("source") or "")
+    role = str(record.get("role") or "")
+    username = str(record.get("username") or "").strip()
+    user_id = str(record.get("user_id") or "").strip()
+    if source != "local_client_account" and role != Role.CUSTOMER.value:
+        return False
+    accounts = read_local_account_overrides_from_env()
+    if not accounts:
+        return False
+    removable_keys: set[str] = set()
+    for key, account in accounts.items():
+        if not isinstance(account, dict):
+            continue
+        key_text = str(key or "").strip()
+        account_user = str(account.get("username") or "").strip()
+        account_id = str(account.get("user_id") or "").strip()
+        if key_text in {username, user_id} or account_user in {username, user_id} or account_id in {username, user_id}:
+            removable_keys.add(key_text)
+    if not removable_keys:
+        return False
+    changed = False
+    for key in removable_keys:
+        if key in accounts:
+            accounts.pop(key, None)
+            changed = True
+    if changed:
+        write_local_account_overrides_to_env(accounts)
+    return changed
 
 
 def seed_local_customer_accounts(state: dict[str, Any]) -> None:
@@ -2700,6 +3011,63 @@ def shared_review_existing_matches(proposal: dict[str, Any], library_records: An
                 }
             )
     return matches[:8]
+
+
+def call_deepseek_json_with_prompt(
+    *,
+    system_prompt: str,
+    user_prompt: str,
+    temperature: float = 0.1,
+    max_tokens: int = 1800,
+) -> dict[str, Any]:
+    api_key = read_secret("DEEPSEEK_API_KEY")
+    if not api_key:
+        return {}
+    base_url = resolve_deepseek_base_url(read_secret_fn=read_secret)
+    model = resolve_deepseek_tier_model(tier="flash", read_secret_fn=read_secret)
+    payload = {
+        "model": model,
+        "messages": [
+            {"role": "system", "content": str(system_prompt or "")},
+            {"role": "user", "content": str(user_prompt or "")},
+        ],
+        "temperature": float(temperature),
+        "max_tokens": resolve_deepseek_max_tokens(max_tokens, read_secret_fn=read_secret),
+        "response_format": {"type": "json_object"},
+    }
+    request = urllib.request.Request(
+        url=base_url.rstrip("/") + "/chat/completions",
+        data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
+        headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=resolve_deepseek_timeout(45, read_secret_fn=read_secret)) as response:
+            raw = response.read().decode("utf-8")
+        data = json.loads(raw or "{}")
+    except (urllib.error.HTTPError, urllib.error.URLError, TimeoutError, OSError, json.JSONDecodeError):
+        return {}
+    content = data.get("choices", [{}])[0].get("message", {}).get("content", "")
+    return parse_json_object_text(str(content or "")) or {}
+
+
+def parse_json_object_text(text: str) -> dict[str, Any] | None:
+    body = str(text or "").strip()
+    if not body:
+        return None
+    try:
+        payload = json.loads(body)
+        return payload if isinstance(payload, dict) else None
+    except json.JSONDecodeError:
+        pass
+    match = re.search(r"\{.*\}", body, re.S)
+    if not match:
+        return None
+    try:
+        payload = json.loads(match.group(0))
+    except json.JSONDecodeError:
+        return None
+    return payload if isinstance(payload, dict) else None
 
 
 def read_json_file(path: Path, *, default: Any) -> Any:

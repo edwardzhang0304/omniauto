@@ -9,6 +9,61 @@ from typing import Any
 from apps.wechat_ai_customer_service.knowledge_paths import shared_runtime_snapshot_path
 
 
+DEFAULT_INTENT_KEYWORDS: dict[str, list[str]] = {
+    "greeting": ["你好", "您好", "在吗", "hello", "hi"],
+    "small_talk": ["哈哈", "先看看", "随便看看", "辛苦了", "回复挺快", "先了解一下"],
+    "quote": ["价格", "报价", "多少钱", "什么价"],
+    "discount": ["优惠", "折扣", "便宜点", "最低价", "砍价"],
+    "stock": ["库存", "现货", "有货", "有没有"],
+    "shipping": ["发货", "物流", "运费", "配送", "多久到", "包邮"],
+    "invoice": ["发票", "开票", "专票", "普票"],
+    "payment": ["付款", "对公", "账号", "转账", "账期", "月结"],
+    "after_sales": ["售后", "质保", "保修", "退换", "维修"],
+    "handoff": ["人工", "转人工", "请示", "核实", "确认一下", "顾问", "月结", "账期", "合同", "盖章"],
+    "catalog": ["有哪些", "推荐", "车源", "清单", "目录"],
+    "scene_product": ["场景", "使用场景", "用途", "适合", "推荐思路"],
+    "spec": ["型号", "规格", "参数", "容量", "功率", "供电", "安装"],
+}
+
+DEFAULT_INTENT_GROUPS: dict[str, list[str]] = {
+    "business": ["catalog", "quote", "discount", "stock", "shipping", "invoice", "payment", "after_sales", "handoff"],
+    "rag_authority_block": ["quote", "discount", "stock", "shipping", "invoice", "payment", "after_sales", "handoff", "customer_data"],
+    "rag_soft_reference": ["scene_product", "spec", "small_talk", "unknown"],
+    "rag_soft_actions": ["answer_from_evidence", "review_or_default_reply", "reply_small_talk"],
+    "product_related": ["product", "scene_product", "spec", "quote", "discount", "stock", "shipping", "warranty", "catalog"],
+    "product_context": ["shipping", "warranty", "spec", "quote", "stock", "discount", "scene_product"],
+}
+
+DEFAULT_PRODUCT_KEYWORDS: dict[str, list[str]] = {
+    "spec": ["型号", "规格", "参数", "容量", "功率", "供电", "门厚", "开孔"],
+}
+
+DEFAULT_RAG_GROUPS: dict[str, list[str]] = {
+    "high_risk_terms": ["最低价", "赔偿", "退款", "账期", "合同", "保证", "包过"],
+    "soft_reference_categories": ["product_explanations", "product_faq", "product_rules", "products"],
+    "soft_reference_source_types": ["product_doc", "manual"],
+}
+
+DEFAULT_POLICY_TYPE_TO_INTENT: dict[str, str] = {
+    "invoice": "invoice",
+    "payment": "payment",
+    "shipping": "shipping",
+    "logistics": "shipping",
+    "after_sales": "after_sales",
+    "warranty": "after_sales",
+    "product_catalog": "catalog",
+}
+
+DEFAULT_POLICY_TAGS: dict[str, str] = {
+    "invoice": "invoice_policy",
+    "payment": "payment_policy",
+    "shipping": "shipping_policy",
+    "after_sales": "after_sales_policy",
+}
+
+DEFAULT_QUANTITY_UNITS: list[str] = ["个", "件", "台", "套", "箱", "辆"]
+
+
 def load_platform_understanding_rules(settings: dict[str, Any] | None = None) -> dict[str, Any]:
     del settings
     cloud = load_platform_understanding_rules_from_cloud()
@@ -54,18 +109,36 @@ def normalize_platform_understanding_rules(payload: dict[str, Any]) -> dict[str,
     item.setdefault("schema_version", 1)
     item.setdefault("title", "平台通用理解词典")
     item.setdefault("description", "所有客户通用的基础意图、检索和归类词典。行业专属业务规则不应写在这里。")
-    item["intent_keywords"] = normalize_map_of_string_lists(item.get("intent_keywords"))
-    item["intent_groups"] = normalize_map_of_string_lists(item.get("intent_groups"))
-    item["policy_type_to_intent"] = normalize_string_map(item.get("policy_type_to_intent"))
-    item["policy_tags"] = normalize_string_map(item.get("policy_tags"))
+    item["intent_keywords"] = merge_map_of_string_lists(
+        normalize_map_of_string_lists(item.get("intent_keywords")),
+        DEFAULT_INTENT_KEYWORDS,
+    )
+    item["intent_groups"] = merge_map_of_string_lists(
+        normalize_map_of_string_lists(item.get("intent_groups")),
+        DEFAULT_INTENT_GROUPS,
+    )
+    item["policy_type_to_intent"] = merge_string_maps(
+        normalize_string_map(item.get("policy_type_to_intent")),
+        DEFAULT_POLICY_TYPE_TO_INTENT,
+    )
+    item["policy_tags"] = merge_string_maps(
+        normalize_string_map(item.get("policy_tags")),
+        DEFAULT_POLICY_TAGS,
+    )
     item["policy_type_tags"] = normalize_map_of_string_lists(item.get("policy_type_tags"))
     item["policy_key_tags"] = normalize_map_of_string_lists(item.get("policy_key_tags"))
-    item["product_knowledge_keywords"] = normalize_map_of_string_lists(item.get("product_knowledge_keywords"))
+    item["product_knowledge_keywords"] = merge_map_of_string_lists(
+        normalize_map_of_string_lists(item.get("product_knowledge_keywords")),
+        DEFAULT_PRODUCT_KEYWORDS,
+    )
     item["semantic_equivalents"] = normalize_map_of_string_lists(item.get("semantic_equivalents"))
-    item["rag"] = normalize_map_of_string_lists(item.get("rag"))
+    item["rag"] = merge_map_of_string_lists(
+        normalize_map_of_string_lists(item.get("rag")),
+        DEFAULT_RAG_GROUPS,
+    )
     item["risk_keywords"] = normalize_map_of_string_lists(item.get("risk_keywords"))
     item["customer_data_field_labels"] = normalize_map_of_string_lists(item.get("customer_data_field_labels"))
-    item["quantity_units"] = normalize_string_list(item.get("quantity_units"))
+    item["quantity_units"] = merge_string_lists(normalize_string_list(item.get("quantity_units")), DEFAULT_QUANTITY_UNITS)
     return item
 
 
@@ -100,6 +173,38 @@ def normalize_string_map(value: Any) -> dict[str, str]:
         if clean_key and clean_value:
             result[clean_key] = clean_value
     return result
+
+
+def merge_string_lists(primary: list[str], fallback: list[str]) -> list[str]:
+    result: list[str] = []
+    for value in [*primary, *fallback]:
+        text = str(value).strip()
+        if text and text not in result:
+            result.append(text)
+    return result
+
+
+def merge_map_of_string_lists(primary: dict[str, list[str]], fallback: dict[str, list[str]]) -> dict[str, list[str]]:
+    merged = {key: list(values) for key, values in primary.items()}
+    for key, values in fallback.items():
+        clean_key = str(key).strip()
+        if not clean_key:
+            continue
+        if clean_key in merged:
+            merged[clean_key] = merge_string_lists(merged[clean_key], list(values))
+        else:
+            merged[clean_key] = merge_string_lists([], list(values))
+    return merged
+
+
+def merge_string_maps(primary: dict[str, str], fallback: dict[str, str]) -> dict[str, str]:
+    merged = dict(primary)
+    for key, value in fallback.items():
+        clean_key = str(key).strip()
+        clean_value = str(value).strip()
+        if clean_key and clean_value and clean_key not in merged:
+            merged[clean_key] = clean_value
+    return merged
 
 
 def platform_understanding_item(settings: dict[str, Any] | None = None) -> dict[str, Any]:

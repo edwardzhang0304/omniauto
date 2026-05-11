@@ -6,6 +6,7 @@ from typing import Any
 
 from fastapi import APIRouter, HTTPException, Query
 
+from ..services.recorder_runtime import RecorderRuntime
 from ..services.recorder_service import RecorderService
 
 
@@ -24,7 +25,14 @@ def settings() -> dict[str, Any]:
 
 @router.put("/settings")
 def update_settings(payload: dict[str, Any]) -> dict[str, Any]:
-    return {"ok": True, "item": RecorderService().save_settings(payload or {})}
+    service = RecorderService()
+    updated = service.save_settings(payload or {})
+    response: dict[str, Any] = {"ok": True, "item": updated}
+    if updated.get("enabled", True) is False:
+        stop_result = RecorderRuntime().stop()
+        response["message"] = "AI智能记录员已关闭，并停止了正在运行的监听任务。"
+        response["runtime"] = stop_result.get("item")
+    return response
 
 
 @router.post("/discover")
@@ -60,3 +68,18 @@ def update_conversation(conversation_id: str, payload: dict[str, Any]) -> dict[s
 def capture_selected(payload: dict[str, Any] | None = None) -> dict[str, Any]:
     payload = payload or {}
     return RecorderService().capture_selected_once(send_notifications=bool(payload.get("send_notifications", False)))
+
+
+@router.get("/runtime/status")
+def runtime_status() -> dict[str, Any]:
+    return {"ok": True, "item": RecorderRuntime().status()}
+
+
+@router.post("/runtime/start")
+def runtime_start() -> dict[str, Any]:
+    return RecorderRuntime().start()
+
+
+@router.post("/runtime/stop")
+def runtime_stop() -> dict[str, Any]:
+    return RecorderRuntime().stop()

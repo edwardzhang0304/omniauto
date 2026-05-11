@@ -1,8 +1,8 @@
 {
   "ok": false,
-  "send": true,
-  "config_path": "D:\\AI\\AI_RPA\\apps\\wechat_ai_customer_service\\configs\\file_transfer_live_regression.example.json",
-  "scenario_path": "D:\\AI\\AI_RPA\\apps\\wechat_ai_customer_service\\tests\\scenarios\\file_transfer_live_regression.json",
+  "send": false,
+  "config_path": "D:\\AI\\omniauto\\apps\\wechat_ai_customer_service\\configs\\file_transfer_live_regression.example.json",
+  "scenario_path": "D:\\AI\\omniauto\\apps\\wechat_ai_customer_service\\tests\\scenarios\\file_transfer_live_regression.json",
   "start_index": 17,
   "end_index": 20,
   "only": [],
@@ -26,122 +26,122 @@
       "window_probe": {
         "windows": [
           {
-            "hwnd": 198790,
-            "pid": 12384,
+            "hwnd": 131820,
+            "pid": 15156,
             "title": "微信",
             "class_name": "Qt51514QWindowIcon",
             "visible": true,
-            "path": "C:\\Program Files (x86)\\Tencent\\Weixin\\Weixin.exe"
+            "path": "D:\\Program Files\\Tencent\\WeChat\\Weixin.exe"
           },
           {
-            "hwnd": 198584,
-            "pid": 12384,
+            "hwnd": 197834,
+            "pid": 15156,
             "title": "Weixin",
             "class_name": "Qt51514QWindowIcon",
             "visible": false,
-            "path": "C:\\Program Files (x86)\\Tencent\\Weixin\\Weixin.exe"
+            "path": "D:\\Program Files\\Tencent\\WeChat\\Weixin.exe"
           },
           {
-            "hwnd": 460756,
-            "pid": 21240,
+            "hwnd": 133014,
+            "pid": 25644,
             "title": "",
             "class_name": "Base_PowerMessageWindow",
             "visible": false,
-            "path": "C:\\Program Files (x86)\\Tencent\\Weixin\\Weixin.exe"
+            "path": "D:\\Program Files\\Tencent\\WeChat\\Weixin.exe"
           },
           {
-            "hwnd": 1312856,
-            "pid": 12384,
+            "hwnd": 197342,
+            "pid": 15156,
             "title": "WxTrayIconMessageWindow",
             "class_name": "Qt51514WxTrayIconMessageWindowClass",
             "visible": false,
-            "path": "C:\\Program Files (x86)\\Tencent\\Weixin\\Weixin.exe"
+            "path": "D:\\Program Files\\Tencent\\WeChat\\Weixin.exe"
           },
           {
-            "hwnd": 854070,
-            "pid": 12384,
+            "hwnd": 131638,
+            "pid": 15156,
             "title": "",
             "class_name": "Base_PowerMessageWindow",
             "visible": false,
-            "path": "C:\\Program Files (x86)\\Tencent\\Weixin\\Weixin.exe"
+            "path": "D:\\Program Files\\Tencent\\WeChat\\Weixin.exe"
           },
           {
-            "hwnd": 133054,
-            "pid": 12384,
+            "hwnd": 197792,
+            "pid": 15156,
             "title": "",
             "class_name": "DisplayICC_SystemMessageWindow",
             "visible": false,
-            "path": "C:\\Program Files (x86)\\Tencent\\Weixin\\Weixin.exe"
+            "path": "D:\\Program Files\\Tencent\\WeChat\\Weixin.exe"
           },
           {
-            "hwnd": 133036,
-            "pid": 12384,
+            "hwnd": 132242,
+            "pid": 15156,
             "title": "",
             "class_name": "Chrome_SystemMessageWindow",
             "visible": false,
-            "path": "C:\\Program Files (x86)\\Tencent\\Weixin\\Weixin.exe"
+            "path": "D:\\Program Files\\Tencent\\WeChat\\Weixin.exe"
           },
           {
-            "hwnd": 198580,
-            "pid": 12384,
+            "hwnd": 132238,
+            "pid": 15156,
             "title": "MSCTFIME UI",
             "class_name": "MSCTFIME UI",
             "visible": false,
-            "path": "C:\\Program Files (x86)\\Tencent\\Weixin\\Weixin.exe"
+            "path": "D:\\Program Files\\Tencent\\WeChat\\Weixin.exe"
           },
           {
-            "hwnd": 133038,
-            "pid": 12384,
+            "hwnd": 132230,
+            "pid": 15156,
             "title": "Default IME",
             "class_name": "IME",
             "visible": false,
-            "path": "C:\\Program Files (x86)\\Tencent\\Weixin\\Weixin.exe"
+            "path": "D:\\Program Files\\Tencent\\WeChat\\Weixin.exe"
           },
           {
-            "hwnd": 329856,
-            "pid": 21240,
+            "hwnd": 262296,
+            "pid": 25644,
             "title": "Default IME",
             "class_name": "IME",
             "visible": false,
-            "path": "C:\\Program Files (x86)\\Tencent\\Weixin\\Weixin.exe"
+            "path": "D:\\Program Files\\Tencent\\WeChat\\Weixin.exe"
           }
         ],
         "visible_windows": [
           {
-            "hwnd": 198790,
-            "pid": 12384,
+            "hwnd": 131820,
+            "pid": 15156,
             "title": "微信",
             "class_name": "Qt51514QWindowIcon",
             "visible": true,
-            "path": "C:\\Program Files (x86)\\Tencent\\Weixin\\Weixin.exe"
+            "path": "D:\\Program Files\\Tencent\\WeChat\\Weixin.exe"
           }
         ],
         "main_windows": [
           {
-            "hwnd": 198790,
-            "pid": 12384,
+            "hwnd": 131820,
+            "pid": 15156,
             "title": "微信",
             "class_name": "Qt51514QWindowIcon",
             "visible": true,
-            "path": "C:\\Program Files (x86)\\Tencent\\Weixin\\Weixin.exe"
+            "path": "D:\\Program Files\\Tencent\\WeChat\\Weixin.exe"
           },
           {
-            "hwnd": 198584,
-            "pid": 12384,
+            "hwnd": 197834,
+            "pid": 15156,
             "title": "Weixin",
             "class_name": "Qt51514QWindowIcon",
             "visible": false,
-            "path": "C:\\Program Files (x86)\\Tencent\\Weixin\\Weixin.exe"
+            "path": "D:\\Program Files\\Tencent\\WeChat\\Weixin.exe"
           }
         ],
         "visible_main_windows": [
           {
-            "hwnd": 198790,
-            "pid": 12384,
+            "hwnd": 131820,
+            "pid": 15156,
             "title": "微信",
             "class_name": "Qt51514QWindowIcon",
             "visible": true,
-            "path": "C:\\Program Files (x86)\\Tencent\\Weixin\\Weixin.exe"
+            "path": "D:\\Program Files\\Tencent\\WeChat\\Weixin.exe"
           }
         ],
         "visible_count": 1,
@@ -149,8 +149,7 @@
         "visible_main_count": 1
       },
       "state": "main_window",
-      "ok": true,
-      "library_stdout": "初始化成功，获取到已登录窗口：Meta_xc"
+      "ok": true
     },
     "targets": [
       "文件传输助手"
@@ -158,7 +157,7 @@
     "events": [
       {
         "ok": true,
-        "created_at": "2026-05-03T17:05:35",
+        "created_at": "2026-05-09T16:41:01",
         "target": "文件传输助手",
         "action": "bootstrapped",
         "marked_message_ids": [],
@@ -168,14 +167,11 @@
     ]
   },
   "selected_count": 4,
-  "run_count": 2,
-  "count": 18,
+  "run_count": 3,
+  "count": 27,
   "passed_count": 17,
-  "pending_count": 2,
-  "pending": [
-    "unknown_business_question_handoff",
-    "mixed_discount_and_customer_data_handoff"
-  ],
+  "pending_count": 0,
+  "pending": [],
   "failures": [
     {
       "name": "customer_data_pending_completion",
@@ -210,6 +206,240 @@
           }
         },
         "verified": true
+      }
+    },
+    {
+      "name": "customer_data_pending_completion",
+      "index": 18,
+      "ok": false,
+      "error": "AssertionError(\"action expected 'sent', got 'skipped'\")",
+      "output": {
+        "action": "skipped",
+        "message_ids": null,
+        "reply_text": null,
+        "rule_name": null,
+        "reason": null,
+        "handoff_reason": null,
+        "data_complete": null,
+        "data_write_ok": false,
+        "intent": null,
+        "needs_handoff": null,
+        "llm_applied": false,
+        "llm_reason": null,
+        "rag_applied": false,
+        "rag_reason": null,
+        "rag_retrieval_mode": null,
+        "rag_experience_id": null,
+        "safety": {},
+        "verified": null
+      }
+    },
+    {
+      "name": "unknown_business_question_handoff",
+      "index": 19,
+      "ok": false,
+      "error": "AssertionError(\"action expected 'handoff_sent', got 'skipped'\")",
+      "output": {
+        "action": "skipped",
+        "message_ids": null,
+        "reply_text": null,
+        "rule_name": null,
+        "reason": null,
+        "handoff_reason": null,
+        "data_complete": null,
+        "data_write_ok": false,
+        "intent": null,
+        "needs_handoff": null,
+        "llm_applied": false,
+        "llm_reason": null,
+        "rag_applied": false,
+        "rag_reason": null,
+        "rag_retrieval_mode": null,
+        "rag_experience_id": null,
+        "safety": {},
+        "verified": null
+      }
+    },
+    {
+      "name": "mixed_discount_and_customer_data_handoff",
+      "index": 20,
+      "ok": false,
+      "error": "AssertionError(\"action expected 'handoff_sent', got 'skipped'\")",
+      "output": {
+        "action": "skipped",
+        "message_ids": null,
+        "reply_text": null,
+        "rule_name": null,
+        "reason": null,
+        "handoff_reason": null,
+        "data_complete": null,
+        "data_write_ok": false,
+        "intent": null,
+        "needs_handoff": null,
+        "llm_applied": false,
+        "llm_reason": null,
+        "rag_applied": false,
+        "rag_reason": null,
+        "rag_retrieval_mode": null,
+        "rag_experience_id": null,
+        "safety": {},
+        "verified": null
+      }
+    },
+    {
+      "name": "customer_data_pending_completion",
+      "index": 18,
+      "ok": false,
+      "error": "AssertionError(\"action expected 'sent', got 'skipped'\")",
+      "output": {
+        "action": "skipped",
+        "message_ids": null,
+        "reply_text": null,
+        "rule_name": null,
+        "reason": null,
+        "handoff_reason": null,
+        "data_complete": null,
+        "data_write_ok": false,
+        "intent": null,
+        "needs_handoff": null,
+        "llm_applied": false,
+        "llm_reason": null,
+        "rag_applied": false,
+        "rag_reason": null,
+        "rag_retrieval_mode": null,
+        "rag_experience_id": null,
+        "safety": {},
+        "verified": null
+      }
+    },
+    {
+      "name": "unknown_business_question_handoff",
+      "index": 19,
+      "ok": false,
+      "error": "AssertionError(\"action expected 'handoff_sent', got 'skipped'\")",
+      "output": {
+        "action": "skipped",
+        "message_ids": null,
+        "reply_text": null,
+        "rule_name": null,
+        "reason": null,
+        "handoff_reason": null,
+        "data_complete": null,
+        "data_write_ok": false,
+        "intent": null,
+        "needs_handoff": null,
+        "llm_applied": false,
+        "llm_reason": null,
+        "rag_applied": false,
+        "rag_reason": null,
+        "rag_retrieval_mode": null,
+        "rag_experience_id": null,
+        "safety": {},
+        "verified": null
+      }
+    },
+    {
+      "name": "mixed_discount_and_customer_data_handoff",
+      "index": 20,
+      "ok": false,
+      "error": "AssertionError(\"action expected 'handoff_sent', got 'skipped'\")",
+      "output": {
+        "action": "skipped",
+        "message_ids": null,
+        "reply_text": null,
+        "rule_name": null,
+        "reason": null,
+        "handoff_reason": null,
+        "data_complete": null,
+        "data_write_ok": false,
+        "intent": null,
+        "needs_handoff": null,
+        "llm_applied": false,
+        "llm_reason": null,
+        "rag_applied": false,
+        "rag_reason": null,
+        "rag_retrieval_mode": null,
+        "rag_experience_id": null,
+        "safety": {},
+        "verified": null
+      }
+    },
+    {
+      "name": "customer_data_pending_completion",
+      "index": 18,
+      "ok": false,
+      "error": "AssertionError(\"action expected 'sent', got 'skipped'\")",
+      "output": {
+        "action": "skipped",
+        "message_ids": null,
+        "reply_text": null,
+        "rule_name": null,
+        "reason": null,
+        "handoff_reason": null,
+        "data_complete": null,
+        "data_write_ok": false,
+        "intent": null,
+        "needs_handoff": null,
+        "llm_applied": false,
+        "llm_reason": null,
+        "rag_applied": false,
+        "rag_reason": null,
+        "rag_retrieval_mode": null,
+        "rag_experience_id": null,
+        "safety": {},
+        "verified": null
+      }
+    },
+    {
+      "name": "unknown_business_question_handoff",
+      "index": 19,
+      "ok": false,
+      "error": "AssertionError(\"action expected 'handoff_sent', got 'skipped'\")",
+      "output": {
+        "action": "skipped",
+        "message_ids": null,
+        "reply_text": null,
+        "rule_name": null,
+        "reason": null,
+        "handoff_reason": null,
+        "data_complete": null,
+        "data_write_ok": false,
+        "intent": null,
+        "needs_handoff": null,
+        "llm_applied": false,
+        "llm_reason": null,
+        "rag_applied": false,
+        "rag_reason": null,
+        "rag_retrieval_mode": null,
+        "rag_experience_id": null,
+        "safety": {},
+        "verified": null
+      }
+    },
+    {
+      "name": "mixed_discount_and_customer_data_handoff",
+      "index": 20,
+      "ok": false,
+      "error": "AssertionError(\"action expected 'handoff_sent', got 'skipped'\")",
+      "output": {
+        "action": "skipped",
+        "message_ids": null,
+        "reply_text": null,
+        "rule_name": null,
+        "reason": null,
+        "handoff_reason": null,
+        "data_complete": null,
+        "data_write_ok": false,
+        "intent": null,
+        "needs_handoff": null,
+        "llm_applied": false,
+        "llm_reason": null,
+        "rag_applied": false,
+        "rag_reason": null,
+        "rag_retrieval_mode": null,
+        "rag_experience_id": null,
+        "safety": {},
+        "verified": null
       }
     }
   ],
@@ -848,6 +1078,240 @@
           }
         },
         "verified": true
+      }
+    },
+    {
+      "name": "customer_data_pending_completion",
+      "index": 18,
+      "ok": false,
+      "error": "AssertionError(\"action expected 'sent', got 'skipped'\")",
+      "output": {
+        "action": "skipped",
+        "message_ids": null,
+        "reply_text": null,
+        "rule_name": null,
+        "reason": null,
+        "handoff_reason": null,
+        "data_complete": null,
+        "data_write_ok": false,
+        "intent": null,
+        "needs_handoff": null,
+        "llm_applied": false,
+        "llm_reason": null,
+        "rag_applied": false,
+        "rag_reason": null,
+        "rag_retrieval_mode": null,
+        "rag_experience_id": null,
+        "safety": {},
+        "verified": null
+      }
+    },
+    {
+      "name": "unknown_business_question_handoff",
+      "index": 19,
+      "ok": false,
+      "error": "AssertionError(\"action expected 'handoff_sent', got 'skipped'\")",
+      "output": {
+        "action": "skipped",
+        "message_ids": null,
+        "reply_text": null,
+        "rule_name": null,
+        "reason": null,
+        "handoff_reason": null,
+        "data_complete": null,
+        "data_write_ok": false,
+        "intent": null,
+        "needs_handoff": null,
+        "llm_applied": false,
+        "llm_reason": null,
+        "rag_applied": false,
+        "rag_reason": null,
+        "rag_retrieval_mode": null,
+        "rag_experience_id": null,
+        "safety": {},
+        "verified": null
+      }
+    },
+    {
+      "name": "mixed_discount_and_customer_data_handoff",
+      "index": 20,
+      "ok": false,
+      "error": "AssertionError(\"action expected 'handoff_sent', got 'skipped'\")",
+      "output": {
+        "action": "skipped",
+        "message_ids": null,
+        "reply_text": null,
+        "rule_name": null,
+        "reason": null,
+        "handoff_reason": null,
+        "data_complete": null,
+        "data_write_ok": false,
+        "intent": null,
+        "needs_handoff": null,
+        "llm_applied": false,
+        "llm_reason": null,
+        "rag_applied": false,
+        "rag_reason": null,
+        "rag_retrieval_mode": null,
+        "rag_experience_id": null,
+        "safety": {},
+        "verified": null
+      }
+    },
+    {
+      "name": "customer_data_pending_completion",
+      "index": 18,
+      "ok": false,
+      "error": "AssertionError(\"action expected 'sent', got 'skipped'\")",
+      "output": {
+        "action": "skipped",
+        "message_ids": null,
+        "reply_text": null,
+        "rule_name": null,
+        "reason": null,
+        "handoff_reason": null,
+        "data_complete": null,
+        "data_write_ok": false,
+        "intent": null,
+        "needs_handoff": null,
+        "llm_applied": false,
+        "llm_reason": null,
+        "rag_applied": false,
+        "rag_reason": null,
+        "rag_retrieval_mode": null,
+        "rag_experience_id": null,
+        "safety": {},
+        "verified": null
+      }
+    },
+    {
+      "name": "unknown_business_question_handoff",
+      "index": 19,
+      "ok": false,
+      "error": "AssertionError(\"action expected 'handoff_sent', got 'skipped'\")",
+      "output": {
+        "action": "skipped",
+        "message_ids": null,
+        "reply_text": null,
+        "rule_name": null,
+        "reason": null,
+        "handoff_reason": null,
+        "data_complete": null,
+        "data_write_ok": false,
+        "intent": null,
+        "needs_handoff": null,
+        "llm_applied": false,
+        "llm_reason": null,
+        "rag_applied": false,
+        "rag_reason": null,
+        "rag_retrieval_mode": null,
+        "rag_experience_id": null,
+        "safety": {},
+        "verified": null
+      }
+    },
+    {
+      "name": "mixed_discount_and_customer_data_handoff",
+      "index": 20,
+      "ok": false,
+      "error": "AssertionError(\"action expected 'handoff_sent', got 'skipped'\")",
+      "output": {
+        "action": "skipped",
+        "message_ids": null,
+        "reply_text": null,
+        "rule_name": null,
+        "reason": null,
+        "handoff_reason": null,
+        "data_complete": null,
+        "data_write_ok": false,
+        "intent": null,
+        "needs_handoff": null,
+        "llm_applied": false,
+        "llm_reason": null,
+        "rag_applied": false,
+        "rag_reason": null,
+        "rag_retrieval_mode": null,
+        "rag_experience_id": null,
+        "safety": {},
+        "verified": null
+      }
+    },
+    {
+      "name": "customer_data_pending_completion",
+      "index": 18,
+      "ok": false,
+      "error": "AssertionError(\"action expected 'sent', got 'skipped'\")",
+      "output": {
+        "action": "skipped",
+        "message_ids": null,
+        "reply_text": null,
+        "rule_name": null,
+        "reason": null,
+        "handoff_reason": null,
+        "data_complete": null,
+        "data_write_ok": false,
+        "intent": null,
+        "needs_handoff": null,
+        "llm_applied": false,
+        "llm_reason": null,
+        "rag_applied": false,
+        "rag_reason": null,
+        "rag_retrieval_mode": null,
+        "rag_experience_id": null,
+        "safety": {},
+        "verified": null
+      }
+    },
+    {
+      "name": "unknown_business_question_handoff",
+      "index": 19,
+      "ok": false,
+      "error": "AssertionError(\"action expected 'handoff_sent', got 'skipped'\")",
+      "output": {
+        "action": "skipped",
+        "message_ids": null,
+        "reply_text": null,
+        "rule_name": null,
+        "reason": null,
+        "handoff_reason": null,
+        "data_complete": null,
+        "data_write_ok": false,
+        "intent": null,
+        "needs_handoff": null,
+        "llm_applied": false,
+        "llm_reason": null,
+        "rag_applied": false,
+        "rag_reason": null,
+        "rag_retrieval_mode": null,
+        "rag_experience_id": null,
+        "safety": {},
+        "verified": null
+      }
+    },
+    {
+      "name": "mixed_discount_and_customer_data_handoff",
+      "index": 20,
+      "ok": false,
+      "error": "AssertionError(\"action expected 'handoff_sent', got 'skipped'\")",
+      "output": {
+        "action": "skipped",
+        "message_ids": null,
+        "reply_text": null,
+        "rule_name": null,
+        "reason": null,
+        "handoff_reason": null,
+        "data_complete": null,
+        "data_write_ok": false,
+        "intent": null,
+        "needs_handoff": null,
+        "llm_applied": false,
+        "llm_reason": null,
+        "rag_applied": false,
+        "rag_reason": null,
+        "rag_retrieval_mode": null,
+        "rag_experience_id": null,
+        "safety": {},
+        "verified": null
       }
     }
   ]

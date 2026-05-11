@@ -16,12 +16,14 @@ from apps.wechat_ai_customer_service.knowledge_paths import tenant_runtime_root
 
 
 DEFAULT_SETTINGS = {
+    "enabled": True,
     "private_recording_enabled": True,
     "group_recording_enabled": True,
     "file_transfer_recording_enabled": True,
     "notify_on_collect": False,
     "auto_learn": True,
     "use_llm": True,
+    "capture_interval_seconds": 30,
 }
 
 
@@ -54,12 +56,14 @@ class RecorderService:
 
     def summary(self) -> dict[str, Any]:
         raw = self.raw_store.summary()
+        settings = self.settings()
         conversations = self.raw_store.list_conversations(status="all", limit=500)
         selected_groups = [item for item in conversations if item.get("conversation_type") == "group" and item.get("selected_by_user")]
         selected_private = [item for item in conversations if item.get("conversation_type") == "private" and item.get("selected_by_user")]
         selected_file_transfer = [item for item in conversations if item.get("conversation_type") == "file_transfer" and item.get("selected_by_user")]
         return {
-            "settings": self.settings(),
+            "settings": settings,
+            "status": status_text(settings),
             "raw": raw,
             "selected_group_count": len(selected_groups),
             "selected_private_count": len(selected_private),
@@ -114,6 +118,15 @@ class RecorderService:
 
     def capture_selected_once(self, *, send_notifications: bool = False) -> dict[str, Any]:
         settings = self.settings()
+        if settings.get("enabled", True) is False:
+            return {
+                "ok": True,
+                "enabled": False,
+                "message": "AI智能记录员总开关已关闭，本轮不采集。",
+                "conversation_count": 0,
+                "inserted_count": 0,
+                "items": [],
+            }
         conversations = [
             item
             for item in self.raw_store.list_conversations(status="active", limit=500)
@@ -130,6 +143,7 @@ class RecorderService:
             results.append(result)
         return {
             "ok": True,
+            "enabled": True,
             "conversation_count": len(conversations),
             "inserted_count": sum(int(item.get("inserted_count", 0) or 0) for item in results),
             "items": results,
@@ -218,6 +232,8 @@ def normalized_patch_conversation_type(value: Any, current: Any) -> str:
 
 
 def conversation_enabled_for_capture(conversation: dict[str, Any], settings: dict[str, Any]) -> bool:
+    if settings.get("enabled", True) is False:
+        return False
     conversation_type = str(conversation.get("conversation_type") or "unknown")
     if conversation_type == "group":
         return settings.get("group_recording_enabled", True) is not False
@@ -230,3 +246,9 @@ def conversation_enabled_for_capture(conversation: dict[str, Any], settings: dic
 
 def now_iso() -> str:
     return datetime.now().isoformat(timespec="seconds")
+
+
+def status_text(settings: dict[str, Any]) -> str:
+    if settings.get("enabled", True) is False:
+        return "已关闭，不会自动采集或整理聊天记录。"
+    return "已开启，可按已选择会话自动采集聊天记录。"

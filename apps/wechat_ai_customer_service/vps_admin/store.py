@@ -32,6 +32,8 @@ STATE_KEYS = (
     "shared_library",
     "shared_patches",
     "shared_scan_state",
+    "recorder_modules",
+    "recorder_module_bindings",
     "backup_requests",
     "restore_requests",
     "customer_data_packages",

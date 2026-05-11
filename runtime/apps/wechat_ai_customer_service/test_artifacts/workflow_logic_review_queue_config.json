@@ -1,8 +1,8 @@
 {
   "version": 1,
   "rules_path": "apps/wechat_ai_customer_service/configs/customer_service_rules.example.json",
-  "state_path": "D:\\AI\\AI_RPA\\runtime\\apps\\wechat_ai_customer_service\\test_artifacts\\workflow_logic_review_queue_state.json",
-  "audit_log_path": "D:\\AI\\AI_RPA\\runtime\\apps\\wechat_ai_customer_service\\test_artifacts\\workflow_logic_review_queue_audit.jsonl",
+  "state_path": "D:\\AI\\omniauto\\runtime\\apps\\wechat_ai_customer_service\\test_artifacts\\workflow_logic_review_queue_state.json",
+  "audit_log_path": "D:\\AI\\omniauto\\runtime\\apps\\wechat_ai_customer_service\\test_artifacts\\workflow_logic_review_queue_audit.jsonl",
   "poll": {
     "interval_seconds": 15,
     "iterations": 1

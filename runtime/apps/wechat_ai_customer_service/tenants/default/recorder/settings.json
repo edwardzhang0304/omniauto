@@ -4,5 +4,5 @@
   "file_transfer_recording_enabled": true,
   "notify_on_collect": false,
   "auto_learn": true,
-  "use_llm": false
+  "use_llm": true
 }

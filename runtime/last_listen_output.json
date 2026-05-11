@@ -1,0 +1,1145 @@
+{
+  "ok": true,
+  "dry_run": false,
+  "iterations": 1,
+  "status": {
+    "login_window_exists": false,
+    "online": true,
+    "my_info": {
+      "display_name": "Meta_xc",
+      "id": "sepulianmeng"
+    },
+    "window_probe": {
+      "windows": [
+        {
+          "hwnd": 1576430,
+          "pid": 30536,
+          "title": "Weixin",
+          "class_name": "Qt51514QWindowToolSaveBits",
+          "visible": false,
+          "path": "D:\\Program Files\\Tencent\\WeChat\\Weixin.exe"
+        },
+        {
+          "hwnd": 134500,
+          "pid": 30536,
+          "title": "微信",
+          "class_name": "Qt51514QWindowIcon",
+          "visible": true,
+          "path": "D:\\Program Files\\Tencent\\WeChat\\Weixin.exe"
+        },
+        {
+          "hwnd": 69030,
+          "pid": 19716,
+          "title": "",
+          "class_name": "Base_PowerMessageWindow",
+          "visible": false,
+          "path": "D:\\Program Files\\Tencent\\WeChat\\Weixin.exe"
+        },
+        {
+          "hwnd": 69078,
+          "pid": 30536,
+          "title": "Weixin",
+          "class_name": "Qt51514QWindowIcon",
+          "visible": false,
+          "path": "D:\\Program Files\\Tencent\\WeChat\\Weixin.exe"
+        },
+        {
+          "hwnd": 134538,
+          "pid": 30536,
+          "title": "WxTrayIconMessageWindow",
+          "class_name": "Qt51514WxTrayIconMessageWindowClass",
+          "visible": false,
+          "path": "D:\\Program Files\\Tencent\\WeChat\\Weixin.exe"
+        },
+        {
+          "hwnd": 134554,
+          "pid": 30536,
+          "title": "",
+          "class_name": "Base_PowerMessageWindow",
+          "visible": false,
+          "path": "D:\\Program Files\\Tencent\\WeChat\\Weixin.exe"
+        },
+        {
+          "hwnd": 330840,
+          "pid": 30536,
+          "title": "",
+          "class_name": "DisplayICC_SystemMessageWindow",
+          "visible": false,
+          "path": "D:\\Program Files\\Tencent\\WeChat\\Weixin.exe"
+        },
+        {
+          "hwnd": 1772032,
+          "pid": 30536,
+          "title": "",
+          "class_name": "Chrome_SystemMessageWindow",
+          "visible": false,
+          "path": "D:\\Program Files\\Tencent\\WeChat\\Weixin.exe"
+        },
+        {
+          "hwnd": 13568510,
+          "pid": 30536,
+          "title": "CiceroUIWndFrame",
+          "class_name": "CiceroUIWndFrame",
+          "visible": false,
+          "path": "D:\\Program Files\\Tencent\\WeChat\\Weixin.exe"
+        },
+        {
+          "hwnd": 12129810,
+          "pid": 30536,
+          "title": "CiceroUIWndFrame",
+          "class_name": "CiceroUIWndFrame",
+          "visible": false,
+          "path": "D:\\Program Files\\Tencent\\WeChat\\Weixin.exe"
+        },
+        {
+          "hwnd": 16193162,
+          "pid": 30536,
+          "title": "",
+          "class_name": "MSCTFIME Composition",
+          "visible": false,
+          "path": "D:\\Program Files\\Tencent\\WeChat\\Weixin.exe"
+        },
+        {
+          "hwnd": 26940904,
+          "pid": 30536,
+          "title": "",
+          "class_name": "MSCTFIME Composition",
+          "visible": false,
+          "path": "D:\\Program Files\\Tencent\\WeChat\\Weixin.exe"
+        },
+        {
+          "hwnd": 1447838,
+          "pid": 30536,
+          "title": "",
+          "class_name": "MSCTFIME Composition",
+          "visible": false,
+          "path": "D:\\Program Files\\Tencent\\WeChat\\Weixin.exe"
+        },
+        {
+          "hwnd": 1182250,
+          "pid": 30536,
+          "title": "MSCTFIME UI",
+          "class_name": "MSCTFIME UI",
+          "visible": false,
+          "path": "D:\\Program Files\\Tencent\\WeChat\\Weixin.exe"
+        },
+        {
+          "hwnd": 1246258,
+          "pid": 30536,
+          "title": "Default IME",
+          "class_name": "IME",
+          "visible": false,
+          "path": "D:\\Program Files\\Tencent\\WeChat\\Weixin.exe"
+        },
+        {
+          "hwnd": 69032,
+          "pid": 19716,
+          "title": "Default IME",
+          "class_name": "IME",
+          "visible": false,
+          "path": "D:\\Program Files\\Tencent\\WeChat\\Weixin.exe"
+        }
+      ],
+      "visible_windows": [
+        {
+          "hwnd": 134500,
+          "pid": 30536,
+          "title": "微信",
+          "class_name": "Qt51514QWindowIcon",
+          "visible": true,
+          "path": "D:\\Program Files\\Tencent\\WeChat\\Weixin.exe"
+        }
+      ],
+      "main_windows": [
+        {
+          "hwnd": 134500,
+          "pid": 30536,
+          "title": "微信",
+          "class_name": "Qt51514QWindowIcon",
+          "visible": true,
+          "path": "D:\\Program Files\\Tencent\\WeChat\\Weixin.exe"
+        },
+        {
+          "hwnd": 69078,
+          "pid": 30536,
+          "title": "Weixin",
+          "class_name": "Qt51514QWindowIcon",
+          "visible": false,
+          "path": "D:\\Program Files\\Tencent\\WeChat\\Weixin.exe"
+        }
+      ],
+      "visible_main_windows": [
+        {
+          "hwnd": 134500,
+          "pid": 30536,
+          "title": "微信",
+          "class_name": "Qt51514QWindowIcon",
+          "visible": true,
+          "path": "D:\\Program Files\\Tencent\\WeChat\\Weixin.exe"
+        }
+      ],
+      "visible_count": 1,
+      "main_count": 2,
+      "visible_main_count": 1
+    },
+    "state": "main_window",
+    "ok": true
+  },
+  "targets": [
+    "文件传输助手",
+    "许聪"
+  ],
+  "events": [
+    {
+      "ok": true,
+      "created_at": "2026-05-06T23:24:18",
+      "target": "文件传输助手",
+      "action": "handoff_sent",
+      "message_ids": [
+        "b63100160375df620f9c6e171a567e45",
+        "9b4251ea9c28b3a774310ab7dd618cd9"
+      ],
+      "message_count": 2,
+      "combined_content": "你好\n凯美瑞，3年内的一般多少钱",
+      "decision": {
+        "reply_text": "[车金AI] 凯美瑞三年内的价格得看具体车况和地区，我这边看不到实时行情，没法直接报价。方便说下您在哪个城市、考虑贷款或置换吗？我让销售同事查一下现车和具体行情再给您准信。",
+        "rule_name": "llm_synthesis_handoff",
+        "matched": true,
+        "need_handoff": true,
+        "reason": "llm_requested_handoff",
+        "raw_reply_text": "凯美瑞三年内的价格得看具体车况和地区，我这边看不到实时行情，没法直接报价。方便说下您在哪个城市、考虑贷款或置换吗？我让销售同事查一下现车和具体行情再给您准信。",
+        "handoff_reason": "evidence_safety:no_relevant_business_evidence"
+      },
+      "data_capture": {
+        "enabled": true,
+        "is_customer_data": false,
+        "complete": false,
+        "fields": {},
+        "missing_required_fields": [
+          "name",
+          "phone"
+        ],
+        "missing_required_labels": [
+          "姓名",
+          "电话"
+        ],
+        "pending_before": null,
+        "message_ids": [
+          "b63100160375df620f9c6e171a567e45",
+          "9b4251ea9c28b3a774310ab7dd618cd9"
+        ],
+        "raw_text": "你好\n凯美瑞，3年内的一般多少钱",
+        "write_requested": false
+      },
+      "raw_capture": {
+        "enabled": true,
+        "ok": true,
+        "conversation": {
+          "tenant_id": "jiangsu_chejin_usedcar_customer_20260501",
+          "conversation_id": "conv_87036d2253c2c945ed",
+          "conversation_type": "file_transfer",
+          "target_name": "文件传输助手",
+          "display_name": "文件传输助手",
+          "group_name": "",
+          "status": "active",
+          "exact": true,
+          "record_self": true,
+          "learning_enabled": true,
+          "notify_enabled": false,
+          "selected_by_user": false,
+          "created_at": "2026-05-06T23:23:55",
+          "updated_at": "2026-05-06T23:23:55",
+          "source": {
+            "type": "customer_service_listener"
+          },
+          "raw_payload": {
+            "target_name": "文件传输助手",
+            "display_name": "文件传输助手",
+            "conversation_type": "file_transfer",
+            "status": "active",
+            "exact": true,
+            "record_self": true,
+            "learning_enabled": true,
+            "notify_enabled": false,
+            "source": {
+              "type": "customer_service_listener"
+            }
+          }
+        },
+        "inserted_count": 1,
+        "duplicate_count": 5,
+        "message_ids": [
+          "raw_msg_e0b7eee3e9c90d32830d"
+        ],
+        "duplicate_message_ids": [
+          "raw_msg_352499673e66908f4ccf",
+          "raw_msg_1b1e109e2318d45e13eb",
+          "raw_msg_67678cd7e0188aa00f37",
+          "raw_msg_83f46942cf58dd13a311",
+          "raw_msg_a6a1683af69865af9c81"
+        ],
+        "batch": {
+          "batch_id": "raw_batch_7ce895dd867647707874",
+          "tenant_id": "jiangsu_chejin_usedcar_customer_20260501",
+          "conversation_id": "conv_87036d2253c2c945ed",
+          "message_ids": [
+            "raw_msg_e0b7eee3e9c90d32830d"
+          ],
+          "reason": "customer_service_poll",
+          "source_module": "customer_service",
+          "status": "pending",
+          "created_at": "2026-05-06T23:23:55"
+        },
+        "learning": {
+          "status": "background_started",
+          "batch_id": "raw_batch_7ce895dd867647707874"
+        }
+      },
+      "product_knowledge": {
+        "enabled": false
+      },
+      "intent_result": {
+        "intent": "product_inquiry",
+        "confidence": 0.0,
+        "reasoning": "",
+        "entities": {},
+        "source": "llm"
+      },
+      "intent_assist": {
+        "enabled": true,
+        "mode": "heuristic",
+        "intent": "quote_request",
+        "confidence": 0.86,
+        "suggested_reply": "好的，请发我具体产品、数量和规格，我帮您确认报价。",
+        "recommended_action": "handoff",
+        "safe_to_auto_send": false,
+        "needs_handoff": true,
+        "reason": "evidence_safety:no_relevant_business_evidence",
+        "fields": {},
+        "missing_fields": [
+          "name",
+          "phone"
+        ],
+        "source": "heuristic",
+        "ok": true,
+        "advisory_only": true,
+        "evidence": {
+          "scope": "wechat_ai_customer_service",
+          "intent_tags": [
+            "greeting",
+            "product",
+            "quote"
+          ],
+          "selected_item_ids": [
+            "chats:chejin_budget_chat_commuter",
+            "global_guidelines:customer_service_style_guidelines"
+          ],
+          "product_ids": [],
+          "faq_intents": [],
+          "policy_keys": [],
+          "product_scoped_ids": [],
+          "style_example_ids": [
+            "chejin_budget_chat_commuter",
+            "customer_service_style_guidelines"
+          ],
+          "rag_chunk_ids": [
+            "chunk_e9529bd5ca602205",
+            "chunk_aeddf38549fc3630",
+            "chunk_ef954954ebca6c9b",
+            "chunk_2629049039a10fdb",
+            "chunk_073920141b8ca59a"
+          ],
+          "rag_hits": [
+            {
+              "chunk_id": "chunk_e9529bd5ca602205",
+              "source_id": "source_59c4d2b6dd4b63d0",
+              "score": 0.99,
+              "category": "file_transfer",
+              "source_type": "wechat_raw_message",
+              "product_id": "",
+              "retrieval_mode": "hybrid_lexical_semantic",
+              "scoring": {
+                "lexical": 0.6,
+                "semantic": 0.3113,
+                "vector": 0.0932,
+                "vector_similarity": 0.5175,
+                "phrase": 0.0,
+                "product": 0.0,
+                "boost": -0.01,
+                "risk_penalty": 0.0,
+                "final": 0.99
+              },
+              "risk_terms": [],
+              "text": "[2026-05-06 23:14:00] system: 23:14\n[2026-05-06T23:19:44] self: [车金AI] 8万预算代步省油的话，可以看看凯美瑞、思域和秦PLUS DM-i，这几款口碑都不错，秦PLUS DM-i尤其省油。您是在哪个城市看车？是否考虑贷款或者置换呢？\n[2026-05-06T23:19:44] self: 凯美瑞，3年内的一般多少钱"
+            },
+            {
+              "chunk_id": "chunk_aeddf38549fc3630",
+              "source_id": "source_fa46ffd194f2c625",
+              "score": 0.99,
+              "category": "private",
+              "source_type": "wechat_raw_message",
+              "product_id": "",
+              "retrieval_mode": "hybrid_lexical_semantic",
+              "scoring": {
+                "lexical": 0.6,
+                "semantic": 0.3113,
+                "vector": 0.14,
+                "vector_similarity": 0.8478,
+                "phrase": 0.0,
+                "product": 0.0,
+                "boost": -0.01,
+                "risk_penalty": 0.0,
+                "final": 0.99
+              },
+              "risk_terms": [],
+              "text": "[2026-05-06 22:27:00] system: 22:27\n[2026-05-06T22:27:59] 许聪: 凯美瑞，3年内的一般多少钱"
+            },
+            {
+              "chunk_id": "chunk_ef954954ebca6c9b",
+              "source_id": "source_bca940ff74de1bc2",
+              "score": 0.5241,
+              "category": "file_transfer",
+              "source_type": "wechat_raw_message",
+              "product_id": "",
+              "retrieval_mode": "hybrid_lexical_semantic",
+              "scoring": {
+                "lexical": 0.28,
+                "semantic": 0.1722,
+                "vector": 0.082,
+                "vector_similarity": 0.4554,
+                "phrase": 0.0,
+                "product": 0.0,
+                "boost": -0.01,
+                "risk_penalty": 0.0,
+                "final": 0.5241
+              },
+              "risk_terms": [],
+              "text": "[2026-05-06T23:23:55] self: [车金AI] 三年内的凯美瑞价格受车况和地区影响挺大的，我这边看不到实时行情，没法直接给报价。方便说下您在哪个城市，考虑贷款或置换吗？我让销售同事查一下现车和具体行情再给您准信。"
+            },
+            {
+              "chunk_id": "chunk_2629049039a10fdb",
+              "source_id": "source_41ff3d9e06f1383d",
+              "score": 0.5212,
+              "category": "file_transfer",
+              "source_type": "wechat_raw_message",
+              "product_id": "",
+              "retrieval_mode": "hybrid_lexical_semantic",
+              "scoring": {
+                "lexical": 0.28,
+                "semantic": 0.1722,
+                "vector": 0.0791,
+                "vector_similarity": 0.4393,
+                "phrase": 0.0,
+                "product": 0.0,
+                "boost": -0.01,
+                "risk_penalty": 0.0,
+                "final": 0.5212
+              },
+              "risk_terms": [],
+              "text": "[2026-05-06 23:20:00] system: 23:20\n[2026-05-06T23:21:59] self: [车金AI] 三年内的凯美瑞价格浮动不小，主要看具体车况和地区，我这边没有实时报价不能随口说个数。方便说一下您所在城市，是否考虑贷款或置换吗？我让同事核实清楚后给您准话。"
+            },
+            {
+              "chunk_id": "chunk_073920141b8ca59a",
+              "source_id": "source_5c66eaada5eaac85",
+              "score": 0.5116,
+              "category": "private",
+              "source_type": "wechat_raw_message",
+              "product_id": "",
+              "retrieval_mode": "hybrid_lexical_semantic",
+              "scoring": {
+                "lexical": 0.28,
+                "semantic": 0.1722,
+                "vector": 0.0695,
+                "vector_similarity": 0.386,
+                "phrase": 0.0,
+                "product": 0.0,
+                "boost": -0.01,
+                "risk_penalty": 0.0,
+                "final": 0.5116
+              },
+              "risk_terms": [],
+              "text": "[2026-05-06 23:14:00] system: 23:14\n[2026-05-06T23:20:40] self: [车金AI] 好的，混动版凯美瑞确实省油，3年内的车况差价不小，我这边没有实时车源和报价，让销售同事帮您查一下现车和具体价格吧。方便留个电话？他查到后直接跟您联系。"
+            }
+          ],
+          "rag_confidence": 0.99,
+          "rag_can_authorize": false,
+          "rag_structured_priority": true,
+          "safety": {
+            "must_handoff": true,
+            "reasons": [
+              "no_relevant_business_evidence"
+            ],
+            "allowed_auto_reply": false,
+            "discount_check": {
+              "detected": false
+            }
+          }
+        },
+        "rule_decision": {
+          "rule_name": null,
+          "matched": false,
+          "reason": "no_rule_matched",
+          "reply_text": "[车金AI] "
+        },
+        "would_change_reply": true,
+        "llm_advisory": {
+          "enabled": true,
+          "provider": "deepseek",
+          "status": "background_started",
+          "reason": "advisory_executed_in_background"
+        }
+      },
+      "dry_run": false,
+      "rag_reply": {
+        "enabled": true,
+        "applied": false,
+        "reason": "evidence_safety_requires_handoff"
+      },
+      "llm_reply": {
+        "enabled": true,
+        "apply_to_reply": false,
+        "applied": false,
+        "reason": "apply_to_reply_disabled"
+      },
+      "llm_reply_synthesis": {
+        "enabled": true,
+        "applied": true,
+        "shadow_mode": false,
+        "evidence_summary": {
+          "structured_evidence_count": 0,
+          "rag_hit_count": 5,
+          "rag_chunk_ids": [
+            "chunk_e9529bd5ca602205",
+            "chunk_aeddf38549fc3630",
+            "chunk_ef954954ebca6c9b",
+            "chunk_2629049039a10fdb",
+            "chunk_073920141b8ca59a"
+          ],
+          "evidence_ids": [
+            "rag:chunk_e9529bd5ca602205",
+            "rag:chunk_aeddf38549fc3630",
+            "rag:chunk_ef954954ebca6c9b",
+            "rag:chunk_2629049039a10fdb",
+            "rag:chunk_073920141b8ca59a"
+          ]
+        },
+        "intent_tags": [
+          "greeting",
+          "product",
+          "quote"
+        ],
+        "model_tier": "pro",
+        "model_routing": {
+          "tier": "pro",
+          "profile": "pro",
+          "reasons": [
+            "rag_only_authority_topic"
+          ]
+        },
+        "provider": "deepseek",
+        "model": "deepseek-v4-pro",
+        "llm_usage": {
+          "prompt_tokens": 9701,
+          "completion_tokens": 1057,
+          "total_tokens": 10758,
+          "prompt_tokens_details": {
+            "cached_tokens": 1152
+          },
+          "completion_tokens_details": {
+            "reasoning_tokens": 878
+          },
+          "prompt_cache_hit_tokens": 1152,
+          "prompt_cache_miss_tokens": 8549
+        },
+        "prompt_estimate": {
+          "prompt_chars": 21074,
+          "rough_prompt_tokens": 10537
+        },
+        "llm_status": {
+          "ok": true,
+          "status": 200,
+          "attempt": 1,
+          "max_attempts": 3,
+          "model_tier": "pro"
+        },
+        "candidate": {
+          "can_answer": false,
+          "confidence": 0.9,
+          "recommended_action": "handoff",
+          "needs_handoff": true,
+          "used_evidence": [
+            "rag:chunk_2629049039a10fdb"
+          ],
+          "rag_used": true,
+          "structured_used": false,
+          "uncertain_points": [
+            "具体价格需销售根据实时车源核实"
+          ],
+          "risk_tags": [],
+          "reason": "根据RAG经验，凯美瑞二手车价格受车况和地区影响，系统无实时报价能力，需要转人工查询。",
+          "reply": "凯美瑞三年内的价格得看具体车况和地区，我这边看不到实时行情，没法直接报价。方便说下您在哪个城市、考虑贷款或置换吗？我让销售同事查一下现车和具体行情再给您准信。"
+        },
+        "guard": {
+          "allowed": true,
+          "action": "handoff",
+          "reason": "llm_requested_handoff",
+          "authority_tags": [],
+          "confidence": null,
+          "min_confidence": null,
+          "errors": []
+        },
+        "rule_name": "llm_synthesis_handoff",
+        "reason": "llm_requested_handoff",
+        "needs_handoff": true,
+        "raw_reply_text": "凯美瑞三年内的价格得看具体车况和地区，我这边看不到实时行情，没法直接报价。方便说下您在哪个城市、考虑贷款或置换吗？我让销售同事查一下现车和具体行情再给您准信。",
+        "reply_text": "凯美瑞三年内的价格得看具体车况和地区，我这边看不到实时行情，没法直接报价。方便说下您在哪个城市、考虑贷款或置换吗？我让销售同事查一下现车和具体行情再给您准信。"
+      },
+      "freshness_check": {
+        "ok": true,
+        "has_newer_messages": false,
+        "newer_message_ids": [],
+        "newer_messages": []
+      },
+      "send_result": {
+        "ok": true,
+        "send": {
+          "login_window_exists": false,
+          "online": true,
+          "my_info": {
+            "display_name": "Meta_xc",
+            "id": "sepulianmeng"
+          },
+          "window_probe": {
+            "windows": [
+              {
+                "hwnd": 1576430,
+                "pid": 30536,
+                "title": "Weixin",
+                "class_name": "Qt51514QWindowToolSaveBits",
+                "visible": false,
+                "path": "D:\\Program Files\\Tencent\\WeChat\\Weixin.exe"
+              },
+              {
+                "hwnd": 134500,
+                "pid": 30536,
+                "title": "微信",
+                "class_name": "Qt51514QWindowIcon",
+                "visible": true,
+                "path": "D:\\Program Files\\Tencent\\WeChat\\Weixin.exe"
+              },
+              {
+                "hwnd": 69030,
+                "pid": 19716,
+                "title": "",
+                "class_name": "Base_PowerMessageWindow",
+                "visible": false,
+                "path": "D:\\Program Files\\Tencent\\WeChat\\Weixin.exe"
+              },
+              {
+                "hwnd": 69078,
+                "pid": 30536,
+                "title": "Weixin",
+                "class_name": "Qt51514QWindowIcon",
+                "visible": false,
+                "path": "D:\\Program Files\\Tencent\\WeChat\\Weixin.exe"
+              },
+              {
+                "hwnd": 134538,
+                "pid": 30536,
+                "title": "WxTrayIconMessageWindow",
+                "class_name": "Qt51514WxTrayIconMessageWindowClass",
+                "visible": false,
+                "path": "D:\\Program Files\\Tencent\\WeChat\\Weixin.exe"
+              },
+              {
+                "hwnd": 134554,
+                "pid": 30536,
+                "title": "",
+                "class_name": "Base_PowerMessageWindow",
+                "visible": false,
+                "path": "D:\\Program Files\\Tencent\\WeChat\\Weixin.exe"
+              },
+              {
+                "hwnd": 330840,
+                "pid": 30536,
+                "title": "",
+                "class_name": "DisplayICC_SystemMessageWindow",
+                "visible": false,
+                "path": "D:\\Program Files\\Tencent\\WeChat\\Weixin.exe"
+              },
+              {
+                "hwnd": 1772032,
+                "pid": 30536,
+                "title": "",
+                "class_name": "Chrome_SystemMessageWindow",
+                "visible": false,
+                "path": "D:\\Program Files\\Tencent\\WeChat\\Weixin.exe"
+              },
+              {
+                "hwnd": 13568510,
+                "pid": 30536,
+                "title": "CiceroUIWndFrame",
+                "class_name": "CiceroUIWndFrame",
+                "visible": false,
+                "path": "D:\\Program Files\\Tencent\\WeChat\\Weixin.exe"
+              },
+              {
+                "hwnd": 12129810,
+                "pid": 30536,
+                "title": "CiceroUIWndFrame",
+                "class_name": "CiceroUIWndFrame",
+                "visible": false,
+                "path": "D:\\Program Files\\Tencent\\WeChat\\Weixin.exe"
+              },
+              {
+                "hwnd": 16193162,
+                "pid": 30536,
+                "title": "",
+                "class_name": "MSCTFIME Composition",
+                "visible": false,
+                "path": "D:\\Program Files\\Tencent\\WeChat\\Weixin.exe"
+              },
+              {
+                "hwnd": 26940904,
+                "pid": 30536,
+                "title": "",
+                "class_name": "MSCTFIME Composition",
+                "visible": false,
+                "path": "D:\\Program Files\\Tencent\\WeChat\\Weixin.exe"
+              },
+              {
+                "hwnd": 1447838,
+                "pid": 30536,
+                "title": "",
+                "class_name": "MSCTFIME Composition",
+                "visible": false,
+                "path": "D:\\Program Files\\Tencent\\WeChat\\Weixin.exe"
+              },
+              {
+                "hwnd": 1182250,
+                "pid": 30536,
+                "title": "MSCTFIME UI",
+                "class_name": "MSCTFIME UI",
+                "visible": false,
+                "path": "D:\\Program Files\\Tencent\\WeChat\\Weixin.exe"
+              },
+              {
+                "hwnd": 1246258,
+                "pid": 30536,
+                "title": "Default IME",
+                "class_name": "IME",
+                "visible": false,
+                "path": "D:\\Program Files\\Tencent\\WeChat\\Weixin.exe"
+              },
+              {
+                "hwnd": 69032,
+                "pid": 19716,
+                "title": "Default IME",
+                "class_name": "IME",
+                "visible": false,
+                "path": "D:\\Program Files\\Tencent\\WeChat\\Weixin.exe"
+              }
+            ],
+            "visible_windows": [
+              {
+                "hwnd": 134500,
+                "pid": 30536,
+                "title": "微信",
+                "class_name": "Qt51514QWindowIcon",
+                "visible": true,
+                "path": "D:\\Program Files\\Tencent\\WeChat\\Weixin.exe"
+              }
+            ],
+            "main_windows": [
+              {
+                "hwnd": 134500,
+                "pid": 30536,
+                "title": "微信",
+                "class_name": "Qt51514QWindowIcon",
+                "visible": true,
+                "path": "D:\\Program Files\\Tencent\\WeChat\\Weixin.exe"
+              },
+              {
+                "hwnd": 69078,
+                "pid": 30536,
+                "title": "Weixin",
+                "class_name": "Qt51514QWindowIcon",
+                "visible": false,
+                "path": "D:\\Program Files\\Tencent\\WeChat\\Weixin.exe"
+              }
+            ],
+            "visible_main_windows": [
+              {
+                "hwnd": 134500,
+                "pid": 30536,
+                "title": "微信",
+                "class_name": "Qt51514QWindowIcon",
+                "visible": true,
+                "path": "D:\\Program Files\\Tencent\\WeChat\\Weixin.exe"
+              }
+            ],
+            "visible_count": 1,
+            "main_count": 2,
+            "visible_main_count": 1
+          },
+          "chat_with_result": "文件传输助手",
+          "chat_info_before_send": {
+            "chat_type": "friend",
+            "chat_name": "文件传输助手"
+          },
+          "send_result": {
+            "status": "成功",
+            "message": null,
+            "data": null
+          },
+          "chat_info_after_send": {
+            "chat_type": "friend",
+            "chat_name": "文件传输助手"
+          },
+          "ok": true
+        },
+        "messages": {
+          "login_window_exists": false,
+          "online": true,
+          "my_info": {
+            "display_name": "Meta_xc",
+            "id": "sepulianmeng"
+          },
+          "window_probe": {
+            "windows": [
+              {
+                "hwnd": 1576430,
+                "pid": 30536,
+                "title": "Weixin",
+                "class_name": "Qt51514QWindowToolSaveBits",
+                "visible": false,
+                "path": "D:\\Program Files\\Tencent\\WeChat\\Weixin.exe"
+              },
+              {
+                "hwnd": 134500,
+                "pid": 30536,
+                "title": "微信",
+                "class_name": "Qt51514QWindowIcon",
+                "visible": true,
+                "path": "D:\\Program Files\\Tencent\\WeChat\\Weixin.exe"
+              },
+              {
+                "hwnd": 69030,
+                "pid": 19716,
+                "title": "",
+                "class_name": "Base_PowerMessageWindow",
+                "visible": false,
+                "path": "D:\\Program Files\\Tencent\\WeChat\\Weixin.exe"
+              },
+              {
+                "hwnd": 69078,
+                "pid": 30536,
+                "title": "Weixin",
+                "class_name": "Qt51514QWindowIcon",
+                "visible": false,
+                "path": "D:\\Program Files\\Tencent\\WeChat\\Weixin.exe"
+              },
+              {
+                "hwnd": 134538,
+                "pid": 30536,
+                "title": "WxTrayIconMessageWindow",
+                "class_name": "Qt51514WxTrayIconMessageWindowClass",
+                "visible": false,
+                "path": "D:\\Program Files\\Tencent\\WeChat\\Weixin.exe"
+              },
+              {
+                "hwnd": 134554,
+                "pid": 30536,
+                "title": "",
+                "class_name": "Base_PowerMessageWindow",
+                "visible": false,
+                "path": "D:\\Program Files\\Tencent\\WeChat\\Weixin.exe"
+              },
+              {
+                "hwnd": 330840,
+                "pid": 30536,
+                "title": "",
+                "class_name": "DisplayICC_SystemMessageWindow",
+                "visible": false,
+                "path": "D:\\Program Files\\Tencent\\WeChat\\Weixin.exe"
+              },
+              {
+                "hwnd": 1772032,
+                "pid": 30536,
+                "title": "",
+                "class_name": "Chrome_SystemMessageWindow",
+                "visible": false,
+                "path": "D:\\Program Files\\Tencent\\WeChat\\Weixin.exe"
+              },
+              {
+                "hwnd": 13568510,
+                "pid": 30536,
+                "title": "CiceroUIWndFrame",
+                "class_name": "CiceroUIWndFrame",
+                "visible": false,
+                "path": "D:\\Program Files\\Tencent\\WeChat\\Weixin.exe"
+              },
+              {
+                "hwnd": 12129810,
+                "pid": 30536,
+                "title": "CiceroUIWndFrame",
+                "class_name": "CiceroUIWndFrame",
+                "visible": false,
+                "path": "D:\\Program Files\\Tencent\\WeChat\\Weixin.exe"
+              },
+              {
+                "hwnd": 16193162,
+                "pid": 30536,
+                "title": "",
+                "class_name": "MSCTFIME Composition",
+                "visible": false,
+                "path": "D:\\Program Files\\Tencent\\WeChat\\Weixin.exe"
+              },
+              {
+                "hwnd": 26940904,
+                "pid": 30536,
+                "title": "",
+                "class_name": "MSCTFIME Composition",
+                "visible": false,
+                "path": "D:\\Program Files\\Tencent\\WeChat\\Weixin.exe"
+              },
+              {
+                "hwnd": 1447838,
+                "pid": 30536,
+                "title": "",
+                "class_name": "MSCTFIME Composition",
+                "visible": false,
+                "path": "D:\\Program Files\\Tencent\\WeChat\\Weixin.exe"
+              },
+              {
+                "hwnd": 1182250,
+                "pid": 30536,
+                "title": "MSCTFIME UI",
+                "class_name": "MSCTFIME UI",
+                "visible": false,
+                "path": "D:\\Program Files\\Tencent\\WeChat\\Weixin.exe"
+              },
+              {
+                "hwnd": 1246258,
+                "pid": 30536,
+                "title": "Default IME",
+                "class_name": "IME",
+                "visible": false,
+                "path": "D:\\Program Files\\Tencent\\WeChat\\Weixin.exe"
+              },
+              {
+                "hwnd": 69032,
+                "pid": 19716,
+                "title": "Default IME",
+                "class_name": "IME",
+                "visible": false,
+                "path": "D:\\Program Files\\Tencent\\WeChat\\Weixin.exe"
+              }
+            ],
+            "visible_windows": [
+              {
+                "hwnd": 134500,
+                "pid": 30536,
+                "title": "微信",
+                "class_name": "Qt51514QWindowIcon",
+                "visible": true,
+                "path": "D:\\Program Files\\Tencent\\WeChat\\Weixin.exe"
+              }
+            ],
+            "main_windows": [
+              {
+                "hwnd": 134500,
+                "pid": 30536,
+                "title": "微信",
+                "class_name": "Qt51514QWindowIcon",
+                "visible": true,
+                "path": "D:\\Program Files\\Tencent\\WeChat\\Weixin.exe"
+              },
+              {
+                "hwnd": 69078,
+                "pid": 30536,
+                "title": "Weixin",
+                "class_name": "Qt51514QWindowIcon",
+                "visible": false,
+                "path": "D:\\Program Files\\Tencent\\WeChat\\Weixin.exe"
+              }
+            ],
+            "visible_main_windows": [
+              {
+                "hwnd": 134500,
+                "pid": 30536,
+                "title": "微信",
+                "class_name": "Qt51514QWindowIcon",
+                "visible": true,
+                "path": "D:\\Program Files\\Tencent\\WeChat\\Weixin.exe"
+              }
+            ],
+            "visible_count": 1,
+            "main_count": 2,
+            "visible_main_count": 1
+          },
+          "chat_info": {
+            "chat_type": "friend",
+            "chat_name": "文件传输助手"
+          },
+          "messages": [
+            {
+              "repr": "SelfTextMessage(你好)",
+              "type": "text",
+              "sender": "self",
+              "content": "你好",
+              "time": null,
+              "id": "b63100160375df620f9c6e171a567e45"
+            },
+            {
+              "repr": "SelfTextMessage(凯美瑞，3年内的一般多少钱)",
+              "type": "text",
+              "sender": "self",
+              "content": "凯美瑞，3年内的一般多少钱",
+              "time": null,
+              "id": "9b4251ea9c28b3a774310ab7dd618cd9"
+            },
+            {
+              "repr": "TimeMessage(23:20)",
+              "type": "time",
+              "sender": "system",
+              "content": "23:20",
+              "time": "2026-05-06 23:20:00",
+              "id": "a6433efc208453952c0a71b07d34c243"
+            },
+            {
+              "repr": "SelfTextMessage([车金AI] 三年内的凯美瑞价格浮动不小...)",
+              "type": "text",
+              "sender": "self",
+              "content": "[车金AI] 三年内的凯美瑞价格浮动不小，主要看具体车况和地区，我这边没有实时报价不能随口说个数。方便说一下您所在城市，是否考虑贷款或置换吗？我让同事核实清楚后给您准话。",
+              "time": null,
+              "id": "2cd9538d5a3d7c8dfc2f3a61b951404d"
+            },
+            {
+              "repr": "SelfTextMessage([车金AI] 三年内的凯美瑞价格受车况和...)",
+              "type": "text",
+              "sender": "self",
+              "content": "[车金AI] 三年内的凯美瑞价格受车况和地区影响挺大的，我这边看不到实时行情，没法直接给报价。方便说下您在哪个城市，考虑贷款或置换吗？我让销售同事查一下现车和具体行情再给您准信。",
+              "time": null,
+              "id": "4d47fa1d9558b58cbe398110da751286"
+            },
+            {
+              "repr": "SelfTextMessage([车金AI] 凯美瑞三年内的价格得看具体...)",
+              "type": "text",
+              "sender": "self",
+              "content": "[车金AI] 凯美瑞三年内的价格得看具体车况和地区，我这边看不到实时行情，没法直接报价。方便说下您在哪个城市、考虑贷款或置换吗？我让销售同事查一下现车和具体行情再给您准信。",
+              "time": null,
+              "id": "7eec7d59d2c6602d2c1b1b9223631a14"
+            }
+          ],
+          "ok": true
+        },
+        "verified": true
+      },
+      "verified": true,
+      "reply_trace_id": "reply_trace_414fee84d9d912261f35",
+      "operator_alert": {
+        "created_at": "2026-05-06T23:24:58",
+        "target": "文件传输助手",
+        "message_ids": [
+          "b63100160375df620f9c6e171a567e45",
+          "9b4251ea9c28b3a774310ab7dd618cd9"
+        ],
+        "message_contents": [
+          "你好",
+          "凯美瑞，3年内的一般多少钱"
+        ],
+        "combined_content": "你好\n凯美瑞，3年内的一般多少钱",
+        "reason": "evidence_safety:no_relevant_business_evidence",
+        "reply_text": "[车金AI] 凯美瑞三年内的价格得看具体车况和地区，我这边看不到实时行情，没法直接报价。方便说下您在哪个城市、考虑贷款或置换吗？我让销售同事查一下现车和具体行情再给您准信。",
+        "product_knowledge": {
+          "enabled": false
+        },
+        "status": "open",
+        "delivery": {
+          "type": "jsonl",
+          "path": "D:\\AI\\omniauto\\runtime\\apps\\wechat_ai_customer_service\\tenants\\jiangsu_chejin_usedcar_customer_20260501\\logs\\xucong_live_operator_alerts.jsonl",
+          "ok": true
+        },
+        "case_store": {
+          "enabled": true,
+          "ok": true,
+          "case_id": "handoff_30aed71a051c15a18823",
+          "status": "open"
+        }
+      },
+      "iteration": 1
+    },
+    {
+      "ok": true,
+      "created_at": "2026-05-06T23:25:00",
+      "target": "许聪",
+      "action": "skipped",
+      "reason": "no eligible unprocessed text messages",
+      "raw_capture": {
+        "enabled": true,
+        "ok": true,
+        "conversation": {
+          "tenant_id": "jiangsu_chejin_usedcar_customer_20260501",
+          "conversation_id": "conv_42724f6508e96ded7f",
+          "conversation_type": "private",
+          "target_name": "许聪",
+          "display_name": "许聪",
+          "group_name": "",
+          "status": "active",
+          "exact": true,
+          "record_self": true,
+          "learning_enabled": true,
+          "notify_enabled": false,
+          "selected_by_user": false,
+          "created_at": "2026-05-06T23:25:00",
+          "updated_at": "2026-05-06T23:25:00",
+          "source": {
+            "type": "customer_service_listener"
+          },
+          "raw_payload": {
+            "target_name": "许聪",
+            "display_name": "许聪",
+            "conversation_type": "private",
+            "status": "active",
+            "exact": true,
+            "record_self": true,
+            "learning_enabled": true,
+            "notify_enabled": false,
+            "source": {
+              "type": "customer_service_listener"
+            }
+          }
+        },
+        "inserted_count": 1,
+        "duplicate_count": 4,
+        "message_ids": [
+          "raw_msg_67c2648aea52c6dde016"
+        ],
+        "duplicate_message_ids": [
+          "raw_msg_e95ebc5159d762c1280e",
+          "raw_msg_9dd24bb6d3b4ef8bbe8c",
+          "raw_msg_afbb9b75471e60229a82",
+          "raw_msg_9b0a30575632564fb5cb"
+        ],
+        "batch": {
+          "batch_id": "raw_batch_7044f6b9d9fdf9961cd6",
+          "tenant_id": "jiangsu_chejin_usedcar_customer_20260501",
+          "conversation_id": "conv_42724f6508e96ded7f",
+          "message_ids": [
+            "raw_msg_67c2648aea52c6dde016"
+          ],
+          "reason": "customer_service_poll",
+          "source_module": "customer_service",
+          "status": "pending",
+          "created_at": "2026-05-06T23:25:00"
+        },
+        "learning": {
+          "status": "background_started",
+          "batch_id": "raw_batch_7044f6b9d9fdf9961cd6"
+        }
+      },
+      "iteration": 1
+    }
+  ]
+}

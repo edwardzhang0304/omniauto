@@ -1167,15 +1167,6 @@ def ensure_email_not_used(state: dict[str, Any], email: str, *, except_user_id: 
     normalized = normalize_email(email)
     if not normalized:
         raise PermissionError("valid email required")
-    admin_record = state.get("admin_credentials", {}).get(load_settings().admin_user_id)
-    admin_email = normalize_email(str(admin_record.get("email") or load_settings().admin_email)) if isinstance(admin_record, dict) else load_settings().admin_email
-    if normalized == admin_email and except_user_id != load_settings().admin_user_id:
-        raise PermissionError("email is already used by another account")
-    for user_id, record in state.get("users", {}).items():
-        if str(user_id) == except_user_id:
-            continue
-        if isinstance(record, dict) and normalize_email(str(record.get("email") or "")) == normalized:
-            raise PermissionError("email is already used by another account")
 
 
 def parse_datetime(value: str) -> datetime | None:

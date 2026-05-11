@@ -72,6 +72,14 @@ def discard_experience(experience_id: str, payload: dict[str, Any] | None = None
         raise HTTPException(status_code=404, detail=f"RAG experience not found: {experience_id}") from exc
 
 
+@router.post("/experiences/{experience_id}/acknowledge")
+def acknowledge_experience(experience_id: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
+    try:
+        return rag_service().acknowledge_experience(experience_id, payload or {})
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=f"RAG experience not found: {experience_id}") from exc
+
+
 @router.post("/experiences/{experience_id}/keep")
 def keep_experience(experience_id: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
     try:
@@ -106,6 +114,17 @@ def update_experience(experience_id: str, payload: dict[str, Any] | None = None)
 def promote_experience(experience_id: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
     try:
         result = rag_service().promote_experience(experience_id, payload or {})
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=f"RAG experience not found: {experience_id}") from exc
+    if not result.get("ok"):
+        raise HTTPException(status_code=400, detail=result)
+    return result
+
+
+@router.post("/experiences/{experience_id}/resolve-overlap")
+def resolve_formal_overlap(experience_id: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
+    try:
+        result = rag_service().resolve_formal_overlap(experience_id, payload or {})
     except KeyError as exc:
         raise HTTPException(status_code=404, detail=f"RAG experience not found: {experience_id}") from exc
     if not result.get("ok"):

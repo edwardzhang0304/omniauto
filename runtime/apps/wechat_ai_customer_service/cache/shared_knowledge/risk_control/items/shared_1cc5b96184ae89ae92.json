@@ -11,6 +11,7 @@
   "schema_version": 1,
   "id": "shared_1cc5b96184ae89ae92",
   "item_id": "shared_1cc5b96184ae89ae92",
+  "industry_id": "global",
   "category_id": "risk_control",
   "status": "active",
   "content": "涉及最低价、破例优惠、特殊折扣或超出公开规则的价格请求，AI客服不能直接承诺，应先记录需求并转人工确认。",

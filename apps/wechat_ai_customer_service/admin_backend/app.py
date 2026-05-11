@@ -25,6 +25,7 @@ from .api.learning import router as learning_router
 from .api.product_console import router as product_console_router
 from .api.rag import router as rag_router
 from .api.raw_messages import router as raw_messages_router
+from .api.recorder_exports import router as recorder_exports_router
 from .api.recorder import router as recorder_router
 from .api.system import router as system_router
 from .api.sync import router as sync_router
@@ -72,6 +73,7 @@ def create_app() -> FastAPI:
     app.include_router(product_console_router)
     app.include_router(rag_router)
     app.include_router(raw_messages_router)
+    app.include_router(recorder_exports_router)
     app.include_router(recorder_router)
     app.include_router(system_router)
     app.include_router(sync_router)

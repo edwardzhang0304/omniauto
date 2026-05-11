@@ -314,8 +314,20 @@ class RagService:
                 self.rebuild_index()
                 entries = db.list_rag_index(self.tenant_id)
             return {"schema_version": 1, "tenant_id": self.tenant_id, "entries": entries, "built_at": "postgres"}
-        if not self.index_path.exists() or self.index_is_stale():
+        if not self.index_path.exists():
             self.rebuild_index()
+        elif self.index_is_stale():
+            try:
+                # Rebuild through the current service instance so custom roots
+                # (test/eval sandboxes) stay consistent with their own index path.
+                self.rebuild_index()
+            except Exception:
+                try:
+                    from apps.wechat_ai_customer_service.workflows.rag_experience_store import rebuild_rag_index_safely
+
+                    rebuild_rag_index_safely(self.tenant_id, trigger="rag_index_stale_on_load", force_sync=True)
+                except Exception:
+                    pass
         if not self.index_path.exists():
             return {"schema_version": 1, "tenant_id": self.tenant_id, "entries": []}
         return json.loads(self.index_path.read_text(encoding="utf-8"))
@@ -441,7 +453,12 @@ class RagService:
             }
         sources = self.list_sources()
         chunks = self.iter_chunks()
-        index = self.load_index() if self.index_path.exists() else {"entries": []}
+        index = {"entries": [], "built_at": ""}
+        if self.index_path.exists():
+            try:
+                index = json.loads(self.index_path.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError):
+                index = {"entries": [], "built_at": ""}
         return {
             "ok": True,
             "tenant_id": self.tenant_id,
@@ -455,6 +472,7 @@ class RagService:
             "index_exists": self.index_path.exists(),
             "index_path": str(self.index_path),
             "updated_at": str(index.get("built_at") or ""),
+            "index_stale": self.index_is_stale() if self.index_path.exists() else True,
         }
 
 

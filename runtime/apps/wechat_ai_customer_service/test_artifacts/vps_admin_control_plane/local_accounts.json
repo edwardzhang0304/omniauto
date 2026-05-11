@@ -9,16 +9,6 @@
         "local_usedcar_tenant"
       ],
       "status": "active"
-    },
-    "local_trade_customer": {
-      "user_id": "local_trade_customer",
-      "username": "local_trade_customer",
-      "display_name": "Local Trade Customer",
-      "role": "customer",
-      "tenant_ids": [
-        "local_trade_tenant"
-      ],
-      "status": "active"
     }
   }
 }

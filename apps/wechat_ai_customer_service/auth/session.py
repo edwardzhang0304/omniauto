@@ -124,23 +124,27 @@ class AuthService:
         return local_password_matches(account, password) and local_account_needs_initialization(account)
 
     def start_login_email_binding(self, *, challenge_id: str, email: str) -> dict[str, Any]:
-        if self.settings.vps_base_url and str(challenge_id or "").startswith("otp_"):
+        challenge_id = str(challenge_id or "").strip()
+        if challenge_id.startswith("otp_"):
+            if not self.settings.vps_base_url:
+                raise PermissionError("VPS verification challenge requires a reachable WECHAT_VPS_BASE_URL")
             try:
                 return self.vps.start_login_email_binding(challenge_id=challenge_id, email=email)
-            except VpsClientError:
-                if self.settings.required:
-                    raise
+            except VpsClientError as exc:
+                raise PermissionError(f"VPS verification challenge unavailable: {exc}") from exc
         return self.local_start_login_email_binding(challenge_id=challenge_id, email=email)
 
     def verify_login(self, *, challenge_id: str, code: str, trust_device: bool = False) -> AuthSession:
-        if self.settings.vps_base_url and str(challenge_id or "").startswith("otp_"):
+        challenge_id = str(challenge_id or "").strip()
+        if challenge_id.startswith("otp_"):
+            if not self.settings.vps_base_url:
+                raise PermissionError("VPS verification challenge requires a reachable WECHAT_VPS_BASE_URL")
             try:
                 session = self.vps.verify_login(challenge_id=challenge_id, code=code, trust_device=trust_device)
                 self.save_session(session)
                 return session
-            except VpsClientError:
-                if self.settings.required:
-                    raise
+            except VpsClientError as exc:
+                raise PermissionError(f"VPS verification challenge unavailable: {exc}") from exc
         session = self.local_verify_login(challenge_id=challenge_id, code=code, trust_device=trust_device)
         self.save_session(session)
         return session
@@ -153,7 +157,10 @@ class AuthService:
         new_password: str,
         smtp_config: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
-        if self.settings.vps_base_url and str(challenge_id or "").startswith("init_"):
+        challenge_id = str(challenge_id or "").strip()
+        if challenge_id.startswith("init_"):
+            if not self.settings.vps_base_url:
+                raise PermissionError("VPS initialization challenge requires a reachable WECHAT_VPS_BASE_URL")
             try:
                 return self.vps.start_account_initialization(
                     challenge_id=challenge_id,
@@ -161,18 +168,19 @@ class AuthService:
                     new_password=new_password,
                     smtp_config=smtp_config,
                 )
-            except VpsClientError:
-                if self.settings.required:
-                    raise
+            except VpsClientError as exc:
+                raise PermissionError(f"VPS initialization challenge unavailable: {exc}") from exc
         return self.local_start_account_initialization(challenge_id=challenge_id, email=email, new_password=new_password)
 
     def verify_account_initialization(self, *, challenge_id: str, code: str) -> dict[str, Any]:
-        if self.settings.vps_base_url and str(challenge_id or "").startswith("init_"):
+        challenge_id = str(challenge_id or "").strip()
+        if challenge_id.startswith("init_"):
+            if not self.settings.vps_base_url:
+                raise PermissionError("VPS initialization challenge requires a reachable WECHAT_VPS_BASE_URL")
             try:
                 return self.vps.verify_account_initialization(challenge_id=challenge_id, code=code)
-            except VpsClientError:
-                if self.settings.required:
-                    raise
+            except VpsClientError as exc:
+                raise PermissionError(f"VPS initialization challenge unavailable: {exc}") from exc
         return self.local_verify_account_initialization(challenge_id=challenge_id, code=code)
 
     def local_login(self, username: str, password: str, *, tenant_id: str | None = None) -> AuthSession:
@@ -755,17 +763,6 @@ class AuthService:
         normalized = normalize_email(email)
         if not normalized:
             raise PermissionError("valid email required")
-        overrides = self.read_local_account_overrides()
-        default_names = {"admin", "customer", "test01", "guest", *overrides.keys()}
-        for username in default_names:
-            if username == except_username:
-                continue
-            try:
-                account = local_account(username)
-            except PermissionError:
-                continue
-            if normalize_email(str(account.get("email") or "")) == normalized:
-                raise PermissionError("email is already used by another account")
 
     def apply_local_email(self, *, username: str, email: str) -> None:
         email = normalize_email(email)
@@ -922,6 +919,15 @@ def read_local_account_overrides_from_env() -> dict[str, Any]:
     if isinstance(accounts, list):
         return {str(item.get("username") or item.get("user_id") or ""): item for item in accounts if isinstance(item, dict)}
     return {}
+
+
+def write_local_account_overrides_to_env(accounts: dict[str, Any]) -> None:
+    path = Path(os.getenv("WECHAT_LOCAL_ACCOUNTS_STATE_PATH") or runtime_app_root() / "auth" / "local_accounts.json")
+    payload = accounts if isinstance(accounts, dict) else {}
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temp = path.with_suffix(".json.tmp")
+    temp.write_text(json.dumps({"accounts": payload}, ensure_ascii=False, indent=2), encoding="utf-8")
+    os.replace(temp, path)
 
 
 def challenge_expired(challenge: dict[str, Any]) -> bool:

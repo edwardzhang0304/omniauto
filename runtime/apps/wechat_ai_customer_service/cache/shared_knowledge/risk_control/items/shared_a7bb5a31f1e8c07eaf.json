@@ -10,6 +10,7 @@
   "schema_version": 1,
   "id": "shared_a7bb5a31f1e8c07eaf",
   "item_id": "shared_a7bb5a31f1e8c07eaf",
+  "industry_id": "global",
   "category_id": "risk_control",
   "status": "active",
   "content": "样品费是否可抵扣大货款，需要按商品和数量人工确认。",

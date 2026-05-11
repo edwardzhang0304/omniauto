@@ -319,5 +319,25 @@
     "status": "not_recommended",
     "updated_at": "2026-05-05T00:34:52",
     "llm_used": true
+  },
+  "default:policies:company_profile:80ab4a30e3d548dd": {
+    "status": "not_recommended",
+    "updated_at": "2026-05-09T11:16:14",
+    "llm_used": true
+  },
+  "default:policies:invoice:95b2a569b417112e": {
+    "status": "not_recommended",
+    "updated_at": "2026-05-09T11:16:14",
+    "llm_used": true
+  },
+  "default:policies:selection_help:87e5598e57af50d5": {
+    "status": "not_recommended",
+    "updated_at": "2026-05-09T11:16:14",
+    "llm_used": true
+  },
+  "default:policies:special_invoice_rule:7b43eaa6ef56cd2f": {
+    "status": "not_recommended",
+    "updated_at": "2026-05-09T11:16:14",
+    "llm_used": true
   }
 }

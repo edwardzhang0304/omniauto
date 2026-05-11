@@ -143,6 +143,7 @@
             </div>
             <div class="console-layout">
               <section class="control-panel">
+                <div class="alert-banner is-hidden" id="runtime-tenant-mismatch-banner" style="margin-bottom: 12px; padding: 8px 12px; background: #fff3cd; border: 1px solid #ffc107; border-radius: 6px; color: #856404; font-size: 13px;"></div>
                 <div class="runtime-status-card is-stopped" id="customer-service-runtime-card">
                   <div class="runtime-status-main">
                     <span class="service-state-dot is-stopped"></span>
@@ -235,36 +236,35 @@
               </div>
               <div class="button-row">
                 <button class="secondary-button" id="refresh-product-catalog">刷新</button>
-                <button class="primary-button" id="new-product-from-catalog">上传商品资料</button>
+                <button class="secondary-button" id="product-llm-intake-toggle">AI 助手录入</button>
               </div>
             </div>
             <div class="metric-grid metric-grid-tight metric-grid-four" id="product-catalog-cards">
               <div class="status-card loading"><strong><span class="loading-spinner" aria-hidden="true"></span>正在加载商品统计</strong><span>请稍等。</span></div>
             </div>
-            <div class="product-command">
-              <label class="form-field wide-field">
-                <span>用一句话修改商品库</span>
-                <input id="product-command-input" placeholder="例如：凯美瑞卖出 1 台；GL8 库存改成 2 台；新增商品..." />
-              </label>
-              <button class="primary-button" id="run-product-command">执行</button>
-            </div>
-            <div class="product-upload-panel is-hidden" id="product-upload-panel">
+            <div class="product-upload-panel is-hidden" id="product-llm-intake-panel">
               <div class="section-head sub-head">
                 <div>
-                  <h2>上传商品资料</h2>
-                  <p>这里上传的是商品主数据。AI 会先整理成商品草稿，字段完整后才能确认直接入库。</p>
+                  <h2>AI 助手录入商品</h2>
+                  <p>采用对话式整理：你可以持续补充、修正字段。AI 会按商品标准结构抽取，缺关键信息会主动追问，确认后再执行。</p>
                 </div>
-                <button class="secondary-button" id="close-product-upload-panel">收起</button>
+                <button class="secondary-button" id="close-product-llm-intake-panel">收起</button>
               </div>
-              <div class="upload-box">
-                <label class="form-field wide-field">
-                  <span>商品资料文件</span>
-                  <input id="product-upload-file" type="file" accept=".txt,.md,.json,.csv,.xlsx" />
-                </label>
-                <button class="primary-button" id="upload-product-doc">AI分析商品资料</button>
-              </div>
-              <div id="product-upload-result" class="product-upload-result">
-                <div class="empty-state">上传商品资料后，会在这里展示 AI 建议、缺失字段和可编辑商品草稿。</div>
+              <div class="generator-layout product-intake-layout">
+                <div class="generator-chat" id="product-llm-intake-messages"></div>
+                <div class="generator-side">
+                  <label class="form-field">
+                    <span>自然语言描述</span>
+                    <textarea id="product-llm-intake-input" placeholder="例如：把小米电视75寸库存改为499，并新增10台起每台1899元；另把售后改为整机2年保修"></textarea>
+                  </label>
+                  <button class="primary-button" id="product-llm-intake-send">生成/补充</button>
+                  <div class="generator-summary" id="product-llm-intake-summary"></div>
+                  <div id="product-llm-intake-status"></div>
+                  <div class="button-row is-hidden" id="product-llm-intake-actions">
+                    <button class="primary-button" id="product-llm-intake-apply">确认执行</button>
+                    <button class="secondary-button" id="product-llm-intake-reset">重新开始</button>
+                  </div>
+                </div>
               </div>
             </div>
             <div class="split-layout product-layout">
@@ -425,16 +425,62 @@
               <strong>记录员只负责采集和整理。</strong>
               <span>记录内容先进入RAG经验池；是否升级为待确认知识，需要用户手动确认。</span>
             </div>
+            <div class="control-row">
+              <div>
+                <strong>记录员总开关</strong>
+                <span id="recorder-status">读取中...</span>
+              </div>
+              <label class="switch-line"><input id="recorder-enabled" type="checkbox" /> 开启</label>
+            </div>
             <div class="recorder-toolbar">
               <label class="checkbox-line"><input id="recorder-notify" type="checkbox" /> 收录后在群内提示</label>
               <label class="checkbox-line"><input id="recorder-auto-learn" type="checkbox" /> 自动整理为RAG经验</label>
               <label class="checkbox-line"><input id="recorder-use-llm" type="checkbox" /> 使用大模型辅助提取</label>
               <button class="secondary-button" id="recorder-save-settings">保存设置</button>
-              <button class="secondary-button" id="export-knowledge-type">按类型导出Excel</button>
-              <button class="secondary-button" id="export-knowledge-time">按时间导出Excel</button>
+            </div>
+            <div class="helper-card" id="recorder-module-info">
+              <strong>当前结构化导出模块：读取中...</strong>
+              <span>模块决定“规则+LLM抽取逻辑”和结构化 Excel 模板格式。</span>
+            </div>
+            <div class="helper-card">
+              <strong>结构化导出（模块 + LLM）</strong>
+              <span>用于把“记录中”会话抽取成结构化结果。此流程是异步任务：创建任务后会自动刷新状态，任务完成后下载结果。</span>
+              <div class="button-row">
+                <button class="primary-button" id="recorder-export-run-create">导出所有记录（结构化）</button>
+                <button class="secondary-button" id="recorder-export-run-day">按日导出</button>
+                <button class="secondary-button" id="recorder-export-run-week">按周导出</button>
+                <button class="secondary-button" id="recorder-export-run-month">按月导出</button>
+              </div>
+              <details id="recorder-export-advanced" class="helper-card">
+                <summary>高级筛选（日期范围）</summary>
+                <span>默认折叠。可设置开始/结束日期后导出；不设置则按当前会话全量导出（最多10000条）。</span>
+                <div class="button-row">
+                  <label class="checkbox-line">开始日期：<input type="date" id="recorder-export-start-date" /></label>
+                  <label class="checkbox-line">结束日期：<input type="date" id="recorder-export-end-date" /></label>
+                  <button class="primary-button" id="recorder-export-run-custom" type="button">按日期范围导出</button>
+                  <button class="secondary-button" id="recorder-export-date-clear" type="button">清空日期范围</button>
+                </div>
+              </details>
+              <div id="recorder-export-progress" class="compact-metrics">
+                <div class="status-card">
+                  <strong>暂无进行中的结构化导出任务</strong>
+                  <span>点击“创建结构化导出任务”后，这里会实时显示排队和处理进度。</span>
+                </div>
+              </div>
+            </div>
+            <div class="helper-card">
+              <strong>基础知识库导出（旧模式）</strong>
+              <span>仅对当前知识库做基础分类导出，不执行模块抽取，也不走 LLM 结构化分析。</span>
+              <div class="button-row">
+                <button class="secondary-button" id="export-knowledge-type">导出知识库Excel（按类型）</button>
+                <button class="secondary-button" id="export-knowledge-time">导出知识库Excel（按时间）</button>
+              </div>
             </div>
             <div class="metric-grid metric-grid-tight metric-grid-four" id="recorder-cards">
               <div class="status-card loading"><strong><span class="loading-spinner" aria-hidden="true"></span>正在加载记录员状态</strong><span>请稍等。</span></div>
+            </div>
+            <div class="compact-list compact-list-small" id="recorder-export-runs-list">
+              <div class="status-card loading"><strong><span class="loading-spinner" aria-hidden="true"></span>正在加载结构化导出任务</strong><span>请稍等。</span></div>
             </div>
             <div class="split-layout">
               <div class="list-pane" id="recorder-group-list">
@@ -668,7 +714,7 @@
       </section>
     </main>
     <aside class="customer-service-float is-stopped" id="customer-service-float" aria-live="polite">
-      <div class="float-status-line">
+      <div class="float-status-line float-drag-handle" title="按住拖动浮窗位置">
         <span class="service-state-dot is-stopped"></span>
         <div>
           <strong>已停止</strong>

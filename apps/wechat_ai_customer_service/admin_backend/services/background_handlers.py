@@ -131,15 +131,48 @@ def handle_diagnostics_deep_check(payload: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def handle_recorder_export_run_execute(payload: dict[str, Any]) -> dict[str, Any]:
+    """Execute one recorder export run asynchronously."""
+    run_id = str(payload.get("run_id") or "").strip()
+    tenant_id = active_tenant_id(payload.get("tenant_id"))
+    if not run_id:
+        return {"ok": False, "error": "missing run_id"}
+    try:
+        from apps.wechat_ai_customer_service.admin_backend.services.recorder_export_run_service import RecorderExportRunService
+
+        result = RecorderExportRunService(tenant_id=tenant_id).process_run(run_id)
+        return {"ok": bool(result.get("ok")), **result}
+    except Exception as exc:
+        return {"ok": False, "error": repr(exc), "run_id": run_id}
+
+
+def handle_rag_rebuild_index(payload: dict[str, Any]) -> dict[str, Any]:
+    """Rebuild tenant RAG index in background."""
+    tenant_id = active_tenant_id(payload.get("tenant_id"))
+    try:
+        from apps.wechat_ai_customer_service.workflows.rag_layer import RagService
+
+        rebuild = RagService(tenant_id=tenant_id).rebuild_index()
+        return {
+            "ok": bool(rebuild.get("ok", False)),
+            "tenant_id": tenant_id,
+            "rebuild": rebuild,
+        }
+    except Exception as exc:
+        return {"ok": False, "error": repr(exc), "tenant_id": tenant_id}
+
+
 JOB_HANDLERS: dict[str, Any] = {
     "experience_interpretation": handle_experience_interpretation,
     "rag_quality_audit": handle_rag_quality_audit,
+    "rag_rebuild_index": handle_rag_rebuild_index,
     "knowledge_compile": handle_knowledge_compile,
     "conversation_summary": handle_conversation_summary,
     "customer_data_sync": handle_customer_data_sync,
     "raw_message_archive": handle_raw_message_archive,
     "diagnostics_deep_check": handle_diagnostics_deep_check,
     "customer_profile_analysis": handle_customer_profile_analysis,
+    "recorder_export_run_execute": handle_recorder_export_run_execute,
 }
 
 

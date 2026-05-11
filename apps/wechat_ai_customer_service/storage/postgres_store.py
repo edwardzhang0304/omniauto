@@ -610,16 +610,42 @@ class PostgresJsonStore:
         conversation_id: str = "",
         query: str = "",
         limit: int = 100,
+        offset: int = 0,
+        start_time: str = "",
+        end_time: str = "",
+        sender: str = "",
+        content_type: str = "",
+        conversation_type: str = "",
+        keywords: list[str] | None = None,
     ) -> list[dict[str, Any]]:
         filters = ["tenant_id = %s"]
         params: list[Any] = [tenant_id]
         if conversation_id:
             filters.append("conversation_id = %s")
             params.append(conversation_id)
+        if sender:
+            filters.append("sender ILIKE %s")
+            params.append(f"%{sender}%")
+        if content_type:
+            filters.append("content_type = %s")
+            params.append(content_type)
+        if conversation_type:
+            filters.append("(payload->>'conversation_type') = %s")
+            params.append(conversation_type)
         if query:
             filters.append("content ILIKE %s")
             params.append(f"%{query}%")
-        params.append(max(1, min(int(limit or 100), 500)))
+        if start_time:
+            filters.append("observed_at >= %s::timestamptz")
+            params.append(start_time)
+        if end_time:
+            filters.append("observed_at <= %s::timestamptz")
+            params.append(end_time)
+        for keyword in [str(item).strip() for item in (keywords or []) if str(item).strip()]:
+            filters.append("content ILIKE %s")
+            params.append(f"%{keyword}%")
+        params.append(max(1, min(int(limit or 100), 10000)))
+        params.append(max(0, int(offset or 0)))
         rows = self.fetchall(
             f"""
             SELECT payload
@@ -627,6 +653,7 @@ class PostgresJsonStore:
             WHERE {" AND ".join(filters)}
             ORDER BY observed_at DESC, raw_message_id DESC
             LIMIT %s
+            OFFSET %s
             """,
             params,
         )
