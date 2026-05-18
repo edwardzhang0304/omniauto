@@ -1,24 +1,23 @@
 {
   "schema_version": 1,
-  "compiled_at": "2026-05-11T01:17:17",
-  "source_root": "D:\\AI\\omniauto\\apps\\wechat_ai_customer_service\\data\\tenants\\default\\knowledge_bases",
+  "compiled_at": "2026-05-19T03:55:06",
+  "source_root": "D:\\AI\\omniauto\\apps\\wechat_ai_customer_service\\data\\knowledge_bases",
   "counts": {
-    "categories": 10,
+    "categories": 9,
     "category_items": {
-      "global_guidelines": 4,
-      "products": 7,
-      "chats": 7,
+      "global_guidelines": 5,
+      "chats": 11,
       "risk_control": 12,
-      "policies": 27,
+      "policies": 33,
       "erp_exports": 0,
       "reply_style": 4,
-      "product_faq": 2,
-      "product_rules": 2,
+      "product_faq": 0,
+      "product_rules": 3,
       "product_explanations": 0
     },
     "products": 7,
-    "faq": 27,
-    "style_examples": 11
+    "faq": 31,
+    "style_examples": 16
   },
-  "note": "Compatibility export only. Formal runtime source is shared_knowledge plus tenant knowledge_bases and product_item_knowledge."
+  "note": "Compatibility export only. Product facts come from product_master; formal runtime source is shared_knowledge plus tenant knowledge_bases and product_item_knowledge."
 }

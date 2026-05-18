@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import json
 import os
+import re
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -20,6 +22,11 @@ DEFAULT_SETTINGS = {
     "data_capture_enabled": True,
     "handoff_enabled": True,
     "operator_alert_enabled": True,
+    "identity_guard_enabled": True,
+    "style_adapter_enabled": True,
+    "respond_all_unread_sessions": False,
+    "session_targets_managed": False,
+    "session_targets": [],
 }
 
 REPLY_MODES = {
@@ -50,13 +57,33 @@ class CustomerServiceSettings:
         settings = {**DEFAULT_SETTINGS, **{key: value for key, value in payload.items() if key in DEFAULT_SETTINGS}}
         if settings["reply_mode"] not in REPLY_MODES:
             settings["reply_mode"] = DEFAULT_SETTINGS["reply_mode"]
+        settings["identity_guard_enabled"] = bool(settings.get("identity_guard_enabled", True))
+        settings["style_adapter_enabled"] = bool(settings.get("style_adapter_enabled", True))
+        settings["respond_all_unread_sessions"] = bool(settings.get("respond_all_unread_sessions", False))
+        settings["session_targets_managed"] = bool(settings.get("session_targets_managed", False))
+        settings["session_targets"] = normalize_session_targets(settings.get("session_targets"))
         return settings
 
     def save(self, patch: dict[str, Any]) -> dict[str, Any]:
         allowed = {key: value for key, value in (patch or {}).items() if key in DEFAULT_SETTINGS}
+        if "identity_guard_enabled" in allowed:
+            allowed["identity_guard_enabled"] = bool(allowed.get("identity_guard_enabled", True))
+        if "style_adapter_enabled" in allowed:
+            allowed["style_adapter_enabled"] = bool(allowed.get("style_adapter_enabled", True))
+        if "respond_all_unread_sessions" in allowed:
+            allowed["respond_all_unread_sessions"] = bool(allowed.get("respond_all_unread_sessions", False))
+        if "session_targets_managed" in allowed:
+            allowed["session_targets_managed"] = bool(allowed.get("session_targets_managed", False))
+        if "session_targets" in allowed:
+            allowed["session_targets"] = normalize_session_targets(allowed.get("session_targets"))
         settings = {**self.get(), **allowed}
         if settings["reply_mode"] not in REPLY_MODES:
             settings["reply_mode"] = DEFAULT_SETTINGS["reply_mode"]
+        settings["identity_guard_enabled"] = bool(settings.get("identity_guard_enabled", True))
+        settings["style_adapter_enabled"] = bool(settings.get("style_adapter_enabled", True))
+        settings["respond_all_unread_sessions"] = bool(settings.get("respond_all_unread_sessions", False))
+        settings["session_targets_managed"] = bool(settings.get("session_targets_managed", False))
+        settings["session_targets"] = normalize_session_targets(settings.get("session_targets"))
         self.settings_path.parent.mkdir(parents=True, exist_ok=True)
         temp = self.settings_path.with_suffix(".json.tmp")
         temp.write_text(json.dumps(settings, ensure_ascii=False, indent=2), encoding="utf-8")
@@ -65,11 +92,111 @@ class CustomerServiceSettings:
 
     def summary(self) -> dict[str, Any]:
         settings = self.get()
+        targets = normalize_session_targets(settings.get("session_targets"))
+        target_enabled = [item for item in targets if item.get("enabled")]
         return {
             "settings": settings,
             "reply_modes": [{"id": key, "label": label} for key, label in REPLY_MODES.items()],
             "status": self.status_text(settings),
+            "session_targets": targets,
+            "session_target_counts": {
+                "total": len(targets),
+                "enabled": len(target_enabled),
+                "ignored": max(0, len(targets) - len(target_enabled)),
+            },
         }
+
+    def list_session_targets(self) -> list[dict[str, Any]]:
+        return normalize_session_targets(self.get().get("session_targets"))
+
+    def merge_discovered_sessions(self, sessions: list[dict[str, Any]]) -> dict[str, Any]:
+        settings = self.get()
+        existing = normalize_session_targets(settings.get("session_targets"))
+        by_name = {str(item.get("name") or ""): dict(item) for item in existing}
+        respond_all_unread = bool(settings.get("respond_all_unread_sessions", False))
+        discovered_count = 0
+        added_count = 0
+        for raw in sessions or []:
+            if not isinstance(raw, dict):
+                continue
+            name = normalize_session_name(raw.get("name") or raw.get("title"))
+            if not name:
+                continue
+            discovered_count += 1
+            current = by_name.get(name)
+            if current is None:
+                kind = infer_conversation_type(name, raw)
+                default_enabled = respond_all_unread and kind not in {"file_transfer", "system"}
+                current = {
+                    "name": name,
+                    "display_name": name,
+                    "enabled": default_enabled,
+                    "exact": True,
+                    "conversation_type": kind,
+                    "source": "discovered",
+                    "updated_at": now_iso(),
+                }
+                by_name[name] = current
+                added_count += 1
+                continue
+            current["display_name"] = normalize_session_name(current.get("display_name") or name) or name
+            current["conversation_type"] = normalized_conversation_type(
+                current.get("conversation_type") or infer_conversation_type(name, raw)
+            )
+            current["updated_at"] = now_iso()
+            by_name[name] = normalize_session_target(current)
+        merged = sort_session_targets(by_name.values())
+        updated = self.save(
+            {
+                "session_targets_managed": True,
+                "session_targets": merged,
+            }
+        )
+        return {
+            "settings": updated,
+            "items": normalize_session_targets(updated.get("session_targets")),
+            "added_count": added_count,
+            "discovered_count": discovered_count,
+        }
+
+    def update_session_target(self, session_name: str, patch: dict[str, Any]) -> dict[str, Any]:
+        settings = self.get()
+        items = normalize_session_targets(settings.get("session_targets"))
+        by_name = {str(item.get("name") or ""): dict(item) for item in items}
+        name = normalize_session_name(session_name)
+        if not name:
+            raise ValueError("session name is required")
+        current = by_name.get(name) or {
+            "name": name,
+            "display_name": name,
+            "enabled": bool(settings.get("respond_all_unread_sessions", False)),
+            "exact": True,
+            "conversation_type": normalized_conversation_type(str((patch or {}).get("conversation_type") or "unknown")),
+            "source": "manual",
+            "updated_at": now_iso(),
+        }
+        if "enabled" in (patch or {}):
+            current["enabled"] = bool((patch or {}).get("enabled"))
+        if "exact" in (patch or {}):
+            current["exact"] = bool((patch or {}).get("exact"))
+        if "conversation_type" in (patch or {}):
+            current["conversation_type"] = normalized_conversation_type((patch or {}).get("conversation_type"))
+        if "display_name" in (patch or {}):
+            display_name = normalize_session_name((patch or {}).get("display_name"))
+            if display_name:
+                current["display_name"] = display_name
+        current["source"] = str((patch or {}).get("source") or current.get("source") or "manual")
+        current["updated_at"] = now_iso()
+        by_name[name] = normalize_session_target(current)
+        updated = self.save(
+            {
+                "session_targets_managed": True,
+                "session_targets": sort_session_targets(by_name.values()),
+            }
+        )
+        latest_targets = normalize_session_targets(updated.get("session_targets"))
+        item = next((entry for entry in latest_targets if str(entry.get("name") or "") == name), normalize_session_target(current))
+        return {"settings": updated, "item": item, "items": latest_targets}
 
     @staticmethod
     def status_text(settings: dict[str, Any]) -> str:
@@ -85,3 +212,89 @@ class CustomerServiceSettings:
         if mode == "full_auto":
             return "会按知识库自动回复，风险问题仍转人工。"
         return "已启用。"
+
+
+def now_iso() -> str:
+    return datetime.now().isoformat(timespec="seconds")
+
+
+def normalize_session_name(value: Any) -> str:
+    text = str(value or "").strip()
+    return text
+
+
+def normalized_conversation_type(value: Any) -> str:
+    text = str(value or "").strip().lower()
+    if text in {"private", "group", "file_transfer", "system", "unknown"}:
+        return text
+    return "unknown"
+
+
+def infer_conversation_type(name: str, session: dict[str, Any] | None = None) -> str:
+    payload = session if isinstance(session, dict) else {}
+    explicit = str(payload.get("conversation_type") or payload.get("type") or "").strip().lower()
+    if explicit in {"private", "group", "file_transfer", "system"}:
+        return explicit
+    if name in {"文件传输助手", "File Transfer"}:
+        return "file_transfer"
+    if re.search(r"(群|群聊|chatroom|room)", name, re.IGNORECASE):
+        return "group"
+    if re.search(r"(微信团队|系统消息|订阅号|服务通知)", name, re.IGNORECASE):
+        return "system"
+    return "private"
+
+
+def normalize_session_target(raw: dict[str, Any]) -> dict[str, Any]:
+    name = normalize_session_name(raw.get("name") or raw.get("target_name") or raw.get("display_name"))
+    if not name:
+        return {}
+    display_name = normalize_session_name(raw.get("display_name") or name) or name
+    enabled = bool(raw.get("enabled", False))
+    exact = bool(raw.get("exact", True))
+    conversation_type = normalized_conversation_type(
+        raw.get("conversation_type") or infer_conversation_type(name, raw if isinstance(raw, dict) else {})
+    )
+    source = str(raw.get("source") or "manual")
+    updated_at = str(raw.get("updated_at") or now_iso())
+    item = {
+        "name": name,
+        "display_name": display_name,
+        "enabled": enabled,
+        "exact": exact,
+        "conversation_type": conversation_type,
+        "source": source,
+        "updated_at": updated_at,
+    }
+    if "max_batch_messages" in raw:
+        try:
+            item["max_batch_messages"] = max(1, int(raw.get("max_batch_messages") or 0))
+        except (TypeError, ValueError):
+            pass
+    return item
+
+
+def normalize_session_targets(raw_items: Any) -> list[dict[str, Any]]:
+    items = raw_items if isinstance(raw_items, list) else []
+    by_name: dict[str, dict[str, Any]] = {}
+    for raw in items:
+        if not isinstance(raw, dict):
+            continue
+        normalized = normalize_session_target(raw)
+        name = str(normalized.get("name") or "")
+        if not name:
+            continue
+        by_name[name] = normalized
+    return sort_session_targets(by_name.values())
+
+
+def sort_session_targets(items: Any) -> list[dict[str, Any]]:
+    normalized = [normalize_session_target(item) for item in items if isinstance(item, dict)]
+    cleaned = [item for item in normalized if item]
+    return sorted(
+        cleaned,
+        key=lambda item: (
+            0 if item.get("enabled") else 1,
+            str(item.get("conversation_type") or ""),
+            str(item.get("display_name") or item.get("name") or ""),
+        ),
+    )

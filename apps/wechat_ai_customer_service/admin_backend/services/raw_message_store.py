@@ -6,17 +6,22 @@ import hashlib
 import json
 import os
 import re
+import time
 from datetime import datetime
 from pathlib import Path
 from typing import Any
 
 from apps.wechat_ai_customer_service.knowledge_paths import active_tenant_id, tenant_runtime_root
 from apps.wechat_ai_customer_service.storage import get_postgres_store, load_storage_config
+from apps.wechat_ai_customer_service.admin_backend.services.knowledge_contamination_guard import (
+    message_learning_exclusion_reason,
+)
 
 
 MAX_FILE_RECORDS = 10000
 MAX_BATCH_RECORDS = 2000
 SAFE_ID_RE = re.compile(r"[^A-Za-z0-9_.-]+")
+WINDOWS_FILE_RETRY_DELAYS = (0.03, 0.08, 0.16, 0.32, 0.64)
 
 
 class RawMessageStore:
@@ -105,10 +110,11 @@ class RawMessageStore:
             records = sorted(updated_records.values(), key=lambda item: str(item.get("observed_at") or ""), reverse=True)
             self._write_json(self.messages_path, records[:MAX_FILE_RECORDS])
         batch = None
-        if create_batch and inserted:
+        learnable_inserted = [item for item in inserted if item.get("learning_enabled") is True]
+        if create_batch and learnable_inserted:
             batch = self.create_batch(
                 conversation_id=normalized_conversation["conversation_id"],
-                message_ids=[str(item.get("raw_message_id") or "") for item in inserted],
+                message_ids=[str(item.get("raw_message_id") or "") for item in learnable_inserted],
                 reason=batch_reason,
                 source_module=source_module,
             )
@@ -284,9 +290,20 @@ class RawMessageStore:
 
     def _write_json(self, path: Path, payload: Any) -> None:
         path.parent.mkdir(parents=True, exist_ok=True)
-        temp = path.with_suffix(path.suffix + ".tmp")
+        temp = path.with_name(f"{path.name}.{os.getpid()}.tmp")
         temp.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
-        os.replace(temp, path)
+        last_error: OSError | None = None
+        for index, delay in enumerate(WINDOWS_FILE_RETRY_DELAYS):
+            try:
+                os.replace(temp, path)
+                return
+            except OSError as exc:
+                last_error = exc
+                if index >= len(WINDOWS_FILE_RETRY_DELAYS) - 1:
+                    break
+                time.sleep(delay)
+        if last_error is not None:
+            raise last_error
 
 
 def normalize_conversation(record: dict[str, Any], *, tenant_id: str) -> dict[str, Any]:
@@ -340,6 +357,13 @@ def normalize_message(
     dedupe_key = stable_digest(f"{tenant_id}:{conversation['conversation_id']}:{dedupe_seed}", 32)
     raw_message_id = "raw_msg_" + dedupe_key[:20]
     timestamp = now()
+    requested_learning = bool(learning_enabled)
+    exclusion_reason = message_learning_exclusion_reason(
+        record,
+        conversation=conversation,
+        source_module=source_module,
+    )
+    final_learning_enabled = requested_learning and not exclusion_reason
     return {
         "tenant_id": tenant_id,
         "raw_message_id": raw_message_id,
@@ -359,8 +383,8 @@ def normalize_message(
         "updated_at": timestamp,
         "source_modules": [source_module],
         "source_adapter": str(record.get("source_adapter") or "wxauto4"),
-        "learning_enabled": bool(learning_enabled),
-        "excluded_reason": str(record.get("excluded_reason") or ""),
+        "learning_enabled": final_learning_enabled,
+        "excluded_reason": str(record.get("excluded_reason") or exclusion_reason or ""),
         "dedupe_key": dedupe_key,
         "raw_payload": record,
     }
@@ -373,7 +397,9 @@ def merge_message(existing: dict[str, Any], incoming: dict[str, Any], *, source_
         modules.append(source_module)
     merged["source_modules"] = modules
     merged["updated_at"] = now()
-    merged["learning_enabled"] = bool(merged.get("learning_enabled", incoming.get("learning_enabled", True)))
+    merged["learning_enabled"] = bool(merged.get("learning_enabled", True)) and bool(incoming.get("learning_enabled", True))
+    if incoming.get("excluded_reason") and not merged["learning_enabled"]:
+        merged["excluded_reason"] = str(incoming.get("excluded_reason") or merged.get("excluded_reason") or "")
     return merged
 
 

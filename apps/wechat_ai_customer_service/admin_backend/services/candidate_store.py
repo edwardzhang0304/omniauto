@@ -32,6 +32,7 @@ TARGET_FILES = {
     "style_examples": STRUCTURED_ROOT / "style_examples.json",
 }
 PRODUCT_SCOPED_TARGET_CATEGORIES = {"product_faq", "product_rules", "product_explanations"}
+PRODUCT_MASTER_TARGET_CATEGORIES = {"products", "erp_exports"}
 
 
 class CandidateStore:
@@ -80,6 +81,8 @@ class CandidateStore:
         if not patch:
             return {"ok": False, "message": "candidate has no formal_patch"}
         target_category = str(patch.get("target_category") or "")
+        if target_category in PRODUCT_MASTER_TARGET_CATEGORIES:
+            return {"ok": False, "message": "商品资料属于权威主数据，禁止通过候选补充链路维护；请在商品库手动更新。"}
         item = patch.get("item")
         if not target_category or not isinstance(item, dict):
             return {"ok": False, "message": "native candidate item is required"}
@@ -98,6 +101,8 @@ class CandidateStore:
         path = self.require_path(candidate_id)
         candidate = json.loads(path.read_text(encoding="utf-8"))
         target_category = str(target_category or "").strip()
+        if target_category in PRODUCT_MASTER_TARGET_CATEGORIES:
+            return {"ok": False, "message": "商品资料属于权威主数据，不能通过候选分类改写；请在商品库手动导入/维护。"}
         schema = self.base_store.schema_manager.load_schema(target_category)
         patch = self.formal_patch(candidate)
         if not patch:
@@ -205,6 +210,8 @@ class CandidateStore:
         patch: dict[str, Any],
         target_category: str,
     ) -> dict[str, Any]:
+        if target_category in PRODUCT_MASTER_TARGET_CATEGORIES:
+            return {"ok": False, "message": "商品资料属于权威主数据，禁止通过候选知识链路写入；请在商品库手动导入/维护。"}
         operation = str(patch.get("operation") or "")
         if operation != "upsert_item":
             return {"ok": False, "message": f"unsupported native operation: {operation}"}

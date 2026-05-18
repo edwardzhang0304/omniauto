@@ -1,19 +1,20 @@
 {
   "schema_version": 1,
   "scope": "wechat_ai_customer_service",
-  "source": "three_layer_knowledge",
-  "compiled_at": "2026-05-11T01:17:17",
+  "source": "product_master_plus_formal_knowledge",
+  "compiled_at": "2026-05-19T03:55:06",
   "items": [
+    {
+      "id": "products",
+      "path": "product_master",
+      "summary": "商品主数据",
+      "scope": "product_master",
+      "participates_in_reply": true
+    },
     {
       "id": "global_guidelines",
       "path": "global_guidelines",
       "summary": "Global Assistant Guidelines",
-      "participates_in_reply": true
-    },
-    {
-      "id": "products",
-      "path": "products",
-      "summary": "商品资料",
       "participates_in_reply": true
     },
     {

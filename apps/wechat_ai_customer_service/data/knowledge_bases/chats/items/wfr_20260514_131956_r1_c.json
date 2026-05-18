@@ -1,0 +1,45 @@
+{
+  "schema_version": 1,
+  "category_id": "chats",
+  "id": "wfr_20260514_131956_r1_c",
+  "status": "archived",
+  "source": {
+    "type": "cleaned_real_chat_pack",
+    "batch_token": "wfr_batch_20260514_131956_r1"
+  },
+  "data": {
+    "customer_message": "wfrq_20260514_131956_r1_c 周末看车怎么预约更快？",
+    "service_reply": "你发下到店时间和意向车型，我帮你安排预约看车排期。",
+    "intent_tags": [
+      "预约看车"
+    ],
+    "tone_tags": [
+      "执行导向"
+    ],
+    "linked_categories": [
+      "products",
+      "policies"
+    ],
+    "linked_item_ids": [],
+    "applicability_scope": "industry",
+    "usable_as_template": true,
+    "additional_details": {
+      "scenario": "看车预约",
+      "hit_count": 6,
+      "industry_id": "used_car",
+      "实盘聊天": "wfrq_20260514_131956_r1_c 周末看车怎么预约更快？ 你发下到店时间和意向车型，我帮你安排预约看车排期。",
+      "workflow_import": "你发下到店时间和意向车型，我帮你安排预约看车排期。"
+    }
+  },
+  "runtime": {
+    "allow_auto_reply": true,
+    "requires_handoff": false,
+    "risk_level": "normal"
+  },
+  "metadata": {
+    "created_at": "2026-05-14T13:19:57",
+    "updated_at": "2026-05-15T15:57:58",
+    "created_by": "workflow_curation",
+    "updated_by": "workflow_curation"
+  }
+}

@@ -1,0 +1,48 @@
+{
+  "schema_version": 1,
+  "category_id": "products",
+  "id": "chejin_c_class_2020_260l",
+  "status": "active",
+  "source": {
+    "type": "test_fixture",
+    "batch_token": "CHEJIN_SEED_20260507",
+    "legacy_migrated_from": "knowledge_bases/products"
+  },
+  "data": {
+    "name": "2020款奔驰C级 C 260 L 运动版",
+    "sku": "CHEJIN-C260L-2020",
+    "category": "二手车/豪华轿车",
+    "aliases": [
+      "奔驰C级",
+      "C260L",
+      "奔驰C",
+      "三叉星",
+      "豪华轿车"
+    ],
+    "specs": "2020年9月上牌，表显4.8万公里，1.5T+48V轻混，柏林之声音响，氛围灯，一手车，原版原漆。",
+    "price": 19.8,
+    "unit": "台",
+    "inventory": 1,
+    "shipping_policy": "高价值豪华车看车需预约，支持试驾体验，需转人工确认时间。",
+    "warranty_policy": "原版原漆精品车况，支持任何第三方检测，90天核心质保，48V轻混系统按厂家政策。",
+    "reply_templates": {
+      "recommendation": "这台C260L适合19到21万预算、注重品牌和内饰氛围的客户，柏林之声和氛围灯是亮点。"
+    },
+    "risk_rules": [
+      "试驾需预约",
+      "金融方案需人工确认",
+      "不承诺贷款必过"
+    ]
+  },
+  "runtime": {
+    "allow_auto_reply": true,
+    "requires_handoff": false,
+    "risk_level": "normal"
+  },
+  "metadata": {
+    "created_at": "2026-05-07T10:00:00",
+    "updated_at": "2026-05-16T22:51:06",
+    "created_by": "admin",
+    "updated_by": "admin"
+  }
+}

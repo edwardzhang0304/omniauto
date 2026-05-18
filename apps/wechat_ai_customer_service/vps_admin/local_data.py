@@ -9,6 +9,7 @@ from typing import Any
 from apps.wechat_ai_customer_service.knowledge_paths import (
     SHARED_KNOWLEDGE_ROOT,
     active_tenant_id,
+    default_admin_knowledge_base_root,
     tenant_knowledge_base_root,
     tenant_product_item_knowledge_root,
     tenant_rag_chunks_root,
@@ -24,7 +25,8 @@ from apps.wechat_ai_customer_service.sync.manifest import stable_digest
 def build_tenant_data_summary(tenant_id: str | None = None) -> dict[str, Any]:
     tenant = active_tenant_id(tenant_id)
     root = tenant_root(tenant)
-    knowledge_root = tenant_knowledge_base_root(tenant)
+    requested_knowledge_root = tenant_knowledge_base_root(tenant)
+    knowledge_root = default_admin_knowledge_base_root(tenant)
     product_root = tenant_product_item_knowledge_root(tenant)
     rag_sources = tenant_rag_sources_root(tenant)
     rag_chunks = tenant_rag_chunks_root(tenant)
@@ -33,12 +35,16 @@ def build_tenant_data_summary(tenant_id: str | None = None) -> dict[str, Any]:
     raw_root = runtime_root / "raw_messages"
     uploads_index = runtime_root / "admin" / "uploads_index.json"
     candidates_root = tenant_review_candidates_root(tenant)
+    formal_knowledge = knowledge_base_summary(knowledge_root)
+    formal_knowledge["requested_root"] = str(requested_knowledge_root)
+    formal_knowledge["effective_root"] = str(knowledge_root)
+    formal_knowledge["used_default_fallback"] = knowledge_root.resolve() != requested_knowledge_root.resolve()
     return {
         "tenant_id": tenant,
         "root": str(root),
         "exists": root.exists(),
         "files": tree_summary(root),
-        "formal_knowledge": knowledge_base_summary(knowledge_root),
+        "formal_knowledge": formal_knowledge,
         "product_item_knowledge": {
             "root": str(product_root),
             "product_count": count_directories(product_root),

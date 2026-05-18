@@ -1,0 +1,47 @@
+{
+  "schema_version": 1,
+  "category_id": "products",
+  "id": "chejin_ranger_2020_23t",
+  "status": "active",
+  "source": {
+    "type": "test_fixture",
+    "batch_token": "CHEJIN_SEED_20260507",
+    "legacy_migrated_from": "knowledge_bases/products"
+  },
+  "data": {
+    "name": "2020款福特Ranger 2.3T 自动四驱",
+    "sku": "CHEJIN-RANGER-2020-23T",
+    "category": "二手车/皮卡",
+    "aliases": [
+      "Ranger",
+      "福特Ranger",
+      "皮卡",
+      "越野",
+      "工具车"
+    ],
+    "specs": "2020年6月上牌，表显7.8万公里，2.3T自动挡四驱，适合越野和轻度载货，后斗有正常使用划痕。",
+    "price": 18.5,
+    "unit": "台",
+    "inventory": 1,
+    "shipping_policy": "皮卡车型部分地区限行，购买前需确认当地政策，看车需预约。",
+    "warranty_policy": "后斗划痕为正常使用痕迹，已如实告知，越野底盘需现场检查，以检测报告为准。",
+    "reply_templates": {
+      "recommendation": "这台Ranger适合18到20万预算、喜欢越野或需要载货能力的客户，四驱是亮点。"
+    },
+    "risk_rules": [
+      "皮卡限行政策需确认",
+      "后斗划痕已告知"
+    ]
+  },
+  "runtime": {
+    "allow_auto_reply": true,
+    "requires_handoff": false,
+    "risk_level": "normal"
+  },
+  "metadata": {
+    "created_at": "2026-05-07T10:00:00",
+    "updated_at": "2026-05-16T22:51:06",
+    "created_by": "admin",
+    "updated_by": "admin"
+  }
+}

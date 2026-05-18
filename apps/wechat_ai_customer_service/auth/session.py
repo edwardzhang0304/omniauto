@@ -144,6 +144,12 @@ class AuthService:
                 self.save_session(session)
                 return session
             except VpsClientError as exc:
+                message = str(exc)
+                lowered = message.lower()
+                if "verification code required" in lowered:
+                    raise PermissionError("verification code required") from exc
+                if "verification code expired or not found" in lowered:
+                    raise PermissionError("verification code expired or not found") from exc
                 raise PermissionError(f"VPS verification challenge unavailable: {exc}") from exc
         session = self.local_verify_login(challenge_id=challenge_id, code=code, trust_device=trust_device)
         self.save_session(session)

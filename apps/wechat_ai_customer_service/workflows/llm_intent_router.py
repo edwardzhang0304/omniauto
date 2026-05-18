@@ -29,6 +29,8 @@ for path in (PROJECT_ROOT, APP_ROOT):
         sys.path.insert(0, str(path))
 
 from apps.wechat_ai_customer_service.llm_config import (
+    apply_llm_reasoning_effort,
+    llm_urlopen,
     read_secret,
     resolve_deepseek_base_url,
     resolve_deepseek_tier_model,
@@ -66,6 +68,9 @@ PRODUCT_INQUIRY_KEYWORDS = [
     "报价",
     "询价",
     "价格",
+    "预算",
+    "推荐",
+    "车源",
     "车型",
     "车况",
     "公里数",
@@ -83,6 +88,10 @@ PRODUCT_INQUIRY_KEYWORDS = [
     "验车",
     "试驾",
     "油耗",
+    "省油",
+    "代步",
+    "通勤",
+    "家用",
     "配置",
     "排量",
     "颜色",
@@ -154,8 +163,24 @@ def route_intent(
     if cached:
         return cached
 
-    llm_settings = (config.get("intent_router", {}) or {}).get("llm", {}) or {}
-    if llm_settings.get("enabled") is not False:
+    router_settings = config.get("intent_router", {}) or {}
+    realtime_settings = config.get("realtime_reply", {}) or {}
+    heuristic_first = router_settings.get("heuristic_first", realtime_settings.get("prefer_local_intent", True)) is not False
+    if heuristic_first:
+        fallback = _keyword_fallback_intent(combined)
+        min_confidence = float(router_settings.get("heuristic_first_min_confidence", 0.5) or 0.5)
+        if fallback.confidence >= min_confidence and fallback.intent in {
+            "customer_data_provide",
+            "product_inquiry",
+            "greeting",
+            "handoff_request",
+        }:
+            _set_cached_intent(target_state, fallback, ttl_seconds=cache_ttl)
+            return fallback
+
+    llm_configured = isinstance(router_settings.get("llm"), dict)
+    llm_settings = (router_settings.get("llm", {}) or {})
+    if llm_configured and llm_settings.get("enabled") is not False:
         llm_result = _call_llm_intent_analysis(
             combined=combined,
             evidence_pack=evidence_pack,
@@ -277,6 +302,7 @@ def _call_llm_intent_analysis(
         "stream": False,
         "response_format": {"type": "json_object"},
     }
+    apply_llm_reasoning_effort(payload, tier="flash", read_secret_fn=read_secret)
 
     url = base_url.rstrip("/") + "/chat/completions"
     request = urllib.request.Request(
@@ -290,7 +316,7 @@ def _call_llm_intent_analysis(
     )
 
     try:
-        with urllib.request.urlopen(request, timeout=max(1, timeout)) as response:
+        with llm_urlopen(request, timeout=max(1, timeout)) as response:
             raw = response.read().decode("utf-8", errors="replace")
             data = json.loads(raw)
             content = (

@@ -20,7 +20,7 @@ from apps.wechat_ai_customer_service.sync import VpsLocalSyncService
 
 PROJECT_ROOT = Path(__file__).resolve().parents[4]
 APP_ROOT = PROJECT_ROOT / "apps" / "wechat_ai_customer_service"
-DEFAULT_CHEJIN_TENANT_ID = "jiangsu_chejin_usedcar_customer_20260501"
+DEFAULT_CHEJIN_TENANT_ID = "chejin"
 DEFAULT_CHEJIN_CONFIG = APP_ROOT / "configs" / "jiangsu_chejin_xucong_live.example.json"
 
 RUNTIME_STATES = {"idle", "thinking", "stopped"}
@@ -174,9 +174,16 @@ class CustomerServiceRuntime:
                 "queue_summary": queue_summary,
             }
         )
+        if not running and pid_record:
+            self._clear_pid_record()
         if not running:
+            previous_state = str(status.get("state") or "")
+            previous_message = str(status.get("message") or "").strip()
             status["state"] = "stopped"
-            status["message"] = status_default_message("stopped")
+            if previous_state == "stopped" and previous_message:
+                status["message"] = previous_message
+            else:
+                status["message"] = status_default_message("stopped")
         status["other_listeners"] = self._scan_all_listener_tenants()
         return status
 
@@ -216,6 +223,7 @@ class CustomerServiceRuntime:
         except FileNotFoundError as exc:
             write_runtime_status("stopped", str(exc), tenant_id=self.tenant_id)
             return {"ok": False, "message": str(exc), "item": self.status()}
+        listener_interval = self._managed_listener_interval_seconds(config_path)
         script_path = APP_ROOT / "scripts" / "run_customer_service_listener.py"
         if not script_path.exists():
             return {"ok": False, "message": f"缺少监听脚本：{script_path}", "item": current}
@@ -239,7 +247,7 @@ class CustomerServiceRuntime:
                 "--config",
                 str(config_path),
                 "--interval-seconds",
-                "3",
+                f"{listener_interval:g}",
                 "--send",
                 "--write-data",
             ],
@@ -266,6 +274,19 @@ class CustomerServiceRuntime:
         if not worker_result.get("ok"):
             result["worker_warning"] = worker_result.get("message", "worker start warning")
         return result
+
+    def _managed_listener_interval_seconds(self, config_path: Path) -> float:
+        default_interval = 3.0
+        try:
+            payload = json.loads(config_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return default_interval
+        poll = payload.get("poll") if isinstance(payload, dict) else {}
+        try:
+            interval = float((poll or {}).get("interval_seconds", default_interval))
+        except (TypeError, ValueError):
+            interval = default_interval
+        return max(0.5, min(10.0, interval))
 
     def stop(self) -> dict[str, Any]:
         pid_record = self._read_pid_record()

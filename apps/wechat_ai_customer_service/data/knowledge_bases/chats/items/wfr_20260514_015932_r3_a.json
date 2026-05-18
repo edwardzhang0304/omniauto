@@ -1,0 +1,46 @@
+{
+  "schema_version": 1,
+  "category_id": "chats",
+  "id": "wfr_20260514_015932_r3_a",
+  "status": "archived",
+  "source": {
+    "type": "cleaned_real_chat_pack",
+    "batch_token": "wfr_batch_20260514_015932_r3"
+  },
+  "data": {
+    "customer_message": "wfrq_20260514_015932_r3_a 预算15万-18万，想找省油家用SUV。",
+    "service_reply": "这档预算可以先看省油家用SUV，我先按通勤和空间给你做三档建议。",
+    "intent_tags": [
+      "需求探询",
+      "车型推荐"
+    ],
+    "tone_tags": [
+      "咨询式"
+    ],
+    "linked_categories": [
+      "products",
+      "policies"
+    ],
+    "linked_item_ids": [],
+    "applicability_scope": "industry",
+    "usable_as_template": true,
+    "additional_details": {
+      "scenario": "预算推荐",
+      "hit_count": 5,
+      "industry_id": "used_car",
+      "实盘聊天": "wfrq_20260514_015932_r3_a 预算15万-18万，想找省油家用SUV。 这档预算可以先看省油家用SUV，我先按通勤和空间给你做三档建议。",
+      "workflow_import": "这档预算可以先看省油家用SUV，我先按通勤和空间给你做三档建议。"
+    }
+  },
+  "runtime": {
+    "allow_auto_reply": true,
+    "requires_handoff": false,
+    "risk_level": "normal"
+  },
+  "metadata": {
+    "created_at": "2026-05-14T01:59:32",
+    "updated_at": "2026-05-14T02:26:53",
+    "created_by": "workflow_curation",
+    "updated_by": "workflow_curation"
+  }
+}

@@ -32,8 +32,9 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from apps.wechat_ai_customer_service.knowledge_paths import default_admin_knowledge_base_root, tenant_raw_inbox_root, tenant_review_candidates_root  # noqa: E402
-from apps.wechat_ai_customer_service.llm_config import read_secret, resolve_deepseek_base_url, resolve_deepseek_max_tokens, resolve_deepseek_tier_model, resolve_deepseek_timeout  # noqa: E402
+from apps.wechat_ai_customer_service.llm_config import apply_llm_reasoning_effort, llm_urlopen, read_secret, resolve_deepseek_base_url, resolve_deepseek_max_tokens, resolve_deepseek_tier_model, resolve_deepseek_timeout  # noqa: E402
 from apps.wechat_ai_customer_service.platform_understanding_rules import intent_keywords, product_keywords, quantity_unit_pattern, rag_terms, risk_keywords  # noqa: E402
+from apps.wechat_ai_customer_service.product_master import PRODUCT_MASTER_CATEGORY_ID, ProductMasterStore  # noqa: E402
 from apps.wechat_ai_customer_service.workflows.knowledge_runtime import PRODUCT_SCOPED_SCHEMAS  # noqa: E402
 
 RAW_INBOX_ROOT = tenant_raw_inbox_root()
@@ -1088,6 +1089,7 @@ def call_deepseek_json(prompt: dict[str, Any]) -> dict[str, Any]:
         "max_tokens": resolve_deepseek_max_tokens(4096, read_secret_fn=read_secret),
         "response_format": {"type": "json_object"},
     }
+    apply_llm_reasoning_effort(payload, tier="flash", read_secret_fn=read_secret)
     request = urllib.request.Request(
         url=base_url.rstrip("/") + "/chat/completions",
         data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
@@ -1095,7 +1097,7 @@ def call_deepseek_json(prompt: dict[str, Any]) -> dict[str, Any]:
         method="POST",
     )
     try:
-        with urllib.request.urlopen(request, timeout=resolve_deepseek_timeout(120, read_secret_fn=read_secret)) as response:
+        with llm_urlopen(request, timeout=resolve_deepseek_timeout(120, read_secret_fn=read_secret)) as response:
             data = json.loads(response.read().decode("utf-8"))
     except (urllib.error.HTTPError, urllib.error.URLError, TimeoutError, OSError, json.JSONDecodeError):
         return {}
@@ -1688,6 +1690,8 @@ def read_text(path: Path) -> str:
 
 
 def load_category_schema(category_id: str) -> dict[str, Any]:
+    if category_id == PRODUCT_MASTER_CATEGORY_ID:
+        return ProductMasterStore().load_schema()
     if category_id in PRODUCT_SCOPED_SCHEMAS:
         return dict(PRODUCT_SCOPED_SCHEMAS[category_id])
     path = default_admin_knowledge_base_root() / category_id / "schema.json"

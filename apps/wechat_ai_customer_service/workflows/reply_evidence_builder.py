@@ -71,6 +71,12 @@ def build_reply_evidence_pack(
         current_batch=batch,
         config=config,
     )
+    if settings.get("foreground_realtime"):
+        history_text_pack = dict(history_text_pack)
+        history_limit = max(300, int(settings.get("history_char_budget", DEFAULT_HISTORY_CHAR_BUDGET) or DEFAULT_HISTORY_CHAR_BUDGET))
+        history_text_pack["history_text"] = truncate_text(str(history_text_pack.get("history_text") or ""), history_limit)
+        history_text_pack["conversation_summary"] = truncate_text(str(history_text_pack.get("summary") or ""), 500)
+        history_text_pack["current_batch_text"] = truncate_text(str(history_text_pack.get("current_batch_text") or ""), 600)
 
     evidence_ids = collect_evidence_ids(compact_knowledge)
     return {
@@ -192,25 +198,26 @@ def compact_knowledge_pack(
     evidence = pack.get("evidence", {}) or {}
     rag_evidence = pack.get("rag_evidence", {}) or {}
     catalog_candidates = catalog_product_candidates(text, limit=max_catalog_candidates)
+    item_limit = max(1, max_catalog_candidates)
     return {
         "intent_tags": list(pack.get("intent_tags", []) or []),
         "selected_items": [
             compact_mapping(item, max_text_chars=400)
-            for item in pack.get("selected_items", []) or []
+            for item in (pack.get("selected_items", []) or [])[:item_limit]
             if isinstance(item, dict)
         ],
         "evidence": {
-            "products": [compact_mapping(item, max_text_chars=700) for item in evidence.get("products", []) or []],
-            "faq": [compact_mapping(item, max_text_chars=700) for item in evidence.get("faq", []) or []],
+            "products": [compact_mapping(item, max_text_chars=420) for item in (evidence.get("products", []) or [])[:item_limit]],
+            "faq": [compact_mapping(item, max_text_chars=360) for item in (evidence.get("faq", []) or [])[:item_limit]],
             "policies": compact_mapping(evidence.get("policies", {}) or {}, max_text_chars=700),
             "product_scoped": [
-                compact_mapping(item, max_text_chars=700)
-                for item in evidence.get("product_scoped", []) or []
+                compact_mapping(item, max_text_chars=360)
+                for item in (evidence.get("product_scoped", []) or [])[:item_limit]
             ],
             "catalog_candidates": catalog_candidates,
             "style_examples": [
-                compact_mapping(item, max_text_chars=500)
-                for item in evidence.get("style_examples", []) or []
+                compact_mapping(item, max_text_chars=260)
+                for item in (evidence.get("style_examples", []) or [])[: min(item_limit, 2)]
             ],
         },
         "rag_evidence": compact_rag_evidence(rag_evidence, max_hits=max_rag_hits, max_text_chars=max_rag_text_chars),

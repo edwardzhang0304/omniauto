@@ -6,6 +6,7 @@ from typing import Any
 
 from fastapi import APIRouter, HTTPException, Query
 
+from apps.wechat_ai_customer_service.adapters.wechat_connector import WeChatConnectorError
 from ..services.recorder_runtime import RecorderRuntime
 from ..services.recorder_service import RecorderService
 
@@ -37,7 +38,26 @@ def update_settings(payload: dict[str, Any]) -> dict[str, Any]:
 
 @router.post("/discover")
 def discover_sessions() -> dict[str, Any]:
-    return RecorderService().discover_sessions()
+    try:
+        return RecorderService().discover_sessions()
+    except WeChatConnectorError as exc:
+        message = str(exc) or "未能连接微信主窗口。"
+        return {
+            "ok": False,
+            "items": [],
+            "detail": "wechat_connector_unavailable",
+            "message": message,
+            "source": {"ok": False, "error": "wechat_connector_unavailable", "detail": message},
+        }
+    except Exception as exc:  # pragma: no cover - defensive guard for runtime failures
+        message = f"识别会话失败：{exc}"
+        return {
+            "ok": False,
+            "items": [],
+            "detail": "recorder_discover_failed",
+            "message": message,
+            "source": {"ok": False, "error": "recorder_discover_failed", "detail": repr(exc)},
+        }
 
 
 @router.get("/conversations")

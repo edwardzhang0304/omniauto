@@ -33,6 +33,35 @@
     "max_reply_chars": 220,
     "max_snippet_chars": 130
   },
+  "history_backfill": {
+    "enabled": true,
+    "load_times": 2,
+    "max_load_times": 5,
+    "trigger_visible_unprocessed_count": 6,
+    "max_messages_after_load": 80,
+    "freshness_load_times": 2
+  },
+  "semantic_batch_planner": {
+    "enabled": true,
+    "max_messages": 12,
+    "spam_repeat_threshold": 0.72
+  },
+  "reply_style_adapter": {
+    "enabled": true,
+    "mode": "fast_local",
+    "apply_to_realtime": true,
+    "apply_to_rag": true,
+    "apply_to_llm": true,
+    "apply_to_rule": true,
+    "apply_to_handoff": true,
+    "identity_guard_aware": true,
+    "avoid_repetition": true,
+    "max_examples": 3,
+    "min_similarity": 0.08,
+    "include_rag_style_hits": true,
+    "max_reply_chars": 520,
+    "shadow_mode": false
+  },
   "llm_reply_synthesis": {
     "enabled": false,
     "provider": "manual_json",
@@ -119,8 +148,8 @@
       "phone"
     ],
     "write_on_send_only": false,
-    "success_reply": "客户资料已记录，我会尽快为您继续处理。",
-    "incomplete_reply": "我看到了客户资料，但还缺少：{missing_fields}。请补充后我再记录。"
+    "success_reply": "资料我收到了，后面按这个继续跟进。",
+    "incomplete_reply": "资料我看到了，还差：{missing_fields}。您发我一下，我这边补齐。"
   },
   "product_knowledge": {
     "enabled": false,
@@ -129,7 +158,7 @@
   "handoff": {
     "enabled": true,
     "auto_acknowledge": true,
-    "acknowledgement_reply": "这个问题我当前无法直接确认，我先帮您记录并请示上级，稍后给您准确回复。"
+    "acknowledgement_reply": "这个我现在还不能直接确认，我把情况记下，问清楚负责人意见后再回复您。"
   },
   "operator_alert": {
     "enabled": true,
@@ -158,14 +187,14 @@
       "enabled": true,
       "exact": true,
       "allow_self_for_test": true,
-      "max_batch_messages": 3
+      "max_batch_messages": 8
     },
     {
       "name": "许聪",
       "enabled": true,
       "exact": true,
       "allow_self_for_test": false,
-      "max_batch_messages": 3
+      "max_batch_messages": 8
     }
   ]
 }

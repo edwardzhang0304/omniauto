@@ -1,0 +1,40 @@
+{
+  "id": "wf_tpl_a",
+  "customer_message": "wfcasea123 预算20万左右，主要市区通勤，想看SUV。",
+  "service_reply": "这类预算可以先看20万左右的SUV价格区间，我先按你的通勤场景给你一批车源。",
+  "intent_tags": [
+    "需求探询",
+    "报价咨询"
+  ],
+  "tone_tags": [
+    "咨询式"
+  ],
+  "scenario": "预算咨询",
+  "hit_count": 6,
+  "schema_version": 1,
+  "category_id": "chats",
+  "source": {
+    "type": "workflow_import"
+  },
+  "data": {
+    "customer_message": "wfcasea123 预算20万左右，主要市区通勤，想看SUV。",
+    "service_reply": "这类预算可以先看20万左右的SUV价格区间，我先按你的通勤场景给你一批车源。",
+    "intent_tags": [],
+    "tone_tags": [],
+    "additional_details": {
+      "workflow_import": "这类预算可以先看20万左右的SUV价格区间，我先按你的通勤场景给你一批车源。"
+    }
+  },
+  "runtime": {
+    "allow_auto_reply": true,
+    "requires_handoff": false,
+    "risk_level": "normal"
+  },
+  "metadata": {
+    "created_at": "2026-05-17T02:58:13",
+    "updated_at": "2026-05-17T02:58:17",
+    "created_by": "workflow_import",
+    "updated_by": "workflow_import"
+  },
+  "status": "active"
+}

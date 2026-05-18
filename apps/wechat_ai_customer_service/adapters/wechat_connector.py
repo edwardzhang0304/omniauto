@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import json
 import os
+import queue
 import subprocess
 import threading
 import time
@@ -58,15 +59,25 @@ class WeChatConnector:
             time.sleep(3)
         return latest
 
-    def list_sessions(self) -> dict[str, Any]:
+    def list_sessions(self, *, fresh: bool = False) -> dict[str, Any]:
         self.require_online()
-        return self.call_sidecar(["sessions"])
+        args = ["sessions"]
+        if fresh:
+            args.append("--fresh")
+        return self.call_sidecar(args)
 
-    def get_messages(self, target: str, exact: bool = True) -> dict[str, Any]:
+    def get_messages(self, target: str, exact: bool = True, history_load_times: int = 0) -> dict[str, Any]:
         self.require_online()
         args = ["messages", "--target", target]
         if exact:
             args.append("--exact")
+        if history_load_times:
+            try:
+                load_times = max(0, int(history_load_times))
+            except (TypeError, ValueError):
+                load_times = 0
+            if load_times:
+                args.extend(["--history-load-times", str(load_times)])
         return self.call_sidecar(args)
 
     def send_text(self, target: str, text: str, exact: bool = True) -> dict[str, Any]:
@@ -155,19 +166,41 @@ class WeChatConnector:
 
 
 def _read_json_response(proc: subprocess.Popen, timeout: int = 25) -> dict[str, Any]:
-    deadline = time.time() + timeout
-    while time.time() < deadline:
-        if proc.poll() is not None:
-            raise RuntimeError("daemon_process_died")
-        line = proc.stdout.readline().decode("utf-8", errors="replace").strip()
-        if not line:
-            continue
+    output: queue.Queue[tuple[str, Any]] = queue.Queue(maxsize=1)
+
+    def read_worker() -> None:
         try:
-            return json.loads(line)
-        except json.JSONDecodeError:
-            # Skip non-JSON lines (e.g., library warnings on startup)
-            continue
-    raise TimeoutError("daemon_response_timeout")
+            while True:
+                if proc.poll() is not None:
+                    output.put(("error", RuntimeError("daemon_process_died")))
+                    return
+                line = proc.stdout.readline()
+                if not line:
+                    output.put(("error", RuntimeError("daemon_stdout_closed")))
+                    return
+                clean = line.decode("utf-8", errors="replace").strip()
+                if not clean:
+                    continue
+                try:
+                    output.put(("payload", json.loads(clean)))
+                    return
+                except json.JSONDecodeError:
+                    # Skip non-JSON lines (e.g., library warnings on startup)
+                    continue
+        except Exception as exc:
+            output.put(("error", exc))
+
+    thread = threading.Thread(target=read_worker, daemon=True)
+    thread.start()
+    try:
+        kind, value = output.get(timeout=max(1, timeout))
+    except queue.Empty as exc:
+        raise TimeoutError("daemon_response_timeout") from exc
+    if kind == "payload":
+        return value
+    if isinstance(value, Exception):
+        raise value
+    raise RuntimeError(str(value))
 
 
 def _ensure_daemon(
@@ -215,6 +248,8 @@ def _args_to_request(args: list[str]) -> dict[str, Any]:
         request["action"] = "status"
     elif args[0] == "sessions":
         request["action"] = "sessions"
+        if "--fresh" in args:
+            request["fresh"] = True
     elif args[0] == "messages":
         request["action"] = "messages"
         for i, arg in enumerate(args):
@@ -222,6 +257,11 @@ def _args_to_request(args: list[str]) -> dict[str, Any]:
                 request["target"] = args[i + 1]
             elif arg == "--exact":
                 request["exact"] = True
+            elif arg == "--history-load-times" and i + 1 < len(args):
+                try:
+                    request["history_load_times"] = max(0, int(args[i + 1]))
+                except ValueError:
+                    request["history_load_times"] = 0
     elif args[0] == "send":
         request["action"] = "send"
         for i, arg in enumerate(args):

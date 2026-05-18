@@ -20,6 +20,8 @@ from apps.wechat_ai_customer_service.auth.email_verification import EmailVerific
 from apps.wechat_ai_customer_service.auth.models import AuthSession, Role
 from apps.wechat_ai_customer_service.auth.session import read_local_account_overrides_from_env, write_local_account_overrides_to_env
 from apps.wechat_ai_customer_service.llm_config import (
+    apply_llm_reasoning_effort,
+    llm_urlopen,
     read_secret,
     resolve_deepseek_base_url,
     resolve_deepseek_max_tokens,
@@ -86,11 +88,27 @@ DEFAULT_RECORDER_MODULES = [
         "status": "active",
         "version": "1.0.0",
         "config": {
-            "description": "Rule-first order extraction with optional LLM supplementation, exports to order-sheet style workbook.",
-            "date_output_mode": "MMDD_text",
+            "description": "LLM-first semantic extraction with structured guardrails, exports to order-sheet style workbook.",
+            "date_output_mode": "YYYY-MM-DD",
             "allow_empty_cost_fields": True,
             "llm_enabled": True,
-            "llm_max_rows_per_run": 40,
+            "llm_max_rows_per_run": 12,
+            "llm_repair_max_rows_per_run": 8,
+            "llm_dynamic_budget_enabled": True,
+            "llm_dynamic_budget_ratio": 0.35,
+            "llm_dynamic_budget_max": 64,
+            "llm_dynamic_repair_ratio": 0.25,
+            "llm_dynamic_repair_max": 32,
+            "llm_segmentation_enabled": True,
+            "llm_segmentation_max_segments": 6,
+            "llm_supplement_mode": "missing_core_fields_only",
+            "extract_mode": "llm_first",
+            "missing_quantity_strategy": "strict",
+            "include_record_types_in_main_sheet": ["order_item", "gift_item"],
+            "force_multi_sku_split_enabled": True,
+            "force_multi_sku_min_skus": 2,
+            "force_multi_order_signal_threshold": 2,
+            "context_followup_enabled": True,
             "supported_content_types": ["text", "quote"],
         },
         "builtin": True,
@@ -184,6 +202,69 @@ class RecorderModuleAssignmentService:
                         "updated_at": now_iso(),
                     }
                     changed = True
+                else:
+                    existing = dict(modules.get(module_key) or {})
+                    config = dict(existing.get("config") or {})
+                    builtin_config = dict(builtin.get("config") or {})
+                    config_changed = False
+                    for key, value in builtin_config.items():
+                        if key not in config:
+                            config[key] = value
+                            config_changed = True
+                    if module_key == "order_sheet_lab_v1":
+                        if str(config.get("date_output_mode") or "").strip() in {"MMDD_text", "MMDD-TEXT", "MMDD"}:
+                            config["date_output_mode"] = str(builtin_config.get("date_output_mode") or "YYYY-MM-DD")
+                            config_changed = True
+                        llm_budget = int(config.get("llm_max_rows_per_run", 0) or 0)
+                        if llm_budget <= 0 or llm_budget >= 40:
+                            config["llm_max_rows_per_run"] = int(builtin_config.get("llm_max_rows_per_run") or 12)
+                            config_changed = True
+                        if not str(config.get("llm_supplement_mode") or "").strip():
+                            config["llm_supplement_mode"] = str(builtin_config.get("llm_supplement_mode") or "missing_core_fields_only")
+                            config_changed = True
+                        if not str(config.get("extract_mode") or "").strip():
+                            config["extract_mode"] = str(builtin_config.get("extract_mode") or "llm_first")
+                            config_changed = True
+                        if "llm_segmentation_enabled" not in config:
+                            config["llm_segmentation_enabled"] = bool(builtin_config.get("llm_segmentation_enabled", True))
+                            config_changed = True
+                        if int(config.get("llm_segmentation_max_segments", 0) or 0) <= 0:
+                            config["llm_segmentation_max_segments"] = int(builtin_config.get("llm_segmentation_max_segments") or 6)
+                            config_changed = True
+                        if int(config.get("llm_repair_max_rows_per_run", 0) or 0) <= 0:
+                            config["llm_repair_max_rows_per_run"] = int(builtin_config.get("llm_repair_max_rows_per_run") or 8)
+                            config_changed = True
+                        if str(config.get("missing_quantity_strategy") or "").strip().lower() not in {"strict", "assume_one", "llm_guess"}:
+                            config["missing_quantity_strategy"] = str(builtin_config.get("missing_quantity_strategy") or "strict")
+                            config_changed = True
+                        include_types = config.get("include_record_types_in_main_sheet")
+                        if not isinstance(include_types, list) or not include_types:
+                            config["include_record_types_in_main_sheet"] = list(builtin_config.get("include_record_types_in_main_sheet") or ["order_item", "gift_item"])
+                            config_changed = True
+                        for bool_key in ("llm_dynamic_budget_enabled", "force_multi_sku_split_enabled", "context_followup_enabled"):
+                            if bool_key not in config:
+                                config[bool_key] = bool(builtin_config.get(bool_key, True))
+                                config_changed = True
+                        for numeric_key, fallback in (
+                            ("llm_dynamic_budget_ratio", 0.35),
+                            ("llm_dynamic_budget_max", 64),
+                            ("llm_dynamic_repair_ratio", 0.25),
+                            ("llm_dynamic_repair_max", 32),
+                            ("force_multi_sku_min_skus", 2),
+                            ("force_multi_order_signal_threshold", 2),
+                        ):
+                            try:
+                                parsed = float(config.get(numeric_key)) if "ratio" in numeric_key else int(config.get(numeric_key))
+                            except (TypeError, ValueError):
+                                parsed = 0
+                            if parsed <= 0:
+                                config[numeric_key] = builtin_config.get(numeric_key, fallback)
+                                config_changed = True
+                    if config_changed:
+                        existing["config"] = config
+                        existing["updated_at"] = now_iso()
+                        modules[module_key] = existing
+                        changed = True
             if changed:
                 state["recorder_modules"] = modules
             items = sorted(modules.values(), key=lambda item: str(item.get("module_key") or ""))
@@ -231,12 +312,14 @@ class RecorderModuleAssignmentService:
         bindings = [
             item
             for item in (state.get("recorder_module_bindings") or {}).values()
-            if str(item.get("scope_type") or "") in {"user", "global"}
+            if str(item.get("scope_type") or "") in {"user", "tenant", "global"}
         ]
         if scope_type:
             bindings = [item for item in bindings if str(item.get("scope_type") or "") == scope_type]
         if scope_id:
             bindings = [item for item in bindings if str(item.get("scope_id") or "") == scope_id]
+        if tenant_id:
+            bindings = [item for item in bindings if str(item.get("tenant_id") or "") == tenant_id]
         if user_id:
             bindings = [item for item in bindings if str(item.get("user_id") or "") == user_id]
         bindings.sort(key=lambda item: str(item.get("updated_at") or ""), reverse=True)
@@ -244,8 +327,8 @@ class RecorderModuleAssignmentService:
 
     def upsert_binding(self, payload: dict[str, Any], *, actor: AuthSession) -> dict[str, Any]:
         scope_type = str(payload.get("scope_type") or "").strip().lower()
-        if scope_type not in {"user", "global"}:
-            raise HTTPException(status_code=400, detail="scope_type must be one of user|global")
+        if scope_type not in {"user", "tenant", "global"}:
+            raise HTTPException(status_code=400, detail="scope_type must be one of user|tenant|global")
         scope_id = str(payload.get("scope_id") or "").strip()
         if scope_type == "global":
             scope_id = "*"
@@ -262,6 +345,11 @@ class RecorderModuleAssignmentService:
 
         binding_id = str(payload.get("binding_id") or make_id("recorder_binding"))
         owner_user_id = str(payload.get("user_id") or scope_id if scope_type == "user" else "").strip()
+        tenant_scope_id = str(payload.get("tenant_id") or "").strip()
+        if scope_type == "tenant":
+            tenant_scope_id = tenant_scope_id or scope_id
+        if scope_type == "global":
+            tenant_scope_id = ""
 
         def mutate(state: dict[str, Any]) -> dict[str, Any]:
             bindings = state.get("recorder_module_bindings", {})
@@ -270,7 +358,7 @@ class RecorderModuleAssignmentService:
                 "binding_id": binding_id,
                 "scope_type": scope_type,
                 "scope_id": scope_id,
-                "tenant_id": "",
+                "tenant_id": tenant_scope_id,
                 "user_id": owner_user_id,
                 "module_key": module_key,
                 "enabled": payload.get("enabled", existing.get("enabled", True)) is not False,
@@ -2022,7 +2110,15 @@ def seed_local_customer_accounts(state: dict[str, Any]) -> None:
         }
         if account.get("password_hash"):
             record["password_hash"] = str(account.get("password_hash") or "")
-        state["users"][user_id] = {**record, **({"password_hash": existing.get("password_hash")} if existing and existing.get("password_hash") and not record.get("password_hash") else {})}
+        if account.get("initialized_at"):
+            record["initialized_at"] = str(account.get("initialized_at") or "")
+        preserved: dict[str, Any] = {}
+        if isinstance(existing, dict):
+            if existing.get("password_hash") and not record.get("password_hash"):
+                preserved["password_hash"] = existing.get("password_hash")
+            if existing.get("initialized_at") and not record.get("initialized_at"):
+                preserved["initialized_at"] = existing.get("initialized_at")
+        state["users"][user_id] = {**record, **preserved}
     if TENANTS_ROOT.exists():
         for path in sorted(item for item in TENANTS_ROOT.iterdir() if item.is_dir()):
             tenant_id = active_tenant_id(path.name)
@@ -3035,6 +3131,7 @@ def call_deepseek_json_with_prompt(
         "max_tokens": resolve_deepseek_max_tokens(max_tokens, read_secret_fn=read_secret),
         "response_format": {"type": "json_object"},
     }
+    apply_llm_reasoning_effort(payload, tier="flash", read_secret_fn=read_secret)
     request = urllib.request.Request(
         url=base_url.rstrip("/") + "/chat/completions",
         data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
@@ -3042,7 +3139,7 @@ def call_deepseek_json_with_prompt(
         method="POST",
     )
     try:
-        with urllib.request.urlopen(request, timeout=resolve_deepseek_timeout(45, read_secret_fn=read_secret)) as response:
+        with llm_urlopen(request, timeout=resolve_deepseek_timeout(45, read_secret_fn=read_secret)) as response:
             raw = response.read().decode("utf-8")
         data = json.loads(raw or "{}")
     except (urllib.error.HTTPError, urllib.error.URLError, TimeoutError, OSError, json.JSONDecodeError):

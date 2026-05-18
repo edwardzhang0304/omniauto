@@ -51,6 +51,17 @@ apps/wechat_ai_customer_service/data/tenants/*/rag_chunks/
 apps/wechat_ai_customer_service/data/tenants/*/rag_experience/
 apps/wechat_ai_customer_service/data/tenants/*/rag_index/
 apps/wechat_ai_customer_service/data/tenants/*/rag_sources/
+apps/wechat_ai_customer_service/data/tenants/*/raw_inbox/
+apps/wechat_ai_customer_service/data/tenants/*/migration_backups/
+apps/wechat_ai_customer_service/data/tenants/*/learning_packs/import_jobs/
+apps/wechat_ai_customer_service/data/tenants/*/learning_packs/import_reports/
+apps/wechat_ai_customer_service/data/tenants/*/learning_packs/curation_jobs/
+apps/wechat_ai_customer_service/data/tenants/*/learning_packs/curation_reports/
+apps/wechat_ai_customer_service/data/tenants/*/legacy_formal_product_archive/
+apps/wechat_ai_customer_service/data/legacy_formal_product_archive/
+apps/wechat_ai_customer_service/data/tenants/wf_iso_*/
+apps/wechat_ai_customer_service/data/tenants/smart_recorder_test/
+apps/wechat_ai_customer_service/data/tenants/workflow_switch_probe/
 
 # Cache / misc
 .pytest_cache/

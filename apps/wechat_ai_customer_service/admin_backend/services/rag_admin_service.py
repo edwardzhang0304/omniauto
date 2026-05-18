@@ -26,6 +26,8 @@ from rag_operations import RagOperationsAnalyzer  # noqa: E402
 from generate_review_candidates import LLM_ASSIST_POLICY_VERSION  # noqa: E402
 from apps.wechat_ai_customer_service.knowledge_paths import tenant_review_candidates_root, tenant_runtime_state_root  # noqa: E402
 from apps.wechat_ai_customer_service.llm_config import (  # noqa: E402
+    apply_llm_reasoning_effort,
+    llm_urlopen,
     read_secret,
     resolve_deepseek_base_url,
     resolve_deepseek_max_tokens,
@@ -54,7 +56,7 @@ from .rag_experience_interpreter import (  # noqa: E402
     interpretation_looks_corrupted,
 )
 from .raw_message_store import RawMessageStore  # noqa: E402
-from .source_authority_policy import evaluate_experience_source_authority, experience_contains_model_reply  # noqa: E402
+from .source_authority_policy import PRODUCT_MASTER_CATEGORIES, evaluate_experience_source_authority, experience_contains_model_reply  # noqa: E402
 
 
 PRODUCT_SCOPED_CATEGORIES = set(PRODUCT_SCOPED_SCHEMAS)
@@ -87,6 +89,30 @@ class RagAdminService:
         payload = self.rag.status()
         payload["experience_counts"] = self.experiences.counts()
         return payload
+
+    def _virtualize_auto_triaged_experience(
+        self,
+        *,
+        base_item: dict[str, Any],
+        annotated_item: dict[str, Any],
+    ) -> tuple[dict[str, Any], bool]:
+        cached_interpretation = annotated_item.get("ai_interpretation") if isinstance(annotated_item.get("ai_interpretation"), dict) else {}
+        if not cached_interpretation:
+            return base_item, False
+        if str(cached_interpretation.get("version") or "") != INTERPRETATION_VERSION:
+            return base_item, False
+        guarded_interpretation = apply_guardrails_to_interpretation(cached_interpretation, annotated_item)
+        triage_patch = build_auto_triage_patch(annotated_item, guarded_interpretation)
+        if not triage_patch:
+            return base_item, False
+        virtual_item = dict(base_item)
+        virtual_item.update(triage_patch)
+        review = triage_patch.get("experience_review") if isinstance(triage_patch.get("experience_review"), dict) else {}
+        review_status = str(review.get("status") or "")
+        auto_action = str(review.get("auto_triage_action") or "")
+        if review_status == AUTO_TRIAGE_REVIEW_STATUS and auto_action in {"discard", "already_covered"}:
+            virtual_item["status"] = "discarded"
+        return with_quality(virtual_item), True
 
     def search(self, payload: dict[str, Any]) -> dict[str, Any]:
         return self.rag.search(
@@ -161,73 +187,99 @@ class RagAdminService:
                 raw_store=self.raw_messages,
                 conversation_cache=source_dialogue_cache,
             )
-            cached_interpretation = annotated.get("ai_interpretation") if isinstance(annotated.get("ai_interpretation"), dict) else {}
-            if cached_interpretation and str(cached_interpretation.get("version") or "") == INTERPRETATION_VERSION:
-                triage_patch = build_auto_triage_patch(annotated, apply_guardrails_to_interpretation(cached_interpretation, annotated))
-                if triage_patch:
-                    virtual_item = dict(enriched)
-                    virtual_item.update(triage_patch)
-                    review = triage_patch.get("experience_review") if isinstance(triage_patch.get("experience_review"), dict) else {}
-                    review_status = str(review.get("status") or "")
-                    auto_action = str(review.get("auto_triage_action") or "")
-                    if review_status == AUTO_TRIAGE_REVIEW_STATUS and auto_action in {"discard", "already_covered"}:
-                        virtual_item["status"] = "discarded"
-                    virtual_item = with_quality(virtual_item)
-                    annotated = annotate_experience(virtual_item, formal_items) if not fast else annotate_experience_from_cache(virtual_item)
-                    annotated = attach_source_dialogue(
-                        annotated,
-                        raw_store=self.raw_messages,
-                        conversation_cache=source_dialogue_cache,
-                    )
             if status == "active" and str(annotated.get("status") or "active") != "active":
                 continue
             items.append(annotated)
         relation_counts = Counter(str(item.get("formal_relation") or "unknown") for item in items)
         quality_counts = Counter(str((item.get("quality") or {}).get("band") or "unknown") for item in items)
         retrieval_counts = Counter("retrievable" if (item.get("quality") or {}).get("retrieval_allowed") else "not_retrievable" for item in items)
+        raw_counts = self.experiences.counts()
+        display_counts = self.display_counts()
         return {
             "ok": True,
             "items": items,
-            "counts": self.experiences.counts(),
+            "counts": raw_counts,
+            "display_counts": display_counts,
             "relation_counts": dict(relation_counts),
             "quality_counts": dict(quality_counts),
             "retrieval_counts": dict(retrieval_counts),
             "formal_knowledge_policy": "rag_experience_only_not_formal_knowledge",
         }
 
+    def display_counts(self) -> dict[str, int]:
+        records = self.experiences.list_for_counts()
+        counts = {"total": len(records), "pending": 0, "kept": 0, "promoted": 0, "discarded": 0, "other": 0}
+        for record in records:
+            enriched = with_quality(record)
+            annotated = annotate_experience_from_cache(enriched)
+            relation_value = str(annotated.get("formal_relation") or enriched.get("status") or "novel")
+            display_state = rag_experience_display_state(enriched, relation_value=relation_value)
+            if display_state in {"pending", "kept", "promoted", "discarded"}:
+                counts[display_state] += 1
+            else:
+                counts["other"] += 1
+        counts["accounted_total"] = counts["pending"] + counts["kept"] + counts["promoted"] + counts["discarded"] + counts["other"]
+        counts["consistent"] = counts["accounted_total"] == counts["total"]
+        return counts
+
     def unreviewed_experience_count(self) -> dict[str, Any]:
         records = self.experiences.list(status="all", limit=500)
         count = 0
-        for item in records:
-            if str(item.get("status") or "active") != "active":
+        for record in records:
+            enriched = with_quality(record)
+            annotated = annotate_experience_from_cache(enriched)
+            relation_value = str(annotated.get("formal_relation") or enriched.get("status") or "novel")
+            if rag_experience_display_state(enriched, relation_value=relation_value) != "pending":
                 continue
-            review = item.get("experience_review") if isinstance(item.get("experience_review"), dict) else {}
-            if str(review.get("status") or "") in {"kept", AUTO_KEPT_REVIEW_STATUS, AUTO_TRIAGE_REVIEW_STATUS}:
-                continue
-            count += 1
-        return {"ok": True, "count": count, "counts": self.experiences.counts()}
+            review_state = enriched.get("review_state") if isinstance(enriched.get("review_state"), dict) else {}
+            if bool(review_state.get("is_new")):
+                count += 1
+        return {"ok": True, "count": count, "counts": self.experiences.counts(), "display_counts": self.display_counts()}
+
+    def _reviewed_state(self, current: dict[str, Any], payload: dict[str, Any], *, action: str) -> dict[str, Any]:
+        now_text = now()
+        review_state = dict(current.get("review_state") if isinstance(current.get("review_state"), dict) else {})
+        if not review_state:
+            review_state = {
+                "is_new": True,
+                "new_reason": "new_rag_experience",
+                "marked_at": now_text,
+                "read_at": "",
+                "read_by": "",
+            }
+        read_at = str(review_state.get("read_at") or now_text)
+        review_state.update(
+            {
+                "is_new": False,
+                "read_at": read_at,
+                "read_by": str(payload.get("actor") or review_state.get("read_by") or "admin"),
+                "updated_at": now_text,
+                "last_action": action,
+                "last_action_at": now_text,
+            }
+        )
+        return review_state
 
     def discard_experience(self, experience_id: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
         payload = payload or {}
-        item = self.experiences.discard(experience_id, reason=str(payload.get("reason") or "discarded in admin"))
+        current = self.find_experience(experience_id)
+        review_state = self._reviewed_state(current, payload, action="discard")
+        item = self.experiences.update_status(
+            experience_id,
+            status="discarded",
+            reason=str(payload.get("reason") or "discarded in admin"),
+            extra={
+                "discarded_at": now(),
+                "review_state": review_state,
+                "reviewed_by_user": True,
+            },
+        )
         return {"ok": True, "item": item, "index": {"ok": True, "mode": "queued_async_rebuild"}}
 
     def acknowledge_experience(self, experience_id: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
         payload = payload or {}
         current = self.find_experience(experience_id)
-        review_state = dict(current.get("review_state") if isinstance(current.get("review_state"), dict) else {})
-        if not review_state:
-            return {"ok": True, "item": current, "index": {"ok": True, "mode": "noop"}}
-        if not bool(review_state.get("is_new")):
-            return {"ok": True, "item": current, "index": {"ok": True, "mode": "noop"}}
-        review_state.update(
-            {
-                "is_new": False,
-                "read_at": now(),
-                "read_by": str(payload.get("actor") or "admin"),
-                "updated_at": now(),
-            }
-        )
+        review_state = self._reviewed_state(current, payload, action="acknowledge")
         item = self.experiences.update_metadata(
             experience_id,
             {"review_state": review_state},
@@ -238,6 +290,7 @@ class RagAdminService:
     def keep_experience(self, experience_id: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
         payload = payload or {}
         current = self.find_experience(experience_id)
+        review_state = self._reviewed_state(current, payload, action="keep")
         review = dict(current.get("experience_review") or {}) if isinstance(current.get("experience_review"), dict) else {}
         review.update(
             {
@@ -251,6 +304,7 @@ class RagAdminService:
             {
                 "experience_review": review,
                 "reviewed_by_user": True,
+                "review_state": review_state,
             },
             rebuild_index=True,
         )
@@ -328,6 +382,7 @@ class RagAdminService:
             else:
                 review["kept_at"] = now()
                 review["kept_reason"] = str(payload.get("reason") or review.get("kept_reason") or "kept_as_rag_experience")
+                patch["review_state"] = self._reviewed_state(current, payload, action="keep")
             patch["experience_review"] = review
             patch["reviewed_by_user"] = review_status == "kept"
         if not patch:
@@ -392,11 +447,17 @@ class RagAdminService:
         candidate_path.parent.mkdir(parents=True, exist_ok=True)
         candidate_path.write_text(json.dumps(candidate, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
         upsert_candidate_to_db(candidate)
+        reviewed_state = self._reviewed_state(item, payload, action="promote")
         updated = self.experiences.update_status(
             experience_id,
             status="promoted",
             reason="promoted_to_review_candidate",
-            extra={"promoted_at": now(), "promoted_candidate_id": candidate["candidate_id"]},
+            extra={
+                "promoted_at": now(),
+                "promoted_candidate_id": candidate["candidate_id"],
+                "review_state": reviewed_state,
+                "reviewed_by_user": True,
+            },
         )
         return {
             "ok": True,
@@ -444,11 +505,26 @@ class RagAdminService:
                 "formal_relation": str(annotated.get("formal_relation") or ""),
                 "formal_match": match,
             }
+        formal_category_id = str(formal_record.get("category_id") or "")
+        if formal_category_id in PRODUCT_MASTER_CATEGORIES and strategy != "keep_formal_discard_experience":
+            return {
+                "ok": False,
+                "message": "商品资料属于权威主数据，禁止用RAG经验覆盖或合并正式商品资料；请保留正式知识并废弃该经验。",
+                "formal_relation": str(annotated.get("formal_relation") or ""),
+                "formal_match": compact_formal_match(formal_record),
+            }
 
         if strategy == "keep_formal_discard_experience":
-            discarded = self.experiences.discard(
+            reviewed_state = self._reviewed_state(current, payload, action="discard")
+            discarded = self.experiences.update_status(
                 experience_id,
+                status="discarded",
                 reason="formal_knowledge_preferred_discard_experience",
+                extra={
+                    "discarded_at": now(),
+                    "review_state": reviewed_state,
+                    "reviewed_by_user": True,
+                },
             )
             return {
                 "ok": True,
@@ -475,9 +551,16 @@ class RagAdminService:
                     "overlap_strategy": strategy,
                 },
             )
-            discarded = self.experiences.discard(
+            reviewed_state = self._reviewed_state(current, payload, action="discard")
+            discarded = self.experiences.update_status(
                 experience_id,
+                status="discarded",
                 reason="replace_formal_with_experience_discard_experience",
+                extra={
+                    "discarded_at": now(),
+                    "review_state": reviewed_state,
+                    "reviewed_by_user": True,
+                },
             )
             return {
                 "ok": True,
@@ -515,9 +598,16 @@ class RagAdminService:
                     "overlap_strategy": strategy,
                 },
             )
-            discarded = self.experiences.discard(
+            reviewed_state = self._reviewed_state(current, payload, action="discard")
+            discarded = self.experiences.update_status(
                 experience_id,
+                status="discarded",
                 reason="formal_overlap_ai_merge_discard_experience",
+                extra={
+                    "discarded_at": now(),
+                    "review_state": reviewed_state,
+                    "reviewed_by_user": True,
+                },
             )
         except ValueError as exc:
             return {"ok": False, "message": str(exc), "formal_match": compact_formal_match(formal_record)}
@@ -578,7 +668,8 @@ class RagAdminService:
             triage_patch = build_auto_triage_patch(annotated, interpretation)
             if triage_patch:
                 try:
-                    self.experiences.update_metadata(str(item.get("experience_id") or ""), triage_patch, rebuild_index=False)
+                    # Keep retrieval behavior deterministic right after AI auto-triage.
+                    self.experiences.update_metadata(str(item.get("experience_id") or ""), triage_patch, rebuild_index=True)
                 except KeyError:
                     pass
             updated = self.find_experience(str(item.get("experience_id") or ""))
@@ -660,6 +751,8 @@ def save_formal_item(
 ) -> dict[str, Any]:
     if not target_category:
         raise ValueError("formal target category is missing")
+    if target_category in PRODUCT_MASTER_CATEGORIES:
+        raise ValueError("商品资料属于权威主数据，禁止通过RAG经验相近处理写回；请在商品库手动维护。")
     if not isinstance(item, dict) or not item:
         raise ValueError("formal merged item is missing")
     registry = KnowledgeRegistry()
@@ -1004,6 +1097,7 @@ def llm_merge_text(
         "max_tokens": resolve_deepseek_max_tokens(1400, read_secret_fn=read_secret),
         "response_format": {"type": "json_object"},
     }
+    apply_llm_reasoning_effort(payload, tier="flash", read_secret_fn=read_secret)
     request = urllib.request.Request(
         url=resolve_deepseek_base_url(read_secret_fn=read_secret).rstrip("/") + "/chat/completions",
         data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
@@ -1011,7 +1105,7 @@ def llm_merge_text(
         method="POST",
     )
     try:
-        with urllib.request.urlopen(request, timeout=resolve_deepseek_timeout(60, read_secret_fn=read_secret)) as response:
+        with llm_urlopen(request, timeout=resolve_deepseek_timeout(60, read_secret_fn=read_secret)) as response:
             raw = response.read().decode("utf-8")
         data = json.loads(raw or "{}")
     except (urllib.error.HTTPError, urllib.error.URLError, TimeoutError, OSError, json.JSONDecodeError):
@@ -1153,6 +1247,25 @@ def auto_triage_should_discard(review: dict[str, Any] | None) -> bool:
     if str(review.get("status") or "") != AUTO_TRIAGE_REVIEW_STATUS:
         return False
     return str(review.get("auto_triage_action") or "") in {"discard", "already_covered"}
+
+
+def experience_review_status(item: dict[str, Any]) -> str:
+    review = item.get("experience_review") if isinstance(item.get("experience_review"), dict) else {}
+    return str(review.get("status") or "")
+
+
+def rag_experience_display_state(item: dict[str, Any], *, relation_value: str = "") -> str:
+    status = str(item.get("status") or "active")
+    relation = str(relation_value or item.get("formal_relation") or status or "")
+    review_status = experience_review_status(item)
+    review = item.get("experience_review") if isinstance(item.get("experience_review"), dict) else {}
+    if status == "discarded" or auto_triage_should_discard(review):
+        return "discarded"
+    if status == "promoted" or relation == "promoted":
+        return "promoted"
+    if review_status in {"kept", AUTO_KEPT_REVIEW_STATUS} or relation in {"kept_experience", "auto_kept_experience"}:
+        return "kept"
+    return "pending"
 
 
 def annotate_experience(item: dict[str, Any], formal_items: list[dict[str, Any]]) -> dict[str, Any]:
@@ -1442,8 +1555,12 @@ def detect_conflict(experience: str, formal: dict[str, Any]) -> bool:
 def build_candidate_from_experience(item: dict[str, Any], *, preferred_category: str = "") -> dict[str, Any]:
     if experience_is_pipeline_trace(item) and not pipeline_trace_has_promotable_business_content(item):
         raise ValueError("这条AI经验像系统流水线记录，不是客户可用知识；请废弃或保留在经验层，不要升级为待确认知识。")
+    if is_product_payload(structured_payload_from_experience(item)):
+        raise ValueError("这条内容命中商品资料主数据，不能升级为商品资料；商品资料只能通过商品库手动导入/维护。")
     hit = item.get("rag_hit", {}) or {}
     category_id = choose_candidate_category(item, preferred_category=preferred_category)
+    if category_id in PRODUCT_MASTER_CATEGORIES:
+        raise ValueError("这条内容命中商品资料主数据，不能升级为商品资料；商品资料只能通过商品库手动导入/维护。")
     source_decision = evaluate_experience_source_authority(item, category_id)
     if not source_decision.get("allowed"):
         raise ValueError(str(source_decision.get("message") or source_decision.get("reason") or "source is not authoritative for this candidate category"))
@@ -1898,9 +2015,9 @@ def extract_service_reply_from_transcript(text: str) -> str:
     value = re.split(r"[；;]\s*keywords\s*:", value, maxsplit=1, flags=re.I)[0].strip()
     if re.search(r"\b(customer_message|service_reply|applicability_scope|additional_details|product_category)\b", value) and re.search(r'"[^"]+"\s*:', value):
         return ""
-    marker = "[车金AI]"
-    if marker in value:
-        return value.rsplit(marker, 1)[-1].strip()
+    marker_match = re.search(r"\[[^\]]*(?:AI|客服)\]", value, re.I)
+    if marker_match:
+        return value[marker_match.end() :].strip()
     for pattern in (r"(?:^|\])\s*self\s*[:：]\s*(.+)$", r"(?:客服|AI)\s*[:：]\s*(.+)$"):
         match = re.search(pattern, value, re.S)
         if match:
@@ -2201,9 +2318,9 @@ def normalize_source_dialogue_message(message: dict[str, Any]) -> dict[str, Any]
     sender = str(message.get("sender") or "").strip()
     sender_role = str(message.get("sender_role") or "").strip().lower()
     role = "system"
-    if sender_role in {"self", "bot", "assistant", "ai"} or "[车金AI]" in content:
+    if sender_role in {"self", "bot", "assistant", "ai"} or re.search(r"^\s*\[[^\]]*(?:AI|客服)\]\s*", content, re.I):
         role = "ai"
-        content = re.sub(r"^\s*\[车金AI\]\s*", "", content).strip()
+        content = re.sub(r"^\s*\[[^\]]*(?:AI|客服)\]\s*", "", content, flags=re.I).strip()
     elif sender_role == "system" or sender.lower() == "system":
         role = "system"
     elif content:

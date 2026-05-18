@@ -11,6 +11,8 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
+import time
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -24,6 +26,8 @@ QUALITY_RETRIEVAL_MIN_SCORE = 0.52
 QUALITY_RETRIEVAL_MIN_HIT_SCORE = 0.32
 QUALITY_REPEATABLE_MIN_HIT_SCORE = 0.24
 QUALITY_REPEATABLE_REPLY_COUNT = 3
+WINDOWS_TRANSIENT_WRITE_ERRNOS = {13, 22}
+WINDOWS_TRANSIENT_WRITE_WINERRORS = {5, 32, 33}
 QUALITY_BLOCK_ACTION_TERMS = {
     "handoff",
     "manual",
@@ -62,6 +66,66 @@ QUALITY_TEST_CONTENT_TERMS = {
     "测试折叠椅",
 }
 
+AUTO_DISCARD_AUDITED_DELETE_SOURCES = {"rag_reply"}
+
+
+def write_json_with_retry(path: Path, payload: Any) -> None:
+    text = json.dumps(payload, ensure_ascii=False, indent=2)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temp = path.with_name(f".{path.name}.{os.getpid()}.{time.time_ns()}.tmp")
+    last_error: OSError | None = None
+    for attempt in range(10):
+        try:
+            temp.write_text(text, encoding="utf-8")
+            os.replace(temp, path)
+            return
+        except OSError as exc:
+            last_error = exc
+            if not transient_write_error(exc):
+                raise
+            time.sleep(0.05 * (attempt + 1))
+    try:
+        temp.unlink()
+    except OSError:
+        pass
+    if last_error is not None:
+        raise last_error
+
+
+def transient_write_error(exc: OSError) -> bool:
+    winerror = getattr(exc, "winerror", None)
+    return getattr(exc, "errno", None) in WINDOWS_TRANSIENT_WRITE_ERRNOS or winerror in WINDOWS_TRANSIENT_WRITE_WINERRORS
+
+INTAKE_PRODUCT_MASTER_CATEGORIES = {"products", "erp_exports"}
+INTAKE_CATEGORY_DUPLICATE_THRESHOLD = {
+    "products": 1,
+    "policies": 2,
+    "chats": 3,
+}
+INTAKE_DEFAULT_DUPLICATE_THRESHOLD = 3
+INTAKE_LOW_VALUE_MIN_TEXT_LENGTH = 36
+INTAKE_LOW_VALUE_BUSINESS_HINTS = (
+    "客户",
+    "客服",
+    "商品",
+    "产品",
+    "车型",
+    "车源",
+    "车况",
+    "规则",
+    "政策",
+    "报价",
+    "价格",
+    "库存",
+    "试驾",
+    "到店",
+    "转人工",
+    "贷款",
+    "首付",
+    "月供",
+    "过户",
+)
+
 
 class RagExperienceStore:
     def __init__(self, *, tenant_id: str | None = None, root: Path | None = None) -> None:
@@ -84,22 +148,24 @@ class RagExperienceStore:
 
     def list_retrievable(self, *, limit: int = 500) -> list[dict[str, Any]]:
         records = []
-        for item in self.list(status="active", limit=limit):
+        for item in self.list_for_counts():
+            if str(item.get("status") or "active") != "active":
+                continue
             enriched = with_quality(item)
             if experience_is_retrievable(enriched):
                 records.append(enriched)
-        return records
+        records.sort(key=lambda item: str(item.get("updated_at") or item.get("created_at") or ""), reverse=True)
+        return records[: max(1, min(int(limit or 500), MAX_RECORDS))]
 
-    def counts(self) -> dict[str, int]:
+    def list_for_counts(self) -> list[dict[str, Any]]:
+        """Return the full local accounting set used for auditable counters."""
         db = postgres_store(self.tenant_id)
         if db:
-            records = db.list_rag_experiences(self.tenant_id, status="all", limit=500)
-            counts = {"total": len(records), "active": 0, "discarded": 0}
-            for item in records:
-                status = str(item.get("status") or "active")
-                counts[status] = counts.get(status, 0) + 1
-            return counts
-        records = self._read()
+            return db.list_rag_experiences(self.tenant_id, status="all", limit=MAX_RECORDS)
+        return self._read()
+
+    def counts(self) -> dict[str, int]:
+        records = self.list_for_counts()
         counts = {"total": len(records), "active": 0, "discarded": 0}
         for item in records:
             status = str(item.get("status") or "active")
@@ -291,6 +357,14 @@ class RagExperienceStore:
             "review_state": new_rag_review_state(now_text),
         }
         record["quality"] = score_record_quality(record)
+        existing_records = self.list(status="all", limit=500)
+        auto_triage = intake_auto_triage_decision(record, existing_records=existing_records)
+        if auto_triage.get("auto_discard"):
+            record = mark_record_auto_triaged_discard(
+                record,
+                reason_code=str(auto_triage.get("reason_code") or "low_value_or_duplicate"),
+                reason=str(auto_triage.get("reason") or "内容缺少业务价值或重复度过高，系统自动降噪。"),
+            )
         _apply_creation_audit(record)
         return self._upsert_record(record, increment_usage=False)
 
@@ -422,7 +496,7 @@ class RagExperienceStore:
     def _write(self, records: list[dict[str, Any]]) -> None:
         self.root.mkdir(parents=True, exist_ok=True)
         compact = records[-MAX_RECORDS:]
-        self.path.write_text(json.dumps(compact, ensure_ascii=False, indent=2), encoding="utf-8")
+        write_json_with_retry(self.path, compact)
 
     def _upsert_record(self, record: dict[str, Any], *, increment_usage: bool) -> dict[str, Any]:
         db = postgres_store(self.tenant_id)
@@ -503,6 +577,7 @@ def merge_experience_record(existing: dict[str, Any], record: dict[str, Any], *,
         merged["review_state"] = existing_review_state
     elif next_review_state:
         merged["review_state"] = next_review_state
+    merged, _ = ensure_review_state(merged, default_now=now_text)
     merged["quality"] = score_record_quality(merged)
     return merged
 
@@ -516,6 +591,73 @@ def new_rag_review_state(now_text: str) -> dict[str, Any]:
         "read_at": "",
         "read_by": "",
     }
+
+
+def ensure_review_state(item: dict[str, Any], *, default_now: str | None = None) -> tuple[dict[str, Any], bool]:
+    """Backfill missing review_state for historical RAG experiences.
+
+    Compatibility rule:
+    - Active + pending/unreviewed experiences default to NEW.
+    - Already processed (kept/auto-kept/auto-triaged/promoted/discarded/reopened) default to not NEW.
+    """
+    result = dict(item)
+    raw_state = result.get("review_state") if isinstance(result.get("review_state"), dict) else {}
+    has_new_flag = "is_new" in raw_state
+    now_text = str(default_now or result.get("updated_at") or result.get("created_at") or now())
+    review = result.get("experience_review") if isinstance(result.get("experience_review"), dict) else {}
+    status = str(result.get("status") or "active")
+    review_status = str(review.get("status") or "")
+    reopened = bool(review.get("reopened_at"))
+    reviewed_by_user = bool(result.get("reviewed_by_user"))
+    processed = (
+        status in {"discarded", "promoted"}
+        or review_status in {"kept", "auto_kept", "auto_triaged"}
+        or reviewed_by_user
+        or reopened
+    )
+    inferred_is_new = not processed
+
+    state = dict(raw_state)
+    changed = False
+    if not has_new_flag:
+        state["is_new"] = inferred_is_new
+        state["new_reason"] = "new_rag_experience" if inferred_is_new else "backfilled_processed_rag_experience"
+        marked_at = str(result.get("created_at") or result.get("updated_at") or now_text)
+        state["marked_at"] = marked_at
+        if inferred_is_new:
+            state["read_at"] = ""
+            state["read_by"] = ""
+        else:
+            state["read_at"] = str(
+                review.get("kept_at")
+                or review.get("reopened_at")
+                or result.get("promoted_at")
+                or result.get("discarded_at")
+                or result.get("updated_at")
+                or marked_at
+            )
+            state["read_by"] = str(state.get("read_by") or ("admin" if reviewed_by_user else "system"))
+        changed = True
+    else:
+        is_new = bool(state.get("is_new"))
+        if is_new and processed:
+            state["is_new"] = False
+            state["read_at"] = str(state.get("read_at") or result.get("updated_at") or now_text)
+            state["read_by"] = str(state.get("read_by") or ("admin" if reviewed_by_user else "system"))
+            state["new_reason"] = str(state.get("new_reason") or "processed_rag_experience")
+            changed = True
+        elif not is_new and not state.get("read_at"):
+            state["read_at"] = str(result.get("updated_at") or now_text)
+            state["read_by"] = str(state.get("read_by") or ("admin" if reviewed_by_user else "system"))
+            changed = True
+
+    if not state.get("marked_at"):
+        state["marked_at"] = str(result.get("created_at") or result.get("updated_at") or now_text)
+        changed = True
+    state["updated_at"] = now_text
+    if changed or not raw_state:
+        result["review_state"] = state
+    return result, changed
 
 
 def _apply_creation_audit(record: dict[str, Any]) -> None:
@@ -551,12 +693,20 @@ def _apply_creation_audit(record: dict[str, Any]) -> None:
     if action != "delete":
         return
     auto_discard_enabled = str(os.getenv("WECHAT_RAG_AUTO_DISCARD", "0")).strip().lower() in {"1", "true", "yes", "on"}
-    if auto_discard_enabled:
-        record["status"] = "discarded"
+    source = str(record.get("source") or "")
+    if auto_discard_enabled or source in AUTO_DISCARD_AUDITED_DELETE_SOURCES:
+        mode = "auto_discard_enabled" if auto_discard_enabled else "auto_discard_low_value_reply"
+        discarded = mark_record_auto_triaged_discard(
+            record,
+            reason_code="llm_audit_delete",
+            reason=reason or "LLM 审计判断为低价值经验，系统自动降噪。",
+        )
+        record.clear()
+        record.update(discarded)
         record["auto_audit_discard"] = {
             "reason": reason,
             "audited_at": now(),
-            "mode": "auto_discard_enabled",
+            "mode": mode,
         }
         return
     record["auto_audit_suggested_discard"] = {
@@ -571,6 +721,140 @@ def summarize_intake_experience(source_type: str, category: str, evidence_excerp
     category_label = category or "unknown"
     excerpt = truncate(normalize_space(evidence_excerpt), 96)
     return f"RAG经验：{source_label}/{category_label}，摘要={excerpt}"
+
+
+def intake_auto_triage_decision(record: dict[str, Any], *, existing_records: list[dict[str, Any]]) -> dict[str, Any]:
+    """Decide whether a new intake record should be auto-discarded.
+
+    Rule intent:
+    - Product-master facts from intake are not reviewed in RAG experience queue.
+    - Low-value noise is auto-discarded.
+    - Highly duplicated intake records are auto-discarded.
+    """
+    category = str(record.get("category") or "").strip().lower()
+    source = str(record.get("source") or "")
+    source_type = str(record.get("source_type") or "")
+    if source != "intake":
+        return {"auto_discard": False}
+    if category in INTAKE_PRODUCT_MASTER_CATEGORIES:
+        return {
+            "auto_discard": True,
+            "reason_code": "product_master_manual_intake_only",
+            "reason": "商品资料属于权威主数据，RAG经验层不做人工复核，自动降噪处理。",
+        }
+    evidence = normalize_space(str(record.get("evidence_excerpt") or record.get("reply_text") or ""))
+    candidate_count = int(coerce_float(record.get("candidate_count"), 0))
+    if _is_low_value_intake(evidence, candidate_count=candidate_count):
+        return {
+            "auto_discard": True,
+            "reason_code": "low_value_noise",
+            "reason": "没有识别到稳定可复用的业务价值，自动从审核队列降噪。",
+        }
+    duplicate_count = intake_duplicate_count(record, existing_records=existing_records)
+    duplicate_threshold = INTAKE_CATEGORY_DUPLICATE_THRESHOLD.get(category, INTAKE_DEFAULT_DUPLICATE_THRESHOLD)
+    if duplicate_count >= duplicate_threshold:
+        return {
+            "auto_discard": True,
+            "reason_code": "high_duplicate_intake",
+            "reason": f"检测到高重复导入内容（同类重复 {duplicate_count} 次），自动降噪处理。",
+            "duplicate_count": duplicate_count,
+            "duplicate_threshold": duplicate_threshold,
+        }
+    return {
+        "auto_discard": False,
+        "duplicate_count": duplicate_count,
+        "duplicate_threshold": duplicate_threshold,
+        "category": category,
+        "source_type": source_type,
+    }
+
+
+def mark_record_auto_triaged_discard(record: dict[str, Any], *, reason_code: str, reason: str) -> dict[str, Any]:
+    now_text = now()
+    review = dict(record.get("experience_review") or {}) if isinstance(record.get("experience_review"), dict) else {}
+    review.update(
+        {
+            "status": "auto_triaged",
+            "auto_triaged_at": now_text,
+            "auto_triage_action": "discard",
+            "auto_triage_reason": truncate(reason, 240),
+            "auto_triage_reason_code": str(reason_code or ""),
+        }
+    )
+    marked = dict(record)
+    marked.update(
+        {
+            "status": "discarded",
+            "experience_review": review,
+            "reviewed_by_user": False,
+            "discarded_at": now_text,
+            "discarded_reason": "auto_triaged_discard",
+            "discard_reason": "auto_triaged_discard",
+            "review_state": {
+                "is_new": False,
+                "new_reason": "auto_triaged_discard",
+                "marked_at": str((record.get("review_state") or {}).get("marked_at") or record.get("created_at") or now_text),
+                "updated_at": now_text,
+                "read_at": now_text,
+                "read_by": "system",
+                "last_action": "auto_discard",
+                "last_action_at": now_text,
+            },
+        }
+    )
+    marked["quality"] = score_record_quality(marked)
+    return marked
+
+
+def intake_duplicate_count(record: dict[str, Any], *, existing_records: list[dict[str, Any]]) -> int:
+    """Return number of similar intake records already present."""
+    target_key = intake_duplicate_key(record)
+    if not target_key:
+        return 0
+    current_id = str(record.get("experience_id") or "")
+    count = 0
+    for item in existing_records:
+        if str(item.get("source") or "") != "intake":
+            continue
+        if current_id and str(item.get("experience_id") or "") == current_id:
+            continue
+        if intake_duplicate_key(item) == target_key:
+            count += 1
+    return count
+
+
+def intake_duplicate_key(record: dict[str, Any]) -> str:
+    category = str(record.get("category") or "").strip().lower()
+    source_type = str(record.get("source_type") or "").strip().lower()
+    evidence = normalize_space(str(record.get("evidence_excerpt") or record.get("reply_text") or ""))
+    if not evidence:
+        return ""
+    evidence = _normalize_intake_text(evidence)
+    if not evidence:
+        return ""
+    return stable_digest(f"{category}|{source_type}|{evidence}", 28)
+
+
+def _normalize_intake_text(text: str) -> str:
+    normalized = normalize_space(text)
+    normalized = re.sub(r"CHEJIN_\d{8}_\d{6}", "CHEJIN_BATCH", normalized, flags=re.I)
+    normalized = re.sub(r"upload_[0-9a-f]{8,}", "UPLOAD_ID", normalized, flags=re.I)
+    normalized = re.sub(r"\b\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}\b", "TIMESTAMP", normalized)
+    normalized = re.sub(r"\b\d{10,}\b", "LONG_NUMBER", normalized)
+    return truncate(normalized, 1600)
+
+
+def _is_low_value_intake(evidence: str, *, candidate_count: int) -> bool:
+    text = normalize_space(evidence)
+    if not text:
+        return True
+    if candidate_count <= 0 and len(text) < INTAKE_LOW_VALUE_MIN_TEXT_LENGTH:
+        return True
+    if len(text) < INTAKE_LOW_VALUE_MIN_TEXT_LENGTH and not any(token in text for token in INTAKE_LOW_VALUE_BUSINESS_HINTS):
+        return True
+    if any(term in text for term in QUALITY_TEST_CONTENT_TERMS):
+        return True
+    return False
 
 
 def compact_rag_ingest(rag_ingest: dict[str, Any]) -> dict[str, Any]:
@@ -599,7 +883,7 @@ def summarize_experience(question: str, reply_text: str, hit: dict[str, Any]) ->
 
 
 def with_quality(item: dict[str, Any]) -> dict[str, Any]:
-    enriched = dict(item)
+    enriched, _ = ensure_review_state(item)
     quality = enriched.get("quality")
     signals = quality.get("signals", {}) if isinstance(quality, dict) else {}
     if not isinstance(quality, dict) or "retrieval_allowed" not in quality or "review_allows_retrieval" not in signals:

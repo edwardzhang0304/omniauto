@@ -1,0 +1,46 @@
+{
+  "schema_version": 1,
+  "category_id": "chats",
+  "id": "wfr_20260514_015928_r2_b",
+  "status": "archived",
+  "source": {
+    "type": "cleaned_real_chat_pack",
+    "batch_token": "wfr_batch_20260514_015928_r2"
+  },
+  "data": {
+    "customer_message": "wfrq_20260514_015928_r2_b 你能保证我征信一般也一定贷下来吗？",
+    "service_reply": "金融审批不能保证通过，需要人工顾问一对一核实资质后再给方案。",
+    "intent_tags": [
+      "金融风险",
+      "转人工"
+    ],
+    "tone_tags": [
+      "谨慎说明"
+    ],
+    "linked_categories": [
+      "products",
+      "policies"
+    ],
+    "linked_item_ids": [],
+    "applicability_scope": "industry",
+    "usable_as_template": true,
+    "additional_details": {
+      "scenario": "金融边界",
+      "hit_count": 7,
+      "industry_id": "used_car",
+      "实盘聊天": "wfrq_20260514_015928_r2_b 你能保证我征信一般也一定贷下来吗？ 金融审批不能保证通过，需要人工顾问一对一核实资质后再给方案。",
+      "workflow_import": "金融审批不能保证通过，需要人工顾问一对一核实资质后再给方案。"
+    }
+  },
+  "runtime": {
+    "allow_auto_reply": false,
+    "requires_handoff": true,
+    "risk_level": "high"
+  },
+  "metadata": {
+    "created_at": "2026-05-14T01:59:28",
+    "updated_at": "2026-05-14T02:26:53",
+    "created_by": "workflow_curation",
+    "updated_by": "workflow_curation"
+  }
+}

@@ -1,0 +1,47 @@
+{
+  "schema_version": 1,
+  "category_id": "products",
+  "id": "chejin_hengyi_2019_es6",
+  "status": "active",
+  "source": {
+    "type": "test_fixture",
+    "batch_token": "CHEJIN_SEED_20260507",
+    "legacy_migrated_from": "knowledge_bases/products"
+  },
+  "data": {
+    "name": "2019款蔚来ES6 420KM 运动版",
+    "sku": "CHEJIN-ES6-2019-420KM",
+    "category": "二手车/新能源SUV",
+    "aliases": [
+      "蔚来ES6",
+      "ES6",
+      "新能源SUV",
+      "电动车",
+      "换电"
+    ],
+    "specs": "2019年12月上牌，表显4.2万公里，纯电续航420KM，换电权益可过户，自动驾驶辅助包。",
+    "price": 16.8,
+    "unit": "台",
+    "inventory": 1,
+    "shipping_policy": "新能源车需确认迁入地政策，电池检测和换电权益过户需人工协助。",
+    "warranty_policy": "电池健康度以官方检测报告为准，三电质保按厂家政策执行，换电权益可过户。",
+    "reply_templates": {
+      "recommendation": "这台ES6适合16到18万预算、想体验新能源和换电便利的客户，换电权益是亮点。"
+    },
+    "risk_rules": [
+      "迁入政策需确认",
+      "换电权益过户需人工协助"
+    ]
+  },
+  "runtime": {
+    "allow_auto_reply": true,
+    "requires_handoff": false,
+    "risk_level": "normal"
+  },
+  "metadata": {
+    "created_at": "2026-05-07T10:00:00",
+    "updated_at": "2026-05-16T22:51:06",
+    "created_by": "admin",
+    "updated_by": "admin"
+  }
+}

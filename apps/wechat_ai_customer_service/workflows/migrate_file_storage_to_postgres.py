@@ -30,6 +30,12 @@ from apps.wechat_ai_customer_service.knowledge_paths import (  # noqa: E402
     tenant_rag_sources_root,
     tenant_root,
 )
+from apps.wechat_ai_customer_service.product_master import (  # noqa: E402
+    PRODUCT_MASTER_CATEGORY_ID,
+    PRODUCT_MASTER_DB_LAYER,
+    ProductMasterStore,
+    product_master_category_record,
+)
 from apps.wechat_ai_customer_service.storage import get_postgres_store, load_storage_config  # noqa: E402
 from apps.wechat_ai_customer_service.workflows.knowledge_runtime import PRODUCT_SCOPED_KINDS  # noqa: E402
 
@@ -66,6 +72,7 @@ def main() -> int:
         store.upsert_category(tenant_id, "shared", category)
     for category in plan["tenant_categories"]:
         store.upsert_category(tenant_id, "tenant", category)
+    store.upsert_category(tenant_id, PRODUCT_MASTER_DB_LAYER, product_master_category_record())
     for category in product_scoped_category_records():
         store.upsert_category(tenant_id, "tenant_product", category)
     for item in plan["knowledge_items"]:
@@ -115,6 +122,7 @@ def collect_file_storage(tenant_id: str) -> dict[str, Any]:
     knowledge_items = []
     knowledge_items.extend(collect_category_items(SHARED_KNOWLEDGE_ROOT, shared_categories, layer="shared"))
     knowledge_items.extend(collect_category_items(tenant_knowledge_base_root(tenant_id), tenant_categories, layer="tenant"))
+    knowledge_items.extend(collect_product_master_items(tenant_id))
     knowledge_items.extend(collect_product_scoped_items(tenant_id))
     rag_sources = read_json(tenant_rag_sources_root(tenant_id) / "sources.json", default=[])
     rag_chunks_by_source = collect_rag_chunks(tenant_id)
@@ -203,10 +211,25 @@ def collect_category_items(root: Path, categories: list[dict[str, Any]], *, laye
         category_id = str(category.get("id") or "")
         if not category_id:
             continue
+        if category_id == PRODUCT_MASTER_CATEGORY_ID:
+            continue
         category_path = root / str(category.get("path") or category_id)
         for item in collect_json_files(category_path / "items"):
             items.append({"layer": layer, "category_id": category_id, "product_id": "", "payload": item})
     return items
+
+
+def collect_product_master_items(tenant_id: str) -> list[dict[str, Any]]:
+    store = ProductMasterStore(tenant_id=tenant_id)
+    return [
+        {
+            "layer": PRODUCT_MASTER_DB_LAYER,
+            "category_id": PRODUCT_MASTER_CATEGORY_ID,
+            "product_id": "",
+            "payload": item,
+        }
+        for item in store.list_items(include_archived=True)
+    ]
 
 
 def collect_product_scoped_items(tenant_id: str) -> list[dict[str, Any]]:

@@ -25,6 +25,7 @@ DEFAULT_SETTINGS = {
     "use_llm": True,
     "capture_interval_seconds": 30,
 }
+RECORDER_DISCOVERY_SOURCE_TYPE = "wechat_session_discovery"
 
 
 class RecorderService:
@@ -57,7 +58,7 @@ class RecorderService:
     def summary(self) -> dict[str, Any]:
         raw = self.raw_store.summary()
         settings = self.settings()
-        conversations = self.raw_store.list_conversations(status="all", limit=500)
+        conversations = self._live_session_conversations(self.raw_store.list_conversations(status="all", limit=500))
         selected_groups = [item for item in conversations if item.get("conversation_type") == "group" and item.get("selected_by_user")]
         selected_private = [item for item in conversations if item.get("conversation_type") == "private" and item.get("selected_by_user")]
         selected_file_transfer = [item for item in conversations if item.get("conversation_type") == "file_transfer" and item.get("selected_by_user")]
@@ -75,18 +76,43 @@ class RecorderService:
         }
 
     def discover_sessions(self) -> dict[str, Any]:
-        payload = self.connector.list_sessions()
+        # Discovery must reflect the currently logged-in WeChat window in real time,
+        # so we force a fresh sidecar attachment instead of daemon cache reuse.
+        payload = self.connector.list_sessions(fresh=True)
         sessions = payload.get("sessions", []) if payload.get("ok") else []
+        existing_records = self.raw_store.list_conversations(status="all", limit=500)
+        existing_by_name = {
+            str(item.get("target_name") or "").strip(): item
+            for item in existing_records
+            if isinstance(item, dict) and str(item.get("target_name") or "").strip()
+        }
+        discovered_names: set[str] = set()
         items = []
         for session in sessions or []:
             if not isinstance(session, dict):
                 continue
             conversation = normalize_session(session)
-            existing = self.find_conversation_by_name(conversation["target_name"])
+            target_name = str(conversation.get("target_name") or "").strip()
+            if not target_name:
+                continue
+            discovered_names.add(target_name)
+            existing = existing_by_name.get(target_name)
             if existing:
-                conversation = {**conversation, **preserved_selection(existing)}
+                conversation = {**conversation, **preserved_selection(existing), "status": "active"}
             items.append(self.raw_store.upsert_conversation(conversation))
-        return {"ok": bool(payload.get("ok")), "items": items, "source": payload}
+        archived_items: list[dict[str, Any]] = []
+        if payload.get("ok"):
+            archived_items = self._archive_missing_discovered_conversations(
+                existing_records=existing_records,
+                discovered_names=discovered_names,
+            )
+        return {
+            "ok": bool(payload.get("ok")),
+            "items": items,
+            "archived_items": archived_items,
+            "archived_count": len(archived_items),
+            "source": payload,
+        }
 
     def ensure_conversation(self, record: dict[str, Any]) -> dict[str, Any]:
         target_name = str(record.get("target_name") or record.get("name") or record.get("display_name") or "").strip()
@@ -97,7 +123,8 @@ class RecorderService:
         return self.raw_store.upsert_conversation(payload)
 
     def list_conversations(self, *, conversation_type: str = "", status: str = "all") -> list[dict[str, Any]]:
-        return self.raw_store.list_conversations(conversation_type=conversation_type, status=status, limit=500)
+        conversations = self.raw_store.list_conversations(conversation_type=conversation_type, status=status, limit=500)
+        return self._live_session_conversations(conversations)
 
     def update_conversation(self, conversation_id: str, patch: dict[str, Any]) -> dict[str, Any]:
         current = next((item for item in self.raw_store.list_conversations(status="all", limit=500) if item.get("conversation_id") == conversation_id), None)
@@ -129,7 +156,7 @@ class RecorderService:
             }
         conversations = [
             item
-            for item in self.raw_store.list_conversations(status="active", limit=500)
+            for item in self.list_conversations(status="active")
             if item.get("selected_by_user") and conversation_enabled_for_capture(item, settings)
         ]
         results = []
@@ -185,6 +212,50 @@ class RecorderService:
                 return item
         return None
 
+    def _archive_missing_discovered_conversations(
+        self,
+        *,
+        existing_records: list[dict[str, Any]],
+        discovered_names: set[str],
+    ) -> list[dict[str, Any]]:
+        archived_items: list[dict[str, Any]] = []
+        if not existing_records:
+            return archived_items
+        snapshot_time = now_iso()
+        for existing in existing_records:
+            target_name = str(existing.get("target_name") or "").strip()
+            if not target_name or target_name in discovered_names:
+                continue
+            if str(existing.get("status") or "active") != "active":
+                continue
+            source = existing.get("source") if isinstance(existing.get("source"), dict) else {}
+            archived_payload = {
+                **existing,
+                "status": "ignored",
+                "selected_by_user": False,
+                "updated_at": snapshot_time,
+                "source": {
+                    **source,
+                    "archived_by_discover": True,
+                    "archived_reason": "missing_from_latest_discovery",
+                    "archived_at": snapshot_time,
+                },
+            }
+            archived_items.append(self.raw_store.upsert_conversation(archived_payload))
+        return archived_items
+
+    def _live_session_conversations(self, conversations: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        items: list[dict[str, Any]] = []
+        for item in conversations:
+            if not isinstance(item, dict):
+                continue
+            source = item.get("source") if isinstance(item.get("source"), dict) else {}
+            source_type = str(source.get("type") or "").strip().lower()
+            if source_type != RECORDER_DISCOVERY_SOURCE_TYPE:
+                continue
+            items.append(item)
+        return items
+
 
 def normalize_session(session: dict[str, Any]) -> dict[str, Any]:
     name = str(session.get("name") or session.get("title") or "").strip()
@@ -197,7 +268,7 @@ def normalize_session(session: dict[str, Any]) -> dict[str, Any]:
         "selected_by_user": False,
         "learning_enabled": True,
         "notify_enabled": False,
-        "source": {"type": "wechat_session_discovery"},
+        "source": {"type": RECORDER_DISCOVERY_SOURCE_TYPE},
         "raw_payload": session,
     }
 

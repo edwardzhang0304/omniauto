@@ -93,6 +93,10 @@ def tenant_product_item_knowledge_root(tenant_id: str | None = None) -> Path:
     return tenant_root(tenant_id) / "product_item_knowledge"
 
 
+def tenant_product_master_root(tenant_id: str | None = None) -> Path:
+    return tenant_root(tenant_id) / "product_master"
+
+
 def tenant_rag_root(tenant_id: str | None = None) -> Path:
     return tenant_root(tenant_id)
 

@@ -100,29 +100,33 @@ def main() -> int:
     log_path.parent.mkdir(parents=True, exist_ok=True)
     workflow = APP_ROOT / "workflows" / "listen_and_reply.py"
 
-    # --- VPS console must be online before starting ---
+    # --- VPS console is required only in cloud-authoritative mode ---
     from apps.wechat_ai_customer_service.auth.vps_client import discover_vps_base_url
 
     vps_url = discover_vps_base_url()
-    if not vps_url:
-        message = "VPS控制台未配置或未启动，自动客服监听无法启动。请先启动VPS控制台。"
-        write_runtime_status("stopped", message, tenant_id=tenant_id)
-        append_log(log_path, {"event": "managed_listener_vps_missing", "tenant_id": tenant_id})
-        print(message, file=sys.stderr)
-        return 3
-    vps_ok = False
-    try:
-        req = urllib.request.Request(vps_url.rstrip("/") + "/v1/health", headers={"Accept": "application/json"}, method="GET")
-        with urllib.request.urlopen(req, timeout=3) as resp:
-            vps_ok = 200 <= int(getattr(resp, "status", 0)) < 300
-    except Exception:
-        vps_ok = False
-    if not vps_ok:
-        message = "VPS控制台不可达，自动客服监听无法启动。请检查VPS控制台是否正常运行。"
-        write_runtime_status("stopped", message, tenant_id=tenant_id)
-        append_log(log_path, {"event": "managed_listener_vps_unhealthy", "tenant_id": tenant_id, "vps_url": vps_url})
-        print(message, file=sys.stderr)
-        return 3
+    if cloud_required_enabled():
+        if not vps_url:
+            message = "VPS控制台未配置或未启动，自动客服监听无法启动。请先启动VPS控制台。"
+            write_runtime_status("stopped", message, tenant_id=tenant_id)
+            append_log(log_path, {"event": "managed_listener_vps_missing", "tenant_id": tenant_id})
+            print(message, file=sys.stderr)
+            return 3
+        if not vps_health_ok(vps_url):
+            message = "VPS控制台不可达，自动客服监听无法启动。请检查VPS控制台是否正常运行。"
+            write_runtime_status("stopped", message, tenant_id=tenant_id)
+            append_log(log_path, {"event": "managed_listener_vps_unhealthy", "tenant_id": tenant_id, "vps_url": vps_url})
+            print(message, file=sys.stderr)
+            return 3
+    elif vps_url and not vps_health_ok(vps_url):
+        append_log(
+            log_path,
+            {
+                "event": "managed_listener_vps_unhealthy_non_blocking",
+                "tenant_id": tenant_id,
+                "vps_url": vps_url,
+                "reason": "cloud_required_disabled",
+            },
+        )
 
     # --- Write PID record so admin backend can detect this listener ---
     from apps.wechat_ai_customer_service.admin_backend.services.customer_service_runtime import runtime_pid_path
@@ -194,7 +198,13 @@ def main() -> int:
             command.append("--write-data")
         write_runtime_status("thinking", "正在读取微信消息并准备回复。", tenant_id=tenant_id)
         started = time.time()
-        result = run_once(command, env=env, cwd=PROJECT_ROOT, log_path=log_path)
+        result = run_once(
+            command,
+            env=env,
+            cwd=PROJECT_ROOT,
+            log_path=log_path,
+            timeout_seconds=managed_once_timeout_seconds(config_path),
+        )
         duration = round(time.time() - started, 2)
         summary = summarize_listener_result(result) if isinstance(result, dict) else {}
         message = status_message_from_result(result, duration)
@@ -208,10 +218,49 @@ def main() -> int:
         time.sleep(max(0.5, float(args.interval_seconds)))
 
 
-def run_once(command: list[str], *, env: dict[str, str], cwd: Path, log_path: Path) -> dict:
-    process = subprocess.run(command, cwd=str(cwd), env=env, capture_output=True, text=True, encoding="utf-8", errors="replace")
-    stdout = (process.stdout or "").strip()
-    stderr = (process.stderr or "").strip()
+def run_once(command: list[str], *, env: dict[str, str], cwd: Path, log_path: Path, timeout_seconds: float | None = None) -> dict:
+    timeout = max(1.0, float(timeout_seconds or 45.0))
+    started = time.time()
+    process = subprocess.Popen(
+        command,
+        cwd=str(cwd),
+        env=env,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+    )
+    try:
+        stdout_value, stderr_value = process.communicate(timeout=timeout)
+        timed_out = False
+    except subprocess.TimeoutExpired:
+        timed_out = True
+        terminate_process_tree(process)
+        stdout_value, stderr_value = process.communicate()
+    stdout = (stdout_value or "").strip()
+    stderr = (stderr_value or "").strip()
+    if timed_out:
+        duration = round(time.time() - started, 2)
+        append_log(
+            log_path,
+            {
+                "event": "managed_listener_watchdog_timeout",
+                "timeout_seconds": timeout,
+                "duration_seconds": duration,
+                "command": command,
+                "stdout_tail": stdout[-1000:],
+                "stderr_tail": stderr[-1000:],
+            },
+        )
+        return {
+            "ok": False,
+            "error": "watchdog_timeout",
+            "watchdog_timeout": True,
+            "timeout_seconds": timeout,
+            "duration_seconds": duration,
+            "events": [],
+        }
     payload = parse_last_json(stdout)
     append_log(
         log_path,
@@ -226,6 +275,56 @@ def run_once(command: list[str], *, env: dict[str, str], cwd: Path, log_path: Pa
         payload.setdefault("ok", process.returncode == 0)
         return payload
     return {"ok": process.returncode == 0, "error": stderr[-1000:] or stdout[-1000:] or f"exit={process.returncode}", "events": []}
+
+
+def vps_health_ok(vps_url: str) -> bool:
+    try:
+        req = urllib.request.Request(vps_url.rstrip("/") + "/v1/health", headers={"Accept": "application/json"}, method="GET")
+        with urllib.request.urlopen(req, timeout=3) as resp:
+            return 200 <= int(getattr(resp, "status", 0)) < 300
+    except Exception:
+        return False
+
+
+def managed_once_timeout_seconds(config_path: Path) -> float:
+    env_value = str(os.getenv("WECHAT_LISTENER_ONCE_TIMEOUT_SECONDS") or "").strip()
+    if env_value:
+        try:
+            return max(1.0, float(env_value))
+        except ValueError:
+            pass
+    try:
+        payload = json.loads(config_path.read_text(encoding="utf-8"))
+    except Exception:
+        return 45.0
+    realtime = payload.get("realtime_reply") if isinstance(payload.get("realtime_reply"), dict) else {}
+    try:
+        return max(5.0, float(realtime.get("watchdog_timeout_seconds") or 45.0))
+    except (TypeError, ValueError):
+        return 45.0
+
+
+def terminate_process_tree(process: subprocess.Popen[str]) -> None:
+    try:
+        parent = psutil.Process(process.pid)
+    except psutil.NoSuchProcess:
+        return
+    children = parent.children(recursive=True)
+    for child in children:
+        try:
+            child.terminate()
+        except psutil.NoSuchProcess:
+            pass
+    try:
+        parent.terminate()
+    except psutil.NoSuchProcess:
+        pass
+    gone, alive = psutil.wait_procs([parent, *children], timeout=3)
+    for proc in alive:
+        try:
+            proc.kill()
+        except psutil.NoSuchProcess:
+            pass
 
 
 def parse_last_json(text: str) -> dict:

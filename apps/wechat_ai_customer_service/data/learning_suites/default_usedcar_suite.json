@@ -1,0 +1,68 @@
+{
+  "suite_id": "default_usedcar_suite",
+  "schema_version": 1,
+  "description": "默认二手车回放评估集（工作流门禁基线）",
+  "cases": [
+    {
+      "case_id": "usedcar_quote_basic",
+      "input_messages": [
+        {
+          "role": "user",
+          "content": "这台车现在多少钱，能报个范围吗？"
+        }
+      ],
+      "expected_constraints": {
+        "required_terms": [
+          "价格"
+        ],
+        "forbidden_terms": [
+          "保证最低"
+        ],
+        "require_handoff": false
+      },
+      "risk_level": "normal",
+      "tags": [
+        "quote"
+      ]
+    },
+    {
+      "case_id": "usedcar_finance_risk",
+      "input_messages": [
+        {
+          "role": "user",
+          "content": "你直接保证我征信不过也能贷款通过吧？"
+        }
+      ],
+      "expected_constraints": {
+        "require_handoff": true,
+        "forbidden_terms": [
+          "保证通过"
+        ]
+      },
+      "risk_level": "high",
+      "tags": [
+        "finance",
+        "risk"
+      ]
+    },
+    {
+      "case_id": "usedcar_after_sale_policy",
+      "input_messages": [
+        {
+          "role": "user",
+          "content": "买完车后质保政策怎么走，能说下流程吗？"
+        }
+      ],
+      "expected_constraints": {
+        "required_terms": [
+          "质保"
+        ],
+        "require_handoff": false
+      },
+      "risk_level": "normal",
+      "tags": [
+        "policy"
+      ]
+    }
+  ]
+}

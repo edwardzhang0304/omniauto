@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from .knowledge_registry import KnowledgeRegistry
+from apps.wechat_ai_customer_service.product_master import PRODUCT_MASTER_CATEGORY_ID, ProductMasterStore
 from apps.wechat_ai_customer_service.workflows.knowledge_runtime import (
     PRODUCT_SCOPED_RESOLVERS,
     PRODUCT_SCOPED_SCHEMAS,
@@ -16,14 +17,19 @@ from apps.wechat_ai_customer_service.workflows.knowledge_runtime import (
 class KnowledgeSchemaManager:
     def __init__(self, registry: KnowledgeRegistry | None = None) -> None:
         self.registry = registry or KnowledgeRegistry()
+        self.product_master = ProductMasterStore()
 
     def load_schema(self, category_id: str) -> dict[str, Any]:
+        if category_id == PRODUCT_MASTER_CATEGORY_ID:
+            return self.product_master.load_schema()
         if category_id in PRODUCT_SCOPED_SCHEMAS:
             return dict(PRODUCT_SCOPED_SCHEMAS[category_id])
         path = self.registry.category_root(category_id) / "schema.json"
         return json.loads(path.read_text(encoding="utf-8"))
 
     def load_resolver(self, category_id: str) -> dict[str, Any]:
+        if category_id == PRODUCT_MASTER_CATEGORY_ID:
+            return self.product_master.load_resolver()
         if category_id in PRODUCT_SCOPED_RESOLVERS:
             return dict(PRODUCT_SCOPED_RESOLVERS[category_id])
         path = self.registry.category_root(category_id) / "resolver.json"
@@ -33,6 +39,10 @@ class KnowledgeSchemaManager:
         validation = self.validate_schema(category_id, schema)
         if not validation["ok"]:
             return validation
+        if category_id == PRODUCT_MASTER_CATEGORY_ID:
+            self.product_master.ensure_structure()
+            self.product_master.schema_path.write_text(json.dumps(schema, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+            return {"ok": True, "schema": schema}
         path = self.registry.category_root(category_id) / "schema.json"
         path.write_text(json.dumps(schema, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
         return {"ok": True, "schema": schema}

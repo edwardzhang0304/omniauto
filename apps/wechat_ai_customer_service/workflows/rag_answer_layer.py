@@ -121,6 +121,9 @@ def rag_reply_allowed_for_decision(
     small_talk_only = bool(intent_tags) and intent_tags <= {"small_talk", "greeting", "unknown"}
     if candidate_intent == "small_talk" or candidate_action == "reply_small_talk" or ("small_talk" in intent_tags and small_talk_only):
         return bool(settings.get("apply_to_small_talk", True))
+    pure_unknown = (candidate_intent in {"", "unknown"} or "unknown" in intent_tags) and not (intent_tags - {"unknown"})
+    if pure_unknown:
+        return False
     if not matched or reason == "no_rule_matched":
         if not bool(settings.get("apply_to_unmatched", True)):
             return False
@@ -142,6 +145,8 @@ def eligible_rag_hits(evidence: dict[str, Any], settings: dict[str, Any]) -> lis
         if not hit_passes_scope_filters(hit, settings):
             continue
         if hit_has_risk(hit):
+            continue
+        if direct_reply_excluded_for_hit(hit, settings):
             continue
         filtered.append(hit)
     return filtered
@@ -172,19 +177,40 @@ def hit_passes_scope_filters(hit: dict[str, Any], settings: dict[str, Any]) -> b
     return True
 
 
+def direct_reply_excluded_for_hit(hit: dict[str, Any], settings: dict[str, Any]) -> bool:
+    """RAG experience/style snippets can guide tone, but must not be pasted as customer replies."""
+    if settings.get("allow_experience_direct_reply") is True:
+        return False
+    text = str(hit.get("text") or "")
+    source_type = str(hit.get("source_type") or "")
+    category = str(hit.get("category") or "")
+    internal_markers = (
+        "RAG经验概括",
+        "实盘话术样本",
+        "客户问法",
+        "历史回复要点",
+        "当时命中的资料",
+        "商品资料",
+        "商品名称",
+        "商品类目",
+    )
+    if any(marker in text for marker in internal_markers):
+        return True
+    return source_type in {"rag_experience", "cleaned_real_chat_pack", "style_memory", "product_master"} or category in {"rag_experience", "chats", "chat_styles", "products"}
+
+
 def build_reply_from_hit(hit: dict[str, Any], *, intent_tags: set[str], settings: dict[str, Any]) -> str:
     snippet = clean_snippet(str(hit.get("text") or ""), max_chars=int(settings.get("max_snippet_chars", DEFAULT_MAX_SNIPPET_CHARS)))
     if not snippet:
         return ""
+    snippet = extract_service_style_snippet(snippet)
     if intent_tags <= {"small_talk", "greeting"} or "small_talk" in intent_tags:
         reply = (
-            f"可以的，您先慢慢看。我先按资料给您把相关点捋一下：{snippet}。"
-            "这部分可以先作为参考；后面如果想看价格、规格或售后，直接发我，我再按正式规则帮您确认。"
+            f"可以的，您先慢慢看。{snippet}"
         )
     else:
         reply = (
-            f"我查到资料里有一条相关说明：{snippet}。"
-            "这部分可以先作为参考；如果您要确认价格、库存、发货或售后承诺，我再按正式规则核对。"
+            f"{snippet}"
         )
     return truncate_sentence(reply, int(settings.get("max_reply_chars", DEFAULT_MAX_REPLY_CHARS) or DEFAULT_MAX_REPLY_CHARS))
 
@@ -211,6 +237,23 @@ def clean_snippet(text: str, *, max_chars: int) -> str:
     if len(compacted) <= max_chars:
         return compacted
     return compacted[: max(1, max_chars - 1)].rstrip("，,。；; ") + "…"
+
+
+def extract_service_style_snippet(text: str) -> str:
+    """Remove import metadata and keep the reusable customer-service wording."""
+    clean = re.sub(r"\s+", " ", str(text or "")).strip()
+    clean = re.sub(r"聊天记录：[^ 客服客户]{0,80}", "", clean)
+    clean = re.sub(r"测试批次：\S+", "", clean)
+    clean = re.sub(r"CHEJIN_\d{8}_\d{6}", "", clean)
+    if "客服：" in clean:
+        clean = clean.split("客服：", 1)[1]
+    clean = re.split(r"意图标签[:：]|聊天记录[:：]|客户[:：]", clean, maxsplit=1)[0]
+    clean = clean.strip(" ：:，,。；;")
+    if not clean:
+        return ""
+    if not clean.endswith(("。", "？", "！", "…")):
+        clean += "。"
+    return clean
 
 
 def truncate_sentence(text: str, max_chars: int) -> str:

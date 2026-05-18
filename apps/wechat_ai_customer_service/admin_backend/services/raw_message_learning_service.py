@@ -3,11 +3,16 @@
 from __future__ import annotations
 
 import sys
+import re
 from datetime import datetime
 from pathlib import Path
 from typing import Any
 
 from .audit_log import append_audit
+from .knowledge_contamination_guard import (
+    message_learning_exclusion_reason,
+    transcript_learning_exclusion_reason,
+)
 from .rag_experience_auto_review import auto_review_rag_experience
 from .raw_message_store import RawMessageStore
 from apps.wechat_ai_customer_service.knowledge_paths import tenant_runtime_root
@@ -62,13 +67,38 @@ class RawMessageLearningService:
             )
             return {"ok": True, "candidate_count": 0, "batch": updated}
 
+        guard_reason = batch_learning_exclusion_reason(batch, messages)
+        if guard_reason:
+            updated = self.raw_store.update_batch(
+                batch_id,
+                {
+                    "status": "skipped",
+                    "skipped_reason": guard_reason,
+                    "processed_at": now_iso(),
+                    "candidate_ids": [],
+                    "candidate_count": 0,
+                    "strict_promotion_policy": "raw_message_skipped_by_contamination_guard",
+                },
+            )
+            append_audit(
+                "raw_message_batch_skipped",
+                {
+                    "batch_id": batch_id,
+                    "conversation_id": batch.get("conversation_id"),
+                    "reason": guard_reason,
+                },
+            )
+            return {"ok": True, "candidate_count": 0, "candidate_ids": [], "batch": updated, "skipped_reason": guard_reason}
+
         transcript_path = self.write_transcript(batch, messages)
-        rag_ingest = self.rag.ingest_file(
-            transcript_path,
-            source_type="wechat_raw_message",
-            category=str(messages[0].get("conversation_type") or "unknown"),
-            rebuild_index=True,
-        )
+        rag_ingest = {
+            "ok": False,
+            "source_id": "",
+            "chunk_count": 0,
+            "category": str(messages[0].get("conversation_type") or "unknown"),
+            "source_type": "wechat_raw_message",
+            "message": "deferred_until_rag_experience_review",
+        }
         source_type = raw_source_type(messages)
         experience = self.rag_experiences.record_intake(
             source_type=source_type,
@@ -99,12 +129,12 @@ class RawMessageLearningService:
                 "skipped_source_policy_count": 0,
                 "skipped_source_policy": [],
                 "llm_assist_policy": {
-                    "policy_version": "knowledge_llm_assist_v1",
-                    "stage": "raw_wechat_message_to_rag_experience_review",
-                    "requested": bool(use_llm),
-                    "rule_fallback_allowed": True,
-                    "human_approval_required": True,
-                    "strict_promotion_policy": "raw WeChat messages create RAG experiences only; pending candidates require manual RAG promotion",
+                "policy_version": "knowledge_llm_assist_v1",
+                "stage": "raw_wechat_message_to_rag_experience_review",
+                "requested": bool(use_llm),
+                "rule_fallback_allowed": True,
+                "human_approval_required": True,
+                    "strict_promotion_policy": "raw WeChat messages create review-only RAG experiences; retrievable chunks are created only after manual keep/promotion",
                 },
                 "rag_ingest": rag_ingest,
                 "rag_experience_id": experience.get("experience_id"),
@@ -191,6 +221,33 @@ def now_iso() -> str:
     return datetime.now().isoformat(timespec="seconds")
 
 
+def batch_learning_exclusion_reason(batch: dict[str, Any], messages: list[dict[str, Any]]) -> str:
+    if not messages:
+        return "no_messages"
+    conversation = {
+        "conversation_id": batch.get("conversation_id"),
+        "conversation_type": str(messages[0].get("conversation_type") or "unknown"),
+        "target_name": str(messages[0].get("target_name") or ""),
+    }
+    reasons = [
+        message_learning_exclusion_reason(
+            item,
+            conversation=conversation,
+            source_module=str(batch.get("source_module") or ""),
+        )
+        for item in messages
+    ]
+    if reasons and all(reasons):
+        return "all_messages_unlearnable:" + ",".join(sorted(set(reasons))[:4])
+    transcript = "\n".join(str(item.get("content") or "") for item in messages)
+    transcript_reason = transcript_learning_exclusion_reason(transcript)
+    if transcript_reason:
+        return transcript_reason
+    if contains_model_reply(messages):
+        return "contains_model_reply"
+    return ""
+
+
 def raw_source_type(messages: list[dict[str, Any]]) -> str:
     conversation_type = str(messages[0].get("conversation_type") or "unknown") if messages else "unknown"
     if conversation_type == "group":
@@ -208,10 +265,11 @@ def message_sender_role(message: dict[str, Any]) -> str:
 
 
 def contains_model_reply(messages: list[dict[str, Any]]) -> bool:
+    marker_pattern = re.compile(r"^\s*\[[^\]]*(?:AI|客服)\]\s*", re.I)
     for item in messages:
         content = str(item.get("content") or "")
         sender = message_sender_role(item)
-        if "[车金AI]" in content or "llm_synthesis_reply" in content or "rag_context_reply" in content:
+        if marker_pattern.search(content) or "llm_synthesis_reply" in content or "rag_context_reply" in content:
             return True
         if sender in {"bot", "assistant", "ai"}:
             return True

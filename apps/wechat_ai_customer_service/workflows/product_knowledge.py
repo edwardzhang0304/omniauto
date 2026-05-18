@@ -267,7 +267,7 @@ def build_product_reply(
         return {
             "reply_text": (
                 f"{name} 当前可执行的公开阶梯价是：{format_discount_policy(product)}。"
-                "您提到的价格/优惠超出了我能直接确认的范围，我先帮您记录并请示上级，稍后给您准确回复。"
+                "您提到的价格/优惠超出了我能直接确认的范围，我把情况记下，问清楚负责人意见后再回复您。"
             ),
             "needs_handoff": True,
             "operator_alert": True,
@@ -317,7 +317,7 @@ def build_product_reply(
         elif lead_time or shipping:
             reply_text = f"{name} 发货/物流信息：{lead_time or shipping}。"
         else:
-            reply_text = f"{name} 的发货/物流信息当前没有明确记录，我先帮您请人工确认。"
+            reply_text = f"{name} 的发货/物流信息当前没有明确记录，我问清楚后再回复您。"
         return {
             "reply_text": reply_text,
             "needs_handoff": False,

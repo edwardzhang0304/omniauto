@@ -24,6 +24,9 @@ def can_access(context: AuthContext, *, resource: str, action: str, tenant_id: s
     if resource == "account_security":
         return context.authenticated and action in READ_ACTIONS | {"write"}
 
+    if resource == "llm_config":
+        return action in READ_ACTIONS | {"write"}
+
     if action in WRITE_ACTIONS and user.role == Role.GUEST:
         return False
 

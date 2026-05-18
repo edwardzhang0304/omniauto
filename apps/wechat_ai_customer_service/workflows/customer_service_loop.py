@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import sys
 from dataclasses import dataclass
 from datetime import datetime
@@ -197,7 +198,7 @@ def decide_reply(content: str, rules: dict[str, Any]) -> ReplyDecision:
     normalized = content.lower()
     matches = []
     for rule in rules.get("rules", []) or []:
-        keywords = [str(item).lower() for item in rule.get("keywords", []) or []]
+        keywords = [str(item).lower() for item in rule.get("keywords", []) or [] if not is_non_business_tracking_keyword(str(item))]
         matched_keywords = [keyword for keyword in keywords if keyword and keyword in normalized]
         if not matched_keywords:
             continue
@@ -219,6 +220,13 @@ def decide_reply(content: str, rules: dict[str, Any]) -> ReplyDecision:
         need_handoff=True,
         reason="no_rule_matched",
     )
+
+
+def is_non_business_tracking_keyword(value: str) -> bool:
+    text = str(value or "").strip()
+    if not text:
+        return False
+    return bool(re.fullmatch(r"(?:CHEJIN|LLMSYN|DBG|TEST|BATCH)_[A-Za-z0-9_:-]{4,}", text, flags=re.IGNORECASE))
 
 
 def format_reply(reply_text: str, prefix: str) -> str:

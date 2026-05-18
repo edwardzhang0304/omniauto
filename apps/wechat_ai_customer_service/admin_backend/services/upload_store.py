@@ -23,7 +23,8 @@ if str(WORKFLOWS_ROOT) not in sys.path:
 
 from rag_layer import RagService  # noqa: E402
 ALLOWED_KINDS = {"products", "chats", "policies", "erp_exports"}
-ALLOWED_SUFFIXES = {".txt", ".md", ".json", ".csv", ".xlsx"}
+ALLOWED_KIND_REQUESTS = set(ALLOWED_KINDS) | {"auto"}
+ALLOWED_SUFFIXES = {".txt", ".md", ".json", ".jsonl", ".csv", ".xlsx"}
 SPREADSHEET_SUFFIXES = {".xlsx"}
 
 
@@ -34,8 +35,12 @@ class UploadStore:
         self.index_path = tenant_admin_upload_index_path(self.tenant_id)
 
     def save_upload(self, filename: str, content: bytes, kind: str) -> dict[str, Any]:
-        if kind not in ALLOWED_KINDS:
-            return {"ok": False, "message": f"unsupported kind: {kind}"}
+        requested_kind = str(kind or "").strip() or "auto"
+        if requested_kind not in ALLOWED_KIND_REQUESTS:
+            return {"ok": False, "message": f"unsupported kind: {requested_kind}"}
+        resolved_kind, detect_reason = resolve_upload_kind(requested_kind, filename, content)
+        if resolved_kind not in ALLOWED_KINDS:
+            return {"ok": False, "message": f"unsupported resolved kind: {resolved_kind}"}
         suffix = Path(filename).suffix.lower()
         if suffix not in ALLOWED_SUFFIXES:
             return {"ok": False, "message": f"unsupported suffix: {suffix}"}
@@ -58,14 +63,16 @@ class UploadStore:
         safe_name = re.sub(r"[^A-Za-z0-9_.\-\u4e00-\u9fff]", "_", Path(filename).name)
         if stored_suffix != suffix:
             safe_name = safe_name + stored_suffix
-        target_dir = self.raw_inbox_root / kind
+        target_dir = self.raw_inbox_root / resolved_kind
         target_dir.mkdir(parents=True, exist_ok=True)
         target_path = target_dir / f"{upload_id}_{safe_name}"
         target_path.write_bytes(stored_content)
         record = {
             "upload_id": upload_id,
             "filename": filename,
-            "kind": kind,
+            "kind": resolved_kind,
+            "requested_kind": requested_kind,
+            "kind_detect_reason": detect_reason,
             "path": str(target_path),
             "original_suffix": suffix,
             "stored_suffix": stored_suffix,
@@ -82,10 +89,10 @@ class UploadStore:
         if db:
             db.upsert_upload(active_tenant_id(self.tenant_id), record)
             if not config.mirror_files:
-                append_audit("upload_created", {"upload_id": upload_id, "kind": kind, "path": str(target_path)})
+                append_audit("upload_created", {"upload_id": upload_id, "kind": resolved_kind, "requested_kind": requested_kind, "path": str(target_path)})
                 return {"ok": True, "item": record}
         self.write_index(records)
-        append_audit("upload_created", {"upload_id": upload_id, "kind": kind, "path": str(target_path)})
+        append_audit("upload_created", {"upload_id": upload_id, "kind": resolved_kind, "requested_kind": requested_kind, "path": str(target_path)})
         return {"ok": True, "item": record}
 
     def list_uploads(self) -> list[dict[str, Any]]:
@@ -171,6 +178,63 @@ def cell_to_text(value: Any) -> str:
     if value is None:
         return ""
     return str(value).strip()
+
+
+def resolve_upload_kind(requested_kind: str, filename: str, content: bytes) -> tuple[str, str]:
+    if requested_kind in ALLOWED_KINDS:
+        return requested_kind, "手动指定"
+
+    name = str(filename or "").lower()
+    preview = content_preview(content).lower()
+    if any(token in name for token in ("chat_templates", "chat_template", "knowledge_chats", "dialogue", "dialogues", "话术模板", "客服话术")):
+        return "chats", "文件名命中聊天模板关键词"
+    score = {
+        "products": 0,
+        "chats": 0,
+        "policies": 0,
+        "erp_exports": 0,
+    }
+
+    for token in ("聊天", "会话", "对话", "客服", "群聊", "私聊", "chat", "conversation", "message", "wechat"):
+        if token in name or token in preview:
+            score["chats"] += 2
+    for token in ("政策", "规则", "条款", "售后", "发票", "付款", "合同", "承诺", "赔付", "policy", "rule"):
+        if token in name or token in preview:
+            score["policies"] += 2
+    for token in ("erp", "导出", "报表", "库存表", "订单", "sku", "台账", "excel", "sheet", "csv"):
+        if token in name or token in preview:
+            score["erp_exports"] += 2
+    for token in ("商品", "车源", "车型", "库存", "报价", "价格", "配置", "product", "catalog", "inventory"):
+        if token in name or token in preview:
+            score["products"] += 2
+
+    if any(token in preview for token in ("客户:", "用户:", "买家:", "客服:", "销售:", "顾问:")):
+        score["chats"] += 3
+    if any(token in preview for token in ("customer_message", "service_reply", "intent_tags", "tone_tags", "template_id", "scenario")):
+        score["chats"] += 4
+    if any(token in preview for token in ("商品名称", "车型", "VIN", "指导价", "库存", "上牌")):
+        score["products"] += 3
+    if any(token in preview for token in ("退款", "质保", "合同", "违约", "付款方式", "开票")):
+        score["policies"] += 3
+
+    suffix = Path(filename).suffix.lower()
+    if suffix in {".csv", ".xlsx"}:
+        score["erp_exports"] += 1
+
+    ordered = sorted(score.items(), key=lambda item: (-item[1], item[0]))
+    top_kind, top_score = ordered[0]
+    if top_score <= 0:
+        return "chats", "未命中关键词，默认按聊天记录"
+    return top_kind, f"关键词命中分数 {top_score}"
+
+
+def content_preview(content: bytes, *, limit: int = 6000) -> str:
+    if not content:
+        return ""
+    try:
+        return content[:limit].decode("utf-8", errors="ignore")
+    except Exception:
+        return ""
 
 
 def postgres_store():

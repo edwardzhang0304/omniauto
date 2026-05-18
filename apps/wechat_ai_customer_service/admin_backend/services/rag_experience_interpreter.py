@@ -15,7 +15,7 @@ import urllib.request
 from datetime import datetime
 from typing import Any
 
-from apps.wechat_ai_customer_service.llm_config import read_secret, resolve_deepseek_base_url, resolve_deepseek_max_tokens, resolve_deepseek_tier_model, resolve_deepseek_timeout
+from apps.wechat_ai_customer_service.llm_config import apply_llm_reasoning_effort, llm_urlopen, read_secret, resolve_deepseek_base_url, resolve_deepseek_max_tokens, resolve_deepseek_tier_model, resolve_deepseek_timeout
 from apps.wechat_ai_customer_service.platform_safety_rules import guard_term_set, load_platform_safety_rules
 from apps.wechat_ai_customer_service.workflows.rag_experience_store import RagExperienceStore
 
@@ -240,6 +240,7 @@ def call_deepseek_interpretation(pack: dict[str, Any]) -> dict[str, Any]:
         "max_tokens": resolve_deepseek_max_tokens(2400, read_secret_fn=read_secret),
         "response_format": {"type": "json_object"},
     }
+    apply_llm_reasoning_effort(payload, tier="flash", read_secret_fn=read_secret)
     request = urllib.request.Request(
         url=base_url.rstrip("/") + "/chat/completions",
         data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
@@ -247,7 +248,7 @@ def call_deepseek_interpretation(pack: dict[str, Any]) -> dict[str, Any]:
         method="POST",
     )
     try:
-        with urllib.request.urlopen(request, timeout=resolve_deepseek_timeout(120, read_secret_fn=read_secret)) as response:
+        with llm_urlopen(request, timeout=resolve_deepseek_timeout(120, read_secret_fn=read_secret)) as response:
             raw = response.read().decode("utf-8")
         data = json.loads(raw or "{}")
     except (urllib.error.HTTPError, urllib.error.URLError, TimeoutError, OSError, json.JSONDecodeError) as exc:
@@ -345,6 +346,24 @@ def fallback_action(item: dict[str, Any]) -> str:
     return "manual_review"
 
 
+def is_product_master_intake(item: dict[str, Any]) -> bool:
+    source = str(item.get("source") or "").strip().lower()
+    if source != "intake":
+        return False
+    category = str(item.get("category") or "").strip().lower()
+    if category == "products":
+        return True
+    source_type = str(item.get("source_type") or "").strip().lower()
+    source_path = str(item.get("source_path") or "").strip().lower().replace("\\", "/")
+    original_source = item.get("original_source") if isinstance(item.get("original_source"), dict) else {}
+    original_kind = str(original_source.get("kind") or original_source.get("type") or "").strip().lower()
+    if original_kind == "products":
+        return True
+    if source_type == "raw_upload" and "/raw_inbox/products/" in source_path:
+        return True
+    return False
+
+
 def guardrail_assessment(item: dict[str, Any]) -> dict[str, Any]:
     """Conservative local policy before any model suggestion can promote.
 
@@ -379,6 +398,26 @@ def guardrail_assessment(item: dict[str, Any]) -> dict[str, Any]:
             contains_model_reply=contains_model_reply,
             source_types=source_types,
         )
+    if is_product_master_intake(item):
+        return guardrail_decision(
+            "product_master_manual_intake_only",
+            "discard",
+            "商品资料属于权威主数据，RAG经验层不做人工复核，自动降噪处理。",
+            auto_triage=True,
+            observed_wechat=observed_wechat,
+            contains_model_reply=contains_model_reply,
+            source_types=source_types,
+        )
+    if text_matches_rule_or_fallback(text, "observed_product_fact_patterns", DEFAULT_OBSERVED_PRODUCT_FACT_PATTERNS):
+        return guardrail_decision(
+            "product_master_facts_must_stay_manual",
+            "discard",
+            "检测到商品资料主数据（车型/价格/库存等）形态：这类信息只允许在商品库手动导入或维护，不进入RAG晋升链路。",
+            auto_triage=True,
+            observed_wechat=observed_wechat,
+            contains_model_reply=contains_model_reply,
+            source_types=source_types,
+        )
     if observed_wechat:
         chat_source = evaluate_experience_source_authority(item, "chats")
         if not chat_source.get("allowed"):
@@ -386,16 +425,6 @@ def guardrail_assessment(item: dict[str, Any]) -> dict[str, Any]:
                 str(chat_source.get("reason") or "observed_wechat_chat_not_generalized"),
                 "discard",
                 str(chat_source.get("message") or "这条微信聊天经验不够通用，不能直接升级为正式话术。"),
-                auto_triage=True,
-                observed_wechat=observed_wechat,
-                contains_model_reply=contains_model_reply,
-                source_types=source_types,
-            )
-        if text_matches_rule_or_fallback(text, "observed_product_fact_patterns", DEFAULT_OBSERVED_PRODUCT_FACT_PATTERNS) and (contains_model_reply or str(item.get("source") or "") == "intake"):
-            return guardrail_decision(
-                "observed_wechat_product_fact_not_authoritative",
-                "discard",
-                "这条经验来自微信聊天，不能当作商品价格、库存、车型资料的入库依据；商品资料只能走商品库或资料导入审核。",
                 auto_triage=True,
                 observed_wechat=observed_wechat,
                 contains_model_reply=contains_model_reply,

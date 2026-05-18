@@ -299,7 +299,11 @@ def check_complete_customer_data_with_unsafe_discount_handoffs_without_writing()
     assert_true(data_capture.get("complete") is True, "customer data may be complete")
     assert_true(not data_capture.get("write_result", {}).get("ok"), "complete data must not be written during handoff")
     assert_true(not workbook_path.exists(), "workbook should not be created for handoff-blocked write")
-    assert_true(any("请示上级" in text for text in connector.sent_texts), "customer should receive handoff acknowledgement")
+    handoff_markers = ("请示负责人", "核实", "确认后", "不能直接确认", "给您准话")
+    assert_true(
+        any(any(marker in text for marker in handoff_markers) for text in connector.sent_texts),
+        "customer should receive handoff acknowledgement",
+    )
 
 
 def check_rag_hits_are_summarized_in_intent_context_only_as_sources() -> None:

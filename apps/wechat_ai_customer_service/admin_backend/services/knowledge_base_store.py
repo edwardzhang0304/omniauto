@@ -12,6 +12,12 @@ from typing import Any
 from .knowledge_registry import KnowledgeRegistry
 from .knowledge_schema_manager import KnowledgeSchemaManager
 from apps.wechat_ai_customer_service.knowledge_paths import active_tenant_id, default_admin_knowledge_base_root, tenant_product_item_knowledge_root
+from apps.wechat_ai_customer_service.product_master import (
+    PRODUCT_MASTER_CATEGORY_ID,
+    ProductMasterStore,
+    normalize_product_item,
+    validate_product_item,
+)
 from apps.wechat_ai_customer_service.storage import get_postgres_store, load_storage_config
 from apps.wechat_ai_customer_service.workflows.knowledge_runtime import (
     PRODUCT_SCOPED_KINDS,
@@ -33,8 +39,11 @@ class KnowledgeBaseStore:
         self.registry = registry or KnowledgeRegistry()
         self.schema_manager = schema_manager or KnowledgeSchemaManager(self.registry)
         self.default_root_mode = self.registry.root.resolve() == default_admin_knowledge_base_root().resolve()
+        self.product_master = ProductMasterStore()
 
     def list_items(self, category_id: str, include_archived: bool = False) -> list[dict[str, Any]]:
+        if category_id == PRODUCT_MASTER_CATEGORY_ID and self.default_root_mode:
+            return self.product_master.list_items(include_archived=include_archived)
         db = postgres_store() if self.default_root_mode else None
         if db:
             layer = "tenant_product" if category_id in PRODUCT_SCOPED_CATEGORY_TO_KIND else "tenant"
@@ -55,6 +64,8 @@ class KnowledgeBaseStore:
         return items
 
     def get_item(self, category_id: str, item_id: str) -> dict[str, Any] | None:
+        if category_id == PRODUCT_MASTER_CATEGORY_ID and self.default_root_mode:
+            return self.product_master.get_item(item_id, include_archived=False)
         db = postgres_store() if self.default_root_mode else None
         if db:
             if category_id in PRODUCT_SCOPED_CATEGORY_TO_KIND:
@@ -73,6 +84,8 @@ class KnowledgeBaseStore:
         return json.loads(path.read_text(encoding="utf-8"))
 
     def save_item(self, category_id: str, item: dict[str, Any]) -> dict[str, Any]:
+        if category_id == PRODUCT_MASTER_CATEGORY_ID and self.default_root_mode:
+            return self.product_master.save_item(item)
         item_id = str(item.get("id") or "")
         validate_item_id(item_id)
         validation = self.validate_item(category_id, item)
@@ -95,6 +108,8 @@ class KnowledgeBaseStore:
         return {"ok": True, "item": normalized}
 
     def archive_item(self, category_id: str, item_id: str) -> dict[str, Any]:
+        if category_id == PRODUCT_MASTER_CATEGORY_ID and self.default_root_mode:
+            return self.product_master.archive_item(item_id)
         item = self.get_item(category_id, item_id)
         if not item:
             return {"ok": False, "message": f"item not found: {category_id}/{item_id}"}
@@ -103,6 +118,8 @@ class KnowledgeBaseStore:
         return self.save_item(category_id, item)
 
     def validate_item(self, category_id: str, item: dict[str, Any]) -> dict[str, Any]:
+        if category_id == PRODUCT_MASTER_CATEGORY_ID and self.default_root_mode:
+            return validate_product_item(normalize_product_item(item), self.product_master.load_schema())
         problems = []
         if item.get("category_id") != category_id:
             problems.append(f"item category_id must be {category_id}")
@@ -126,6 +143,8 @@ class KnowledgeBaseStore:
         return {"ok": not problems, "problems": problems}
 
     def items_root(self, category_id: str) -> Path:
+        if category_id == PRODUCT_MASTER_CATEGORY_ID and self.default_root_mode:
+            return self.product_master.items_dir
         if category_id in PRODUCT_SCOPED_CATEGORY_TO_KIND:
             return tenant_product_item_knowledge_root()
         return self.registry.category_root(category_id) / "items"

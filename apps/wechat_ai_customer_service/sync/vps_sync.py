@@ -30,6 +30,9 @@ from .shared_candidate_scanner import (
 from apps.wechat_ai_customer_service.workflows.generate_review_candidates import stable_digest
 
 
+WINDOWS_FILE_RETRY_DELAYS = (0.05, 0.1, 0.2, 0.35, 0.5, 0.75, 1.0, 1.25)
+
+
 class VpsLocalSyncService:
     def __init__(
         self,
@@ -99,10 +102,7 @@ class VpsLocalSyncService:
 
     def write_node_cache(self, node: dict[str, Any]) -> None:
         path = local_node_cache_path()
-        path.parent.mkdir(parents=True, exist_ok=True)
-        temp = path.with_suffix(path.suffix + ".tmp")
-        temp.write_text(json.dumps(node, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-        temp.replace(path)
+        write_json_payload(path, node)
 
     def poll_commands(
         self,
@@ -396,10 +396,7 @@ class VpsLocalSyncService:
 
     def write_shared_formal_scan_cache(self, cache: dict[str, dict[str, Any]]) -> None:
         path = shared_formal_scan_cache_path()
-        path.parent.mkdir(parents=True, exist_ok=True)
-        temp = path.with_suffix(path.suffix + ".tmp")
-        temp.write_text(json.dumps(cache, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-        temp.replace(path)
+        write_json_payload(path, cache)
 
     def read_shared_cloud_snapshot_cache(self) -> dict[str, Any]:
         payload = read_json_payload(shared_runtime_snapshot_path(), default={})
@@ -688,7 +685,7 @@ def read_json_payload(path: Path, *, default: Any) -> Any:
 def write_json_payload(path: Path, payload: Any) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     serialized = json.dumps(payload, ensure_ascii=False, indent=2) + "\n"
-    temp = path.with_suffix(path.suffix + ".tmp")
+    temp = path.with_name(f".{path.name}.{os.getpid()}.{time.time_ns()}.tmp")
     temp.write_text(serialized, encoding="utf-8")
     try:
         replace_path_with_retry(temp, path)
@@ -697,7 +694,7 @@ def write_json_payload(path: Path, payload: Any) -> None:
             raise
         # Fallback for Windows: when the target file is opened in read mode by
         # another request, rename-replace can fail but direct overwrite usually works.
-        path.write_text(serialized, encoding="utf-8")
+        write_text_with_retry(path, serialized)
         try:
             temp.unlink()
         except OSError:
@@ -705,9 +702,8 @@ def write_json_payload(path: Path, payload: Any) -> None:
 
 
 def replace_path_with_retry(source: Path, destination: Path) -> None:
-    delays = (0.05, 0.1, 0.2, 0.35, 0.5)
     last_error: OSError | None = None
-    for index, delay in enumerate(delays):
+    for index, delay in enumerate(WINDOWS_FILE_RETRY_DELAYS):
         try:
             source.replace(destination)
             return
@@ -717,16 +713,15 @@ def replace_path_with_retry(source: Path, destination: Path) -> None:
             last_error = exc
             if not is_windows_lock_error(exc):
                 raise
-            if index < len(delays) - 1:
+            if index < len(WINDOWS_FILE_RETRY_DELAYS) - 1:
                 time.sleep(delay)
     if last_error is not None:
         raise last_error
 
 
 def remove_tree_with_retry(path: Path) -> None:
-    delays = (0.05, 0.1, 0.2, 0.35, 0.5)
     last_error: OSError | None = None
-    for index, delay in enumerate(delays):
+    for index, delay in enumerate(WINDOWS_FILE_RETRY_DELAYS):
         try:
             shutil.rmtree(path)
             return
@@ -736,16 +731,15 @@ def remove_tree_with_retry(path: Path) -> None:
             last_error = exc
             if not is_windows_lock_error(exc):
                 raise
-            if index < len(delays) - 1:
+            if index < len(WINDOWS_FILE_RETRY_DELAYS) - 1:
                 time.sleep(delay)
     if last_error is not None:
         raise last_error
 
 
 def remove_path_with_retry(path: Path) -> None:
-    delays = (0.05, 0.1, 0.2, 0.35, 0.5)
     last_error: OSError | None = None
-    for index, delay in enumerate(delays):
+    for index, delay in enumerate(WINDOWS_FILE_RETRY_DELAYS):
         try:
             if path.is_dir():
                 shutil.rmtree(path)
@@ -758,7 +752,7 @@ def remove_path_with_retry(path: Path) -> None:
             last_error = exc
             if not is_windows_lock_error(exc):
                 raise
-            if index < len(delays) - 1:
+            if index < len(WINDOWS_FILE_RETRY_DELAYS) - 1:
                 time.sleep(delay)
     if last_error is not None:
         raise last_error
@@ -783,7 +777,23 @@ def apply_shared_cache_overlay(*, root: Path, temp_root: Path, snapshot: dict[st
 def is_windows_lock_error(exc: OSError) -> bool:
     if os.name != "nt":
         return False
-    return int(getattr(exc, "winerror", 0) or 0) in {5, 32}
+    return int(getattr(exc, "winerror", 0) or 0) in {5, 32, 33} or int(getattr(exc, "errno", 0) or 0) in {13, 22}
+
+
+def write_text_with_retry(path: Path, content: str) -> None:
+    last_error: OSError | None = None
+    for index, delay in enumerate(WINDOWS_FILE_RETRY_DELAYS):
+        try:
+            path.write_text(content, encoding="utf-8")
+            return
+        except OSError as exc:
+            last_error = exc
+            if not is_windows_lock_error(exc):
+                raise
+            if index < len(WINDOWS_FILE_RETRY_DELAYS) - 1:
+                time.sleep(delay)
+    if last_error is not None:
+        raise last_error
 
 
 def renew_shared_cloud_snapshot_cache(cached: dict[str, Any], lease_payload: dict[str, Any]) -> dict[str, Any]:

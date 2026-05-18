@@ -1,0 +1,35 @@
+{
+  "schema_version": 1,
+  "category_id": "reply_style",
+  "id": "contextual_honorific_usage",
+  "status": "active",
+  "source": {
+    "type": "admin_shared_seed",
+    "scope": "all_customers"
+  },
+  "data": {
+    "title": "自然称呼使用规则",
+    "keywords": [
+      "称呼",
+      "哥",
+      "姐",
+      "老板",
+      "开场",
+      "新话题",
+      "真人感"
+    ],
+    "guideline_text": "微信客服不要每条回复都在开头加称呼。称呼主要用于开场寒暄，或客户切换到新话题时有选择地使用；中途连续追问默认不加。称呼要结合客户画像自然轮换：男性可在“姓哥/哥/老板”之间切换，女性可用“姓姐/姐”。不要把“文件传输助手”、群名、门店名、客服名、测试名等非真人会话名拆成姓氏称呼。",
+    "applies_to": "所有微信 AI 客服账号的客户可见回复"
+  },
+  "runtime": {
+    "allow_auto_reply": true,
+    "requires_handoff": false,
+    "risk_level": "normal"
+  },
+  "metadata": {
+    "created_at": "2026-05-18T00:00:00",
+    "updated_at": "2026-05-18T00:00:00",
+    "created_by": "codex",
+    "updated_by": "codex"
+  }
+}

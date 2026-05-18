@@ -19,12 +19,13 @@ from .rag_experience_auto_review import auto_review_rag_experience
 from .knowledge_registry import KnowledgeRegistry
 from .knowledge_schema_manager import KnowledgeSchemaManager
 from apps.wechat_ai_customer_service.knowledge_paths import tenant_runtime_root
-from apps.wechat_ai_customer_service.llm_config import read_secret, resolve_deepseek_base_url, resolve_deepseek_max_tokens, resolve_deepseek_tier_model, resolve_deepseek_timeout
+from apps.wechat_ai_customer_service.llm_config import apply_llm_reasoning_effort, llm_urlopen, read_secret, resolve_deepseek_base_url, resolve_deepseek_max_tokens, resolve_deepseek_tier_model, resolve_deepseek_timeout
 from apps.wechat_ai_customer_service.platform_understanding_rules import intent_keywords, product_keywords, risk_keywords
 from apps.wechat_ai_customer_service.workflows.knowledge_intake import evaluate_intake_item
 from apps.wechat_ai_customer_service.workflows.rag_experience_store import RagExperienceStore
 from apps.wechat_ai_customer_service.workflows.rag_layer import RagService
 from apps.wechat_ai_customer_service.workflows.knowledge_runtime import PRODUCT_SCOPED_SCHEMAS
+from apps.wechat_ai_customer_service.product_master import PRODUCT_MASTER_CATEGORY_ID, product_master_category_record
 
 
 APP_ROOT = Path(__file__).resolve().parents[2]
@@ -361,6 +362,7 @@ class KnowledgeGenerator:
             "temperature": 0.2,
             "max_tokens": resolve_deepseek_max_tokens(2400, read_secret_fn=read_secret),
         }
+        apply_llm_reasoning_effort(payload, tier="flash", read_secret_fn=read_secret)
         request = urllib.request.Request(
             url=base_url.rstrip("/") + "/chat/completions",
             data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
@@ -368,7 +370,7 @@ class KnowledgeGenerator:
             method="POST",
         )
         try:
-            with urllib.request.urlopen(request, timeout=resolve_deepseek_timeout(120, read_secret_fn=read_secret)) as response:
+            with llm_urlopen(request, timeout=resolve_deepseek_timeout(120, read_secret_fn=read_secret)) as response:
                 data = json.loads(response.read().decode("utf-8"))
         except urllib.error.HTTPError as exc:
             body = exc.read().decode("utf-8", errors="replace")
@@ -387,7 +389,10 @@ class KnowledgeGenerator:
 
     def _build_prompt_pack(self, session: dict[str, Any], message: str, *, preferred_category_id: str) -> dict[str, Any]:
         categories = []
-        for category in [*self.registry.list_categories(enabled_only=True), *product_scoped_category_records()]:
+        category_records = [*self.registry.list_categories(enabled_only=True), *product_scoped_category_records()]
+        if preferred_category_id == PRODUCT_MASTER_CATEGORY_ID or str(session.get("category_id") or "") == PRODUCT_MASTER_CATEGORY_ID:
+            category_records = [product_master_category_record(), *category_records]
+        for category in category_records:
             category_id = str(category.get("id") or "")
             schema = self.schema_manager.load_schema(category_id)
             categories.append(
@@ -763,6 +768,8 @@ def normalize_category_id(value: Any, preferred: str, registry: KnowledgeRegistr
 
 
 def knowledge_category_record(registry: KnowledgeRegistry, category_id: str) -> dict[str, Any]:
+    if category_id == PRODUCT_MASTER_CATEGORY_ID:
+        return product_master_category_record()
     for category in product_scoped_category_records():
         if category.get("id") == category_id:
             return category
