@@ -1,0 +1,42 @@
+{
+  "schema_version": 1,
+  "category_id": "policies",
+  "id": "chejin_acquisition_policy",
+  "status": "active",
+  "source": {
+    "type": "manual_seed",
+    "normalized_by": "knowledge_contamination_guard",
+    "normalized_at": "2026-05-19T01:53:49"
+  },
+  "data": {
+    "title": "江苏车金二手车收购政策",
+    "policy_type": "company",
+    "keywords": [
+      "收车",
+      "卖车",
+      "收购",
+      "估价",
+      "置换",
+      "旧车",
+      "卖给你们"
+    ],
+    "answer": "我们收购各类二手车，流程是：1）线上初步估价（提供车型、年份、公里数、车况）；2）到店或上门验车（我们的评估师会现场检测）；3）给出最终收购价；4）签订合同当天打款。收购价根据市场行情、车况、手续完整性综合评估，不收事故车、水泡车、火烧车。",
+    "allow_auto_reply": true,
+    "requires_handoff": false,
+    "handoff_reason": "",
+    "operator_alert": false,
+    "risk_level": "normal"
+  },
+  "runtime": {
+    "allow_auto_reply": true,
+    "requires_handoff": false,
+    "risk_level": "normal",
+    "operator_alert": false
+  },
+  "metadata": {
+    "created_at": "2026-05-07T10:00:00",
+    "updated_at": "2026-05-07T10:00:00",
+    "created_by": "admin",
+    "updated_by": "admin"
+  }
+}

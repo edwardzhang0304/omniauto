@@ -23,6 +23,7 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from apps.wechat_ai_customer_service.vps_admin.app import create_app  # noqa: E402
+from apps.wechat_ai_customer_service.auth.passwords import hash_password  # noqa: E402
 from apps.wechat_ai_customer_service.knowledge_paths import tenant_knowledge_base_root  # noqa: E402
 
 
@@ -104,9 +105,12 @@ def check_local_client_accounts_are_mirrored(client: TestClient) -> None:
                         "user_id": "local_usedcar_customer",
                         "username": "local_usedcar_customer",
                         "display_name": "Local Usedcar Customer",
+                        "email": "local-usedcar@example.local",
                         "role": "customer",
                         "tenant_ids": ["local_usedcar_tenant"],
                         "status": "active",
+                        "password_hash": hash_password("mirror-usedcar-pass"),
+                        "initialized_at": "2026-05-01T08:09:49+00:00",
                     },
                     "local_trade_customer": {
                         "user_id": "local_trade_customer",
@@ -127,8 +131,30 @@ def check_local_client_accounts_are_mirrored(client: TestClient) -> None:
     try:
         users = client.get("/v1/admin/users", headers=auth_headers(token))
         assert_status(users, 200, "list users with local mirrors")
-        usernames = {item.get("username") for item in users.json().get("users", [])}
+        users_payload = users.json().get("users", [])
+        usernames = {item.get("username") for item in users_payload}
         assert_true({"local_usedcar_customer", "local_trade_customer"}.issubset(usernames), "VPS should show Local customer accounts")
+        usedcar_user = next((item for item in users_payload if item.get("username") == "local_usedcar_customer"), None)
+        assert_true(usedcar_user is not None, "local mirrored customer should exist")
+        assert_equal(
+            usedcar_user.get("initialized_at"),
+            "2026-05-01T08:09:49+00:00",
+            "mirrored customer should preserve initialized_at to avoid false first-login initialization",
+        )
+        usedcar_login = client.post(
+            "/v1/auth/login/start",
+            json={
+                "username": "local_usedcar_customer",
+                "password": "mirror-usedcar-pass",
+                "tenant_id": "local_usedcar_tenant",
+                "device_id": "mirror-device",
+            },
+        )
+        assert_status(usedcar_login, 200, "mirrored local customer login")
+        assert_true(
+            not bool(usedcar_login.json().get("requires_initialization")),
+            "mirrored initialized customer should not be forced into first-login initialization",
+        )
         tenants = client.get("/v1/admin/tenants", headers=auth_headers(token))
         assert_status(tenants, 200, "list tenants with local mirrors")
         tenant_ids = {item.get("tenant_id") for item in tenants.json().get("tenants", [])}
@@ -296,6 +322,28 @@ def check_recorder_module_assignment_flow(client: TestClient) -> None:
     assert_status(listed, 200, "list recorder bindings by scope")
     listed_items = listed.json().get("items", [])
     assert_true(any(str(item.get("binding_id") or "") == f"user_{user_id}" for item in listed_items), "user binding should be listed")
+
+    tenant_binding_payload = {
+        "binding_id": f"tenant_{tenant_id}",
+        "scope_type": "tenant",
+        "scope_id": tenant_id,
+        "tenant_id": tenant_id,
+        "module_key": "raw_message_log_v1",
+        "enabled": True,
+    }
+    tenant_upserted = client.post("/v1/admin/recorder-module-bindings", headers=auth_headers(token), json=tenant_binding_payload)
+    assert_status(tenant_upserted, 200, "upsert tenant recorder module binding")
+    tenant_item = tenant_upserted.json().get("item", {})
+    assert_equal(tenant_item.get("scope_type"), "tenant", "tenant binding scope type should be tenant")
+    assert_equal(tenant_item.get("tenant_id"), tenant_id, "tenant binding should keep tenant_id")
+
+    tenant_listed = client.get(
+        f"/v1/admin/recorder-module-bindings?scope_type=tenant&tenant_id={tenant_id}",
+        headers=auth_headers(token),
+    )
+    assert_status(tenant_listed, 200, "list tenant recorder bindings")
+    tenant_items = tenant_listed.json().get("items", [])
+    assert_true(any(str(item.get("binding_id") or "") == f"tenant_{tenant_id}" for item in tenant_items), "tenant binding should be listed")
 
 
 def check_local_node_and_command_roundtrip(client: TestClient) -> None:

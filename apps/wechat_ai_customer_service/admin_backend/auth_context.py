@@ -125,6 +125,8 @@ def resource_for_path(path: str) -> str:
         return "tenant_knowledge"
     if path.startswith("/api/recorder/modules") or path.startswith("/api/recorder/module-bindings"):
         return "settings"
+    if path.startswith("/api/system/llm-config"):
+        return "llm_config"
     if path.startswith("/api/tenants") or path.startswith("/api/system"):
         return "settings"
     return "tenant_knowledge"

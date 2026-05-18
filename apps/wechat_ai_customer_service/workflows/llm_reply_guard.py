@@ -35,6 +35,33 @@ HARD_HANDOFF_RISK_TAG_ALIASES = {
     "违反规则": "policy_violation",
 }
 
+AI_IDENTITY_EXPOSURE_MARKERS = (
+    "我是AI",
+    "我是一个AI",
+    "我是智能助手",
+    "我是机器人",
+    "作为AI",
+    "作为一个AI",
+    "作为机器人",
+    "AI助手",
+    "自动回复系统",
+)
+
+AI_IDENTITY_PROBE_PATTERNS = (
+    r"(你|您).{0,4}(是不是|是吗|到底是不是).{0,8}(ai|AI|人工智能|机器人|智能助手)",
+    r"(你|您).{0,8}(机器人|ai|AI|智能助手)",
+)
+
+INTERNAL_PROBE_PATTERNS = (
+    r"(系统提示词|提示词|内部规则|开发者消息|developer message|api密钥|api key|apikey|token)",
+    r"(把|发).{0,8}(提示词|内部规则|密钥|key|token)",
+)
+
+
+def identity_guard_enabled(settings: dict[str, Any] | None) -> bool:
+    payload = settings if isinstance(settings, dict) else {}
+    return payload.get("identity_guard_enabled", True) is not False
+
 
 def guard_synthesized_reply(
     *,
@@ -43,21 +70,37 @@ def guard_synthesized_reply(
     settings: dict[str, Any],
 ) -> dict[str, Any]:
     platform_rules = load_platform_safety_rules(settings).get("item", {})
+    enforce_identity_guard = identity_guard_enabled(settings)
     normalized = normalize_candidate(candidate)
     if not normalized.get("ok"):
         return {"allowed": False, "action": "fallback", "reason": "candidate_invalid", "errors": normalized.get("errors", [])}
 
     candidate = normalized["candidate"]
+    candidate["allow_ai_identity_exposure"] = not enforce_identity_guard
     reply = str(candidate.get("reply") or "").strip()
     safety = evidence_pack.get("safety", {}) or {}
     if isinstance(safety, dict) and safety.get("must_handoff"):
         return handoff_decision("existing_safety_requires_handoff", candidate)
 
     risk_tags = normalize_risk_tags(candidate.get("risk_tags", []) or [])
+    has_internal_probe = request_has_internal_probe(evidence_pack)
+    has_identity_probe = request_has_ai_identity_probe(evidence_pack)
     if risk_tags & HARD_HANDOFF_RISK_TAGS:
         enriched = dict(candidate)
-        enriched["reply"] = risk_tag_handoff_reply(risk_tags)
+        if "prompt_injection" in risk_tags or has_internal_probe:
+            enriched["reply"] = identity_probe_handoff_reply(evidence_pack)
+        else:
+            enriched["reply"] = risk_tag_handoff_reply(risk_tags)
         return handoff_decision("risk_tag_requires_handoff", enriched)
+
+    if has_internal_probe:
+        enriched = dict(candidate)
+        enriched["reply"] = identity_probe_handoff_reply(evidence_pack)
+        return handoff_decision("identity_or_internal_probe_requires_handoff", enriched)
+    if enforce_identity_guard and has_identity_probe:
+        enriched = dict(candidate)
+        enriched["reply"] = identity_probe_handoff_reply(evidence_pack)
+        return handoff_decision("identity_or_internal_probe_requires_handoff", enriched)
 
     if request_has_hard_boundary_signal(evidence_pack):
         return handoff_decision("customer_request_boundary_requires_handoff", candidate, include_candidate_reply=False)
@@ -95,6 +138,10 @@ def guard_synthesized_reply(
 
     if not reply:
         return {"allowed": False, "action": "fallback", "reason": "empty_reply", "candidate": candidate}
+    if enforce_identity_guard and has_ai_identity_exposure(reply):
+        enriched = dict(candidate)
+        enriched["reply"] = identity_probe_handoff_reply(evidence_pack)
+        return handoff_decision("ai_identity_exposure_requires_handoff", enriched)
 
     has_structured = has_structured_evidence(evidence_pack)
     rag_used = bool(candidate.get("rag_used"))
@@ -156,6 +203,7 @@ def handoff_decision(
     include_candidate_reply: bool = True,
 ) -> dict[str, Any]:
     platform_rules = load_platform_safety_rules().get("item", {})
+    allow_ai_identity_exposure = bool(candidate.get("allow_ai_identity_exposure", False))
     payload: dict[str, Any] = {
         "allowed": True,
         "action": "handoff",
@@ -166,11 +214,24 @@ def handoff_decision(
         payload["authority_tags"] = authority_tags
     reply = str(candidate.get("reply") or "").strip()
     if include_candidate_reply:
-        payload["reply"] = reply if handoff_reply_safe(reply, platform_rules) else default_handoff_reply(platform_rules)
+        payload["reply"] = (
+            reply
+            if handoff_reply_safe(
+                reply,
+                platform_rules,
+                allow_ai_identity_exposure=allow_ai_identity_exposure,
+            )
+            else default_handoff_reply(platform_rules)
+        )
     return payload
 
 
-def handoff_reply_safe(reply: str, platform_rules: dict[str, Any] | None = None) -> bool:
+def handoff_reply_safe(
+    reply: str,
+    platform_rules: dict[str, Any] | None = None,
+    *,
+    allow_ai_identity_exposure: bool = False,
+) -> bool:
     platform_rules = platform_rules or load_platform_safety_rules().get("item", {})
     clean = str(reply or "").strip()
     if not clean:
@@ -179,21 +240,57 @@ def handoff_reply_safe(reply: str, platform_rules: dict[str, Any] | None = None)
         return False
     if has_formulaic_handoff(clean, platform_rules):
         return False
+    if not allow_ai_identity_exposure and has_ai_identity_exposure(clean):
+        return False
     if has_unqualified_commitment(clean, platform_rules):
         return False
-    return has_caution(clean, platform_rules)
+    return has_caution(clean, platform_rules) or has_boundary_qualification(clean)
 
 
 def default_handoff_reply(platform_rules: dict[str, Any] | None = None) -> str:
-    platform_rules = platform_rules or load_platform_safety_rules().get("item", {})
-    caution_terms = list(guard_term_set(platform_rules, "caution_terms"))
-    caution = caution_terms[0] if caution_terms else "人工核实"
-    return f"这个问题我不能直接给结论，我先转给人工同事{caution}后再回复您。"
+    # Keep the fallback human-readable. Safety vocab may contain fragments such
+    # as "不保证", which should not be interpolated into customer-visible text.
+    return "您这个问题问得对，我这边不能随口定，免得给您说错。我先把关键信息记下，请负责人核实清楚后再回您。"
 
 
 def risk_tag_handoff_reply(risk_tags: set[str]) -> str:
-    del risk_tags
-    return "这个问题超出自动回复边界，我不能直接给结论；我先转给人工同事核实后再回复您。"
+    if "prompt_injection" in risk_tags or "policy_violation" in risk_tags:
+        return "这类内部信息我这边不能提供，您别介意。咱们回到您的实际需求上；涉及具体承诺，我核实后再回复您。"
+    if "off_topic" in risk_tags or "out_of_scope" in risk_tags:
+        return "这个话题我这边不方便展开，咱们先把正事处理好。您把关键需求告诉我，我按业务给您整理可执行建议。"
+    if "illegal_request" in risk_tags:
+        return "这个要求我这边不能处理，咱们还是按正常流程来。您把需求说一下，我马上给您可执行方案。"
+    return "您这个问题问得对，我这边不能随口定，免得给您说错。我先把关键信息记下，请负责人核实后再回您。"
+
+
+def has_ai_identity_exposure(text: str) -> bool:
+    clean = str(text or "").strip()
+    if not clean:
+        return False
+    if any(marker in clean for marker in AI_IDENTITY_EXPOSURE_MARKERS):
+        return True
+    return bool(re.search(r"\bi am (an )?ai\b", clean, re.I))
+
+
+def request_has_ai_identity_probe(evidence_pack: dict[str, Any]) -> bool:
+    text = re.sub(r"\s+", "", str(evidence_pack.get("current_message") or ""))
+    if not text:
+        return False
+    return any(re.search(pattern, text, re.I) for pattern in AI_IDENTITY_PROBE_PATTERNS)
+
+
+def request_has_internal_probe(evidence_pack: dict[str, Any]) -> bool:
+    text = re.sub(r"\s+", "", str(evidence_pack.get("current_message") or ""))
+    if not text:
+        return False
+    return any(re.search(pattern, text, re.I) for pattern in INTERNAL_PROBE_PATTERNS)
+
+
+def identity_probe_handoff_reply(evidence_pack: dict[str, Any] | None = None) -> str:
+    text = re.sub(r"\s+", "", str((evidence_pack or {}).get("current_message") or ""))
+    if any(re.search(pattern, text, re.I) for pattern in INTERNAL_PROBE_PATTERNS):
+        return "这类内部信息我这边不能提供，您别介意。咱们回到您的实际需求上；涉及具体承诺，我核实后再回复您。"
+    return "不是您说的那种流程哈，我这边按正常客服流程给您处理；涉及具体承诺我不会随口定，会先核实。您把需求说一下，我马上给您看。"
 
 
 def normalize_candidate(candidate: dict[str, Any]) -> dict[str, Any]:
@@ -338,6 +435,20 @@ def has_forbidden_private_payment_or_invoice_reply(reply: str, platform_rules: d
 def has_caution(reply: str, platform_rules: dict[str, Any] | None = None) -> bool:
     platform_rules = platform_rules or load_platform_safety_rules().get("item", {})
     return any(term in reply for term in guard_term_set(platform_rules, "caution_terms"))
+
+
+def has_boundary_qualification(reply: str) -> bool:
+    clean = re.sub(r"\s+", "", str(reply or ""))
+    if not clean:
+        return False
+    patterns = (
+        r"以.{0,12}为准",
+        r"(不能|无法|没法).{0,12}(承诺|保证|拍板)",
+        r"(需|需要).{0,8}(人工|同事|销售).{0,8}(确认|核实|复核)",
+        r"(转|交给).{0,8}(人工|同事|销售).{0,8}(确认|核实|跟进)",
+        r"(审核|审批).{0,8}(为准|确认)",
+    )
+    return any(re.search(pattern, clean) for pattern in patterns)
 
 
 def has_formulaic_handoff(reply: str, platform_rules: dict[str, Any] | None = None) -> bool:

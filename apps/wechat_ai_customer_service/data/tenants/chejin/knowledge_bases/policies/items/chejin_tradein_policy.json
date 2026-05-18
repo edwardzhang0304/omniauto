@@ -1,0 +1,40 @@
+{
+  "schema_version": 1,
+  "category_id": "policies",
+  "id": "chejin_tradein_policy",
+  "status": "active",
+  "source": {
+    "type": "manual_seed",
+    "normalized_by": "knowledge_contamination_guard",
+    "normalized_at": "2026-05-19T01:53:49"
+  },
+  "data": {
+    "title": "旧车置换补贴政策",
+    "policy_type": "discount",
+    "keywords": [
+      "置换补贴",
+      "旧车换新",
+      "补贴",
+      "以旧换新",
+      "抵扣"
+    ],
+    "answer": "支持旧车置换，流程是：1）评估旧车价值；2）选定新车（二手车）；3）旧车价款直接抵扣新车款；4）差价部分可贷款或全款支付。置换补贴根据车型和活动政策而定，目前一般补贴3000到8000元，具体以当月活动为准。普通流程和资料准备可以先说明，最终估价、补贴口径和成交方案需要结合实车与当月活动核实确认。",
+    "allow_auto_reply": true,
+    "requires_handoff": false,
+    "handoff_reason": "",
+    "operator_alert": false,
+    "risk_level": "normal"
+  },
+  "runtime": {
+    "allow_auto_reply": true,
+    "requires_handoff": false,
+    "risk_level": "normal",
+    "operator_alert": false
+  },
+  "metadata": {
+    "created_at": "2026-05-07T10:00:00",
+    "updated_at": "2026-05-18T22:20:00",
+    "created_by": "admin",
+    "updated_by": "admin"
+  }
+}

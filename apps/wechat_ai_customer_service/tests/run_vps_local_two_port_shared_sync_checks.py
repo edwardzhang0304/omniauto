@@ -24,6 +24,9 @@ from apps.wechat_ai_customer_service.knowledge_paths import runtime_knowledge_ro
 from apps.wechat_ai_customer_service.sync.vps_sync import local_node_cache_path  # noqa: E402
 
 
+WINDOWS_FILE_RETRY_DELAYS = (0.05, 0.1, 0.2, 0.35, 0.5, 0.75, 1.0, 1.25)
+
+
 def main() -> int:
     cleanup_test_root()
     cache_backup = TEST_ROOT / "previous_shared_cache"
@@ -266,16 +269,16 @@ def seed_vps_state(path: Path) -> None:
         },
     }
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(state, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    write_text(path, json.dumps(state, ensure_ascii=False, indent=2) + "\n")
 
 
 def backup_runtime_cache(cache_backup: Path) -> str | None:
     cache_root = shared_runtime_cache_root()
     if cache_backup.exists():
-        shutil.rmtree(cache_backup)
+        remove_tree(cache_backup)
     if cache_root.exists():
         shutil.copytree(cache_root, cache_backup)
-        shutil.rmtree(cache_root)
+        remove_tree(cache_root)
     node_path = local_node_cache_path()
     if node_path.exists():
         return node_path.read_text(encoding="utf-8")
@@ -285,17 +288,17 @@ def backup_runtime_cache(cache_backup: Path) -> str | None:
 def restore_runtime_cache(cache_backup: Path, node_cache_text: str | None) -> None:
     cache_root = shared_runtime_cache_root()
     if cache_root.exists():
-        shutil.rmtree(cache_root)
+        remove_tree(cache_root)
     if cache_backup.exists():
         shutil.copytree(cache_backup, cache_root)
-        shutil.rmtree(cache_backup)
+        remove_tree(cache_backup)
     node_path = local_node_cache_path()
     if node_cache_text is None:
         if node_path.exists():
-            node_path.unlink()
+            remove_file(node_path)
     else:
         node_path.parent.mkdir(parents=True, exist_ok=True)
-        node_path.write_text(node_cache_text, encoding="utf-8")
+        write_text(node_path, node_cache_text)
 
 
 def start_server(command: list[str], *, env: dict[str, str], log: Any) -> subprocess.Popen[str]:
@@ -370,8 +373,83 @@ def cleanup_test_root() -> None:
     if expected_parent not in resolved.parents and resolved != expected_parent:
         raise RuntimeError(f"unsafe test cleanup path: {resolved}")
     if resolved.exists():
-        shutil.rmtree(resolved, ignore_errors=True)
+        remove_tree(resolved)
     resolved.mkdir(parents=True, exist_ok=True)
+
+
+def write_text(path: Path, content: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temp = path.with_name(f".{path.name}.{os.getpid()}.{time.time_ns()}.tmp")
+    temp.write_text(content, encoding="utf-8")
+    try:
+        replace_path(temp, path)
+    finally:
+        if temp.exists():
+            remove_file(temp)
+
+
+def is_transient_windows_file_error(exc: OSError) -> bool:
+    return (
+        os.name == "nt"
+        and (
+            int(getattr(exc, "errno", 0) or 0) in {13, 22}
+            or int(getattr(exc, "winerror", 0) or 0) in {5, 32, 33}
+        )
+    )
+
+
+def replace_path(source: Path, destination: Path) -> None:
+    last_error: OSError | None = None
+    for index, delay in enumerate(WINDOWS_FILE_RETRY_DELAYS):
+        try:
+            source.replace(destination)
+            return
+        except FileNotFoundError:
+            return
+        except OSError as exc:
+            last_error = exc
+            if not is_transient_windows_file_error(exc):
+                raise
+            if index < len(WINDOWS_FILE_RETRY_DELAYS) - 1:
+                time.sleep(delay)
+    if last_error is not None:
+        raise last_error
+
+
+def remove_tree(path: Path) -> None:
+    last_error: OSError | None = None
+    for index, delay in enumerate(WINDOWS_FILE_RETRY_DELAYS):
+        try:
+            shutil.rmtree(path)
+            return
+        except FileNotFoundError:
+            return
+        except OSError as exc:
+            last_error = exc
+            if not is_transient_windows_file_error(exc):
+                raise
+            if index < len(WINDOWS_FILE_RETRY_DELAYS) - 1:
+                time.sleep(delay)
+    if last_error is not None:
+        raise last_error
+
+
+def remove_file(path: Path) -> None:
+    last_error: OSError | None = None
+    for index, delay in enumerate(WINDOWS_FILE_RETRY_DELAYS):
+        try:
+            path.unlink()
+            return
+        except FileNotFoundError:
+            return
+        except OSError as exc:
+            last_error = exc
+            if not is_transient_windows_file_error(exc):
+                raise
+            if index < len(WINDOWS_FILE_RETRY_DELAYS) - 1:
+                time.sleep(delay)
+    if last_error is not None:
+        raise last_error
 
 
 def assert_equal(actual: Any, expected: Any, message: str) -> None:

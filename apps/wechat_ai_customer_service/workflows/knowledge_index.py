@@ -92,6 +92,27 @@ class KnowledgeIndex:
         intent_tags: list[str],
     ) -> list[KnowledgeHit]:
         hits: list[KnowledgeHit] = []
+        product_category = self.runtime.get_category("products") or {
+            "id": "products",
+            "name": "商品主数据",
+            "scope": "product_master",
+        }
+        try:
+            product_schema = self.runtime.load_schema("products")
+            product_resolver = self.runtime.load_resolver("products")
+            product_items = self.runtime.list_items("products", include_unacknowledged=False)
+        except FileNotFoundError:
+            product_items = []
+            product_schema = {}
+            product_resolver = {}
+        for item in product_items:
+            hit = self._match_item(product_category, product_schema, product_resolver, item, normalized_text, intent_tags)
+            if hit:
+                hits.append(hit)
+            context_hit = self._context_product_hit(product_category, product_schema, product_resolver, item, context, intent_tags)
+            if context_hit:
+                hits.append(context_hit)
+
         for category, schema, resolver, item in self.runtime.iter_reply_items():
             category_id = str(category.get("id") or "")
             if not item_applies_to_context(category_id, item, context, hits):
@@ -99,10 +120,6 @@ class KnowledgeIndex:
             hit = self._match_item(category, schema, resolver, item, normalized_text, intent_tags)
             if hit:
                 hits.append(hit)
-
-            context_hit = self._context_product_hit(category, schema, resolver, item, context, intent_tags)
-            if context_hit:
-                hits.append(context_hit)
 
         product_ids = {hit.item_id for hit in hits if hit.category_id == "products"}
         if context.get("last_product_id"):
@@ -572,7 +589,7 @@ def knowledge_layer(hit: KnowledgeHit) -> str:
 
 
 def layer_rank(hit: KnowledgeHit) -> int:
-    return {"tenant_product": 30, "tenant": 20, "shared": 10}.get(knowledge_layer(hit), 20)
+    return {"product_master": 35, "tenant_product": 30, "tenant": 20, "shared": 10}.get(knowledge_layer(hit), 20)
 
 
 def dedupe_hits(hits: list[KnowledgeHit]) -> list[KnowledgeHit]:

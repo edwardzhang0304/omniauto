@@ -35,11 +35,31 @@ BUILTIN_MODULES = [
         "status": "active",
         "version": "1.0.0",
         "config": {
-            "description": "Rule-first order extraction with optional LLM supplementation, exports to order-sheet style workbook.",
-            "date_output_mode": "MMDD_text",
+            "description": "LLM-first semantic extraction with structured guardrails, exports to order-sheet style workbook.",
+            "date_output_mode": "YYYY-MM-DD",
             "allow_empty_cost_fields": True,
             "llm_enabled": True,
-            "llm_max_rows_per_run": 40,
+            "llm_max_rows_per_run": 12,
+            "llm_repair_max_rows_per_run": 8,
+            "llm_dynamic_budget_enabled": True,
+            "llm_dynamic_budget_ratio": 0.35,
+            "llm_dynamic_budget_max": 64,
+            "llm_dynamic_repair_ratio": 0.25,
+            "llm_dynamic_repair_max": 32,
+            "llm_segmentation_enabled": True,
+            "llm_segmentation_max_segments": 6,
+            "llm_supplement_mode": "missing_core_fields_only",
+            "extract_mode": "llm_first",
+            "missing_quantity_strategy": "strict",
+            "include_record_types_in_main_sheet": ["order_item", "gift_item"],
+            "force_multi_sku_split_enabled": True,
+            "force_multi_sku_min_skus": 2,
+            "force_multi_order_signal_threshold": 2,
+            "context_followup_enabled": True,
+            "brand_aliases": ["津腾", "康为", "源叶", "麦克林", "施睿康", "甄选", "赛宁", "建成", "索莱宝", "毕得医药"],
+            "brand_llm_inference_enabled": True,
+            "brand_llm_inference_max_calls_per_run": 20,
+            "brand_llm_inference_min_confidence": 0.62,
             "supported_content_types": ["text", "quote"],
         },
         "builtin": True,
@@ -116,12 +136,14 @@ class RecorderModuleRegistryService:
         bindings = [
             item
             for item in self._read_json(self.bindings_path, default=[])
-            if isinstance(item, dict) and str(item.get("scope_type") or "") in {"user", "global"}
+            if isinstance(item, dict) and str(item.get("scope_type") or "") in {"user", "tenant", "global"}
         ]
         if scope_type:
             bindings = [item for item in bindings if str(item.get("scope_type") or "") == scope_type]
         if scope_id:
             bindings = [item for item in bindings if str(item.get("scope_id") or "") == scope_id]
+        if tenant_id:
+            bindings = [item for item in bindings if str(item.get("tenant_id") or "") == tenant_id]
         if user_id:
             bindings = [item for item in bindings if str(item.get("user_id") or "") == user_id]
         bindings.sort(key=lambda item: str(item.get("updated_at") or ""), reverse=True)
@@ -129,8 +151,8 @@ class RecorderModuleRegistryService:
 
     def upsert_binding(self, payload: dict[str, Any]) -> dict[str, Any]:
         scope_type = str(payload.get("scope_type") or "").strip().lower()
-        if scope_type not in {"user", "global"}:
-            raise ValueError("scope_type must be one of user|global")
+        if scope_type not in {"user", "tenant", "global"}:
+            raise ValueError("scope_type must be one of user|tenant|global")
         scope_id = str(payload.get("scope_id") or "").strip()
         if scope_type == "global":
             scope_id = "*"
@@ -149,11 +171,16 @@ class RecorderModuleRegistryService:
         bindings = [item for item in self._read_json(self.bindings_path, default=[]) if isinstance(item, dict)]
         index = next((idx for idx, item in enumerate(bindings) if str(item.get("binding_id") or "") == binding_id), -1)
         existing = bindings[index] if index >= 0 else {}
+        tenant_id = str(payload.get("tenant_id") or existing.get("tenant_id") or "").strip()
+        if scope_type == "tenant" and not tenant_id:
+            tenant_id = scope_id
+        if scope_type == "global":
+            tenant_id = ""
         record = {
             "binding_id": binding_id,
             "scope_type": scope_type,
             "scope_id": scope_id,
-            "tenant_id": "",
+            "tenant_id": tenant_id,
             "user_id": user_id,
             "module_key": module_key,
             "enabled": payload.get("enabled", existing.get("enabled", True)) is not False,
@@ -207,6 +234,20 @@ class RecorderModuleRegistryService:
                 if module and str(module.get("status") or "active") == "active":
                     return module
 
+        tenant_binding = next(
+            (
+                item
+                for item in sorted(active_bindings, key=lambda value: str(value.get("updated_at") or ""), reverse=True)
+                if str(item.get("scope_type") or "") == "tenant"
+                and str(item.get("scope_id") or "") == str(tenant_id or "")
+            ),
+            None,
+        )
+        if tenant_binding:
+            module = self.get_module(str(tenant_binding.get("module_key") or ""))
+            if module and str(module.get("status") or "active") == "active":
+                return module
+
         global_binding = next(
             (
                 item
@@ -239,6 +280,76 @@ class RecorderModuleRegistryService:
                 }
             else:
                 existing = dict(by_key[module_key])
+                config = dict(existing.get("config") or {})
+                builtin_config = dict(builtin.get("config") or {})
+                config_changed = False
+                for key, value in builtin_config.items():
+                    if key not in config:
+                        config[key] = value
+                        config_changed = True
+                if module_key == "order_sheet_lab_v1":
+                    if str(config.get("date_output_mode") or "").strip() in {"MMDD_text", "MMDD-TEXT", "MMDD"}:
+                        config["date_output_mode"] = str(builtin_config.get("date_output_mode") or "YYYY-MM-DD")
+                        config_changed = True
+                    llm_budget = int(config.get("llm_max_rows_per_run", 0) or 0)
+                    if llm_budget <= 0 or llm_budget >= 40:
+                        config["llm_max_rows_per_run"] = int(builtin_config.get("llm_max_rows_per_run") or 12)
+                        config_changed = True
+                    if not str(config.get("llm_supplement_mode") or "").strip():
+                        config["llm_supplement_mode"] = str(builtin_config.get("llm_supplement_mode") or "missing_core_fields_only")
+                        config_changed = True
+                    if not str(config.get("extract_mode") or "").strip():
+                        config["extract_mode"] = str(builtin_config.get("extract_mode") or "llm_first")
+                        config_changed = True
+                    if "llm_segmentation_enabled" not in config:
+                        config["llm_segmentation_enabled"] = bool(builtin_config.get("llm_segmentation_enabled", True))
+                        config_changed = True
+                    if int(config.get("llm_segmentation_max_segments", 0) or 0) <= 0:
+                        config["llm_segmentation_max_segments"] = int(builtin_config.get("llm_segmentation_max_segments") or 6)
+                        config_changed = True
+                    if int(config.get("llm_repair_max_rows_per_run", 0) or 0) <= 0:
+                        config["llm_repair_max_rows_per_run"] = int(builtin_config.get("llm_repair_max_rows_per_run") or 8)
+                        config_changed = True
+                    if str(config.get("missing_quantity_strategy") or "").strip().lower() not in {"strict", "assume_one", "llm_guess"}:
+                        config["missing_quantity_strategy"] = str(builtin_config.get("missing_quantity_strategy") or "strict")
+                        config_changed = True
+                    include_types = config.get("include_record_types_in_main_sheet")
+                    if not isinstance(include_types, list) or not include_types:
+                        config["include_record_types_in_main_sheet"] = list(builtin_config.get("include_record_types_in_main_sheet") or ["order_item", "gift_item"])
+                        config_changed = True
+                    for bool_key in ("llm_dynamic_budget_enabled", "force_multi_sku_split_enabled", "context_followup_enabled", "brand_llm_inference_enabled"):
+                        if bool_key not in config:
+                            config[bool_key] = bool(builtin_config.get(bool_key, True))
+                            config_changed = True
+                    brand_aliases = config.get("brand_aliases")
+                    if not isinstance(brand_aliases, list) or not any(str(item).strip() for item in brand_aliases):
+                        config["brand_aliases"] = list(
+                            builtin_config.get("brand_aliases")
+                            or ["津腾", "康为", "源叶", "麦克林", "施睿康", "甄选", "赛宁", "建成", "索莱宝", "毕得医药"]
+                        )
+                        config_changed = True
+                    for numeric_key, fallback in (
+                        ("llm_dynamic_budget_ratio", 0.35),
+                        ("llm_dynamic_budget_max", 64),
+                        ("llm_dynamic_repair_ratio", 0.25),
+                        ("llm_dynamic_repair_max", 32),
+                        ("force_multi_sku_min_skus", 2),
+                        ("force_multi_order_signal_threshold", 2),
+                        ("brand_llm_inference_max_calls_per_run", 20),
+                        ("brand_llm_inference_min_confidence", 0.62),
+                    ):
+                        try:
+                            parsed = float(config.get(numeric_key)) if ("ratio" in numeric_key or "confidence" in numeric_key) else int(config.get(numeric_key))
+                        except (TypeError, ValueError):
+                            parsed = 0
+                        if parsed <= 0:
+                            config[numeric_key] = builtin_config.get(numeric_key, fallback)
+                            config_changed = True
+                if config_changed:
+                    existing["config"] = config
+                    existing["updated_at"] = now_iso()
+                    by_key[module_key] = existing
+                    changed = True
                 if existing.get("builtin") is not True:
                     existing["builtin"] = True
                     existing["updated_at"] = now_iso()

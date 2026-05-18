@@ -21,6 +21,11 @@ try:  # pragma: no cover - supports package imports and direct workflow scripts.
         shared_runtime_cache_root,
         tenant_product_item_knowledge_root,
     )
+    from apps.wechat_ai_customer_service.product_master import (
+        PRODUCT_MASTER_CATEGORY_ID,
+        ProductMasterStore,
+        product_master_category_record,
+    )
     from apps.wechat_ai_customer_service.storage import get_postgres_store, load_storage_config
 except ImportError:  # pragma: no cover
     APP_PACKAGE_ROOT = Path(__file__).resolve().parents[1]
@@ -31,6 +36,9 @@ except ImportError:  # pragma: no cover
     default_admin_knowledge_base_root = lambda tenant_id=None: LEGACY_KNOWLEDGE_BASE_ROOT
     runtime_knowledge_roots = lambda tenant_id=None: [LEGACY_KNOWLEDGE_BASE_ROOT]
     tenant_product_item_knowledge_root = lambda tenant_id=None: APP_PACKAGE_ROOT / "data" / "tenants" / "default" / "product_item_knowledge"
+    PRODUCT_MASTER_CATEGORY_ID = "products"
+    ProductMasterStore = None
+    product_master_category_record = lambda: {"id": "products", "name": "商品主数据", "scope": "product_master"}
     get_postgres_store = None
     load_storage_config = None
 
@@ -119,6 +127,8 @@ class KnowledgeRuntime:
         self.root = (root or default_admin_knowledge_base_root(tenant_id)).resolve()
         self.registry_path = self.root / "registry.json"
         self.product_item_root = tenant_product_item_knowledge_root(tenant_id).resolve() if not root else (root.parent / "product_item_knowledge").resolve()
+        has_legacy_products = bool(root and (root / "products").exists())
+        self.product_master = ProductMasterStore(tenant_id=self.tenant_id) if ProductMasterStore is not None and not has_legacy_products else None
 
     def load_registry(self) -> dict[str, Any]:
         if not self.registry_path.exists():
@@ -128,7 +138,7 @@ class KnowledgeRuntime:
     def load_registry_from_root(self, root: Path) -> dict[str, Any]:
         path = root / "registry.json"
         if not path.exists():
-            raise FileNotFoundError(str(path))
+            return {"categories": []}
         return read_json(path)
 
     def list_categories(
@@ -142,6 +152,8 @@ class KnowledgeRuntime:
         for root in self.roots:
             for item in self.load_registry_from_root(root).get("categories", []) or []:
                 category_id = str(item.get("id") or "")
+                if category_id == PRODUCT_MASTER_CATEGORY_ID:
+                    continue
                 if not category_id or category_id in seen:
                     continue
                 seen.add(category_id)
@@ -153,6 +165,8 @@ class KnowledgeRuntime:
         return sorted(categories, key=lambda item: (int(item.get("sort_order", 999)), str(item.get("id") or "")))
 
     def get_category(self, category_id: str) -> dict[str, Any] | None:
+        if category_id == PRODUCT_MASTER_CATEGORY_ID and self.product_master is not None:
+            return product_master_category_record()
         for root in self.roots:
             for category in self.load_registry_from_root(root).get("categories", []) or []:
                 if category.get("id") == category_id:
@@ -166,6 +180,8 @@ class KnowledgeRuntime:
         return category
 
     def category_root(self, category_id: str) -> Path:
+        if category_id == PRODUCT_MASTER_CATEGORY_ID and self.product_master is not None:
+            return self.product_master.root
         for root in self.roots:
             category = self.get_category_from_root(root, category_id)
             if not category:
@@ -192,9 +208,13 @@ class KnowledgeRuntime:
         return path
 
     def load_schema(self, category_id: str) -> dict[str, Any]:
+        if category_id == PRODUCT_MASTER_CATEGORY_ID and self.product_master is not None:
+            return self.product_master.load_schema()
         return read_json(self.category_root(category_id) / "schema.json")
 
     def load_resolver(self, category_id: str) -> dict[str, Any]:
+        if category_id == PRODUCT_MASTER_CATEGORY_ID and self.product_master is not None:
+            return self.product_master.load_resolver()
         return read_json(self.category_root(category_id) / "resolver.json")
 
     def items_root(self, category_id: str) -> Path:
@@ -207,6 +227,15 @@ class KnowledgeRuntime:
         include_archived: bool = False,
         include_unacknowledged: bool = False,
     ) -> list[dict[str, Any]]:
+        if category_id == PRODUCT_MASTER_CATEGORY_ID and self.product_master is not None:
+            return filter_runtime_items(
+                [
+                    mark_layer(item, "product_master")
+                    for item in self.product_master.list_items(include_archived=include_archived)
+                ],
+                include_archived=include_archived,
+                include_unacknowledged=include_unacknowledged,
+            )
         db = postgres_store(self.tenant_id)
         if db and not self.single_root_mode:
             layer_items: list[dict[str, Any]] = []
@@ -251,7 +280,9 @@ class KnowledgeRuntime:
             if not items_root.exists():
                 continue
             for path in sorted(items_root.glob("*.json")):
-                item = read_json(path)
+                item = read_json_optional(path)
+                if item is None:
+                    continue
                 if not include_archived and item.get("status") == "archived":
                     continue
                 items.append(mark_layer(item, layer_for_root(root)))
@@ -268,6 +299,12 @@ class KnowledgeRuntime:
         *,
         include_unacknowledged: bool = False,
     ) -> dict[str, Any] | None:
+        if category_id == PRODUCT_MASTER_CATEGORY_ID and self.product_master is not None:
+            item = self.product_master.get_item(item_id, include_archived=True)
+            if not item:
+                return None
+            marked = mark_layer(item, "product_master")
+            return marked if item_is_runtime_usable(marked, include_unacknowledged=include_unacknowledged) else None
         db = postgres_store(self.tenant_id)
         if db and not self.single_root_mode:
             if category_id in PRODUCT_SCOPED_SCHEMAS:
@@ -295,7 +332,9 @@ class KnowledgeRuntime:
                 raise ValueError(f"item path escapes category root: {item_id}")
             if not path.exists():
                 continue
-            item = read_json(path)
+            item = read_json_optional(path)
+            if item is None:
+                continue
             marked = mark_layer(item, layer_for_root(root))
             return marked if item_is_runtime_usable(marked, include_unacknowledged=include_unacknowledged) else None
         return None
@@ -322,14 +361,20 @@ class KnowledgeRuntime:
                 if not items_root.exists():
                     continue
                 for path in sorted(items_root.glob("*.json")):
-                    item = read_json(path)
+                    item = read_json_optional(path)
+                    if item is None:
+                        continue
                     marked = mark_layer(item, layer_for_root(root))
                     if not item_is_runtime_usable(marked, include_unacknowledged=False):
                         continue
                     yield category, schema, resolver, marked
 
     def list_categories_from_root(self, root: Path, *, reply_only: bool = False) -> list[dict[str, Any]]:
-        categories = [item for item in self.load_registry_from_root(root).get("categories", []) or [] if item.get("enabled", True)]
+        categories = [
+            item
+            for item in self.load_registry_from_root(root).get("categories", []) or []
+            if item.get("enabled", True) and str(item.get("id") or "") != PRODUCT_MASTER_CATEGORY_ID
+        ]
         if reply_only:
             categories = [item for item in categories if item.get("participates_in_reply", False)]
         return sorted(categories, key=lambda item: (int(item.get("sort_order", 999)), str(item.get("id") or "")))
@@ -388,7 +433,9 @@ class KnowledgeRuntime:
                 schema = PRODUCT_SCOPED_SCHEMAS[category_id]
                 resolver = PRODUCT_SCOPED_RESOLVERS[category_id]
                 for path in sorted(kind_root.glob("*.json")):
-                    item = read_json(path)
+                    item = read_json_optional(path)
+                    if item is None:
+                        continue
                     item.setdefault("category_id", category_id)
                     item.setdefault("data", {})
                     item["data"].setdefault("product_id", product_id)
@@ -419,7 +466,9 @@ class KnowledgeRuntime:
             if not kind_root.exists():
                 continue
             for path in sorted(kind_root.glob("*.json")):
-                item = read_json(path)
+                item = read_json_optional(path)
+                if item is None:
+                    continue
                 if not include_archived and item.get("status") == "archived":
                     continue
                 item.setdefault("category_id", category_id)
@@ -462,6 +511,13 @@ class KnowledgeRuntime:
 
 def read_json(path: Path) -> dict[str, Any]:
     return json.loads(path.read_text(encoding="utf-8"))
+
+
+def read_json_optional(path: Path) -> dict[str, Any] | None:
+    try:
+        return read_json(path)
+    except (FileNotFoundError, OSError, json.JSONDecodeError):
+        return None
 
 
 def layer_for_root(root: Path) -> str:

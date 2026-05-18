@@ -1,0 +1,47 @@
+{
+  "schema_version": 1,
+  "category_id": "products",
+  "id": "chejin_xtrail_2020_25l",
+  "status": "active",
+  "source": {
+    "type": "test_fixture",
+    "batch_token": "CHEJIN_SEED_20260507",
+    "legacy_migrated_from": "knowledge_bases/products"
+  },
+  "data": {
+    "name": "2020款日产奇骏2.5L CVT智联豪华版",
+    "sku": "CHEJIN-XTRAIL-2020-25L",
+    "category": "二手车/SUV",
+    "aliases": [
+      "奇骏",
+      "日产奇骏",
+      "四驱SUV",
+      "越野",
+      "尼桑"
+    ],
+    "specs": "2020年5月上牌，表显5.2万公里，2.5L自动挡四驱，适合轻度越野，前保险杠更换，其余原版。",
+    "price": 11.5,
+    "unit": "台",
+    "inventory": 1,
+    "shipping_policy": "随时看车，支持越野场地试驾体验。",
+    "warranty_policy": "前保险杠为更换件，已如实告知，非事故导致，以检测报告为准。",
+    "reply_templates": {
+      "recommendation": "这台奇骏适合11到13万预算、喜欢SUV和轻度越野的客户，四驱是亮点。"
+    },
+    "risk_rules": [
+      "前保险杠为更换件",
+      "已如实告知车况"
+    ]
+  },
+  "runtime": {
+    "allow_auto_reply": true,
+    "requires_handoff": false,
+    "risk_level": "normal"
+  },
+  "metadata": {
+    "created_at": "2026-05-07T10:00:00",
+    "updated_at": "2026-05-16T22:51:06",
+    "created_by": "admin",
+    "updated_by": "admin"
+  }
+}

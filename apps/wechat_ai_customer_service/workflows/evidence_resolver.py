@@ -77,6 +77,7 @@ def build_evidence_item(hit: KnowledgeHit, intent_tags: list[str]) -> dict[str, 
         "match_reason": hit.match_reason,
         "confidence": hit.confidence,
         "knowledge_layer": knowledge_layer(item),
+        "knowledge_track": knowledge_track(hit.category_id),
         "reply_excerpt": reply_excerpt(hit, intent_tags),
         "allow_auto_reply": allow_auto_reply,
         "requires_handoff": requires_handoff,
@@ -215,3 +216,16 @@ def dedupe(values: list[str]) -> list[str]:
 def knowledge_layer(item: dict[str, Any]) -> str:
     metadata = item.get("metadata") if isinstance(item.get("metadata"), dict) else {}
     return str(item.get("_knowledge_layer") or metadata.get("knowledge_layer") or "tenant")
+
+
+def knowledge_track(category_id: str) -> str:
+    text = str(category_id or "")
+    if text in {"products", "policies", "product_faq", "product_rules", "product_explanations"}:
+        return "factual"
+    if text in {"chats", "reply_style", "global_guidelines"}:
+        return "style"
+    if text in {"rag_experience"}:
+        return "experience"
+    if text in {"risk_control"}:
+        return "factual"
+    return "factual"

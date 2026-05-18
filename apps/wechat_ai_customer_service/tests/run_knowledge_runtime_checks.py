@@ -6,6 +6,7 @@ import json
 import os
 import shutil
 import sys
+import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
@@ -27,10 +28,12 @@ from apps.wechat_ai_customer_service.admin_backend.services.formal_review_state 
 from apps.wechat_ai_customer_service.admin_backend.services.knowledge_registry import KnowledgeRegistry  # noqa: E402
 from apps.wechat_ai_customer_service.admin_backend.services.knowledge_schema_manager import KnowledgeSchemaManager  # noqa: E402
 from apps.wechat_ai_customer_service.knowledge_paths import SHARED_KNOWLEDGE_ROOT, default_admin_knowledge_base_root, shared_runtime_cache_root, shared_runtime_snapshot_path, tenant_context, tenant_knowledge_base_root, tenant_root  # noqa: E402
+from apps.wechat_ai_customer_service.product_master import ProductMasterStore  # noqa: E402
 from evidence_resolver import EvidenceResolver  # noqa: E402
 from knowledge_runtime import KnowledgeRuntime  # noqa: E402
 
 SHARED_PRIORITY_ITEM = shared_runtime_cache_root() / "risk_control" / "items" / "shared_priority_sample_fee.json"
+WINDOWS_FILE_RETRY_DELAYS = (0.05, 0.1, 0.2, 0.35, 0.5, 0.75, 1.0, 1.25)
 
 
 def main() -> int:
@@ -99,11 +102,18 @@ def check_global_guidelines_are_layered_style_context() -> None:
     assert_equal(item["requires_handoff"], False, "global guidelines must not force handoff")
 
 
+def check_contextual_honorific_rule_is_shared_reply_style() -> None:
+    pack = resolve("称呼每次都加哥或者老板是不是太假了？")
+    item = assert_has_item(pack, "reply_style", "contextual_honorific_usage")
+    assert_contains(item["reply_excerpt"], "不要每条回复都在开头加称呼", "shared honorific rule should be retrievable")
+    assert_equal(item["requires_handoff"], False, "honorific style rule must not force handoff")
+
+
 def check_tenant_visible_catalog_policy_drives_used_car_catalog() -> None:
     tenant_id = "knowledge_catalog_policy_probe"
     root = tenant_root(tenant_id)
     if root.exists():
-        shutil.rmtree(root)
+        remove_tree(root)
     try:
         tenant_kb = tenant_knowledge_base_root(tenant_id)
         tenant_kb.parent.mkdir(parents=True, exist_ok=True)
@@ -163,7 +173,7 @@ def check_tenant_visible_catalog_policy_drives_used_car_catalog() -> None:
             pack = EvidenceResolver().resolve("你们现在有哪些车源？预算十来万家用推荐哪几台？")
     finally:
         if root.exists():
-            shutil.rmtree(root)
+            remove_tree(root)
     assert_in("catalog", pack["intent_tags"], "visible tenant catalog policy should infer catalog intent")
     assert_has_item(pack, "policies", "visible_catalog_probe_rule")
     products = [item for item in pack.get("evidence_items", []) or [] if item.get("category_id") == "products"]
@@ -308,9 +318,7 @@ def check_custom_category_can_return_evidence() -> None:
 
 def check_unread_formal_product_is_visible_but_not_runtime_usable() -> None:
     root = prepare_custom_root()
-    registry = KnowledgeRegistry(root=root)
-    schema_manager = KnowledgeSchemaManager(registry)
-    store = KnowledgeBaseStore(registry, schema_manager)
+    store = ProductMasterStore()
     item = {
         "schema_version": 1,
         "category_id": "products",
@@ -329,25 +337,29 @@ def check_unread_formal_product_is_visible_but_not_runtime_usable() -> None:
         },
         "runtime": {"allow_auto_reply": True, "requires_handoff": False, "risk_level": "normal"},
     }
-    result = store.save_item("products", item)
-    if not result.get("ok"):
-        raise AssertionError(f"unread product save failed: {result}")
+    path = store.item_path("runtime_unread_probe_sedan")
+    try:
+        result = store.save_item(item)
+        if not result.get("ok"):
+            raise AssertionError(f"unread product save failed: {result}")
 
-    runtime = KnowledgeRuntime(root=root)
-    visible_ids = {str(record.get("id") or "") for record in runtime.list_items("products", include_unacknowledged=True)}
-    active_ids = {str(record.get("id") or "") for record in runtime.list_items("products")}
-    assert_in("runtime_unread_probe_sedan", list(visible_ids), "unread formal product should remain admin-visible")
-    if "runtime_unread_probe_sedan" in active_ids:
-        raise AssertionError("unread formal product leaked into reply runtime")
-    if runtime.get_item("products", "runtime_unread_probe_sedan") is not None:
-        raise AssertionError("unread formal product get_item leaked into reply runtime")
+        runtime = KnowledgeRuntime(root=root)
+        visible_ids = {str(record.get("id") or "") for record in runtime.list_items("products", include_unacknowledged=True)}
+        active_ids = {str(record.get("id") or "") for record in runtime.list_items("products")}
+        assert_in("runtime_unread_probe_sedan", list(visible_ids), "unread product_master item should remain admin-visible")
+        if "runtime_unread_probe_sedan" in active_ids:
+            raise AssertionError("unread product_master item leaked into reply runtime")
+        if runtime.get_item("products", "runtime_unread_probe_sedan") is not None:
+            raise AssertionError("unread product_master get_item leaked into reply runtime")
 
-    hidden_pack = EvidenceResolver(runtime).resolve("Runtime Unread Probe Sedan 这辆二手车多少钱？")
-    assert_no_item(hidden_pack, "products", "runtime_unread_probe_sedan")
+        hidden_pack = EvidenceResolver(runtime).resolve("Runtime Unread Probe Sedan 这辆二手车多少钱？")
+        assert_no_item(hidden_pack, "products", "runtime_unread_probe_sedan")
 
-    store.save_item("products", acknowledge_item(item))
-    acknowledged_pack = EvidenceResolver(KnowledgeRuntime(root=root)).resolve("Runtime Unread Probe Sedan 这辆二手车多少钱？")
-    assert_has_item(acknowledged_pack, "products", "runtime_unread_probe_sedan")
+        store.save_item(acknowledge_item(item))
+        acknowledged_pack = EvidenceResolver(KnowledgeRuntime(root=root)).resolve("Runtime Unread Probe Sedan 这辆二手车多少钱？")
+        assert_has_item(acknowledged_pack, "products", "runtime_unread_probe_sedan")
+    finally:
+        path.unlink(missing_ok=True)
 
 
 def resolve(text: str, context: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -386,7 +398,7 @@ def prepare_custom_root() -> Path:
 
 def cleanup() -> None:
     if TEST_ROOT.exists():
-        shutil.rmtree(TEST_ROOT)
+        remove_tree(TEST_ROOT)
     cleanup_priority_fixture()
 
 
@@ -396,7 +408,7 @@ def prepare_shared_runtime_cache_fixture() -> bool:
     backup_root = TEST_ROOT.parent / "knowledge_runtime_previous_shared_runtime_cache"
     had_previous = cache_root.exists()
     if backup_root.exists():
-        shutil.rmtree(backup_root)
+        remove_tree(backup_root)
     backup_root.parent.mkdir(parents=True, exist_ok=True)
     previous_snapshot = None
     if had_previous:
@@ -407,7 +419,7 @@ def prepare_shared_runtime_cache_fixture() -> bool:
             except (OSError, json.JSONDecodeError):
                 pass
         shutil.copytree(cache_root, backup_root)
-        shutil.rmtree(cache_root)
+        remove_tree(cache_root)
     if source_root.exists():
         cache_root.parent.mkdir(parents=True, exist_ok=True)
         shutil.copytree(source_root, cache_root)
@@ -419,24 +431,94 @@ def restore_shared_runtime_cache_fixture(had_previous: bool) -> None:
     cache_root = shared_runtime_cache_root()
     backup_root = TEST_ROOT.parent / "knowledge_runtime_previous_shared_runtime_cache"
     if cache_root.exists():
-        shutil.rmtree(cache_root)
+        remove_tree(cache_root)
     if had_previous and backup_root.exists():
         shutil.copytree(backup_root, cache_root)
     if backup_root.exists():
-        shutil.rmtree(backup_root)
+        remove_tree(backup_root)
 
 
 def cleanup_priority_fixture() -> None:
     root = tenant_root(PRIORITY_TENANT_ID)
     if root.exists():
-        shutil.rmtree(root)
+        remove_tree(root)
     if SHARED_PRIORITY_ITEM.exists():
-        SHARED_PRIORITY_ITEM.unlink()
+        remove_file(SHARED_PRIORITY_ITEM)
 
 
 def write_json_file(path: Path, payload: dict[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    temp = path.with_name(f".{path.name}.{os.getpid()}.{time.time_ns()}.tmp")
+    temp.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    try:
+        replace_path(temp, path)
+    finally:
+        if temp.exists():
+            remove_file(temp)
+
+
+def is_transient_windows_file_error(exc: OSError) -> bool:
+    return (
+        os.name == "nt"
+        and (
+            int(getattr(exc, "errno", 0) or 0) in {13, 22}
+            or int(getattr(exc, "winerror", 0) or 0) in {5, 32, 33}
+        )
+    )
+
+
+def replace_path(source: Path, destination: Path) -> None:
+    last_error: OSError | None = None
+    for index, delay in enumerate(WINDOWS_FILE_RETRY_DELAYS):
+        try:
+            source.replace(destination)
+            return
+        except FileNotFoundError:
+            return
+        except OSError as exc:
+            last_error = exc
+            if not is_transient_windows_file_error(exc):
+                raise
+            if index < len(WINDOWS_FILE_RETRY_DELAYS) - 1:
+                time.sleep(delay)
+    if last_error is not None:
+        raise last_error
+
+
+def remove_tree(path: Path) -> None:
+    last_error: OSError | None = None
+    for index, delay in enumerate(WINDOWS_FILE_RETRY_DELAYS):
+        try:
+            shutil.rmtree(path)
+            return
+        except FileNotFoundError:
+            return
+        except OSError as exc:
+            last_error = exc
+            if not is_transient_windows_file_error(exc):
+                raise
+            if index < len(WINDOWS_FILE_RETRY_DELAYS) - 1:
+                time.sleep(delay)
+    if last_error is not None:
+        raise last_error
+
+
+def remove_file(path: Path) -> None:
+    last_error: OSError | None = None
+    for index, delay in enumerate(WINDOWS_FILE_RETRY_DELAYS):
+        try:
+            path.unlink()
+            return
+        except FileNotFoundError:
+            return
+        except OSError as exc:
+            last_error = exc
+            if not is_transient_windows_file_error(exc):
+                raise
+            if index < len(WINDOWS_FILE_RETRY_DELAYS) - 1:
+                time.sleep(delay)
+    if last_error is not None:
+        raise last_error
 
 
 def write_cloud_cache_snapshot_fixture(cache_root: Path, previous_snapshot: dict[str, Any] | None = None) -> None:
@@ -533,6 +615,7 @@ CHECKS = [
     check_context_product_shipping,
     check_chat_style_hits_chats,
     check_global_guidelines_are_layered_style_context,
+    check_contextual_honorific_rule_is_shared_reply_style,
     check_tenant_visible_catalog_policy_drives_used_car_catalog,
     check_tenant_formal_overrides_conflicting_shared_public,
     check_product_scoped_rule_requires_product_context,

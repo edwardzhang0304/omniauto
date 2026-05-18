@@ -13,6 +13,7 @@ from apps.wechat_ai_customer_service.knowledge_paths import (
     SHARED_KNOWLEDGE_ROOT,
     TENANTS_ROOT,
     active_tenant_id,
+    default_admin_knowledge_base_root,
     runtime_app_root,
     tenant_runtime_root,
     tenant_runtime_backups_root,
@@ -85,6 +86,10 @@ class BackupService:
             return roots
         if scope == "tenant":
             roots = [(f"tenants/{tenant_id}", tenant_root(tenant_id))]
+            fallback_root = default_admin_knowledge_base_root(tenant_id)
+            tenant_scope_root = tenant_root(tenant_id).resolve()
+            if fallback_root.exists() and not path_is_within(fallback_root.resolve(), tenant_scope_root):
+                roots.append(("knowledge_bases", fallback_root))
             if include_runtime:
                 roots.append((f"runtime/tenants/{tenant_id}", tenant_runtime_root(tenant_id)))
             return roots
@@ -93,10 +98,22 @@ class BackupService:
             if TENANTS_ROOT.exists():
                 for path in sorted(item for item in TENANTS_ROOT.iterdir() if item.is_dir()):
                     roots.append((f"tenants/{path.name}", path))
+            fallback_root = default_admin_knowledge_base_root()
+            existing_roots = {path.resolve() for _, path in roots}
+            if fallback_root.exists() and fallback_root.resolve() not in existing_roots:
+                roots.append(("knowledge_bases", fallback_root))
             if include_runtime and runtime_app_root().exists():
                 roots.append(("runtime", runtime_app_root()))
             return roots
         raise ValueError(f"unsupported backup scope: {scope}")
+
+
+def path_is_within(candidate: Path, ancestor: Path) -> bool:
+    try:
+        candidate.relative_to(ancestor)
+        return True
+    except ValueError:
+        return False
 
 
 def iter_backup_files(root: Path, *, include_derived: bool) -> list[Path]:

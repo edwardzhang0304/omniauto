@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from typing import Any
 
 from fastapi import APIRouter, BackgroundTasks, HTTPException, Query, Request
@@ -19,6 +20,7 @@ from ..services.knowledge_registry import KnowledgeRegistry
 from ..services.knowledge_schema_manager import KnowledgeSchemaManager
 from ..services.knowledge_store import KnowledgeStore
 from ..services.shared_public_sync import queue_shared_public_scan
+from apps.wechat_ai_customer_service.product_master import PRODUCT_MASTER_CATEGORY_ID, product_master_category_record
 
 
 router = APIRouter(prefix="/api/knowledge", tags=["knowledge"])
@@ -50,6 +52,8 @@ def categories() -> dict[str, Any]:
     items = []
     for category in registry.list_categories(enabled_only=True):
         category_id = str(category.get("id") or "")
+        if category_id == PRODUCT_MASTER_CATEGORY_ID:
+            continue
         items.append(
             {
                 **category,
@@ -58,6 +62,15 @@ def categories() -> dict[str, Any]:
                 "item_count": len(base_store.list_items(category_id)),
             }
         )
+    product_category = product_master_category_record()
+    items.append(
+        {
+            **product_category,
+            "schema": schema_manager.load_schema(PRODUCT_MASTER_CATEGORY_ID),
+            "resolver": schema_manager.load_resolver(PRODUCT_MASTER_CATEGORY_ID),
+            "item_count": len(base_store.list_items(PRODUCT_MASTER_CATEGORY_ID)),
+        }
+    )
     for category in product_scoped_category_records():
         category_id = str(category.get("id") or "")
         items.append(
@@ -93,7 +106,9 @@ def create_category(payload: dict[str, Any]) -> dict[str, Any]:
 def category_detail(category_id: str) -> dict[str, Any]:
     registry, schema_manager, base_store = knowledge_components()
     try:
-        category = next((item for item in product_scoped_category_records() if item.get("id") == category_id), None)
+        category = product_master_category_record() if category_id == PRODUCT_MASTER_CATEGORY_ID else None
+        if not category:
+            category = next((item for item in product_scoped_category_records() if item.get("id") == category_id), None)
         if not category:
             category = registry.require_category(category_id)
         return {
@@ -110,13 +125,49 @@ def category_detail(category_id: str) -> dict[str, Any]:
 
 
 @router.get("/categories/{category_id}/items")
-def category_items(category_id: str, include_archived: bool = False) -> dict[str, Any]:
+def category_items(
+    category_id: str,
+    include_archived: bool = False,
+    limit: int = Query(0, ge=0, le=1000),
+    offset: int = Query(0, ge=0),
+    query: str = "",
+) -> dict[str, Any]:
     _, _, base_store = knowledge_components()
     try:
         items = sort_knowledge_items_for_review(base_store.list_items(category_id, include_archived=include_archived))
-        return {"ok": True, "items": [enrich_knowledge_item(item) for item in items]}
+        unfiltered_total = len(items)
+        normalized_query = str(query or "").strip().lower()
+        if normalized_query:
+            items = [item for item in items if normalized_query in knowledge_item_search_text(item).lower()]
+        total = len(items)
+        if limit:
+            page = items[offset : offset + limit]
+        else:
+            page = items
+        return {
+            "ok": True,
+            "items": [enrich_knowledge_item(item) for item in page],
+            "total": total,
+            "unfiltered_total": unfiltered_total,
+            "offset": offset,
+            "limit": limit,
+            "has_more": bool(limit and offset + len(page) < total),
+        }
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail=f"category not found: {category_id}") from exc
+
+
+def knowledge_item_search_text(item: dict[str, Any]) -> str:
+    data = item.get("data") if isinstance(item.get("data"), dict) else {}
+    metadata = item.get("metadata") if isinstance(item.get("metadata"), dict) else {}
+    return " ".join(
+        [
+            str(item.get("id") or ""),
+            str(item.get("category_id") or ""),
+            json.dumps(data, ensure_ascii=False, sort_keys=True),
+            json.dumps(metadata, ensure_ascii=False, sort_keys=True),
+        ]
+    )
 
 
 @router.get("/categories/{category_id}/items/{item_id}")

@@ -2,6 +2,13 @@
   "schema_version": 1,
   "examples": [
     {
+      "id": "admin_check_style_example",
+      "message": "测试话术，仅用于管理台回归。",
+      "intent_tags": [
+        "small_talk"
+      ]
+    },
+    {
       "id": "data_missing",
       "message": "资料我看到了，还差联系人电话，您补一下我就一起登记。",
       "intent_tags": [
@@ -43,8 +50,7 @@
       "message": "哈哈没事，您先慢慢看。我这边主要帮您查商品、报价和发货售后，看到合适的产品直接发我名称和数量就行。",
       "intent_tags": [
         "small_talk"
-      ],
-      "customer_message": "哈哈我先随便看看"
+      ]
     },
     {
       "id": "unknown_handoff",
@@ -53,6 +59,24 @@
         "unknown",
         "handoff"
       ]
+    },
+    {
+      "id": "wf_tpl_a",
+      "message": "这类预算可以先看20万左右的SUV价格区间，我先按你的通勤场景给你一批车源。",
+      "customer_message": "wfcasea123 预算20万左右，主要市区通勤，想看SUV。",
+      "details": "workflow_import: 这类预算可以先看20万左右的SUV价格区间，我先按你的通勤场景给你一批车源。"
+    },
+    {
+      "id": "wf_tpl_b",
+      "message": "这个属于金融审批边界，不能保证通过，需要人工顾问一对一核实。",
+      "customer_message": "wfcaseb456 你保证我征信不过也能贷款通过吗？",
+      "details": "workflow_import: 这个属于金融审批边界，不能保证通过，需要人工顾问一对一核实。"
+    },
+    {
+      "id": "wf_tpl_c",
+      "message": "我们按质保政策执行，交付后会同步售后服务流程和质保条款。",
+      "customer_message": "wfcasec789 售后质保怎么走？",
+      "details": "workflow_import: 我们按质保政策执行，交付后会同步售后服务流程和质保条款。"
     },
     {
       "id": "customer_service_style_guidelines",
@@ -79,14 +103,19 @@
       "customer_message": "证据优先回复"
     },
     {
-      "id": "shared_home_appliance_energy_label_notice",
-      "message": "能效等级、额定功率、用电环境相关答复应引用规格参数，不得臆测省电比例或改写官方标识信息。",
-      "customer_message": "家电能效与功率说明"
+      "id": "shared_used_car_compliance_disclosure",
+      "message": "涉及事故、水泡、火烧、里程、过户次数、检修记录等问题，必须基于可验证资料；不确定时先说明待核验。",
+      "customer_message": "二手车车况披露规则"
     },
     {
-      "id": "shared_home_appliance_three_guarantees",
-      "message": "家电售后答复需围绕三包、质保期、维修记录与票据凭证，避免超出标准承诺。",
-      "customer_message": "家电三包与售后说明"
+      "id": "shared_used_car_test_drive_notice",
+      "message": "试驾沟通需明确有效证件、保险覆盖、试驾路线与责任边界；涉及高风险路况或改装车辆必须人工确认。",
+      "customer_message": "二手车试驾安全提示"
+    },
+    {
+      "id": "shared_used_car_transfer_docs",
+      "message": "提醒客户交易完成后应交付合法证照与交易凭证，涉及过户办理必须按登记流程执行。",
+      "customer_message": "二手车交易资料完整性"
     }
   ]
 }

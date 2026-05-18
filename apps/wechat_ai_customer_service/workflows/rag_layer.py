@@ -10,8 +10,10 @@ from __future__ import annotations
 import hashlib
 import json
 import math
+import os
 import re
 import sys
+import time
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -30,14 +32,29 @@ from apps.wechat_ai_customer_service.knowledge_paths import (  # noqa: E402
     tenant_rag_sources_root,
 )
 from apps.wechat_ai_customer_service.platform_understanding_rules import (  # noqa: E402
+    platform_understanding_cache_token,
     rag_terms,
     semantic_equivalents as visible_semantic_equivalents,
+)
+from apps.wechat_ai_customer_service.admin_backend.services.knowledge_contamination_guard import (  # noqa: E402
+    rag_chunk_exclusion_reason,
+    rag_chunk_is_retrievable,
 )
 from apps.wechat_ai_customer_service.storage import get_postgres_store, load_storage_config  # noqa: E402
 
 
 SUPPORTED_SUFFIXES = {".txt", ".md", ".json", ".csv"}
-DEFAULT_SOURCE_TYPES = {"upload", "chat_log", "product_doc", "policy_doc", "erp_export", "manual", "wechat_raw_message"}
+DEFAULT_SOURCE_TYPES = {
+    "upload",
+    "chat_log",
+    "product_doc",
+    "policy_doc",
+    "erp_export",
+    "manual",
+    "wechat_raw_message",
+    "cleaned_real_chat_pack",
+    "real_chat",
+}
 RETRIEVAL_MODE = "hybrid_lexical_semantic"
 VECTOR_DIMENSIONS = 96
 SOURCE_TYPE_BOOSTS = {
@@ -46,6 +63,8 @@ SOURCE_TYPE_BOOSTS = {
     "policy_doc": 0.03,
     "erp_export": 0.02,
     "rag_experience": 0.02,
+    "cleaned_real_chat_pack": 0.015,
+    "real_chat": 0.012,
     "wechat_raw_message": -0.01,
     "chat_log": -0.02,
 }
@@ -63,6 +82,71 @@ DEFAULT_SEMANTIC_EQUIVALENTS = {
     "民宿客房": ["酒店公寓", "客房"],
     "酒店公寓": ["民宿客房", "客房"],
 }
+
+_SEMANTIC_EQUIVALENTS_MAP_CACHE: dict[str, Any] = {
+    "key": None,
+    "value": None,
+}
+WINDOWS_TRANSIENT_WRITE_ERRNOS = {13, 22}
+WINDOWS_TRANSIENT_WRITE_WINERRORS = {5, 32, 33}
+WINDOWS_WRITE_RETRY_DELAYS = (0.05, 0.1, 0.2, 0.35, 0.5, 0.75, 1.0, 1.25)
+
+
+def is_transient_windows_write_error(exc: OSError) -> bool:
+    return (
+        os.name == "nt"
+        and (
+            int(getattr(exc, "errno", 0) or 0) in WINDOWS_TRANSIENT_WRITE_ERRNOS
+            or int(getattr(exc, "winerror", 0) or 0) in WINDOWS_TRANSIENT_WRITE_WINERRORS
+        )
+    )
+
+
+def write_json_file(path: Path, payload: Any) -> None:
+    """Write JSON via a temp file so Windows never sees a half-written index."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp_path = path.with_name(f".{path.name}.{os.getpid()}.{time.time_ns()}.tmp")
+    last_error: OSError | None = None
+    try:
+        tmp_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+        for index, delay in enumerate(WINDOWS_WRITE_RETRY_DELAYS):
+            try:
+                os.replace(tmp_path, path)
+                return
+            except OSError as exc:
+                last_error = exc
+                if not is_transient_windows_write_error(exc):
+                    raise
+                if index < len(WINDOWS_WRITE_RETRY_DELAYS) - 1:
+                    time.sleep(delay)
+        if last_error is not None:
+            raise last_error
+    finally:
+        try:
+            if tmp_path.exists():
+                tmp_path.unlink()
+        except OSError:
+            pass
+
+
+def remove_path_with_retry(path: Path) -> None:
+    last_error: OSError | None = None
+    for index, delay in enumerate(WINDOWS_WRITE_RETRY_DELAYS):
+        try:
+            path.unlink()
+            return
+        except FileNotFoundError:
+            return
+        except OSError as exc:
+            last_error = exc
+            if not is_transient_windows_write_error(exc):
+                raise
+            if index < len(WINDOWS_WRITE_RETRY_DELAYS) - 1:
+                time.sleep(delay)
+    if last_error is not None:
+        raise last_error
+
+
 class RagService:
     def __init__(
         self,
@@ -153,7 +237,7 @@ class RagService:
                 return result
         self.write_source(source_record)
         chunks_path = self.chunks_root / f"{source_id}.json"
-        chunks_path.write_text(json.dumps({"source": source_record, "chunks": chunks}, ensure_ascii=False, indent=2), encoding="utf-8")
+        write_json_file(chunks_path, {"source": source_record, "chunks": chunks})
         result = {
             "ok": True,
             "source": source_record,
@@ -162,7 +246,7 @@ class RagService:
             "chunks_path": str(chunks_path),
         }
         if rebuild_index:
-            result["index"] = self.rebuild_index()
+            result["index"] = self.update_index_for_chunks(source_id, chunks)
         return result
 
     def write_source(self, source_record: dict[str, Any]) -> None:
@@ -176,7 +260,7 @@ class RagService:
         records = [item for item in records if item.get("source_id") != source_record.get("source_id")]
         records.append(source_record)
         records.sort(key=lambda item: (str(item.get("source_type") or ""), str(item.get("source_id") or "")))
-        self.sources_path.write_text(json.dumps(records, ensure_ascii=False, indent=2), encoding="utf-8")
+        write_json_file(self.sources_path, records)
 
     def list_sources(self) -> list[dict[str, Any]]:
         db = postgres_store(self.tenant_id)
@@ -203,12 +287,12 @@ class RagService:
             return {"ok": True, "deleted_sources": 0, "deleted_chunks": 0}
         remaining = [item for item in records if str(item.get("source_path") or "") != target]
         self.ensure_dirs()
-        self.sources_path.write_text(json.dumps(remaining, ensure_ascii=False, indent=2), encoding="utf-8")
+        write_json_file(self.sources_path, remaining)
         deleted_chunks = 0
         for item in matched:
             chunks_path = self.chunks_root / f"{item.get('source_id')}.json"
             if chunks_path.exists():
-                chunks_path.unlink()
+                remove_path_with_retry(chunks_path)
                 deleted_chunks += 1
         self.rebuild_index()
         return {"ok": True, "deleted_sources": len(matched), "deleted_chunks": deleted_chunks}
@@ -216,7 +300,7 @@ class RagService:
     def iter_chunks(self) -> list[dict[str, Any]]:
         db = postgres_store(self.tenant_id)
         if db:
-            chunks = db.list_rag_chunks(self.tenant_id)
+            chunks = [chunk for chunk in db.list_rag_chunks(self.tenant_id) if rag_chunk_is_retrievable(chunk)]
             chunks.extend(self.iter_experience_chunks())
             if chunks:
                 return chunks
@@ -230,7 +314,7 @@ class RagService:
             except json.JSONDecodeError:
                 continue
             for chunk in payload.get("chunks", []) or []:
-                if chunk.get("status", "active") == "active":
+                if rag_chunk_is_retrievable(chunk):
                     chunks.append(chunk)
         chunks.extend(self.iter_experience_chunks())
         return chunks
@@ -242,7 +326,7 @@ class RagService:
             return []
         store = RagExperienceStore(tenant_id=self.tenant_id)
         chunks: list[dict[str, Any]] = []
-        for item in store.list_retrievable(limit=500):
+        for item in store.list_retrievable(limit=1000):
             text = build_experience_chunk_text(item)
             if not text.strip():
                 continue
@@ -272,24 +356,9 @@ class RagService:
     def rebuild_index(self) -> dict[str, Any]:
         self.ensure_dirs()
         chunks = self.iter_chunks()
-        entries = []
-        for chunk in chunks:
-            text = str(chunk.get("text") or "")
-            terms = sorted(tokenize(text))
-            semantic_terms = sorted(expand_semantic_terms(text, terms))
-            vector = build_sparse_vector([*terms, *semantic_terms])
-            entries.append(
-                {
-                    **chunk,
-                    "terms": terms,
-                    "semantic_terms": semantic_terms,
-                    "vector": vector,
-                    "vector_dimensions": VECTOR_DIMENSIONS,
-                    "term_count": len(terms),
-                    "semantic_term_count": len(semantic_terms),
-                    "risk_terms": sorted(term for term in rag_terms("high_risk_terms") if term in text),
-                }
-            )
+        high_risk_terms = rag_terms("high_risk_terms")
+        semantic_equivalents_map()
+        entries = [build_index_entry(chunk, high_risk_terms=high_risk_terms) for chunk in chunks]
         payload = {
             "schema_version": 1,
             "tenant_id": self.tenant_id,
@@ -303,8 +372,40 @@ class RagService:
             db.replace_rag_index(self.tenant_id, entries)
             if not config.mirror_files:
                 return {"ok": True, "index_path": f"postgres://{db.schema}.rag_index_entries", "entry_count": len(entries)}
-        self.index_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+        write_json_file(self.index_path, payload)
         return {"ok": True, "index_path": str(self.index_path), "entry_count": len(entries)}
+
+    def update_index_for_chunks(self, source_id: str, chunks: list[dict[str, Any]]) -> dict[str, Any]:
+        """Update file-backed RAG index for one source without scanning all chunks."""
+        self.ensure_dirs()
+        db = postgres_store(self.tenant_id)
+        if db or not self.index_path.exists():
+            return self.rebuild_index()
+        try:
+            payload = json.loads(self.index_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return self.rebuild_index()
+        entries = [
+            item
+            for item in payload.get("entries", []) or []
+            if str(item.get("source_id") or "") != str(source_id)
+        ]
+        high_risk_terms = rag_terms("high_risk_terms")
+        semantic_equivalents_map()
+        entries.extend(
+            build_index_entry(chunk, high_risk_terms=high_risk_terms)
+            for chunk in chunks
+            if rag_chunk_is_retrievable(chunk)
+        )
+        next_payload = {
+            "schema_version": 1,
+            "tenant_id": self.tenant_id,
+            "built_at": now(),
+            "entry_count": len(entries),
+            "entries": entries,
+        }
+        write_json_file(self.index_path, next_payload)
+        return {"ok": True, "index_path": str(self.index_path), "entry_count": len(entries), "mode": "incremental_source_update"}
 
     def load_index(self) -> dict[str, Any]:
         db = postgres_store(self.tenant_id)
@@ -542,6 +643,25 @@ def build_experience_chunk_text(item: dict[str, Any]) -> str:
     return normalize_text_block("\n".join(parts))
 
 
+def build_index_entry(chunk: dict[str, Any], *, high_risk_terms: set[str] | None = None) -> dict[str, Any]:
+    text = str(chunk.get("text") or "")
+    terms = sorted(tokenize(text))
+    semantic_terms = sorted(expand_semantic_terms(text, terms))
+    vector = build_sparse_vector([*terms, *semantic_terms])
+    risk_terms = high_risk_terms if high_risk_terms is not None else rag_terms("high_risk_terms")
+    return {
+        **chunk,
+        "retrieval_exclusion_reason": rag_chunk_exclusion_reason(chunk),
+        "terms": terms,
+        "semantic_terms": semantic_terms,
+        "vector": vector,
+        "vector_dimensions": VECTOR_DIMENSIONS,
+        "term_count": len(terms),
+        "semantic_term_count": len(semantic_terms),
+        "risk_terms": sorted(term for term in risk_terms if term in text),
+    }
+
+
 def normalize_text_block(text: str) -> str:
     lines = [re.sub(r"[ \t]+", " ", line).strip() for line in str(text or "").splitlines()]
     return "\n".join(line for line in lines if line).strip()
@@ -617,6 +737,9 @@ def semantic_equivalents(term: str) -> set[str]:
 
 
 def semantic_equivalents_map() -> dict[str, set[str]]:
+    key = platform_understanding_cache_token()
+    if _SEMANTIC_EQUIVALENTS_MAP_CACHE.get("key") == key and isinstance(_SEMANTIC_EQUIVALENTS_MAP_CACHE.get("value"), dict):
+        return _SEMANTIC_EQUIVALENTS_MAP_CACHE["value"]
     merged: dict[str, set[str]] = {}
     for raw_map in (visible_semantic_equivalents(), DEFAULT_SEMANTIC_EQUIVALENTS):
         for raw_key, raw_values in raw_map.items():
@@ -631,6 +754,8 @@ def semantic_equivalents_map() -> dict[str, set[str]]:
     for key, values in list(merged.items()):
         for value in values:
             merged.setdefault(value, set()).add(key)
+    _SEMANTIC_EQUIVALENTS_MAP_CACHE["key"] = platform_understanding_cache_token()
+    _SEMANTIC_EQUIVALENTS_MAP_CACHE["value"] = merged
     return merged
 
 

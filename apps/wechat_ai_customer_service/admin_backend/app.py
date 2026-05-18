@@ -32,6 +32,7 @@ from .api.sync import router as sync_router
 from .api.tenants import router as tenants_router
 from .api.uploads import router as uploads_router
 from .api.versions import router as versions_router
+from .api.workflow import router as workflow_router
 from .auth_context import AuthTenantMiddleware
 
 
@@ -80,6 +81,7 @@ def create_app() -> FastAPI:
     app.include_router(tenants_router)
     app.include_router(uploads_router)
     app.include_router(versions_router)
+    app.include_router(workflow_router)
 
     if STATIC_ROOT.exists():
         app.mount("/static", StaticFiles(directory=STATIC_ROOT), name="static")

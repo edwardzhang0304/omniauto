@@ -37,6 +37,7 @@ class ActiveTarget:
     priority_score: int = 0
     unread_detected: bool = False
     session_age_seconds: int = 0
+    conversation_type: str = "unknown"
 
 
 class SessionMonitor:
@@ -48,6 +49,7 @@ class SessionMonitor:
         tenant_id: str | None = None,
         state_path: Path | None = None,
         whitelist: set[str] | None = None,
+        blacklist: set[str] | None = None,
         max_targets_per_iteration: int = 5,
         min_switch_interval_seconds: int = 2,
     ) -> None:
@@ -56,6 +58,7 @@ class SessionMonitor:
             tenant_runtime_root(self.tenant_id) / "customer_profiles" / "session_monitor_state.json"
         )
         self.whitelist = whitelist or set()
+        self.blacklist = blacklist or set()
         self.max_targets_per_iteration = max(1, max_targets_per_iteration)
         self.min_switch_interval_seconds = max(1, min_switch_interval_seconds)
         self._last_switch_at: float = 0.0
@@ -131,10 +134,13 @@ class SessionMonitor:
             # Skip sessions not in whitelist if whitelist is set
             if self.whitelist and name not in self.whitelist:
                 continue
+            if self.blacklist and name in self.blacklist:
+                continue
 
             content = str(raw.get("content") or "").strip()
             msg_time = str(raw.get("time") or "").strip()
             digest = _digest(content) if content else ""
+            conversation_type = _infer_conversation_type(name, raw)
 
             existing = self._sessions.get(name)
             if existing is None:
@@ -155,6 +161,7 @@ class SessionMonitor:
                         priority_score=50,
                         unread_detected=True,
                         session_age_seconds=0,
+                        conversation_type=conversation_type,
                     ))
             else:
                 changed = False
@@ -187,6 +194,7 @@ class SessionMonitor:
                         priority_score=priority,
                         unread_detected=True,
                         session_age_seconds=age_seconds,
+                        conversation_type=conversation_type,
                     ))
                 else:
                     existing.last_seen_at = now_iso
@@ -235,3 +243,16 @@ class SessionMonitor:
 
 def _digest(value: str) -> str:
     return hashlib.sha256(str(value).encode("utf-8")).hexdigest()[:32]
+
+
+def _infer_conversation_type(name: str, session: dict[str, Any]) -> str:
+    explicit = str(session.get("conversation_type") or session.get("type") or "").strip().lower()
+    if explicit in {"private", "group", "file_transfer", "system"}:
+        return explicit
+    if name in {"文件传输助手", "File Transfer"}:
+        return "file_transfer"
+    if "群" in name or "chatroom" in name.lower() or "room" in name.lower():
+        return "group"
+    if any(keyword in name for keyword in ("微信团队", "系统消息", "服务通知", "订阅号")):
+        return "system"
+    return "private"

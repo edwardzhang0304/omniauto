@@ -1,0 +1,44 @@
+{
+  "schema_version": 1,
+  "category_id": "policies",
+  "id": "chejin_bargain_policy",
+  "status": "active",
+  "source": {
+    "type": "manual_seed",
+    "normalized_by": "knowledge_contamination_guard",
+    "normalized_at": "2026-05-19T01:53:49"
+  },
+  "data": {
+    "title": "议价与价格政策",
+    "policy_type": "discount",
+    "keywords": [
+      "便宜",
+      "砍价",
+      "优惠",
+      "折扣",
+      "最低价",
+      "少点",
+      "能降",
+      "一口价",
+      "全网最低"
+    ],
+    "answer": "我们的报价会结合车况、整备成本和市场行情，尽量做到透明合理。部分车型有议价空间，通常需要到店结合付款方式和是否置换综合确认。我们不承诺全网最低价或绝对最低价；如您有明确预算，我可以先按预算给您筛选更合适的车源。",
+    "allow_auto_reply": true,
+    "requires_handoff": false,
+    "handoff_reason": "",
+    "operator_alert": false,
+    "risk_level": "normal"
+  },
+  "runtime": {
+    "allow_auto_reply": true,
+    "requires_handoff": false,
+    "risk_level": "normal",
+    "operator_alert": false
+  },
+  "metadata": {
+    "created_at": "2026-05-07T10:00:00",
+    "updated_at": "2026-05-14T15:58:00",
+    "created_by": "admin",
+    "updated_by": "workflow_curation"
+  }
+}

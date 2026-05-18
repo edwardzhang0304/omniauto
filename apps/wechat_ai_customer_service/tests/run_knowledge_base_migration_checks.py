@@ -44,7 +44,8 @@ def check_default_categories_are_isolated() -> None:
     registry = KnowledgeRegistry()
     categories = registry.list_categories()
     ids = [item["id"] for item in categories]
-    assert_equal(ids[:4], ["products", "chats", "policies", "erp_exports"], "default category order")
+    assert_equal(ids[:3], ["chats", "policies", "erp_exports"], "formal category order")
+    assert_true("products" not in ids, "products should live in product_master, not formal knowledge registry")
     for category_id in ids:
         root = registry.category_root(category_id)
         assert_true((root / "schema.json").exists(), f"{category_id} schema should exist")

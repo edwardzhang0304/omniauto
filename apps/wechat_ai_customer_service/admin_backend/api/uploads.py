@@ -17,7 +17,7 @@ def upload_store() -> UploadStore:
 
 
 @router.post("")
-async def upload_file(kind: str = Form("products"), file: UploadFile = File(...)) -> dict[str, Any]:
+async def upload_file(kind: str = Form("auto"), file: UploadFile = File(...)) -> dict[str, Any]:
     content = await file.read()
     result = upload_store().save_upload(filename=file.filename or "upload.txt", content=content, kind=kind)
     if not result.get("ok"):
@@ -26,7 +26,7 @@ async def upload_file(kind: str = Form("products"), file: UploadFile = File(...)
 
 
 @router.post("/batch")
-async def upload_files(kind: str = Form("products"), files: list[UploadFile] = File(...)) -> dict[str, Any]:
+async def upload_files(kind: str = Form("auto"), files: list[UploadFile] = File(...)) -> dict[str, Any]:
     if not files:
         raise HTTPException(status_code=400, detail="no files uploaded")
     results = []

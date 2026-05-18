@@ -78,12 +78,12 @@ class VpsAdminStore:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         temp = self.path.with_suffix(self.path.suffix + ".tmp")
         temp.write_text(json.dumps(state, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-        for attempt in range(6):
+        for attempt in range(20):
             try:
                 os.replace(temp, self.path)
                 return
-            except PermissionError:
-                if attempt == 5:
+            except OSError as exc:
+                if not is_transient_windows_write_error(exc) or attempt == 19:
                     raise
                 time.sleep(0.05 * (attempt + 1))
 
@@ -93,6 +93,11 @@ def default_state_path() -> Path:
     if configured:
         return Path(configured)
     return runtime_app_root() / "vps_admin" / "control_plane.json"
+
+
+def is_transient_windows_write_error(exc: OSError) -> bool:
+    winerror = getattr(exc, "winerror", None)
+    return getattr(exc, "errno", None) in {13, 22} or winerror in {5, 32, 33}
 
 
 def default_state() -> dict[str, Any]:

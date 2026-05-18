@@ -15,6 +15,7 @@ from apps.wechat_ai_customer_service.knowledge_paths import (
     TENANTS_ROOT,
     default_admin_knowledge_base_root,
     tenant_product_item_knowledge_root,
+    tenant_product_master_root,
     tenant_raw_inbox_root,
     tenant_review_candidates_root,
 )
@@ -34,12 +35,14 @@ class KnowledgeStore:
         self.knowledge_base_root = default_admin_knowledge_base_root()
         self.shared_knowledge_root = SHARED_KNOWLEDGE_ROOT
         self.tenants_root = TENANTS_ROOT
+        self.product_master_root = tenant_product_master_root()
         self.product_item_knowledge_root = tenant_product_item_knowledge_root()
         self.review_root = tenant_review_candidates_root()
         self.raw_inbox_root = tenant_raw_inbox_root()
         self.prompts_root = self.app_root / "prompts"
         self.runtime = KnowledgeRuntime()
         self.compiler = KnowledgeCompiler(runtime=self.runtime)
+        self._compiled_cache: dict[str, Any] | None = None
 
     @property
     def manifest_path(self) -> Path:
@@ -54,10 +57,32 @@ class KnowledgeStore:
         return self.structured_root / "style_examples.json"
 
     def overview(self) -> dict[str, Any]:
-        product_knowledge = self.product_knowledge()
-        styles = self.style_data()
-        manifest = self.manifest()
         categories = self.runtime.list_categories(enabled_only=True)
+        base_store = KnowledgeBaseStore()
+        category_counts: dict[str, int] = {}
+        for category_id in ("products", "chats", "policies", "erp_exports"):
+            try:
+                category_counts[category_id] = len(base_store.list_items(category_id, include_archived=False))
+            except FileNotFoundError:
+                category_counts[category_id] = 0
+        product_scoped_counts: dict[str, int] = {}
+        for category in product_scoped_category_records():
+            category_id = str(category.get("id") or "")
+            if not category_id:
+                continue
+            try:
+                product_scoped_counts[category_id] = len(base_store.list_items(category_id, include_archived=False))
+            except FileNotFoundError:
+                product_scoped_counts[category_id] = 0
+        product_master_count = category_counts.get("products", 0)
+        chat_count = category_counts.get("chats", 0)
+        policy_count = category_counts.get("policies", 0)
+        erp_count = category_counts.get("erp_exports", 0)
+        product_scoped_total = sum(product_scoped_counts.values())
+        formal_knowledge_total = chat_count + policy_count + erp_count + product_scoped_total
+        knowledge_total = product_master_count + formal_knowledge_total
+        reply_eligible_product_count = len(self.runtime.list_items("products"))
+        product_pending_review = max(0, product_master_count - reply_eligible_product_count)
         pending_count = count_visible_pending_candidates(self.review_root / "pending")
         approved_count = count_json_files(self.review_root / "approved")
         rejected_count = count_json_files(self.review_root / "rejected")
@@ -67,14 +92,26 @@ class KnowledgeStore:
         return {
             "ok": True,
             "created_at": datetime.now().isoformat(timespec="seconds"),
-            "version": product_knowledge.get("version"),
-            "scope": manifest.get("scope"),
+            "version": "knowledge-center-overview-v2",
+            "scope": "wechat_ai_customer_service",
             "counts": {
                 "categories": len(categories),
-                "products": len(product_knowledge.get("products", []) or []),
-                "faqs": len(product_knowledge.get("faq", []) or []),
-                "policies": len(self.policies()),
-                "style_examples": len(styles.get("examples", []) or []),
+                "knowledge_total": knowledge_total,
+                "formal_knowledge_total": formal_knowledge_total,
+                "product_master": product_master_count,
+                "reply_eligible_products": reply_eligible_product_count,
+                "product_pending_review": product_pending_review,
+                # Backward-compatible keys retained for older checks and clients.
+                "products": product_master_count,
+                "faqs": product_scoped_counts.get("product_faq", 0),
+                "policies": policy_count,
+                "style_examples": chat_count,
+                "chats": chat_count,
+                "erp_exports": erp_count,
+                "product_scoped_knowledge": product_scoped_total,
+                "product_faq": product_scoped_counts.get("product_faq", 0),
+                "product_rules": product_scoped_counts.get("product_rules", 0),
+                "product_explanations": product_scoped_counts.get("product_explanations", 0),
                 "pending_candidates": pending_count,
                 "approved_candidates": approved_count,
                 "rejected_candidates": rejected_count,
@@ -86,6 +123,7 @@ class KnowledgeStore:
             },
             "paths": {
                 "knowledge_base_root": str(self.knowledge_base_root),
+                "product_master_root": str(self.product_master_root),
                 "shared_knowledge_root": str(self.shared_knowledge_root),
                 "tenants_root": str(self.tenants_root),
                 "product_item_knowledge_root": str(self.product_item_knowledge_root),
@@ -95,6 +133,7 @@ class KnowledgeStore:
             },
             "updated_at": {
                 "knowledge_bases": newest_mtime(self.knowledge_base_root),
+                "product_master": newest_mtime(self.product_master_root),
                 "shared_knowledge": newest_mtime(self.shared_knowledge_root),
                 "product_item_knowledge": newest_mtime(self.product_item_knowledge_root),
                 "product_knowledge": file_mtime(self.product_knowledge_path),
@@ -120,13 +159,19 @@ class KnowledgeStore:
         return count
 
     def manifest(self) -> dict[str, Any]:
-        return self.compiler.compile()["manifest"]
+        return self._compiled()["manifest"]
 
     def product_knowledge(self) -> dict[str, Any]:
-        return self.compiler.compile()["product_knowledge"]
+        return self._compiled()["product_knowledge"]
 
     def style_data(self) -> dict[str, Any]:
-        return self.compiler.compile()["style_examples"]
+        return self._compiled()["style_examples"]
+
+    def _compiled(self) -> dict[str, Any]:
+        # Compile once per request-scoped store instance to avoid repeated full scans.
+        if self._compiled_cache is None:
+            self._compiled_cache = self.compiler.compile()
+        return self._compiled_cache
 
     def products(self) -> list[dict[str, Any]]:
         return list(self.product_knowledge().get("products", []) or [])

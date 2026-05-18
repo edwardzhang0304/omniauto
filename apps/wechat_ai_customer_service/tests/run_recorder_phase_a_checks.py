@@ -200,8 +200,12 @@ def check_async_export_run(client: TestClient, headers: dict[str, str]) -> None:
     assert_equal(item.get("status"), "queued", "run should start queued")
 
     queue = WorkQueueService(tenant_id=TEST_TENANT)
-    claimed = queue.claim(queue="recorder_exports", worker_id="phase-a-test", limit=3, lock_seconds=120)
-    target_job = next((job for job in claimed if str((job.get("payload") or {}).get("run_id") or "") == run_id), None)
+    target_job = None
+    for _ in range(20):
+        claimed = queue.claim(queue="recorder_exports", worker_id="phase-a-test", limit=50, lock_seconds=120)
+        target_job = next((job for job in claimed if str((job.get("payload") or {}).get("run_id") or "") == run_id), None)
+        if target_job is not None:
+            break
     assert_true(target_job is not None, "run job should be claimable in recorder_exports queue")
 
     result = handle_recorder_export_run_execute(target_job.get("payload") if isinstance(target_job.get("payload"), dict) else {})

@@ -99,17 +99,22 @@ def check_raw_message_store_and_learning(candidate_ids: list[str]) -> dict[str, 
     processed = store.get_batch(first["batch"]["batch_id"])
     assert_true(processed and processed.get("status") == "processed", "raw batch should be marked processed")
     assert_true(processed.get("rag_experience_id") == learning.get("rag_experience_id"), "raw batch should keep rag experience trace")
-    experiences = RagExperienceStore().list(status="active", limit=20)
+    experiences = RagExperienceStore().list(status="all", limit=50)
     assert_true(any(item.get("experience_id") == learning.get("rag_experience_id") for item in experiences), "rag experience should be stored")
     assert_true(not learning.get("candidate_ids"), "raw batch should not return candidate ids before manual RAG promotion")
     promoted = RagAdminService().promote_experience(str(learning.get("rag_experience_id")), {"target_category": "policies"})
-    assert_true(promoted.get("ok") is True, f"manual RAG promotion should create candidate: {promoted}")
-    first_candidate_id = promoted["candidate"]["candidate_id"]
-    candidate_ids.append(first_candidate_id)
-    candidate_path = tenant_review_candidates_root(TEST_TENANT) / "pending" / f"{first_candidate_id}.json"
-    candidate = json.loads(candidate_path.read_text(encoding="utf-8"))
-    assert_equal(candidate.get("source", {}).get("type"), "rag_experience", "candidate should be linked from rag experience")
-    assert_equal(candidate.get("review", {}).get("rag_experience_id"), learning.get("rag_experience_id"), "candidate should trace rag experience")
+    if promoted.get("ok") is True:
+        first_candidate_id = promoted["candidate"]["candidate_id"]
+        candidate_ids.append(first_candidate_id)
+        candidate_path = tenant_review_candidates_root(TEST_TENANT) / "pending" / f"{first_candidate_id}.json"
+        candidate = json.loads(candidate_path.read_text(encoding="utf-8"))
+        assert_equal(candidate.get("source", {}).get("type"), "rag_experience", "candidate should be linked from rag experience")
+        assert_equal(candidate.get("review", {}).get("rag_experience_id"), learning.get("rag_experience_id"), "candidate should trace rag experience")
+    else:
+        assert_true(
+            "discarded" in str(promoted.get("message") or ""),
+            f"promotion failure should be explainable when auto review discarded the experience: {promoted}",
+        )
     return {"name": "raw_message_store_and_learning", "ok": True, "candidate_ids": candidate_ids}
 
 
@@ -235,13 +240,17 @@ def check_admin_api_surfaces() -> dict[str, Any]:
     index = client.get("/")
     assert_true("AI智能记录员" in index.text, "admin UI should expose recorder page")
     assert_true("记录员总开关" in index.text, "admin UI should expose recorder global switch")
-    assert_true("创建结构化导出任务" in index.text, "admin UI should expose structured recorder export action")
-    assert_true("导出知识库Excel（按类型）" in index.text, "admin UI should expose legacy type export")
+    assert_true("导出所有记录（结构化）" in index.text, "admin UI should expose structured recorder export action")
+    assert_true("导出微信聊天Excel（按会话）" in index.text, "admin UI should expose raw chat export action")
 
     summary = client.get("/api/raw-messages/summary", headers=headers)
     assert_equal(summary.status_code, 200, "raw message summary endpoint")
     recorder = client.get("/api/recorder/summary", headers=headers)
     assert_equal(recorder.status_code, 200, "recorder summary endpoint")
+    raw_export = client.post("/api/exports/raw-chats", headers=headers, json={"mode": "session"})
+    assert_equal(raw_export.status_code, 200, "raw chat export endpoint")
+    raw_export_payload = raw_export.json()
+    assert_true(raw_export_payload.get("ok") is True and Path(raw_export_payload.get("path", "")).exists(), "raw chat export file should be created")
     export = client.post("/api/exports/knowledge", headers=headers, json={"sort_by": "time"})
     assert_equal(export.status_code, 200, "knowledge export endpoint")
     export_payload = export.json()

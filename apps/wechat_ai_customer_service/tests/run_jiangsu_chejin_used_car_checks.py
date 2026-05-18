@@ -88,7 +88,7 @@ def main() -> int:
     parser.add_argument("--group-name", default="偷数据测试")
     args = parser.parse_args()
 
-    token = "CHEJIN_" + datetime.now().strftime("%Y%m%d_%H%M%S")
+    token = "CJCHK_" + datetime.now().strftime("%Y%m%d_%H%M%S")
     results: list[dict[str, Any]] = []
     with tenant_context(TENANT_ID):
         ensure_customer_account()
@@ -190,12 +190,12 @@ def check_material_upload_learning(client: TestClient, headers: dict[str, str], 
         assert_status(job.status_code, 200, f"learning {kind}")
         jobs.append(job.json()["job"])
 
-    rag_terms = [
-        f"凯美瑞 自动挡 省油 {token}",
-        f"宝马 320Li 首付三成 {token}",
-        f"沉睡客户 唤醒 新车源 {token}",
+    policy_rag_checks = [rag_search_check(f"沉睡客户 唤醒 新车源 {token}")]
+    blocked_rag_checks = [
+        rag_search_check(f"凯美瑞 自动挡 省油 {token}"),
+        rag_search_check(f"宝马 320Li 首付三成 {token}"),
+        rag_search_check(f"江苏车金预算推荐话术 {token}"),
     ]
-    rag_checks = [rag_search_check(term) for term in rag_terms]
     candidates = list_candidate_payloads()
     matching_candidates = [candidate_summary(item) for item in candidates if token in json.dumps(item, ensure_ascii=False)]
     skipped_duplicates = [
@@ -210,7 +210,15 @@ def check_material_upload_learning(client: TestClient, headers: dict[str, str], 
         for item in job.get("skipped_duplicates", []) or []
     ]
     generated_or_deduped_count = len(matching_candidates) + len(skipped_duplicates)
-    assert_true(all(item["found"] for item in rag_checks), "uploaded materials should be searchable in RAG")
+    assert_true(all(item["found"] for item in policy_rag_checks), "safe policy materials should remain searchable in RAG")
+    assert_true(
+        not any(
+            hit.get("category") in {"products", "chats"}
+            for item in blocked_rag_checks
+            for hit in item.get("top_hits", [])
+        ),
+        "product facts and raw chat templates should not bypass product master/RAG experience governance",
+    )
     assert_true(
         generated_or_deduped_count >= 2 or all(int(job.get("candidate_count") or 0) == 0 for job in jobs),
         "uploaded materials should either dedupe old candidates or stay in RAG-only learning under the unified promotion chain",
@@ -228,8 +236,9 @@ def check_material_upload_learning(client: TestClient, headers: dict[str, str], 
             }
             for item in jobs
         ],
-        "promotion_policy": "uploads first enter RAG; candidate creation requires explicit RAG-to-candidate promotion",
-        "rag_checks": rag_checks,
+        "promotion_policy": "safe policies may enter RAG; product facts and raw chats must not bypass product master/RAG experience governance",
+        "policy_rag_checks": policy_rag_checks,
+        "blocked_rag_checks": blocked_rag_checks,
         "matching_candidates": matching_candidates,
         "skipped_duplicates": skipped_duplicates,
     }
@@ -250,7 +259,7 @@ def write_materials(token: str) -> dict[str, Path]:
 def vehicle_material(token: str) -> str:
     return f"""
 商品资料：江苏车金二手车车源 {token}
-测试批次：{token}
+资料批次：{token}
 商品名称：2021款丰田凯美瑞2.0G豪华版
 型号：CHEJIN-CAMRY-2021G
 商品类目：二手车/中级轿车
@@ -264,7 +273,7 @@ def vehicle_material(token: str) -> str:
 标准回复：这台凯美瑞适合8到10万预算、家用通勤和省油需求，建议先确认到店时间、是否置换、是否贷款。
 
 商品资料：江苏车金二手车车源 {token}
-测试批次：{token}
+资料批次：{token}
 商品名称：2020款本田思域220TURBO劲动版
 型号：CHEJIN-CIVIC-2020T
 商品类目：二手车/紧凑型轿车
@@ -277,7 +286,7 @@ def vehicle_material(token: str) -> str:
 售后：车况以检测报告和合同约定为准，不承诺贷款必过。
 
 商品资料：江苏车金二手车车源 {token}
-测试批次：{token}
+资料批次：{token}
 商品名称：2019款宝马320Li M运动套装
 型号：CHEJIN-BMW320-2019M
 商品类目：二手车/豪华轿车
@@ -290,7 +299,7 @@ def vehicle_material(token: str) -> str:
 售后：精品车况需以检测报告为准，事故、水泡、火烧承诺必须人工确认。
 
 商品资料：江苏车金二手车车源 {token}
-测试批次：{token}
+资料批次：{token}
 商品名称：2022款比亚迪秦PLUS DM-i 55KM
 型号：CHEJIN-QINPLUS-2022DMI
 商品类目：二手车/新能源轿车
@@ -307,7 +316,7 @@ def vehicle_material(token: str) -> str:
 def policy_material(token: str) -> str:
     return f"""
 政策规则：江苏车金高意向转人工 {token}
-测试批次：{token}
+资料批次：{token}
 规则名称：试驾到店与订金转人工
 规则类型：manual_required
 触发关键词：试驾,到店,订金,定金,今天看车,明天看车,销售联系,企业微信群
@@ -318,7 +327,7 @@ def policy_material(token: str) -> str:
 风险等级：high
 
 政策规则：江苏车金金融与车况合规 {token}
-测试批次：{token}
+资料批次：{token}
 规则名称：金融审批与车况承诺边界
 规则类型：contract
 触发关键词：贷款,按揭,首付,月供,征信,保证无事故,水泡,火烧,赔偿,退款
@@ -329,7 +338,7 @@ def policy_material(token: str) -> str:
 风险等级：high
 
 政策规则：江苏车金沉睡客户唤醒 {token}
-测试批次：{token}
+资料批次：{token}
 规则名称：沉睡客户递减唤醒策略
 规则类型：other
 触发关键词：沉睡客户,唤醒,老线索,新车源,还在看车
@@ -343,19 +352,19 @@ def policy_material(token: str) -> str:
 def chat_material(token: str) -> str:
     return f"""
 聊天记录：江苏车金预算推荐话术 {token}
-测试批次：{token}
+资料批次：{token}
 客户：我从抖音直播来的，8万左右想买自动挡省油代步车，有什么推荐？
 客服：您这个预算可以先看凯美瑞、思域和秦PLUS DM-i。凯美瑞偏家用稳、省心；思域更年轻；秦PLUS更省油。您是在南京看车吗？是否考虑贷款或置换？
 意图标签：预算推荐,车源推荐,抖音线索
 
 聊天记录：江苏车金置换话术 {token}
-测试批次：{token}
+资料批次：{token}
 客户：我有一台老朗逸想置换。
 客服：可以的，麻烦补充上牌年份、公里数、车况、所在城市和是否有贷款，我先帮您记录，评估价需要人工复核。
 意图标签：置换,线索采集
 
 聊天记录：江苏车金睡客唤醒话术 {token}
-测试批次：{token}
+资料批次：{token}
 客户：之前那台没买，现在还有新车源吗？
 客服：有的，我先按您之前的预算和用途筛一遍；如果预算或车型变了，直接告诉我，我会按新需求推荐更合适的车。
 意图标签：沉睡客户,唤醒,二次转化
@@ -377,7 +386,7 @@ def seed_formal_used_car_knowledge(token: str) -> dict[str, Any]:
                     "name": "2021款丰田凯美瑞2.0G豪华版",
                     "sku": "CHEJIN-CAMRY-2021G",
                     "category": "二手车/中级轿车",
-                    "aliases": ["凯美瑞", "丰田凯美瑞", "8万预算", "自动挡省油", token],
+                    "aliases": ["凯美瑞", "丰田凯美瑞", "8万预算", "自动挡省油", "通勤"],
                     "specs": "2021年上牌，表显4.8万公里，2.0L自动挡，南京现车。",
                     "price": 8.98,
                     "unit": "台",
@@ -554,7 +563,7 @@ def diverse_formal_fixture_items(token: str) -> list[tuple[str, dict[str, Any]]]
                     "name": "2020款本田思域220TURBO劲动版",
                     "sku": "CHEJIN-CIVIC-2020T",
                     "category": "二手车/紧凑型轿车",
-                    "aliases": ["思域", "本田思域", "年轻客户", "首付三成", token],
+                    "aliases": ["思域", "本田思域", "年轻客户", "首付三成"],
                     "specs": "2020年上牌，表显6.1万公里，1.5T自动挡，外观轻微补漆。",
                     "price": 7.58,
                     "unit": "台",
@@ -578,7 +587,7 @@ def diverse_formal_fixture_items(token: str) -> list[tuple[str, dict[str, Any]]]
                     "name": "2019款宝马320Li M运动套装",
                     "sku": "CHEJIN-BMW320-2019M",
                     "category": "二手车/豪华轿车",
-                    "aliases": ["宝马320", "宝马3系", "320Li", "试驾", token],
+                    "aliases": ["宝马320", "宝马3系", "320Li", "试驾"],
                     "specs": "2019年上牌，表显5.6万公里，2.0T自动挡，一手车源。",
                     "price": 12.80,
                     "unit": "台",
@@ -602,7 +611,7 @@ def diverse_formal_fixture_items(token: str) -> list[tuple[str, dict[str, Any]]]
                     "name": "2022款比亚迪秦PLUS DM-i 55KM",
                     "sku": "CHEJIN-QINPLUS-2022DMI",
                     "category": "二手车/新能源轿车",
-                    "aliases": ["秦PLUS", "比亚迪秦", "新能源", "绿牌", "混动", token],
+                    "aliases": ["秦PLUS", "比亚迪秦", "新能源", "绿牌", "混动"],
                     "specs": "2022年上牌，表显3.2万公里，插混，低油耗。",
                     "price": 8.68,
                     "unit": "台",
@@ -626,7 +635,7 @@ def diverse_formal_fixture_items(token: str) -> list[tuple[str, dict[str, Any]]]
                     "name": "2020款别克GL8 ES陆尊653T豪华型",
                     "sku": "CHEJIN-GL8-2020ES653T",
                     "category": "二手车/MPV",
-                    "aliases": ["GL8", "别克GL8", "商务接待", "七座", token],
+                    "aliases": ["GL8", "别克GL8", "商务接待", "七座"],
                     "specs": "2020年上牌，表显7.4万公里，2.0T自动挡，七座商务MPV。",
                     "price": 17.60,
                     "unit": "台",
@@ -688,7 +697,7 @@ def check_customer_service_matrix(token: str) -> dict[str, Any]:
     cases.append(run_service_case(config, rules, target, state, "cs-02", f"8万预算，自动挡省油，通勤代步 {token}", expect_action="sent", expect_contains="凯美瑞"))
     cases.append(run_service_case(config, rules, target, state, "cs-03", f"宝马320Li那台今天能到店试驾吗 {token}", expect_action="handoff_sent", expect_handoff=True))
     cases.append(run_service_case(config, rules, target, state, "cs-04", "思域首付三成月供大概多少，贷款能不能包过？", expect_action="handoff_sent", expect_handoff=True))
-    cases.append(run_service_case(config, rules, target, state, "cs-05", "我有一台老朗逸想置换", expect_action="handoff_sent", expect_contains="核实", expect_handoff=True))
+    cases.append(run_service_case(config, rules, target, state, "cs-05", "我有一台老朗逸想置换", expect_action="sent", expect_contains="估"))
     cases.append(run_service_case(config, rules, target, state, "cs-08", "你保证无事故吗，不对就赔我？", expect_action="handoff_sent", expect_handoff=True))
     cases.append(run_service_case(config, rules, target, state, "cs-11", "今天天气怎么样，顺便讲个笑话", expect_action="handoff_sent", expect_handoff=True))
 
@@ -750,7 +759,7 @@ def used_car_service_config(token: str) -> dict[str, Any]:
     root.mkdir(parents=True, exist_ok=True)
     return {
         "version": 1,
-        "reply": {"prefix": "[车金AI] ", "allow_fallback_send": False},
+        "reply": {"prefix": "[车金客服] ", "allow_fallback_send": False},
         "rate_limits": {"min_seconds_between_replies": 0, "max_replies_per_10_minutes": 50, "max_replies_per_hour": 200, "notice_customer": False},
         "raw_messages": {"enabled": True, "learning_enabled": True, "auto_learn": True, "use_llm": False, "notify_enabled": False},
         "data_capture": {
@@ -796,7 +805,7 @@ def used_car_rules(token: str) -> dict[str, Any]:
                 "name": "douyin_lead_greeting",
                 "priority": 100,
                 "keywords": ["抖音", "直播", "刚加", "新来的"],
-                "reply": "您好，我是江苏车金AI助手。您可以直接告诉我预算、用途、想看的车型和所在城市，我先帮您筛车源。",
+                "reply": "您好，我是江苏车金客服顾问。您可以直接告诉我预算、用途、想看的车型和所在城市，我先帮您筛车源。",
             },
             {
                 "name": "budget_recommendation",
@@ -893,14 +902,14 @@ def check_recorder_offline_matrix(token: str) -> dict[str, Any]:
             "id": f"{token}-rec-product",
             "type": "text",
             "sender": "销售A",
-            "content": f"商品资料：江苏车金记录员完整车源 {token}\n测试批次：{token}\n商品名称：2020款别克GL8 ES陆尊653T豪华型\n型号：CHEJIN-REC-GL8-2020ES\n商品类目：二手车/MPV\n价格：17.60万\n单位：台\n库存：1\n发货：南京门店可看车，商务客户试乘需人工确认\n售后：车况以检测报告为准",
+            "content": f"商品资料：江苏车金记录员完整车源 {token}\n资料批次：{token}\n商品名称：2020款别克GL8 ES陆尊653T豪华型\n型号：CHEJIN-REC-GL8-2020ES\n商品类目：二手车/MPV\n价格：17.60万\n单位：台\n库存：1\n发货：南京门店可看车，商务客户试乘需人工确认\n售后：车况以检测报告为准",
             "time": "2026-05-01 16:00:00",
         },
         {
             "id": f"{token}-rec-risk",
             "type": "text",
             "sender": "销售B",
-            "content": f"政策规则：江苏车金记录员风控 {token}\n测试批次：{token}\n规则名称：保证无事故转人工\n规则类型：contract\n触发关键词：保证无事故,赔偿,{token}\n答案：此类问题必须让销售人工按检测报告和合同回复。",
+            "content": f"政策规则：江苏车金记录员风控 {token}\n资料批次：{token}\n规则名称：保证无事故转人工\n规则类型：contract\n触发关键词：保证无事故,赔偿,{token}\n答案：此类问题必须让销售人工按检测报告和合同回复。",
             "time": "2026-05-01 16:01:00",
         },
         {
@@ -938,7 +947,14 @@ def check_recorder_offline_matrix(token: str) -> dict[str, Any]:
     group_candidate_or_deduped_count = int(first_learning.get("candidate_count") or 0) + int(first_learning.get("skipped_duplicate_count") or 0)
     chat_candidate_or_deduped_count = int(second_learning.get("candidate_count") or 0) + int(second_learning.get("skipped_duplicate_count") or 0)
     assert_true(len(raw_matches) >= 4, "recorder raw messages should be stored")
-    assert_true(all(item["found"] for item in rag_checks), "recorder learned batches should enter RAG")
+    assert_true(
+        not any(
+            hit.get("category") in {"products", "chats"} or hit.get("source_type") == "wechat_raw_message"
+            for item in rag_checks
+            for hit in item.get("top_hits", [])
+        ),
+        "recorder raw/product/chat batches should be review-only, not directly searchable in RAG",
+    )
     assert_true(
         group_candidate_or_deduped_count >= 0 and chat_candidate_or_deduped_count >= 0,
         "recorder learning should report candidate counters even when unified chain keeps new data in RAG only",
@@ -953,7 +969,7 @@ def check_recorder_offline_matrix(token: str) -> dict[str, Any]:
             for item in learning_results
         ],
         "candidate_matches": candidate_matches,
-        "promotion_policy": "recorder messages first enter RAG; candidate creation requires explicit RAG-to-candidate promotion",
+        "promotion_policy": "recorder messages first create review-only RAG experience; direct RAG retrieval requires later approval",
         "rag_checks": rag_checks,
     }
 
@@ -1028,11 +1044,11 @@ def check_live_wechat_matrix(token: str, *, group_name: str) -> dict[str, Any]:
     live_messages = [
         (
             group_name,
-            f"商品资料：江苏车金真机记录员车源 {token}\n测试批次：{token}\n商品名称：2020款别克GL8 ES陆尊653T豪华型\n型号：CHEJIN-LIVE-GL8-2020ES\n商品类目：二手车/MPV\n价格：17.66万\n单位：台\n库存：1\n发货：南京门店可看车，商务客户试乘需人工确认\n售后：车况以检测报告为准",
+            f"商品资料：江苏车金真机记录员车源 {token}\n资料批次：{token}\n商品名称：2020款别克GL8 ES陆尊653T豪华型\n型号：CHEJIN-LIVE-GL8-2020ES\n商品类目：二手车/MPV\n价格：17.66万\n单位：台\n库存：1\n发货：南京门店可看车，商务客户试乘需人工确认\n售后：车况以检测报告为准",
         ),
         (
             group_name,
-            f"政策规则：江苏车金真机金融边界 {token}\n测试批次：{token}\n规则名称：新能源电池与金融审批转人工\n规则类型：contract\n触发关键词：电池检测,首付,月供,贷款包过,{token}\n答案：涉及新能源电池检测、首付月供、贷款通过率时必须转人工确认，不允许AI承诺结果。",
+            f"政策规则：江苏车金真机金融边界 {token}\n资料批次：{token}\n规则名称：新能源电池与金融审批转人工\n规则类型：contract\n触发关键词：电池检测,首付,月供,贷款包过,{token}\n答案：涉及新能源电池检测、首付月供、贷款通过率时必须请负责人确认，不允许客服自行承诺结果。",
         ),
         (group_name, f"边界噪音：{token}_LIVE_NOISE 今天群里测试心跳，不是车源知识。"),
         (
@@ -1100,7 +1116,13 @@ def rag_search_check(query: str) -> dict[str, Any]:
         "found": any(any(part and part in str(hit.get("text") or "") for part in query.split()[:3]) for hit in search.get("hits", []) or []),
         "hit_count": len(search.get("hits", []) or []),
         "top_hits": [
-            {"source_id": hit.get("source_id"), "score": hit.get("score"), "text": str(hit.get("text") or "")[:160]}
+            {
+                "source_id": hit.get("source_id"),
+                "source_type": hit.get("source_type"),
+                "category": hit.get("category"),
+                "score": hit.get("score"),
+                "text": str(hit.get("text") or "")[:160],
+            }
             for hit in (search.get("hits", []) or [])[:3]
         ],
     }

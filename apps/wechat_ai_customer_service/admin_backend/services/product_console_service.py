@@ -12,6 +12,8 @@ from pathlib import Path
 from typing import Any
 
 from apps.wechat_ai_customer_service.llm_config import (
+    apply_llm_reasoning_effort,
+    llm_urlopen,
     read_secret,
     resolve_deepseek_base_url,
     resolve_deepseek_max_tokens,
@@ -1720,6 +1722,7 @@ def _call_llm_for_command(text: str, products: list[dict[str, Any]], *, use_llm:
         "max_tokens": resolve_deepseek_max_tokens(1200, read_secret_fn=read_secret),
         "response_format": {"type": "json_object"},
     }
+    apply_llm_reasoning_effort(payload, tier="flash", read_secret_fn=read_secret)
 
     request = urllib.request.Request(
         url=base_url.rstrip("/") + "/chat/completions",
@@ -1729,7 +1732,7 @@ def _call_llm_for_command(text: str, products: list[dict[str, Any]], *, use_llm:
     )
 
     try:
-        with urllib.request.urlopen(request, timeout=resolve_deepseek_timeout(30, read_secret_fn=read_secret)) as response:
+        with llm_urlopen(request, timeout=resolve_deepseek_timeout(30, read_secret_fn=read_secret)) as response:
             raw = response.read().decode("utf-8")
         data = json.loads(raw or "{}")
     except (urllib.error.HTTPError, urllib.error.URLError, TimeoutError, OSError, json.JSONDecodeError):

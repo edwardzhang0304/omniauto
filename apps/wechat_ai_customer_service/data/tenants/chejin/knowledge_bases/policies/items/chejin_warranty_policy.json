@@ -1,0 +1,41 @@
+{
+  "schema_version": 1,
+  "category_id": "policies",
+  "id": "chejin_warranty_policy",
+  "status": "active",
+  "source": {
+    "type": "manual_seed",
+    "normalized_by": "knowledge_contamination_guard",
+    "normalized_at": "2026-05-19T01:53:49"
+  },
+  "data": {
+    "title": "售后质保与退换政策",
+    "policy_type": "after_sales",
+    "keywords": [
+      "质保",
+      "保修",
+      "退换",
+      "售后",
+      "问题车",
+      "维权"
+    ],
+    "answer": "我们提供90天或5000公里核心部件质保（发动机、变速箱）。质保期内如发现重大事故、水泡、火烧问题且我们未提前告知，可全额退款退车。质保以合同约定为准，具体条款购车时会详细说明。质保期外的维修由客户自理，我们可推荐合作修理厂但不强制。",
+    "allow_auto_reply": true,
+    "requires_handoff": false,
+    "handoff_reason": "",
+    "operator_alert": false,
+    "risk_level": "normal"
+  },
+  "runtime": {
+    "allow_auto_reply": true,
+    "requires_handoff": false,
+    "risk_level": "normal",
+    "operator_alert": false
+  },
+  "metadata": {
+    "created_at": "2026-05-07T10:00:00",
+    "updated_at": "2026-05-07T10:00:00",
+    "created_by": "admin",
+    "updated_by": "admin"
+  }
+}

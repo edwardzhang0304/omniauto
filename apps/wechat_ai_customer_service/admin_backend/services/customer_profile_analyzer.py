@@ -15,6 +15,8 @@ from apps.wechat_ai_customer_service.admin_backend.services.customer_profile_sto
 from apps.wechat_ai_customer_service.admin_backend.services.raw_message_store import RawMessageStore
 from apps.wechat_ai_customer_service.knowledge_paths import active_tenant_id
 from apps.wechat_ai_customer_service.llm_config import (
+    apply_llm_reasoning_effort,
+    llm_urlopen,
     read_secret,
     resolve_deepseek_base_url,
     resolve_deepseek_model,
@@ -185,6 +187,7 @@ class CustomerProfileAnalyzer:
             "stream": False,
             "response_format": {"type": "json_object"},
         }
+        apply_llm_reasoning_effort(payload, tier="flash", read_secret_fn=read_secret)
         request = urllib.request.Request(
             url,
             data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
@@ -192,7 +195,7 @@ class CustomerProfileAnalyzer:
             method="POST",
         )
         try:
-            with urllib.request.urlopen(request, timeout=max(1, timeout)) as response:
+            with llm_urlopen(request, timeout=max(1, timeout)) as response:
                 raw = response.read().decode("utf-8", errors="replace")
                 data = json.loads(raw)
                 content = data.get("choices", [{}])[0].get("message", {}).get("content", "")

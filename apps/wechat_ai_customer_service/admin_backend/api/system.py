@@ -11,8 +11,22 @@ from fastapi import APIRouter, Request
 
 from apps.wechat_ai_customer_service.auth.models import Role
 from apps.wechat_ai_customer_service.llm_config import (
+    LLM_REASONING_EFFORT_OPTIONS,
+    active_llm_provider,
+    apply_llm_reasoning_effort,
+    llm_provider_options,
+    llm_provider_preset,
+    llm_urlopen,
     load_llm_config,
-    resolve_deepseek_base_url,
+    normalize_llm_base_url,
+    normalize_llm_provider,
+    normalize_llm_reasoning_effort,
+    parse_bool,
+    resolve_llm_api_key,
+    resolve_llm_allow_insecure_tls,
+    resolve_llm_base_url,
+    resolve_llm_reasoning_effort,
+    resolve_llm_tier_model,
     save_llm_config,
 )
 from apps.wechat_ai_customer_service.platform_safety_rules import load_platform_safety_rules, save_platform_safety_rules
@@ -149,62 +163,244 @@ def heartbeat(component_id: str, payload: dict[str, Any] | None = None) -> dict[
 def llm_config(request: Request) -> dict[str, Any]:
     context = current_auth_context(request)
     config = load_llm_config()
-    key = str(config.get("DEEPSEEK_API_KEY") or "")
-    return {
-        "ok": True,
-        "api_key_configured": bool(key),
-        "api_key_masked": _mask_key(key),
-        "editable": context.role == Role.ADMIN,
-    }
+    provider = active_llm_provider(config=config)
+    return _llm_config_payload(context=context, config=config, provider=provider)
 
 
 @router.put("/llm-config")
 def update_llm_config(request: Request, payload: dict[str, Any]) -> dict[str, Any]:
     context = current_auth_context(request)
-    if context.role != Role.ADMIN:
-        return {"ok": False, "detail": "only admin can update llm config"}
     config = load_llm_config()
-    new_key = str(payload.get("deepseek_api_key") or "").strip()
-    if new_key:
-        config["DEEPSEEK_API_KEY"] = new_key
-    else:
-        config.pop("DEEPSEEK_API_KEY", None)
+    legacy_key_only = set(payload.keys()) <= {"deepseek_api_key"}
+    provider_value = payload.get("provider")
+    if not provider_value and "deepseek_api_key" in payload and "api_key" not in payload:
+        provider_value = "deepseek"
+    provider = normalize_llm_provider(provider_value or config.get("LLM_PROVIDER") or "deepseek")
+    preset = llm_provider_preset(provider)
+    config["LLM_PROVIDER"] = provider
+
+    base_url = normalize_llm_base_url(str(payload.get("base_url") or ""))
+    flash_model = str(payload.get("flash_model") or payload.get("model") or "").strip()
+    pro_model = str(payload.get("pro_model") or payload.get("model") or "").strip()
+    flash_reasoning_effort = normalize_llm_reasoning_effort(payload.get("flash_reasoning_effort"))
+    pro_reasoning_effort = normalize_llm_reasoning_effort(payload.get("pro_reasoning_effort"))
+    api_key = str(payload.get("api_key") or payload.get("deepseek_api_key") or "").strip()
+    clear_api_key = bool(payload.get("clear_api_key")) or (legacy_key_only and not api_key)
+    allow_insecure_tls = parse_bool(payload.get("allow_insecure_tls"), default=False)
+
+    if "base_url" in payload:
+        _set_or_clear(config, str(preset.get("base_url_env") or ""), base_url)
+    if "flash_model" in payload or "model" in payload:
+        _set_or_clear(config, str(preset.get("flash_model_env") or ""), flash_model)
+    if "pro_model" in payload or "model" in payload:
+        _set_or_clear(config, str(preset.get("pro_model_env") or ""), pro_model)
+    if "flash_reasoning_effort" in payload:
+        _set_or_clear(config, str(preset.get("flash_reasoning_effort_env") or ""), flash_reasoning_effort)
+    if "pro_reasoning_effort" in payload:
+        _set_or_clear(config, str(preset.get("pro_reasoning_effort_env") or ""), pro_reasoning_effort)
+    if "allow_insecure_tls" in payload:
+        _set_bool(config, str(preset.get("allow_insecure_tls_env") or ""), allow_insecure_tls)
+    if api_key:
+        config[str(preset.get("api_key_env") or "")] = api_key
+    elif clear_api_key:
+        config.pop(str(preset.get("api_key_env") or ""), None)
+        if provider == "openai_compatible":
+            config.pop("LLM_API_KEY", None)
     save_llm_config(config)
-    return {
-        "ok": True,
-        "api_key_configured": bool(config.get("DEEPSEEK_API_KEY")),
-        "api_key_masked": _mask_key(str(config.get("DEEPSEEK_API_KEY") or "")),
-    }
+    return _llm_config_payload(context=context, config=config, provider=provider)
 
 
 @router.post("/llm-config/test")
-def test_llm_config(request: Request) -> dict[str, Any]:
+def test_llm_config(request: Request, payload: dict[str, Any] | None = None) -> dict[str, Any]:
     context = current_auth_context(request)
-    if context.role != Role.ADMIN:
-        return {"ok": False, "detail": "only admin can test llm config"}
+    payload = payload or {}
     config = load_llm_config()
-    api_key = str(config.get("DEEPSEEK_API_KEY") or "")
+    provider = normalize_llm_provider(payload.get("provider") or active_llm_provider(config=config))
+    api_key = str(payload.get("api_key") or "").strip() or resolve_llm_api_key(provider=provider, config=config)
     if not api_key:
-        return {"ok": False, "message": "DEEPSEEK_API_KEY 未配置"}
-    base_url = resolve_deepseek_base_url()
+        return {"ok": False, "message": f"{llm_provider_preset(provider).get('label', provider)} API Key 未配置", "provider": provider}
+    base_url = normalize_llm_base_url(str(payload.get("base_url") or "")) or resolve_llm_base_url(provider=provider, config=config)
+    if not base_url:
+        return {"ok": False, "message": "Base URL 未配置", "provider": provider}
+    tier = "pro" if str(payload.get("route") or payload.get("tier") or "").strip().lower() == "pro" else "flash"
+    requested_model = payload.get("model")
+    if requested_model is None:
+        requested_model = payload.get("pro_model") if tier == "pro" else payload.get("flash_model")
+    model = str(requested_model or "").strip() or resolve_llm_tier_model(provider=provider, tier=tier, config=config)
+    if not model:
+        return {"ok": False, "message": "模型名未配置", "provider": provider, "base_url": base_url}
+    request_payload: dict[str, Any] = {
+        "model": model,
+        "messages": [{"role": "user", "content": "Reply with OK only."}],
+        "temperature": 0,
+        "max_tokens": 8,
+        "stream": False,
+    }
+    explicit_reasoning_effort = payload.get("reasoning_effort") if "reasoning_effort" in payload else None
+    reasoning_effort = apply_llm_reasoning_effort(
+        request_payload,
+        provider=provider,
+        tier=tier,
+        explicit_value=explicit_reasoning_effort,
+        config=config,
+    )
+    try:
+        req = urllib.request.Request(
+            base_url.rstrip("/") + "/chat/completions",
+            data=json.dumps(request_payload, ensure_ascii=False).encode("utf-8"),
+            headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json", "Accept": "application/json"},
+            method="POST",
+        )
+        with llm_urlopen(req, timeout=30, provider=provider, allow_insecure_tls=payload.get("allow_insecure_tls")) as response:
+            status = int(getattr(response, "status", 200))
+            if 200 <= status < 300:
+                raw = response.read().decode("utf-8", errors="replace")
+                sample = _chat_completion_sample(raw)
+                return {
+                    "ok": True,
+                    "message": "连接成功",
+                    "provider": provider,
+                    "provider_label": str(llm_provider_preset(provider).get("label") or provider),
+                    "base_url": base_url,
+                    "model": model,
+                    "route": tier,
+                    "reasoning_effort": reasoning_effort,
+                    "sample": sample,
+                }
+            return {"ok": False, "message": f"HTTP {status}", "provider": provider, "base_url": base_url, "model": model}
+    except urllib.error.HTTPError as exc:
+        detail = exc.read().decode("utf-8", errors="replace")[:200]
+        model_hint = _llm_model_unavailable_hint(provider=provider, base_url=base_url, api_key=api_key, model=model, allow_insecure_tls=payload.get("allow_insecure_tls"))
+        message = f"HTTP {exc.code}: {detail}"
+        if model_hint:
+            message = f"{message}\n{model_hint}"
+        return {"ok": False, "message": message, "provider": provider, "base_url": base_url, "model": model}
+    except urllib.error.URLError as exc:
+        return {"ok": False, "message": f"连接失败: {exc.reason}", "provider": provider, "base_url": base_url, "model": model}
+    except Exception as exc:
+        return {"ok": False, "message": f"测试异常: {exc}", "provider": provider, "base_url": base_url, "model": model}
+
+
+def _llm_config_payload(*, context: Any, config: dict[str, str], provider: str) -> dict[str, Any]:
+    provider = normalize_llm_provider(provider)
+    key = resolve_llm_api_key(provider=provider, config=config)
+    providers = []
+    for option in llm_provider_options(config=config):
+        provider_key = resolve_llm_api_key(provider=option.get("id"), config=config)
+        providers.append({**option, "api_key_masked": _mask_key(provider_key)})
+    preset = llm_provider_preset(provider)
+    base_url = resolve_llm_base_url(provider=provider, config=config)
+    model_probe = _fetch_provider_model_ids(
+        provider=provider,
+        base_url=base_url,
+        api_key=key,
+        allow_insecure_tls=resolve_llm_allow_insecure_tls(provider=provider, config=config),
+        timeout=4,
+    )
+    available_models = model_probe.get("models") if isinstance(model_probe.get("models"), list) else []
+    return {
+        "ok": True,
+        "provider": provider,
+        "provider_label": str(preset.get("label") or provider),
+        "providers": providers,
+        "base_url": base_url,
+        "flash_model": resolve_llm_tier_model(provider=provider, tier="flash", config=config),
+        "pro_model": resolve_llm_tier_model(provider=provider, tier="pro", config=config),
+        "flash_reasoning_effort": resolve_llm_reasoning_effort(provider=provider, tier="flash", config=config),
+        "pro_reasoning_effort": resolve_llm_reasoning_effort(provider=provider, tier="pro", config=config),
+        "reasoning_effort_options": list(LLM_REASONING_EFFORT_OPTIONS),
+        "available_models": available_models,
+        "available_models_error": str(model_probe.get("error") or ""),
+        "allow_insecure_tls": resolve_llm_allow_insecure_tls(provider=provider, config=config),
+        "api_key_configured": bool(key),
+        "api_key_masked": _mask_key(key),
+        "editable": True,
+    }
+
+
+def _set_or_clear(config: dict[str, str], key: str, value: str) -> None:
+    if not key:
+        return
+    if value:
+        config[key] = value
+    else:
+        config.pop(key, None)
+
+
+def _set_bool(config: dict[str, str], key: str, value: bool) -> None:
+    if not key:
+        return
+    if value:
+        config[key] = "1"
+    else:
+        config.pop(key, None)
+
+
+def _chat_completion_sample(raw: str) -> str:
+    try:
+        data = json.loads(raw)
+    except json.JSONDecodeError:
+        return raw[:80]
+    content = (
+        data.get("choices", [{}])[0]
+        .get("message", {})
+        .get("content", "")
+    )
+    return str(content or "").strip()[:80]
+
+
+def _llm_model_unavailable_hint(*, provider: str, base_url: str, api_key: str, model: str, allow_insecure_tls: Any = None) -> str:
+    probe = _fetch_provider_model_ids(
+        provider=provider,
+        base_url=base_url,
+        api_key=api_key,
+        allow_insecure_tls=allow_insecure_tls,
+        timeout=8,
+    )
+    models = probe.get("models") if isinstance(probe.get("models"), list) else []
+    if models and model not in models:
+        shown = ", ".join(str(item) for item in models[:12])
+        more = f" 等 {len(models)} 个" if len(models) > 12 else ""
+        return f"当前中转 /models 未列出 `{model}`，可用模型只有：{shown}{more}。请在中转站开通/映射该模型，或改用列表中的模型。"
+    error = str(probe.get("error") or "")
+    if error:
+        return f"无法读取当前中转 /models 列表：{error}"
+    return ""
+
+
+def _fetch_provider_model_ids(
+    *,
+    provider: str,
+    base_url: str,
+    api_key: str,
+    allow_insecure_tls: Any = None,
+    timeout: int = 6,
+) -> dict[str, Any]:
+    if not base_url or not api_key:
+        return {"ok": False, "models": [], "error": ""}
     try:
         req = urllib.request.Request(
             base_url.rstrip("/") + "/models",
-            headers={"Authorization": f"Bearer {api_key}"},
+            headers={"Authorization": f"Bearer {api_key}", "Accept": "application/json"},
             method="GET",
         )
-        with urllib.request.urlopen(req, timeout=15) as response:
-            status = int(getattr(response, "status", 200))
-            if 200 <= status < 300:
-                return {"ok": True, "message": "连接成功", "base_url": base_url}
-            return {"ok": False, "message": f"HTTP {status}", "base_url": base_url}
+        with llm_urlopen(req, timeout=max(1, timeout), provider=provider, allow_insecure_tls=allow_insecure_tls) as response:
+            raw = response.read().decode("utf-8", errors="replace")
+        data = json.loads(raw or "{}")
     except urllib.error.HTTPError as exc:
-        detail = exc.read().decode("utf-8", errors="replace")[:200]
-        return {"ok": False, "message": f"HTTP {exc.code}: {detail}", "base_url": base_url}
-    except urllib.error.URLError as exc:
-        return {"ok": False, "message": f"连接失败: {exc.reason}", "base_url": base_url}
+        detail = exc.read().decode("utf-8", errors="replace")[:160]
+        return {"ok": False, "models": [], "error": f"HTTP {exc.code}: {detail}"}
     except Exception as exc:
-        return {"ok": False, "message": f"测试异常: {exc}", "base_url": base_url}
+        return {"ok": False, "models": [], "error": str(exc)}
+    items = data.get("data") if isinstance(data, dict) else []
+    models = []
+    if isinstance(items, list):
+        for item in items:
+            if isinstance(item, dict):
+                model_id = str(item.get("id") or "").strip()
+                if model_id and model_id not in models:
+                    models.append(model_id)
+    return {"ok": True, "models": models, "error": ""}
 
 
 def _mask_key(key: str) -> str:

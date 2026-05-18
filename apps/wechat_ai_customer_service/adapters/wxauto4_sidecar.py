@@ -13,6 +13,7 @@ import contextlib
 import ctypes
 import io
 import json
+import re
 import sys
 import time
 from ctypes import wintypes
@@ -26,6 +27,7 @@ def main() -> int:
     parser.add_argument("--text", help="Message text for send.")
     parser.add_argument("--exact", action="store_true", help="Use exact chat name matching.")
     parser.add_argument("--resize", action="store_true", help="Allow wxauto4 to resize WeChat.")
+    parser.add_argument("--history-load-times", type=int, default=0, help="Use wxauto4 LoadMoreCache before reading messages.")
     parser.add_argument("--daemon", action="store_true", help="Run in daemon mode (read commands from stdin).")
     args = parser.parse_args()
 
@@ -72,6 +74,11 @@ def run_daemon() -> int:
             sys.stdout.flush()
             return 0
 
+        if bool(request.get("fresh")):
+            # Force a fresh probe and fresh wxauto attachment for the next action.
+            wx = None
+            window_probe = None
+
         # Probe window on first real command
         if window_probe is None:
             window_probe = ensure_visible_wechat_window()
@@ -112,6 +119,7 @@ def run_daemon() -> int:
             text=request.get("text"),
             exact=bool(request.get("exact", False)),
             resize=bool(request.get("resize", False)),
+            history_load_times=int(request.get("history_load_times", 0) or 0),
         )
 
         captured = io.StringIO()
@@ -178,8 +186,15 @@ def run_action(
         if args.target:
             wx.ChatWith(args.target, exact=args.exact)
             time.sleep(0.5)
+        payload["scroll_to_latest"] = scroll_message_list_to_latest(wx)
         payload["chat_info"] = safe_call(wx.ChatInfo)
-        payload["messages"] = [message_to_dict(item) for item in wx.GetAllMessage()]
+        history_load_times = bounded_history_load_times(getattr(args, "history_load_times", 0))
+        if history_load_times:
+            history_result = collect_messages_with_rpa_history(wx, history_load_times)
+            payload["history_load"] = history_result["history_load"]
+            payload["messages"] = history_result["messages"]
+        else:
+            payload["messages"] = [message_to_dict(item) for item in wx.GetAllMessage()]
     elif args.action == "send":
         if not args.target:
             raise ValueError("--target is required for send")
@@ -192,12 +207,127 @@ def run_action(
             raise RuntimeError(f"target chat not active before send: target={args.target!r} chat_info={chat_info!r}")
         payload["chat_with_result"] = chat_result
         payload["chat_info_before_send"] = chat_info
-        payload["send_result"] = normalize_response(
-            wx.SendMsg(args.text, who=None, clear=True, exact=args.exact)
-        )
+        payload["send_result"] = send_text_with_chatbox_controls(wx, args.text)
         time.sleep(0.5)
         payload["chat_info_after_send"] = safe_call(wx.ChatInfo)
     return payload
+
+
+def send_text_with_chatbox_controls(wx: Any, text: str) -> dict[str, Any]:
+    """Send through wxauto4's exposed ChatBox controls.
+
+    In some WeChat 4.x environments wxauto4's high-level SendMsg wrapper can
+    block indefinitely. The lower-level ChatBox UIA controls remain the same
+    wxauto4/RPA boundary but give us explicit control and predictable returns.
+    """
+    chatbox = getattr(wx, "ChatBox", None)
+    if chatbox is None:
+        raise RuntimeError("wxauto4 ChatBox is unavailable")
+    editbox = getattr(chatbox, "editbox", None)
+    sendbtn = getattr(chatbox, "sendbtn", None)
+    if editbox is None or sendbtn is None:
+        raise RuntimeError("wxauto4 ChatBox editbox/send button is unavailable")
+    editbox.SetFocus()
+    time.sleep(0.1)
+    value_pattern = editbox.GetValuePattern()
+    value_pattern.SetValue("")
+    time.sleep(0.05)
+    value_pattern.SetValue(text)
+    time.sleep(0.15)
+    sendbtn.Click()
+    return {"ok": True, "method": "wxauto4.ChatBox.editbox.ValuePattern.SetValue+sendbtn.Click"}
+
+
+def collect_messages_with_rpa_history(wx: Any, load_times: int) -> dict[str, Any]:
+    """Collect visible windows while scrolling upward with wxauto4 UIA controls.
+
+    wxauto4 exposes a high-level ``LoadMoreCache`` API, but on the current
+    WeChat 4.x window it delegates to a missing internal method. This keeps the
+    implementation inside the existing wxauto4/RPA boundary while making the
+    history-read behavior explicit and auditable.
+    """
+    windows: list[list[dict[str, Any]]] = [[message_to_dict(item) for item in wx.GetAllMessage()]]
+    history_load: dict[str, Any] = {
+        "ok": True,
+        "requested_load_times": load_times,
+        "mechanism": "wxauto4.ChatBox.msgbox.WheelUp+GetAllMessage",
+        "scroll_units_per_load": 6,
+        "window_samples_per_load": 4,
+        "window_counts": [len(windows[0])],
+        "errors": [],
+    }
+    chatbox = getattr(wx, "ChatBox", None)
+    msgbox = getattr(chatbox, "msgbox", None) if chatbox is not None else None
+    if msgbox is None:
+        history_load["ok"] = False
+        history_load["errors"].append("wxauto4 ChatBox msgbox is unavailable")
+        return {"history_load": history_load, "messages": windows[0]}
+
+    scroll_units = int(history_load["scroll_units_per_load"])
+    samples_per_load = int(history_load["window_samples_per_load"])
+    requested_samples = max(0, int(load_times or 0)) * max(1, samples_per_load)
+    performed_samples = 0
+    for _ in range(requested_samples):
+        try:
+            msgbox.MoveCursorToMyCenter()
+            msgbox.WheelUp(wheelTimes=scroll_units)
+            performed_samples += 1
+            time.sleep(0.3)
+            window = [message_to_dict(item) for item in wx.GetAllMessage()]
+            windows.append(window)
+            history_load["window_counts"].append(len(window))
+        except Exception as exc:
+            history_load["ok"] = False
+            history_load["errors"].append(repr(exc))
+            break
+
+    if performed_samples:
+        history_load["restore_to_latest"] = scroll_message_list_to_latest(
+            wx,
+            wheel_times=max(30, performed_samples * scroll_units * 3),
+        )
+
+    merged = merge_message_dict_windows(*reversed(windows))
+    history_load["performed_scroll_samples"] = performed_samples
+    history_load["merged_count"] = len(merged)
+    return {"history_load": history_load, "messages": merged}
+
+
+def scroll_message_list_to_latest(wx: Any, wheel_times: int = 60) -> dict[str, Any]:
+    chatbox = getattr(wx, "ChatBox", None)
+    msgbox = getattr(chatbox, "msgbox", None) if chatbox is not None else None
+    if msgbox is None:
+        return {"ok": False, "reason": "msgbox_unavailable"}
+    try:
+        msgbox.MoveCursorToMyCenter()
+        msgbox.SendKeys("{End}")
+        time.sleep(0.15)
+        msgbox.WheelDown(wheelTimes=max(1, int(wheel_times or 1)))
+        time.sleep(0.2)
+        return {"ok": True, "method": "wxauto4.ChatBox.msgbox.SendKeys(End)+WheelDown", "wheel_times": wheel_times}
+    except Exception as exc:
+        return {"ok": False, "reason": "wheel_down_failed", "error": repr(exc), "wheel_times": wheel_times}
+
+
+def merge_message_dict_windows(*windows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    seen: set[tuple[Any, ...]] = set()
+    merged: list[dict[str, Any]] = []
+    for window in windows:
+        for item in window or []:
+            if not isinstance(item, dict):
+                continue
+            key = (
+                item.get("id") or "",
+                item.get("sender") or "",
+                item.get("type") or "",
+                item.get("time") or "",
+                item.get("content") or "",
+            )
+            if key in seen:
+                continue
+            seen.add(key)
+            merged.append(item)
+    return merged
 
 
 def probe_wechat_windows() -> dict[str, Any]:
@@ -271,6 +401,11 @@ def probe_wechat_windows() -> dict[str, Any]:
 def ensure_visible_wechat_window() -> dict[str, Any]:
     probe = probe_wechat_windows()
     if probe["visible_main_windows"]:
+        focused = focus_wechat_window(probe)
+        if focused:
+            time.sleep(0.2)
+            probe = probe_wechat_windows()
+            probe["focused_window"] = focused
         return probe
 
     restored = restore_wechat_window(probe)
@@ -278,30 +413,83 @@ def ensure_visible_wechat_window() -> dict[str, Any]:
         time.sleep(0.8)
         probe = probe_wechat_windows()
         probe["restored_window"] = restored
+        focused = focus_wechat_window(probe)
+        if focused:
+            time.sleep(0.2)
+            probe = probe_wechat_windows()
+            probe["focused_window"] = focused
     return probe
 
 
 def restore_wechat_window(probe: dict[str, Any]) -> dict[str, Any] | None:
-    user32 = ctypes.windll.user32
-    sw_restore = 9
-    sw_show = 5
     for item in probe.get("windows") or []:
         if not is_wechat_main_window(item):
             continue
         hwnd = int(item.get("hwnd") or 0)
         if not hwnd:
             continue
-        user32.ShowWindow(hwnd, sw_restore)
-        user32.ShowWindow(hwnd, sw_show)
-        user32.SetForegroundWindow(hwnd)
+        activate_window(hwnd)
         return dict(item)
     return None
+
+
+def focus_wechat_window(probe: dict[str, Any]) -> dict[str, Any] | None:
+    visible = probe.get("visible_main_windows") or []
+    if not visible:
+        return None
+    item = visible[0]
+    hwnd = int(item.get("hwnd") or 0)
+    if not hwnd:
+        return None
+    activate_window(hwnd)
+    return dict(item)
+
+
+def activate_window(hwnd: int) -> None:
+    user32 = ctypes.windll.user32
+    sw_restore = 9
+    sw_show = 5
+    user32.ShowWindow(hwnd, sw_restore)
+    user32.ShowWindow(hwnd, sw_show)
+    user32.SetForegroundWindow(hwnd)
+    user32.BringWindowToTop(hwnd)
 
 
 def is_wechat_main_window(item: dict[str, Any]) -> bool:
     title = str(item.get("title") or "").strip()
     class_name = str(item.get("class_name") or "")
-    return title in {"微信", "Weixin", "WeChat"} and "QWindowIcon" in class_name
+    normalized = normalize_wechat_title(title)
+    if not normalized:
+        return False
+    class_name_lower = class_name.lower()
+    main_class_ok = ("qwindowicon" in class_name_lower) or ("wechatmainwndforpc" in class_name_lower)
+    if not main_class_ok:
+        return False
+    positive_tokens = ("微信", "weixin", "wechat")
+    negative_tokens = ("登录", "login", "qr", "扫码", "更新", "update")
+    lowered = normalized.lower()
+    if any(token in lowered for token in negative_tokens):
+        return False
+    return any(token in normalized for token in positive_tokens) or any(token in lowered for token in positive_tokens)
+
+
+def normalize_wechat_title(title: str) -> str:
+    text = str(title or "").strip()
+    if not text:
+        return ""
+    # Common unread prefix: "(2) 微信"
+    text = re.sub(r"^\(\d+\)\s*", "", text).strip()
+    # Some locales prepend unread with full-width parentheses.
+    text = re.sub(r"^（\d+）\s*", "", text).strip()
+    return text
+
+
+def bounded_history_load_times(value: Any, *, max_times: int = 5) -> int:
+    try:
+        parsed = int(value or 0)
+    except (TypeError, ValueError):
+        return 0
+    return max(0, min(max_times, parsed))
 
 
 def chat_matches(chat_info: Any, target: str, exact: bool) -> bool:

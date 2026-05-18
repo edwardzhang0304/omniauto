@@ -123,6 +123,19 @@ def get_export_run(run_id: str, request: Request) -> dict[str, Any]:
     return {"ok": True, "item": item}
 
 
+@router.delete("/exports/runs/{run_id}")
+def delete_export_run(run_id: str, request: Request) -> dict[str, Any]:
+    context = current_auth_context(request)
+    service = RecorderExportRunService(tenant_id=context.tenant_id)
+    try:
+        result = service.delete_run(run_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if not result.get("deleted"):
+        raise HTTPException(status_code=404, detail=f"export run not found: {run_id}")
+    return {"ok": True, **result}
+
+
 @router.get("/exports/runs/{run_id}/download")
 def download_export_run(run_id: str, request: Request) -> FileResponse:
     context = current_auth_context(request)

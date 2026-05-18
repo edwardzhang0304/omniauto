@@ -1,0 +1,47 @@
+{
+  "schema_version": 1,
+  "category_id": "products",
+  "id": "chejin_model3_2021_srplus",
+  "status": "active",
+  "source": {
+    "type": "test_fixture",
+    "batch_token": "CHEJIN_SEED_20260507",
+    "legacy_migrated_from": "knowledge_bases/products"
+  },
+  "data": {
+    "name": "2021款特斯拉Model 3 标准续航后驱升级版",
+    "sku": "CHEJIN-M3-2021-SRPLUS",
+    "category": "二手车/新能源轿车",
+    "aliases": [
+      "Model 3",
+      "特斯拉",
+      "M3",
+      "电动车",
+      "新能源"
+    ],
+    "specs": "2021年3月上牌，表显3.1万公里，纯电续航468KM，AP自动驾驶，白色车漆，原版原漆。",
+    "price": 15.5,
+    "unit": "台",
+    "inventory": 1,
+    "shipping_policy": "新能源车需确认迁入地政策，支持超充网络，电池健康度以官方检测为准。",
+    "warranty_policy": "原版原漆精品车况，电池和三电按特斯拉官方质保政策，支持官方服务中心检测。",
+    "reply_templates": {
+      "recommendation": "这台Model 3适合15到17万预算、想体验特斯拉品牌和超充网络的客户，AP是亮点。"
+    },
+    "risk_rules": [
+      "迁入政策需确认",
+      "电池衰减以官方检测为准"
+    ]
+  },
+  "runtime": {
+    "allow_auto_reply": true,
+    "requires_handoff": false,
+    "risk_level": "normal"
+  },
+  "metadata": {
+    "created_at": "2026-05-07T10:00:00",
+    "updated_at": "2026-05-16T22:51:06",
+    "created_by": "admin",
+    "updated_by": "admin"
+  }
+}

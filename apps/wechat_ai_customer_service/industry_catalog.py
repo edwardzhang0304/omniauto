@@ -128,6 +128,13 @@ def global_platform_safety_rules() -> dict[str, Any]:
                 "instruction": "对违规或越权请求应简洁说明边界并提供可执行的下一步（转人工/补充资料），避免机械模板化重复。",
                 "enabled": True,
             },
+            {
+                "id": "contextual_honorific_usage",
+                "title": "称呼不要机械重复",
+                "description": "称呼要服务于真人感，而不是每条回复固定套用。",
+                "instruction": "称呼只在开场寒暄和新话题切入时有选择地使用；连续对话中不要每条都加称呼。称呼应结合客户画像自然轮换，例如男性可在“姓哥/哥/老板”之间切换，女性可使用“姓姐/姐”；不要把文件传输助手、群名、门店名、测试名等非真人会话名拆成姓氏称呼。",
+                "enabled": True,
+            },
         ],
         "guard_terms": {
             "authority_tags": ["quote", "discount", "stock", "shipping", "invoice", "payment", "after_sales", "handoff", "customer_data"],
@@ -475,6 +482,23 @@ def seed_shared_library_items() -> list[dict[str, Any]]:
             "source": "system_seed_industry_library",
             "notes": "平台通用规则",
             "data": {"title": "证据优先回复", "guideline_text": "回复必须优先依据正式知识、共享规则和已确认上下文；无证据时明确说明需核实并转人工。"},
+        },
+        {
+            "item_id": "shared_global_contextual_honorific_usage",
+            "industry_id": GLOBAL_INDUSTRY_ID,
+            "category_id": "reply_style",
+            "title": "自然称呼使用规则",
+            "content": "微信客服不要每条回复都在开头加称呼。称呼主要用于开场寒暄，或客户切换到新话题时有选择地使用；中途连续追问默认不加。称呼要结合客户画像自然轮换：男性可在“姓哥/哥/老板”之间切换，女性可用“姓姐/姐”。不要把文件传输助手、群名、门店名、客服名、测试名等非真人会话名拆成姓氏称呼。",
+            "keywords": ["称呼", "哥", "姐", "老板", "开场", "新话题", "真人感"],
+            "applies_to": "所有行业的微信客服对话",
+            "status": "active",
+            "source": "system_seed_industry_library",
+            "notes": "平台通用回复口吻",
+            "data": {
+                "title": "自然称呼使用规则",
+                "guideline_text": "微信客服不要每条回复都在开头加称呼。称呼主要用于开场寒暄，或客户切换到新话题时有选择地使用；中途连续追问默认不加。称呼要结合客户画像自然轮换：男性可在“姓哥/哥/老板”之间切换，女性可用“姓姐/姐”。不要把文件传输助手、群名、门店名、客服名、测试名等非真人会话名拆成姓氏称呼。",
+                "applies_to": "所有微信 AI 客服账号的客户可见回复",
+            },
         },
         {
             "item_id": "shared_global_no_fabrication",

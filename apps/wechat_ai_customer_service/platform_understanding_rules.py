@@ -44,6 +44,17 @@ DEFAULT_RAG_GROUPS: dict[str, list[str]] = {
     "soft_reference_source_types": ["product_doc", "manual"],
 }
 
+DEFAULT_CUSTOMER_DATA_FIELD_LABELS: dict[str, list[str]] = {
+    "name": ["姓名", "客户姓名", "联系人", "名字", "称呼", "我叫", "我是"],
+    "phone": ["电话", "手机号", "手机", "联系电话", "联系方式"],
+    "address": ["地址", "收货地址", "上牌城市", "所在城市", "城市"],
+    "product": ["商品", "产品", "车型", "车源", "意向车型", "想看车型"],
+    "quantity": ["数量", "台数"],
+    "spec": ["规格", "配置", "版本"],
+    "budget": ["预算", "预算范围"],
+    "note": ["备注", "需求", "用车需求", "到店时间", "看车时间"],
+}
+
 DEFAULT_POLICY_TYPE_TO_INTENT: dict[str, str] = {
     "invoice": "invoice",
     "payment": "payment",
@@ -64,29 +75,55 @@ DEFAULT_POLICY_TAGS: dict[str, str] = {
 DEFAULT_QUANTITY_UNITS: list[str] = ["个", "件", "台", "套", "箱", "辆"]
 
 
+_RULES_CACHE: dict[str, Any] = {
+    "key": None,
+    "payload": None,
+}
+
+
+def platform_understanding_cache_token() -> str:
+    path = shared_runtime_snapshot_path()
+    try:
+        stat = path.stat()
+    except OSError:
+        return f"missing:{path}"
+    return f"{path}:{stat.st_mtime_ns}:{stat.st_size}"
+
+
 def load_platform_understanding_rules(settings: dict[str, Any] | None = None) -> dict[str, Any]:
     del settings
+    return cached_platform_understanding_rules()
+
+
+def cached_platform_understanding_rules() -> dict[str, Any]:
+    key = platform_understanding_cache_token()
+    if _RULES_CACHE.get("key") == key and isinstance(_RULES_CACHE.get("payload"), dict):
+        return _RULES_CACHE["payload"]
     cloud = load_platform_understanding_rules_from_cloud()
     if cloud is not None:
         item = normalize_platform_understanding_rules(cloud)
         item["_path"] = "cloud://shared_snapshot/policy_bundle/merged/platform_understanding_rules"
-        return {
+        payload = {
             "ok": True,
             "path": item["_path"],
             "source": "cloud_shared_snapshot",
             "readonly": True,
             "item": item,
         }
-    item = empty_rules()
-    item["_path"] = "cloud://shared_snapshot/policy_bundle/merged/platform_understanding_rules"
-    return {
-        "ok": False,
-        "path": item["_path"],
-        "source": "cloud_shared_snapshot",
-        "readonly": True,
-        "error": "platform_understanding_rules_cloud_snapshot_required",
-        "item": item,
-    }
+    else:
+        item = empty_rules()
+        item["_path"] = "cloud://shared_snapshot/policy_bundle/merged/platform_understanding_rules"
+        payload = {
+            "ok": False,
+            "path": item["_path"],
+            "source": "cloud_shared_snapshot",
+            "readonly": True,
+            "error": "platform_understanding_rules_cloud_snapshot_required",
+            "item": item,
+        }
+    _RULES_CACHE["key"] = key
+    _RULES_CACHE["payload"] = payload
+    return payload
 
 
 def save_platform_understanding_rules(payload: dict[str, Any], settings: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -137,7 +174,10 @@ def normalize_platform_understanding_rules(payload: dict[str, Any]) -> dict[str,
         DEFAULT_RAG_GROUPS,
     )
     item["risk_keywords"] = normalize_map_of_string_lists(item.get("risk_keywords"))
-    item["customer_data_field_labels"] = normalize_map_of_string_lists(item.get("customer_data_field_labels"))
+    item["customer_data_field_labels"] = merge_map_of_string_lists(
+        normalize_map_of_string_lists(item.get("customer_data_field_labels")),
+        DEFAULT_CUSTOMER_DATA_FIELD_LABELS,
+    )
     item["quantity_units"] = merge_string_lists(normalize_string_list(item.get("quantity_units")), DEFAULT_QUANTITY_UNITS)
     return item
 

@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>微信 AI 客服知识管理台</title>
-    <link rel="stylesheet" href="/static/styles.css" />
+    <link rel="stylesheet" href="/static/styles.css?v=20260517-knowledge-renderfix-v8" />
   </head>
   <body>
     <section id="login-screen" class="login-screen">
@@ -123,7 +123,7 @@
             <h2>微信智能客服负责回复，AI智能记录员负责记录，知识成长中心负责审核和管理。</h2>
           </div>
           <div class="hero-metrics hero-metrics-compact">
-            <div><span id="metric-products">-</span><label>商品</label></div>
+            <div><span id="metric-knowledge-total">-</span><label>总知识</label></div>
             <div><span id="metric-candidates">-</span><label>待审核</label></div>
             <div><span id="metric-diagnostics">-</span><label>检测</label></div>
           </div>
@@ -172,6 +172,9 @@
                   <label class="checkbox-line"><input id="customer-data-capture" type="checkbox" /> 识别客户线索</label>
                   <label class="checkbox-line"><input id="customer-handoff" type="checkbox" /> 风险问题转人工</label>
                   <label class="checkbox-line"><input id="customer-operator-alert" type="checkbox" /> 需要人工时提醒</label>
+                  <label class="checkbox-line"><input id="customer-identity-guard" type="checkbox" /> 防暴露AI身份</label>
+                  <label class="checkbox-line"><input id="customer-style-adapter" type="checkbox" /> 实盘话术风格适配</label>
+                  <label class="checkbox-line"><input id="customer-respond-all-unread" type="checkbox" /> 响应所有未读会话（新会话默认响应）</label>
                 </div>
                 <button class="primary-button" id="customer-save-settings">保存客服设置</button>
               </section>
@@ -179,6 +182,24 @@
                 <strong>客户可以只用记录员，不开自动回复。</strong>
                 <span>选择"只记录不回复"或直接关闭客服总开关，系统仍可记录和整理聊天内容。</span>
               </section>
+            </div>
+            <div class="helper-card" id="customer-service-session-summary">
+              <strong>当前监听会话：读取中...</strong>
+              <span>请稍等。</span>
+            </div>
+            <div class="section-head sub-head">
+              <div>
+                <h2>会话监听列表</h2>
+                <p>已在列表中的会话由右侧勾选控制；“新会话默认响应/忽略”只影响后续新出现的会话，不会改动当前列表勾选。</p>
+              </div>
+              <div class="button-row">
+                <button class="secondary-button" id="customer-service-discover" type="button">识别会话</button>
+                <button class="secondary-button" id="customer-service-select-all" type="button">新会话默认响应</button>
+                <button class="secondary-button" id="customer-service-clear-selection" type="button">新会话默认忽略</button>
+              </div>
+            </div>
+            <div class="list-pane" id="customer-service-session-list">
+              <div class="status-card loading"><strong><span class="loading-spinner" aria-hidden="true"></span>正在加载会话列表</strong><span>请稍等。</span></div>
             </div>
           </article>
 
@@ -222,7 +243,7 @@
               <button class="module-card nav-shortcut product-module-card" data-view="product_catalog"><strong>商品库</strong><span>商品资料是特殊主数据，可在商品库内单独上传、确认和入库。</span></button>
               <button class="module-card nav-shortcut" data-view="ai_reference"><strong>RAG经验池</strong><span>所有资料和聊天内容先进入这里，由 AI 给出处理建议。</span></button>
               <button class="module-card nav-shortcut" data-view="candidates"><strong>待确认知识</strong><span>像审核清单一样确认AI建议加入的知识。</span></button>
-              <button class="module-card nav-shortcut" data-view="knowledge"><strong>正式知识库</strong><span>管理已生效的商品、政策和话术。</span></button>
+              <button class="module-card nav-shortcut" data-view="knowledge"><strong>正式知识库</strong><span>管理已生效的政策、流程、边界和话术。</span></button>
               <button class="module-card nav-shortcut" data-view="uploads"><strong>资料导入</strong><span>上传政策规则、聊天记录和普通资料；整理后先进入RAG经验池。</span></button>
               <button class="module-card nav-shortcut" data-view="diagnostics"><strong>知识检测</strong><span>检查知识冲突、缺失和运行风险。</span></button>
             </div>
@@ -232,7 +253,7 @@
             <div class="section-head">
               <div>
                 <h2>商品库</h2>
-                <p>像电商后台一样查看在售商品、价格、库存和商品专属问答。</p>
+                <p>首页只看每台车/商品的关键信息；点开卡片后再查看完整资料、库存和专属话术。</p>
               </div>
               <div class="button-row">
                 <button class="secondary-button" id="refresh-product-catalog">刷新</button>
@@ -267,13 +288,8 @@
                 </div>
               </div>
             </div>
-            <div class="split-layout product-layout">
-              <div class="list-pane" id="product-catalog-list">
-                <div class="status-card loading"><strong><span class="loading-spinner" aria-hidden="true"></span>正在加载商品库</strong><span>正在读取商品和库存。</span></div>
-              </div>
-              <div class="detail-pane form-pane" id="product-catalog-detail">
-                <div class="status-card loading"><strong><span class="loading-spinner" aria-hidden="true"></span>正在加载商品详情</strong><span>请稍等。</span></div>
-              </div>
+            <div class="product-home-layout" id="product-catalog-list">
+              <div class="status-card loading"><strong><span class="loading-spinner" aria-hidden="true"></span>正在加载商品库</strong><span>正在读取商品和库存。</span></div>
             </div>
           </article>
 
@@ -281,7 +297,7 @@
             <div class="section-head">
               <div>
                 <h2>正式知识库</h2>
-                <p>这里管理已经生效的结构化知识；商品库存和上下架请优先到商品库操作。</p>
+                <p>这里管理已经生效的结构化业务知识；商品价格、库存、车型和规格只在商品库维护。</p>
               </div>
               <div class="button-row">
                 <select id="category-select" aria-label="知识门类"></select>
@@ -289,8 +305,8 @@
               </div>
             </div>
             <div class="helper-card">
-              <strong>商品库是业务后台，正式知识库是结构化编辑器。</strong>
-              <span>商品资料会在两个地方共用同一份数据；商品专属问答、规则和解释请从商品详情进入，避免脱离商品单独编辑。</span>
+              <strong>商品库是商品主数据，正式知识库是业务规则。</strong>
+              <span>商品事实不从RAG经验或候选知识升级而来；商品专属问答、规则和解释请从商品详情进入，避免脱离商品单独编辑。</span>
             </div>
             <div class="section-head sub-head">
               <input class="search-input" id="knowledge-search" placeholder="搜索名称、关键词、话术" />
@@ -302,13 +318,8 @@
                 <button class="secondary-button danger-button" id="archive-knowledge-item">归档</button>
               </div>
             </div>
-            <div class="split-layout">
-              <div class="list-pane" id="knowledge-list">
-                <div class="status-card loading"><strong><span class="loading-spinner" aria-hidden="true"></span>正在加载正式知识库</strong><span>正在读取知识条目。</span></div>
-              </div>
-              <div class="detail-pane form-pane" id="knowledge-detail">
-                <div class="status-card loading"><strong><span class="loading-spinner" aria-hidden="true"></span>正在加载详情</strong><span>请稍等。</span></div>
-              </div>
+            <div class="product-home-layout knowledge-home-layout" id="knowledge-list">
+              <div class="status-card loading"><strong><span class="loading-spinner" aria-hidden="true"></span>正在加载正式知识库</strong><span>将按每页 20 条读取知识条目。</span></div>
             </div>
           </article>
 
@@ -316,12 +327,12 @@
             <div class="section-head">
               <div>
                 <h2>资料导入</h2>
-                <p>导入资料后，AI 会先整理成 RAG 经验；是否升级为候选知识，需要用户在 RAG经验池里手动确认。</p>
+                <p>上传后可自动识别资料类型并整理为 RAG 经验；系统默认先沉淀经验，再由你决定是否升级知识。</p>
               </div>
               <div class="button-row">
                 <button class="workflow-tab is-active" data-group="intake" data-tab="uploads">资料导入</button>
                 <button class="workflow-tab" data-group="intake" data-tab="generator">手动创建</button>
-                <button class="workflow-tab" data-group="intake" data-tab="rag_experiences">跳转到RAG经验池<span class="tab-count-badge is-hidden" id="rag-experience-tab-badge">0</span></button>
+                <button class="workflow-tab" data-group="intake" data-tab="rag_experiences">跳转到RAG经验池<span class="tab-count-badge is-hidden" id="rag-experience-intake-tab-badge" data-rag-experience-count-badge>0</span></button>
               </div>
             </div>
 
@@ -363,23 +374,27 @@
               <div class="section-head sub-head">
                 <div>
                   <h2>资料导入</h2>
-                  <p>上传文件后，点击"整理未处理资料"，AI 会把内容整理进 RAG经验池，并给出下一步建议。</p>
+                  <p>把清洗后的资料直接上传，系统会自动识别类型；默认上传后立即整理进 RAG经验池。</p>
                 </div>
                 <button class="primary-button is-hidden" id="upload-button" type="button">手动上传</button>
               </div>
               <div class="helper-card">
-                <strong>这里才需要整理按钮。</strong>
-                <span>资料整理后不会直接生成待确认知识；请到 RAG经验池查看 AI 建议，再决定是否升级。</span>
+                <strong>默认一键自动学习。</strong>
+                <span>上传后会自动整理为 RAG 经验，不会直接改动正式知识；需要入库时，再到 RAG经验池确认升级。</span>
               </div>
               <div class="upload-zone">
                 <input id="upload-file" type="file" multiple />
                 <select id="upload-kind">
+                  <option value="auto" selected>自动识别（推荐）</option>
                   <option value="products">商品资料</option>
                   <option value="chats">聊天记录</option>
                   <option value="policies">政策规则</option>
                   <option value="erp_exports">ERP 导出</option>
                 </select>
                 <button class="primary-button" id="run-learning">整理未处理资料</button>
+              </div>
+              <div class="button-row">
+                <label class="checkbox-line"><input id="upload-auto-learn" type="checkbox" checked /> 上传后自动整理并吸收经验（推荐）</label>
               </div>
               <div id="upload-list" class="compact-list">
                 <div class="status-card loading"><strong><span class="loading-spinner" aria-hidden="true"></span>正在加载上传资料</strong><span>正在读取文件列表。</span></div>
@@ -417,8 +432,7 @@
                 <p>记录、选择会话、整理批次和导出资料；知识晋升交给知识成长中心。</p>
               </div>
               <div class="button-row">
-                <button class="secondary-button" id="recorder-discover">识别会话</button>
-                <button class="primary-button" id="recorder-capture">立即记录</button>
+                <button class="secondary-button" id="recorder-discover" type="button">识别会话</button>
               </div>
             </div>
             <div class="helper-card">
@@ -432,11 +446,43 @@
               </div>
               <label class="switch-line"><input id="recorder-enabled" type="checkbox" /> 开启</label>
             </div>
+            <div class="control-row">
+              <div>
+                <strong>监听进程</strong>
+                <span id="recorder-runtime-status">读取中...</span>
+              </div>
+              <div class="button-row">
+                <button class="secondary-button" id="recorder-runtime-start" type="button">启动监听</button>
+                <button class="secondary-button" id="recorder-runtime-stop" type="button">停止监听</button>
+              </div>
+            </div>
             <div class="recorder-toolbar">
               <label class="checkbox-line"><input id="recorder-notify" type="checkbox" /> 收录后在群内提示</label>
               <label class="checkbox-line"><input id="recorder-auto-learn" type="checkbox" /> 自动整理为RAG经验</label>
               <label class="checkbox-line"><input id="recorder-use-llm" type="checkbox" /> 使用大模型辅助提取</label>
               <button class="secondary-button" id="recorder-save-settings">保存设置</button>
+            </div>
+            <div class="helper-card" id="recorder-selected-summary">
+              <strong>当前监听会话：读取中...</strong>
+              <span>请稍等。</span>
+            </div>
+            <div class="section-head sub-head">
+              <div>
+                <h2>会话监听列表</h2>
+                <p>勾选“记录中”后，该会话会被监听并纳入导出范围。</p>
+              </div>
+              <div class="button-row">
+                <button class="secondary-button" id="recorder-select-groups" type="button">全选群聊</button>
+                <button class="secondary-button" id="recorder-clear-selection" type="button">清空选择</button>
+              </div>
+            </div>
+            <div class="split-layout">
+              <div class="list-pane" id="recorder-group-list">
+                <div class="status-card loading"><strong><span class="loading-spinner" aria-hidden="true"></span>正在加载会话列表</strong><span>正在读取群聊和私聊。</span></div>
+              </div>
+              <div class="detail-pane form-pane" id="recorder-detail">
+                <div class="status-card loading"><strong><span class="loading-spinner" aria-hidden="true"></span>正在加载聊天记录</strong><span>请稍等。</span></div>
+              </div>
             </div>
             <div class="helper-card" id="recorder-module-info">
               <strong>当前结构化导出模块：读取中...</strong>
@@ -464,16 +510,23 @@
               <div id="recorder-export-progress" class="compact-metrics">
                 <div class="status-card">
                   <strong>暂无进行中的结构化导出任务</strong>
-                  <span>点击“创建结构化导出任务”后，这里会实时显示排队和处理进度。</span>
+                  <span>点击“导出所有记录（结构化）”后，这里会实时显示排队和处理进度。</span>
                 </div>
               </div>
             </div>
-            <div class="helper-card">
-              <strong>基础知识库导出（旧模式）</strong>
-              <span>仅对当前知识库做基础分类导出，不执行模块抽取，也不走 LLM 结构化分析。</span>
+            <details class="helper-card" id="recorder-advanced-actions">
+              <summary>高级操作（补采）</summary>
+              <span>“补采一次”会立即抓取当前“记录中”会话消息，仅执行一次，不会持续监听。</span>
               <div class="button-row">
-                <button class="secondary-button" id="export-knowledge-type">导出知识库Excel（按类型）</button>
-                <button class="secondary-button" id="export-knowledge-time">导出知识库Excel（按时间）</button>
+                <button class="secondary-button" id="recorder-capture" type="button">补采一次</button>
+              </div>
+            </details>
+            <div class="helper-card">
+              <strong>原始聊天导出（追踪记录）</strong>
+              <span>导出程序已追踪到的微信原始聊天记录，格式对齐微信聊天导出表（会话信息 + 序号/时间/发送者/消息类型/内容）。</span>
+              <div class="button-row">
+                <button class="secondary-button" id="export-knowledge-type">导出微信聊天Excel（按会话）</button>
+                <button class="secondary-button" id="export-knowledge-time">导出微信聊天Excel（按时间）</button>
               </div>
             </div>
             <div class="metric-grid metric-grid-tight metric-grid-four" id="recorder-cards">
@@ -481,14 +534,6 @@
             </div>
             <div class="compact-list compact-list-small" id="recorder-export-runs-list">
               <div class="status-card loading"><strong><span class="loading-spinner" aria-hidden="true"></span>正在加载结构化导出任务</strong><span>请稍等。</span></div>
-            </div>
-            <div class="split-layout">
-              <div class="list-pane" id="recorder-group-list">
-                <div class="status-card loading"><strong><span class="loading-spinner" aria-hidden="true"></span>正在加载会话列表</strong><span>正在读取群聊和私聊。</span></div>
-              </div>
-              <div class="detail-pane form-pane" id="recorder-detail">
-                <div class="status-card loading"><strong><span class="loading-spinner" aria-hidden="true"></span>正在加载聊天记录</strong><span>请稍等。</span></div>
-              </div>
             </div>
           </article>
 
@@ -499,7 +544,7 @@
                 <p>优先查看 AI 从资料和对话里归纳出的经验；资料片段只作为证据参考。</p>
               </div>
               <div class="button-row">
-                <button class="workflow-tab is-active" data-group="reference" data-tab="experiences">RAG经验清单<span class="tab-count-badge is-hidden" id="rag-experience-tab-badge">0</span></button>
+                <button class="workflow-tab is-active" data-group="reference" data-tab="experiences">RAG经验清单<span class="tab-count-badge is-hidden" id="rag-experience-tab-badge" data-rag-experience-count-badge>0</span></button>
                 <button class="workflow-tab" data-group="reference" data-tab="sources">资料片段</button>
               </div>
             </div>
@@ -511,7 +556,7 @@
                   <p>这里是 AI 读完资料或真实对话后留下的经验总结和处理建议。</p>
                 </div>
                 <div class="button-row">
-                  <label class="checkbox-line"><input id="show-discarded-rag" type="checkbox" /> 显示已废弃</label>
+                  <label class="checkbox-line"><input id="show-discarded-rag" type="checkbox" /> 显示全部（含已废弃）</label>
                   <button class="secondary-button" id="refresh-rag-experiences">刷新经验</button>
                 </div>
               </div>
@@ -588,43 +633,97 @@
               <div class="section-head sub-head">
                 <div>
                   <h2>大模型配置</h2>
-                  <p>配置 DeepSeek API Key，用于 AI 辅助整理和自动回复。</p>
+                  <p>配置 OpenAI-compatible 大模型供应商，用于 AI 辅助整理和自动回复。</p>
                 </div>
               </div>
               <div id="llm-config-summary" class="security-summary">大模型配置读取中...</div>
               <div class="security-grid">
                 <section class="security-panel">
                   <div class="security-panel-head">
-                    <h3>API Key</h3>
-                    <span>Flash 和 Pro 模型共用同一个 Key</span>
+                    <h3>供应商基础配置</h3>
+                    <span>官方 OpenAI 或第三方中转</span>
                   </div>
                   <form class="security-form" id="llm-config-form">
-                    <label class="form-field wide-field">
-                      <span>DEEPSEEK API KEY</span>
-                      <input name="deepseek_api_key" type="password" autocomplete="off" placeholder="输入 API Key 后点击保存" id="llm-api-key-input" />
+                    <label class="form-field">
+                      <span>供应商</span>
+                      <select name="provider" id="llm-provider-select"></select>
                     </label>
+                    <label class="form-field">
+                      <span>Base URL</span>
+                      <input name="base_url" type="url" autocomplete="off" placeholder="https://.../v1" id="llm-base-url-input" />
+                    </label>
+                    <label class="form-field wide-field">
+                      <span>API Key</span>
+                      <input name="api_key" type="password" autocomplete="off" placeholder="输入 API Key 后点击保存" id="llm-api-key-input" />
+                      <small id="llm-api-key-current">当前 Key 状态读取中...</small>
+                    </label>
+                    <label class="checkbox-field wide-field">
+                      <input name="allow_insecure_tls" type="checkbox" id="llm-insecure-tls-input" />
+                      <span>允许自签名证书（仅自有或可信中转）</span>
+                    </label>
+                    <div class="llm-route-grid wide-field">
+                      <section class="llm-route-card">
+                        <div class="llm-route-head">
+                          <strong>浅任务入口</strong>
+                          <span>低延迟 / 高频调用</span>
+                        </div>
+                        <label class="form-field">
+                          <span>模型</span>
+                          <select id="llm-flash-model-select" aria-label="选择浅任务模型"></select>
+                          <input name="flash_model" type="hidden" id="llm-flash-model-input" />
+                        </label>
+                        <label class="form-field">
+                          <span>思考强度</span>
+                          <select name="flash_reasoning_effort" id="llm-flash-reasoning-input"></select>
+                        </label>
+                        <small>用于意图识别、字段抽取、资料整理、普通自动回复等浅任务。</small>
+                      </section>
+                      <section class="llm-route-card">
+                        <div class="llm-route-head">
+                          <strong>深度思考入口</strong>
+                          <span>复杂推理 / 高风险场景</span>
+                        </div>
+                        <label class="form-field">
+                          <span>模型</span>
+                          <select id="llm-pro-model-select" aria-label="选择深度思考模型"></select>
+                          <input name="pro_model" type="hidden" id="llm-pro-model-input" />
+                        </label>
+                        <label class="form-field">
+                          <span>思考强度</span>
+                          <select name="pro_reasoning_effort" id="llm-pro-reasoning-input"></select>
+                        </label>
+                        <small>用于长上下文、高风险回复、复杂规则判断和需要更强推理的深度任务。</small>
+                      </section>
+                    </div>
+                    <datalist id="llm-model-options"></datalist>
+                    <div class="llm-model-list wide-field" id="llm-model-availability-note">可用模型读取中...</div>
                     <div class="security-actions">
                       <button class="primary-button compact-button" type="submit" id="llm-config-save">保存配置</button>
-                      <button class="secondary-button compact-button" type="button" id="llm-config-test">测试连接</button>
+                      <button class="secondary-button compact-button" type="button" id="llm-config-test">测试浅任务</button>
+                      <button class="secondary-button compact-button" type="button" id="llm-config-test-pro">测试深度思考</button>
                       <button class="secondary-button compact-button" type="button" id="llm-config-toggle">显示</button>
                     </div>
                   </form>
                 </section>
                 <section class="security-panel">
                   <div class="security-panel-head">
-                    <h3>模型信息</h3>
-                    <span>当前默认使用 DeepSeek 模型</span>
+                    <h3>当前路由预览</h3>
+                    <span>运行时按任务类型自动选择</span>
                   </div>
                   <div class="llm-info-grid">
-                    <div><span>Flash 模型</span><strong>deepseek-v4-flash</strong></div>
-                    <div><span>Pro 模型</span><strong>deepseek-v4-pro</strong></div>
-                    <div><span>Base URL</span><strong>https://api.deepseek.com</strong></div>
+                    <div><span>供应商</span><strong id="llm-info-provider">—</strong></div>
+                    <div><span>浅任务模型</span><strong id="llm-info-flash-model">—</strong></div>
+                    <div><span>浅任务思考强度</span><strong id="llm-info-flash-effort">—</strong></div>
+                    <div><span>深度思考模型</span><strong id="llm-info-pro-model">—</strong></div>
+                    <div><span>深度思考强度</span><strong id="llm-info-pro-effort">—</strong></div>
+                    <div><span>Base URL</span><strong id="llm-info-base-url">—</strong></div>
+                    <div><span>TLS 校验</span><strong id="llm-info-tls">—</strong></div>
                   </div>
                 </section>
               </div>
               <div class="security-note">
                 <strong>Key 存储位置</strong>
-                <span>API Key 保存在客户端本地的 llm_config.json 中，不会上传到 VPS 服务端。</span>
+                <span>API Key 保存在客户端本地的 llm_config.json 中，不会上传到 VPS 服务端；第三方中转请选择 OpenAI Compatible 并填写中转 Base URL。</span>
               </div>
             </section>
             <section class="settings-section">
@@ -737,6 +836,22 @@
         </div>
       </div>
     </div>
-    <script src="/static/app.js?v=20260505-promotion-chain-cleanup"></script>
+    <div id="product-detail-modal" class="modal product-detail-modal is-hidden" aria-hidden="true">
+      <div class="modal-overlay product-detail-close" aria-hidden="true"></div>
+      <div class="modal-content glass-panel product-detail-modal-content" role="dialog" aria-modal="true" aria-labelledby="product-detail-title">
+        <div id="product-catalog-detail">
+          <div class="status-card loading"><strong><span class="loading-spinner" aria-hidden="true"></span>正在加载商品详情</strong><span>请稍等。</span></div>
+        </div>
+      </div>
+    </div>
+    <div id="knowledge-detail-modal" class="modal product-detail-modal knowledge-detail-modal is-hidden" aria-hidden="true">
+      <div class="modal-overlay knowledge-detail-close" aria-hidden="true"></div>
+      <div class="modal-content glass-panel product-detail-modal-content knowledge-detail-modal-content" role="dialog" aria-modal="true" aria-labelledby="knowledge-detail-title">
+        <div id="knowledge-detail">
+          <div class="status-card loading"><strong><span class="loading-spinner" aria-hidden="true"></span>正在加载知识详情</strong><span>请稍等。</span></div>
+        </div>
+      </div>
+    </div>
+    <script src="/static/app.js?v=20260518-llm-provider-ui-v3"></script>
   </body>
 </html>

@@ -3,6 +3,8 @@ const state = {
   activeView: "customer_service",
   overview: null,
   customerService: null,
+  customerServiceSessions: [],
+  customerServiceSessionMeta: null,
   customerServiceRuntime: null,
   customerServiceRuntimeTimer: null,
   customerServiceRuntimeBusy: false,
@@ -15,9 +17,20 @@ const state = {
   productDetailMode: "view",
   productDetailScopedKnowledge: {},
   productScopedEditor: null,
+  productAcknowledgeLoadingIds: new Set(),
   categories: [],
   activeCategoryId: "",
   categoryItems: [],
+  categoryItemsTotal: 0,
+  categoryItemsHasMore: false,
+  categoryItemsLoading: false,
+  categoryItemsLoadingMore: false,
+  categoryItemsLoadingOffset: 0,
+  categoryItemsLoadingLimit: 20,
+  categoryItemsLoadingQuery: "",
+  categoryItemsError: "",
+  knowledgeListVisibleCount: 20,
+  knowledgeSearchTimer: null,
   selectedKnowledge: null,
   knowledgeMode: "view",
   generatorSession: null,
@@ -26,6 +39,7 @@ const state = {
   selectedCandidate: null,
   learningInProgress: false,
   uploadInProgress: false,
+  autoLearnAfterUpload: localStorage.getItem("uploadAutoLearnAfterSelect") !== "0",
   activeIntakeTab: "uploads",
   recorderSummary: null,
   recorderConversations: [],
@@ -43,11 +57,16 @@ const state = {
   ragStatus: null,
   ragHits: [],
   ragExperiences: [],
+  ragExperienceDisplayCounts: null,
   ragExperienceHiddenCount: 0,
   ragExperienceDiscardedTotal: 0,
   ragExperienceTotal: 0,
-  showDiscardedRagExperiences: localStorage.getItem("showDiscardedRagExperiences") === "1",
+  showDiscardedRagExperiences: localStorage.getItem("showDiscardedRagExperiences") !== "0",
   ragExperienceExpanded: loadStringSet("ragExperienceExpanded"),
+  ragActionNotice: null,
+  ragInterpretationInProgress: false,
+  ragInterpretationPendingCount: 0,
+  ragInterpretationLastResult: null,
   ragInterpretationLoadingIds: new Set(),
   ragActionLoadingIds: new Map(),
   candidateActionLoadingIds: new Map(),
@@ -64,10 +83,32 @@ const state = {
   emailChallenge: null,
   security: null,
   llmConfig: null,
+  workflowOpsBusy: false,
+  workflowLastResult: null,
 };
 const CUSTOMER_SERVICE_FLOAT_POSITION_KEY = "customerServiceFloatPositionV1";
 const localDeviceId = getOrCreateDeviceId("localConsoleDeviceId");
 const RECORDER_EXPORT_DEFAULT_LIMIT = 10000;
+const KNOWLEDGE_LIST_PAGE_SIZE = 20;
+const WORKFLOW_DEFAULT_METRICS_GATE = {
+  factual_consistency_min: 0.95,
+  violation_rate_max: 0.01,
+  handoff_precision_min: 0.9,
+  continue_chat_rate_min: 0.7,
+};
+const WORKFLOW_ACTION_BUTTON_IDS = [
+  "wf-curation-run",
+  "wf-curation-fetch",
+  "wf-import-dry-run",
+  "wf-import-fetch",
+  "wf-import-apply",
+  "wf-eval-run",
+  "wf-eval-fetch",
+  "wf-release-create",
+  "wf-release-fetch",
+  "wf-release-approve",
+  "wf-release-rollback",
+];
 
 const titles = {
   customer_service: "微信智能客服",
@@ -76,6 +117,9 @@ const titles = {
   overview: "总览",
   knowledge: "正式知识库",
   intake: "资料导入",
+  uploads: "资料导入",
+  candidates: "待确认知识",
+  generator: "手动创建",
   recorder: "AI智能记录员",
   customer_profiles: "客户画像",
   ai_reference: "RAG经验池",
@@ -155,6 +199,90 @@ const fieldLabelOverrides = {
   usable_as_template: "是否可作为话术模板",
 };
 
+let helperCardCollapseObserver = null;
+const helperCardCollapseSkipIds = new Set([
+  "customer-service-session-summary",
+  "recorder-module-info",
+  "recorder-selected-summary",
+  "recorder-export-progress",
+]);
+
+function initHelperCardCollapsing() {
+  applyHelperCardCollapsing(document);
+  if (helperCardCollapseObserver || !document.body) return;
+  helperCardCollapseObserver = new MutationObserver((mutations) => {
+    mutations.forEach((mutation) => {
+      mutation.addedNodes.forEach((node) => {
+        if (!(node instanceof Element)) return;
+        applyHelperCardCollapsing(node);
+      });
+    });
+  });
+  helperCardCollapseObserver.observe(document.body, {childList: true, subtree: true});
+}
+
+function applyHelperCardCollapsing(root) {
+  if (!root) return;
+  const cards = [];
+  if (root instanceof Element && root.classList.contains("helper-card")) cards.push(root);
+  if (root.querySelectorAll) cards.push(...root.querySelectorAll(".helper-card"));
+  cards.forEach((card) => convertHelperCardToCollapsible(card));
+}
+
+function convertHelperCardToCollapsible(card) {
+  if (!(card instanceof HTMLElement)) return;
+  if (card.dataset.helperCollapseReady === "1") return;
+  if (card.tagName.toLowerCase() === "details") return;
+  if (card.classList.contains("helper-card-collapsible")) return;
+  if (helperCardCollapseSkipIds.has(card.id || "")) return;
+  if (card.dataset.helperCollapse === "off") return;
+  if (card.querySelector("button, input, select, textarea, form, .button-row, .compact-list, .metric-grid, .list-pane, .detail-pane, table")) return;
+  const contentTitle = helperCardContentTitle(card);
+
+  const details = document.createElement("details");
+  Array.from(card.attributes || []).forEach((attr) => {
+    if (attr.name === "class") return;
+    details.setAttribute(attr.name, attr.value);
+  });
+  details.className = `${card.className} helper-card-collapsible`;
+  details.dataset.helperCollapseReady = "1";
+
+  const summary = document.createElement("summary");
+  summary.className = "helper-card-summary";
+  const title = document.createElement("strong");
+  title.textContent = "备注信息";
+  const hint = document.createElement("span");
+  hint.className = "helper-card-summary-hint";
+  hint.textContent = "展开/收起";
+  summary.appendChild(title);
+  summary.appendChild(hint);
+  if (contentTitle) summary.title = contentTitle;
+
+  const content = document.createElement("div");
+  content.className = "helper-card-content";
+  while (card.firstChild) {
+    content.appendChild(card.firstChild);
+  }
+  details.appendChild(summary);
+  details.appendChild(content);
+  card.replaceWith(details);
+}
+
+function helperCardContentTitle(card) {
+  const strong = card.querySelector(":scope > strong") || card.querySelector("strong");
+  if (strong) {
+    const text = normalizeSpace(strong.textContent);
+    if (text) return text;
+  }
+  const span = card.querySelector(":scope > span") || card.querySelector("span");
+  const fallback = normalizeSpace(span?.textContent || "");
+  return fallback || "备注信息";
+}
+
+function normalizeSpace(text) {
+  return String(text || "").replace(/\s+/g, " ").trim();
+}
+
 function selectView(view, options = {}) {
   const target = viewAliases[view] || {view};
   if (target.group === "intake") state.activeIntakeTab = target.tab;
@@ -164,13 +292,15 @@ function selectView(view, options = {}) {
   if (activeView !== "knowledge" || !options.keepKnowledgeContext) state.productScopedEditContext = null;
   if (activeView !== "knowledge" || !options.keepDiagnosticHighlight) state.diagnosticHighlight = null;
   const requestedView = view || activeView;
-  document.querySelectorAll(".nav-item").forEach((item) => {
-    item.classList.toggle("is-active", item.dataset.view === requestedView || (!viewAliases[requestedView] && item.dataset.view === activeView));
+  const navItems = Array.from(document.querySelectorAll(".nav-item"));
+  const hasRequestedNavItem = navItems.some((item) => item.dataset.view === requestedView);
+  navItems.forEach((item) => {
+    item.classList.toggle("is-active", item.dataset.view === requestedView || (!hasRequestedNavItem && item.dataset.view === activeView));
   });
   document.querySelectorAll(".view-panel").forEach((panel) => {
     panel.classList.toggle("is-visible", panel.dataset.panel === activeView);
   });
-  document.getElementById("view-title").textContent = titles[activeView] || "总览";
+  document.getElementById("view-title").textContent = titles[requestedView] || titles[activeView] || "总览";
   syncWorkflowTabs();
   if (activeView !== "recorder") stopRecorderExportPolling();
 }
@@ -462,10 +592,27 @@ async function bootstrapAuthenticatedApp() {
   await registerLocalNode().catch((error) => console.warn("register local node failed", error));
   scheduleStartupSync();
   scheduleCustomerServiceRuntimePolling();
-  await Promise.all([loadOverview().catch(console.error), loadKnowledge().catch(console.error), refreshRagExperienceBadge().catch(console.error)]);
-  await loadCustomerService().catch(console.error);
   renderGenerator();
-  activateHashView();
+  if (hasHashView()) {
+    activateHashView();
+  } else {
+    await loadCustomerService().catch(console.error);
+  }
+  warmupStartupData();
+}
+
+function hasHashView() {
+  const view = window.location.hash.replace("#", "");
+  return Boolean(titles[view] || viewAliases[view]);
+}
+
+function warmupStartupData() {
+  window.setTimeout(() => {
+    Promise.all([
+      loadOverview().catch(console.error),
+      refreshRagExperienceBadge().catch(console.error),
+    ]).catch(console.error);
+  }, 80);
 }
 
 async function logoutLocal() {
@@ -852,46 +999,154 @@ async function loadLlmConfig() {
   renderLlmConfig();
 }
 
+const LLM_REASONING_EFFORT_LABELS = {
+  "": "默认（不覆盖）",
+  none: "none（关闭，若支持）",
+  minimal: "minimal（最低）",
+  low: "low（较低）",
+  medium: "medium（平衡）",
+  high: "high（深度）",
+  xhigh: "xhigh（极深，若中转支持）",
+};
+
 function renderLlmConfig() {
   const payload = state.llmConfig || {};
   const summary = document.getElementById("llm-config-summary");
+  const providerSelect = document.getElementById("llm-provider-select");
+  const baseUrlInput = document.getElementById("llm-base-url-input");
+  const flashModelSelect = document.getElementById("llm-flash-model-select");
+  const flashModelInput = document.getElementById("llm-flash-model-input");
+  const proModelSelect = document.getElementById("llm-pro-model-select");
+  const proModelInput = document.getElementById("llm-pro-model-input");
+  const flashReasoningInput = document.getElementById("llm-flash-reasoning-input");
+  const proReasoningInput = document.getElementById("llm-pro-reasoning-input");
+  const insecureTlsInput = document.getElementById("llm-insecure-tls-input");
   const input = document.getElementById("llm-api-key-input");
+  const keyCurrent = document.getElementById("llm-api-key-current");
+  const dataList = document.getElementById("llm-model-options");
+  const modelAvailabilityNote = document.getElementById("llm-model-availability-note");
   const saveButton = document.getElementById("llm-config-save");
   const testButton = document.getElementById("llm-config-test");
+  const proTestButton = document.getElementById("llm-config-test-pro");
+  const providers = Array.isArray(payload.providers) ? payload.providers : [];
+  const activeProvider = payload.provider || providers[0]?.id || "openai_compatible";
+  const activeOption = providers.find((item) => item.id === activeProvider) || {};
+  const modelOptions = llmVisibleModelOptions(payload, activeOption);
   if (summary) {
     summary.innerHTML = `
+      <div><span>供应商</span><strong>${escapeHtml(payload.provider_label || activeOption.label || activeProvider)}</strong></div>
       <div><span>Key 状态</span><strong>${payload.api_key_configured ? "已配置" : "未配置"}</strong></div>
       <div><span>当前 Key</span><strong>${escapeHtml(payload.api_key_masked || "—")}</strong></div>
-      <div><span>编辑权限</span><strong>${payload.editable ? "admin 可编辑" : "只读"}</strong></div>
+      <div><span>编辑权限</span><strong>${payload.editable ? "所有用户可编辑" : "当前会话只读"}</strong></div>
     `;
+  }
+  if (providerSelect) {
+    providerSelect.innerHTML = providers.map((item) => `<option value="${escapeHtml(item.id)}">${escapeHtml(item.label || item.id)}</option>`).join("");
+    providerSelect.value = activeProvider;
+    providerSelect.disabled = !payload.editable;
+  }
+  if (baseUrlInput) {
+    baseUrlInput.value = payload.base_url || activeOption.base_url || "";
+    baseUrlInput.disabled = !payload.editable;
+    baseUrlInput.placeholder = activeProvider === "openai_compatible" ? "填写第三方中转 Base URL，例如 https://.../v1" : "https://.../v1";
+  }
+  if (flashModelInput) {
+    flashModelInput.value = payload.flash_model || activeOption.flash_model || "";
+    flashModelInput.disabled = !payload.editable;
+  }
+  renderLlmModelSelect(flashModelSelect, flashModelInput?.value || payload.flash_model || "", modelOptions, payload.editable);
+  if (proModelInput) {
+    proModelInput.value = payload.pro_model || activeOption.pro_model || "";
+    proModelInput.disabled = !payload.editable;
+  }
+  renderLlmModelSelect(proModelSelect, proModelInput?.value || payload.pro_model || "", modelOptions, payload.editable);
+  renderLlmReasoningSelect(
+    flashReasoningInput,
+    payload.flash_reasoning_effort || activeOption.flash_reasoning_effort || "",
+    payload.reasoning_effort_options,
+    payload.editable,
+  );
+  renderLlmReasoningSelect(
+    proReasoningInput,
+    payload.pro_reasoning_effort || activeOption.pro_reasoning_effort || "",
+    payload.reasoning_effort_options,
+    payload.editable,
+  );
+  if (insecureTlsInput) {
+    insecureTlsInput.checked = !!payload.allow_insecure_tls;
+    insecureTlsInput.disabled = !payload.editable;
+  }
+  if (dataList) {
+    const dataListOptions = new Set(modelOptions);
+    [payload.flash_model, payload.pro_model].forEach((model) => {
+      if (model) dataListOptions.add(model);
+    });
+    dataList.innerHTML = Array.from(dataListOptions).map((model) => `<option value="${escapeHtml(model)}"></option>`).join("");
+  }
+  if (modelAvailabilityNote) {
+    const availableModels = Array.isArray(payload.available_models) ? payload.available_models : [];
+    if (availableModels.length) {
+      modelAvailabilityNote.innerHTML = availableModels
+        .map((model) => `<span class="llm-model-chip">${escapeHtml(model)}</span>`)
+        .join("");
+    } else if (payload.available_models_error) {
+      modelAvailabilityNote.textContent = `未读取到可用模型：${payload.available_models_error}`;
+    } else {
+      modelAvailabilityNote.textContent = "未读取到可用模型。";
+    }
   }
   if (input) {
     input.value = "";
-    input.placeholder = payload.api_key_configured ? "已配置（输入新 Key 可覆盖）" : "请输入 DeepSeek API Key";
+    input.placeholder = payload.api_key_configured ? "已配置（输入新 Key 可覆盖；留空保留）" : "请输入 API Key";
     input.disabled = !payload.editable;
   }
+  if (keyCurrent) {
+    keyCurrent.textContent = payload.api_key_configured
+      ? `当前已保存 Key：${payload.api_key_masked || "已配置"}。输入新 Key 会覆盖；留空保存会保留原 Key。`
+      : "当前未保存 Key。";
+  }
+  updateLlmInfoPanel();
+  updateLlmTestButtonState();
   if (saveButton) {
     saveButton.disabled = !payload.editable;
-    saveButton.title = payload.editable ? "保存 API Key" : "只有 admin 可以编辑 LLM 配置";
+    saveButton.title = payload.editable ? "保存大模型配置" : "当前会话不可编辑";
   }
   if (testButton) {
-    testButton.disabled = !payload.editable || !payload.api_key_configured;
-    testButton.title = payload.editable ? (payload.api_key_configured ? "测试 DeepSeek 连接" : "请先配置 API Key") : "只有 admin 可以测试";
+    testButton.textContent = "测试浅任务";
+    testButton.title = payload.editable ? "测试浅任务入口使用的模型" : "当前会话不可测试";
+  }
+  if (proTestButton) {
+    proTestButton.textContent = "测试深度思考";
+    proTestButton.title = payload.editable ? "测试深度思考入口使用的模型" : "当前会话不可测试";
   }
 }
 
 async function saveLlmConfig(event) {
   if (event) event.preventDefault();
+  const providerSelect = document.getElementById("llm-provider-select");
+  const baseUrlInput = document.getElementById("llm-base-url-input");
+  const flashModelSelect = document.getElementById("llm-flash-model-select");
+  const flashModelInput = document.getElementById("llm-flash-model-input");
+  const proModelSelect = document.getElementById("llm-pro-model-select");
+  const proModelInput = document.getElementById("llm-pro-model-input");
+  const flashReasoningInput = document.getElementById("llm-flash-reasoning-input");
+  const proReasoningInput = document.getElementById("llm-pro-reasoning-input");
+  const insecureTlsInput = document.getElementById("llm-insecure-tls-input");
   const input = document.getElementById("llm-api-key-input");
-  if (!input) return;
-  const deepseekApiKey = input.value.trim();
-  if (!deepseekApiKey) {
-    const confirmed = confirm("确定要清空 API Key 吗？");
-    if (!confirmed) return;
-  }
+  if (!input || !providerSelect) return;
+  const apiKey = input.value.trim();
   const payload = await apiJson("/api/system/llm-config", {
     method: "PUT",
-    body: JSON.stringify({deepseek_api_key: deepseekApiKey}),
+    body: JSON.stringify({
+      provider: providerSelect.value,
+      base_url: baseUrlInput?.value.trim() || "",
+      flash_model: flashModelSelect?.value || flashModelInput?.value.trim() || "",
+      pro_model: proModelSelect?.value || proModelInput?.value.trim() || "",
+      flash_reasoning_effort: flashReasoningInput?.value || "",
+      pro_reasoning_effort: proReasoningInput?.value || "",
+      allow_insecure_tls: !!insecureTlsInput?.checked,
+      api_key: apiKey,
+    }),
   });
   if (payload.ok === false) {
     alert(payload.detail || "保存失败");
@@ -902,27 +1157,200 @@ async function saveLlmConfig(event) {
   alert("大模型配置已保存。");
 }
 
-async function testLlmConfig() {
-  const testButton = document.getElementById("llm-config-test");
+async function testLlmConfig(route = "flash") {
+  const isPro = route === "pro";
+  const testButton = document.getElementById(isPro ? "llm-config-test-pro" : "llm-config-test");
+  const providerSelect = document.getElementById("llm-provider-select");
+  const baseUrlInput = document.getElementById("llm-base-url-input");
+  const flashModelSelect = document.getElementById("llm-flash-model-select");
+  const flashModelInput = document.getElementById("llm-flash-model-input");
+  const proModelSelect = document.getElementById("llm-pro-model-select");
+  const proModelInput = document.getElementById("llm-pro-model-input");
+  const flashReasoningInput = document.getElementById("llm-flash-reasoning-input");
+  const proReasoningInput = document.getElementById("llm-pro-reasoning-input");
+  const insecureTlsInput = document.getElementById("llm-insecure-tls-input");
+  const input = document.getElementById("llm-api-key-input");
+  const model = isPro ? proModelSelect?.value || proModelInput?.value.trim() : flashModelSelect?.value || flashModelInput?.value.trim();
+  const reasoningEffort = isPro ? proReasoningInput?.value || "" : flashReasoningInput?.value || "";
+  const routeLabel = isPro ? "深度思考入口" : "浅任务入口";
   if (testButton) {
     testButton.disabled = true;
     testButton.textContent = "测试中...";
   }
   try {
-    const payload = await apiJson("/api/system/llm-config/test", {method: "POST", body: JSON.stringify({})});
+    const payload = await apiJson("/api/system/llm-config/test", {
+      method: "POST",
+      body: JSON.stringify({
+        provider: providerSelect?.value || state.llmConfig?.provider || "",
+        route,
+        base_url: baseUrlInput?.value.trim() || "",
+        model: model || "",
+        reasoning_effort: reasoningEffort,
+        allow_insecure_tls: !!insecureTlsInput?.checked,
+        api_key: input?.value.trim() || "",
+      }),
+    });
     if (payload.ok) {
-      alert(`连接成功\nBase URL: ${escapeHtml(payload.base_url || "—")}`);
+      alert(`连接成功\n入口: ${routeLabel}\n供应商: ${escapeHtml(payload.provider_label || payload.provider || "—")}\n模型: ${escapeHtml(payload.model || "—")}\n思考强度: ${llmReasoningLabel(payload.reasoning_effort || "")}\nBase URL: ${escapeHtml(payload.base_url || "—")}`);
     } else {
-      alert(`连接失败: ${escapeHtml(payload.message || "未知错误")}`);
+      alert(`连接失败: ${payload.message || "未知错误"}`);
     }
   } catch (error) {
     alert(`测试异常: ${error.message}`);
   } finally {
     if (testButton) {
       testButton.disabled = false;
-      testButton.textContent = "测试连接";
+      testButton.textContent = isPro ? "测试深度思考" : "测试浅任务";
+      updateLlmTestButtonState();
     }
   }
+}
+
+function updateLlmInfoPanel() {
+  const config = state.llmConfig || {};
+  const providers = Array.isArray(config.providers) ? config.providers : [];
+  const providerSelect = document.getElementById("llm-provider-select");
+  const baseUrlInput = document.getElementById("llm-base-url-input");
+  const flashModelSelect = document.getElementById("llm-flash-model-select");
+  const flashModelInput = document.getElementById("llm-flash-model-input");
+  const proModelSelect = document.getElementById("llm-pro-model-select");
+  const proModelInput = document.getElementById("llm-pro-model-input");
+  const flashReasoningInput = document.getElementById("llm-flash-reasoning-input");
+  const proReasoningInput = document.getElementById("llm-pro-reasoning-input");
+  const provider = providerSelect?.value || config.provider || providers[0]?.id || "openai_compatible";
+  const option = providers.find((item) => item.id === provider) || {};
+  setLlmInfoText("llm-info-provider", option.label || config.provider_label || provider || "—");
+  setLlmInfoText("llm-info-flash-model", flashModelSelect?.value || flashModelInput?.value || option.flash_model || "—");
+  setLlmInfoText("llm-info-flash-effort", llmReasoningLabel(flashReasoningInput?.value || option.flash_reasoning_effort || ""));
+  setLlmInfoText("llm-info-pro-model", proModelSelect?.value || proModelInput?.value || option.pro_model || "—");
+  setLlmInfoText("llm-info-pro-effort", llmReasoningLabel(proReasoningInput?.value || option.pro_reasoning_effort || ""));
+  setLlmInfoText("llm-info-base-url", baseUrlInput?.value || option.base_url || "—");
+  setLlmInfoText("llm-info-tls", document.getElementById("llm-insecure-tls-input")?.checked ? "允许自签名证书" : "标准证书校验");
+}
+
+function updateLlmTestButtonState() {
+  const config = state.llmConfig || {};
+  const providers = Array.isArray(config.providers) ? config.providers : [];
+  const providerSelect = document.getElementById("llm-provider-select");
+  const input = document.getElementById("llm-api-key-input");
+  const testButton = document.getElementById("llm-config-test");
+  const proTestButton = document.getElementById("llm-config-test-pro");
+  const provider = providerSelect?.value || config.provider || "";
+  const option = providers.find((item) => item.id === provider) || {};
+  const hasSavedKey = provider === config.provider ? !!config.api_key_configured : !!option.api_key_configured;
+  const hasTypedKey = !!input?.value.trim();
+  const disabled = !config.editable || (!hasSavedKey && !hasTypedKey);
+  if (testButton) testButton.disabled = disabled;
+  if (proTestButton) proTestButton.disabled = disabled;
+}
+
+function setLlmInfoText(id, value) {
+  const element = document.getElementById(id);
+  if (element) element.textContent = value || "—";
+}
+
+function llmReasoningLabel(value) {
+  const key = String(value || "");
+  return LLM_REASONING_EFFORT_LABELS[key] || key || "默认（不覆盖）";
+}
+
+function llmVisibleModelOptions(config, option) {
+  const isActiveProvider = !option?.id || option.id === config?.provider;
+  const availableModels = isActiveProvider && Array.isArray(config?.available_models) ? config.available_models : [];
+  const configuredModels = Array.isArray(option?.model_options) ? option.model_options : [];
+  const source = availableModels.length ? availableModels : configuredModels;
+  return uniqueStrings(source);
+}
+
+function renderLlmModelSelect(select, value, models, editable) {
+  if (!select) return;
+  const normalizedModels = uniqueStrings([...(Array.isArray(models) ? models : []), value]);
+  if (!normalizedModels.length) {
+    select.innerHTML = `<option value="">暂无可用模型</option>`;
+    select.value = "";
+    select.disabled = true;
+    return;
+  }
+  const current = String(value || "").trim();
+  select.innerHTML = [
+    `<option value="">选择模型</option>`,
+    ...normalizedModels.map((model) => `<option value="${escapeHtml(model)}">${escapeHtml(model)}</option>`),
+  ].join("");
+  select.value = normalizedModels.includes(current) ? current : "";
+  select.disabled = !editable;
+}
+
+function applyLlmModelSelect(route) {
+  const isPro = route === "pro";
+  const select = document.getElementById(isPro ? "llm-pro-model-select" : "llm-flash-model-select");
+  const input = document.getElementById(isPro ? "llm-pro-model-input" : "llm-flash-model-input");
+  if (!select || !input) return;
+  input.value = select.value;
+  updateLlmInfoPanel();
+}
+
+function syncLlmModelSelect(route) {
+  const isPro = route === "pro";
+  const select = document.getElementById(isPro ? "llm-pro-model-select" : "llm-flash-model-select");
+  const input = document.getElementById(isPro ? "llm-pro-model-input" : "llm-flash-model-input");
+  if (!select || !input) return;
+  const typed = String(input.value || "").trim();
+  const hasOption = Array.from(select.options || []).some((option) => option.value === typed);
+  select.value = hasOption ? typed : "";
+  updateLlmInfoPanel();
+}
+
+function renderLlmReasoningSelect(select, value, options, editable) {
+  if (!select) return;
+  const values = Array.isArray(options) && options.length ? options : ["", "minimal", "low", "medium", "high"];
+  const merged = new Set(["", ...values.map((item) => String(item || "").trim()).filter((item) => item || item === ""), String(value || "").trim()]);
+  select.innerHTML = Array.from(merged)
+    .map((item) => `<option value="${escapeHtml(item)}">${escapeHtml(llmReasoningLabel(item))}</option>`)
+    .join("");
+  select.value = String(value || "");
+  select.disabled = !editable;
+}
+
+function uniqueStrings(items) {
+  const seen = new Set();
+  const result = [];
+  (items || []).forEach((item) => {
+    const value = String(item || "").trim();
+    if (!value || seen.has(value)) return;
+    seen.add(value);
+    result.push(value);
+  });
+  return result;
+}
+
+function applyLlmProviderPreset() {
+  const config = state.llmConfig || {};
+  const providers = Array.isArray(config.providers) ? config.providers : [];
+  const providerSelect = document.getElementById("llm-provider-select");
+  const baseUrlInput = document.getElementById("llm-base-url-input");
+  const flashModelSelect = document.getElementById("llm-flash-model-select");
+  const flashModelInput = document.getElementById("llm-flash-model-input");
+  const proModelSelect = document.getElementById("llm-pro-model-select");
+  const proModelInput = document.getElementById("llm-pro-model-input");
+  const flashReasoningInput = document.getElementById("llm-flash-reasoning-input");
+  const proReasoningInput = document.getElementById("llm-pro-reasoning-input");
+  const insecureTlsInput = document.getElementById("llm-insecure-tls-input");
+  if (!providerSelect) return;
+  const option = providers.find((item) => item.id === providerSelect.value) || {};
+  if (baseUrlInput) {
+    baseUrlInput.value = option.base_url || "";
+    baseUrlInput.placeholder = providerSelect.value === "openai_compatible" ? "填写第三方中转 Base URL，例如 https://.../v1" : "https://.../v1";
+  }
+  const modelOptions = llmVisibleModelOptions(config, option);
+  if (flashModelInput) flashModelInput.value = option.flash_model || "";
+  renderLlmModelSelect(flashModelSelect, flashModelInput?.value || option.flash_model || "", modelOptions, config.editable);
+  if (proModelInput) proModelInput.value = option.pro_model || "";
+  renderLlmModelSelect(proModelSelect, proModelInput?.value || option.pro_model || "", modelOptions, config.editable);
+  renderLlmReasoningSelect(flashReasoningInput, option.flash_reasoning_effort || "", config.reasoning_effort_options, config.editable);
+  renderLlmReasoningSelect(proReasoningInput, option.pro_reasoning_effort || "", config.reasoning_effort_options, config.editable);
+  if (insecureTlsInput) insecureTlsInput.checked = !!option.allow_insecure_tls;
+  updateLlmInfoPanel();
+  updateLlmTestButtonState();
 }
 
 function toggleLlmApiKeyVisibility() {
@@ -935,13 +1363,16 @@ function toggleLlmApiKeyVisibility() {
 }
 
 async function loadCustomerService() {
-  const [settingsPayload, runtimePayload, overviewPayload] = await Promise.all([
+  const [settingsPayload, runtimePayload, overviewPayload, sessionsPayload] = await Promise.all([
     apiGet("/api/customer-service/settings"),
     apiGet("/api/customer-service/runtime/status").catch(() => ({item: null})),
     apiGet("/api/knowledge/overview").catch(() => ({counts: {}})),
+    apiGet("/api/customer-service/sessions").catch(() => ({items: []})),
   ]);
   state.customerService = settingsPayload.item || {};
   state.customerServiceRuntime = runtimePayload.item || state.customerServiceRuntime || {};
+  state.customerServiceSessions = sessionsPayload.items || [];
+  state.customerServiceSessionMeta = sessionsPayload || {};
   renderCustomerService(overviewPayload.counts || {});
   renderCustomerServiceRuntime();
 }
@@ -964,14 +1395,118 @@ function renderCustomerService(counts = {}) {
   setChecked("customer-data-capture", settings.data_capture_enabled !== false);
   setChecked("customer-handoff", settings.handoff_enabled !== false);
   setChecked("customer-operator-alert", settings.operator_alert_enabled !== false);
+  setChecked("customer-identity-guard", settings.identity_guard_enabled !== false);
+  setChecked("customer-style-adapter", settings.style_adapter_enabled !== false);
+  setChecked("customer-respond-all-unread", settings.respond_all_unread_sessions === true);
   document.getElementById("customer-service-status").textContent = item.status || "未配置";
+  const enabledSessions = (state.customerServiceSessions || []).filter((session) => session.enabled);
   document.getElementById("customer-service-cards").innerHTML = `
     <div class="metric-card"><span>${settings.enabled ? "开" : "关"}</span><label>客服开关</label></div>
     <div class="metric-card"><span>${escapeHtml(modeSelect?.selectedOptions?.[0]?.textContent || "未选择")}</span><label>当前模式</label></div>
-    <div class="metric-card"><span>${counts.pending_candidates ?? 0}</span><label>待确认知识</label></div>
+    <div class="metric-card"><span>${enabledSessions.length}</span><label>监听会话</label></div>
     <div class="metric-card"><span>${counts.raw_messages ?? 0}</span><label>已记录消息</label></div>
   `;
+  renderCustomerServiceNewSessionPolicyButtons();
+  renderCustomerServiceSessionSummary();
+  renderCustomerServiceSessionList();
   renderCustomerServiceRuntime();
+}
+
+function renderCustomerServiceNewSessionPolicyButtons() {
+  const settings = (state.customerService || {}).settings || {};
+  const respondAllUnread = settings.respond_all_unread_sessions === true;
+  const enableButton = document.getElementById("customer-service-select-all");
+  const disableButton = document.getElementById("customer-service-clear-selection");
+  if (enableButton) {
+    enableButton.classList.toggle("customer-policy-active", respondAllUnread);
+  }
+  if (disableButton) {
+    disableButton.classList.toggle("customer-policy-active", !respondAllUnread);
+  }
+}
+
+function renderCustomerServiceSessionSummary() {
+  const panel = document.getElementById("customer-service-session-summary");
+  if (!panel) return;
+  const settings = (state.customerService || {}).settings || {};
+  const sessions = state.customerServiceSessions || [];
+  const enabled = sessions.filter((item) => item.enabled);
+  const ignored = sessions.filter((item) => !item.enabled);
+  const unread = sessions.filter((item) => item.unread_detected);
+  const previewNames = enabled
+    .slice(0, 6)
+    .map((item) => item.display_name || item.name)
+    .filter(Boolean);
+  const more = enabled.length > previewNames.length ? ` 等 ${enabled.length} 个` : "";
+  const defaultText = settings.respond_all_unread_sessions
+    ? "已开启“响应所有未读会话”：新会话默认响应。"
+    : "未开启“响应所有未读会话”：新会话默认忽略。";
+  panel.innerHTML = `
+    <strong>当前监听会话：${escapeHtml(String(enabled.length))} 个（忽略 ${escapeHtml(String(ignored.length))} 个）</strong>
+    <span>${enabled.length ? `已选择：${escapeHtml(previewNames.join("、"))}${escapeHtml(more)}` : "尚未选择监听会话，请先识别会话后勾选。"} ${escapeHtml(defaultText)}${unread.length ? ` 当前有 ${unread.length} 个会话检测到未读变化。` : ""}</span>
+  `;
+}
+
+function customerServiceConversationTypeLabel(value) {
+  if (value === "group") return "群聊";
+  if (value === "private") return "私聊";
+  if (value === "file_transfer") return "文件传输";
+  if (value === "system") return "系统";
+  return "未知";
+}
+
+function renderCustomerServiceSessionList() {
+  const list = document.getElementById("customer-service-session-list");
+  if (!list) return;
+  const items = [...(state.customerServiceSessions || [])];
+  if (!items.length) {
+    list.innerHTML = `<div class="empty-state">尚未识别到会话。点击“识别会话”后，再勾选需要自动回复的对象。</div>`;
+    return;
+  }
+  items.sort((a, b) => {
+    const enabledGap = Number(Boolean(b.enabled)) - Number(Boolean(a.enabled));
+    if (enabledGap !== 0) return enabledGap;
+    const unreadGap = Number(Boolean(b.unread_detected)) - Number(Boolean(a.unread_detected));
+    if (unreadGap !== 0) return unreadGap;
+    const scoreGap = Number(b.priority_score || 0) - Number(a.priority_score || 0);
+    if (scoreGap !== 0) return scoreGap;
+    return String(a.display_name || a.name || "").localeCompare(String(b.display_name || b.name || ""), "zh-Hans-CN");
+  });
+  list.innerHTML = items.map((item) => {
+    const name = item.name || "";
+    const selected = Boolean(item.enabled);
+    const unread = Boolean(item.unread_detected);
+    const title = item.display_name || name || "未命名会话";
+    const statusLine = unread
+      ? `检测到新变化 · ${item.last_message_time || "等待时间"}`
+      : `最近时间：${item.last_message_time || "暂无"}`;
+    const badges = [
+      {key: item.conversation_type || "unknown", label: customerServiceConversationTypeLabel(item.conversation_type), tone: "info"},
+      selected ? {key: "enabled", label: "自动回复", tone: "ok"} : {key: "disabled", label: "忽略", tone: "muted"},
+      ...(unread ? [{key: "unread", label: "未读变化", tone: "warning"}] : []),
+    ];
+    return `
+      <div class="record-row recorder-row${selected ? " is-selected" : ""}">
+        <button class="link-button">
+          <strong>${escapeHtml(title)}</strong>
+          <span>${escapeHtml(statusLine)}</span>
+          ${badgeListHtml(badges)}
+        </button>
+        <div class="inline-actions">
+          <label class="checkbox-line">
+            <input class="customer-session-toggle" type="checkbox" data-name="${escapeAttr(name)}" ${selected ? "checked" : ""} />
+            自动回复
+          </label>
+        </div>
+      </div>
+    `;
+  }).join("");
+  list.querySelectorAll(".customer-session-toggle").forEach((checkbox) => {
+    checkbox.addEventListener("change", () => {
+      const name = checkbox.dataset.name || "";
+      updateCustomerServiceSession(name, {enabled: checkbox.checked}).catch((error) => alert(error.message));
+    });
+  });
 }
 
 async function refreshCustomerServiceRuntime(options = {}) {
@@ -1192,10 +1727,106 @@ async function saveCustomerServiceSettings() {
       data_capture_enabled: document.getElementById("customer-data-capture")?.checked,
       handoff_enabled: document.getElementById("customer-handoff")?.checked,
       operator_alert_enabled: document.getElementById("customer-operator-alert")?.checked,
+      identity_guard_enabled: document.getElementById("customer-identity-guard")?.checked,
+      style_adapter_enabled: document.getElementById("customer-style-adapter")?.checked,
+      respond_all_unread_sessions: document.getElementById("customer-respond-all-unread")?.checked,
     }),
   });
   state.customerService = payload.item || {};
+  await refreshCustomerServiceSessions({silent: true});
   renderCustomerService((state.overview || {}).counts || {});
+}
+
+async function refreshCustomerServiceSessions(options = {}) {
+  if (!state.authToken) return;
+  try {
+    const payload = await apiGet("/api/customer-service/sessions");
+    state.customerServiceSessions = payload.items || [];
+    state.customerServiceSessionMeta = payload || {};
+    if (typeof payload.respond_all_unread_sessions === "boolean") {
+      state.customerService = {
+        ...(state.customerService || {}),
+        settings: {
+          ...((state.customerService || {}).settings || {}),
+          respond_all_unread_sessions: payload.respond_all_unread_sessions,
+        },
+      };
+    }
+    renderCustomerServiceSessionSummary();
+    renderCustomerServiceSessionList();
+    renderCustomerServiceNewSessionPolicyButtons();
+  } catch (error) {
+    if (!options.silent) console.warn(error);
+  }
+}
+
+async function discoverCustomerServiceSessions() {
+  const button = document.getElementById("customer-service-discover");
+  if (button) {
+    button.disabled = true;
+    button.textContent = "识别中...";
+  }
+  try {
+    const payload = await apiJson("/api/customer-service/sessions/discover", {method: "POST", body: "{}"});
+    if (payload.ok === false) {
+      throw new Error(payload.message || "识别会话失败");
+    }
+    state.customerServiceSessions = payload.items || [];
+    state.customerServiceSessionMeta = payload || {};
+    state.customerService = {
+      ...(state.customerService || {}),
+      settings: {
+        ...((state.customerService || {}).settings || {}),
+        respond_all_unread_sessions: payload.respond_all_unread_sessions === true,
+        session_targets_managed: payload.session_targets_managed === true,
+      },
+    };
+    renderCustomerServiceSessionSummary();
+    renderCustomerServiceSessionList();
+    const added = Number(payload.added_count || 0);
+    alert(added > 0 ? `识别完成，新增 ${added} 个会话。` : "识别完成，会话列表已更新。");
+  } finally {
+    if (button) {
+      button.disabled = false;
+      button.textContent = "识别会话";
+    }
+  }
+}
+
+async function updateCustomerServiceSession(name, patch) {
+  if (!name) return;
+  const payload = await apiJson(`/api/customer-service/sessions/${encodeURIComponent(name)}`, {
+    method: "PATCH",
+    body: JSON.stringify(patch || {}),
+  });
+  state.customerServiceSessions = payload.items || state.customerServiceSessions || [];
+  if (payload.settings) {
+    state.customerService = {
+      ...(state.customerService || {}),
+      settings: payload.settings,
+    };
+  }
+  renderCustomerServiceSessionSummary();
+  renderCustomerServiceSessionList();
+}
+
+async function applyCustomerServiceSessionSelection(mode = "all") {
+  const enableNewSessionsByDefault = mode === "all";
+  const payload = await apiJson("/api/customer-service/settings", {
+    method: "PUT",
+    body: JSON.stringify({
+      respond_all_unread_sessions: enableNewSessionsByDefault,
+    }),
+  });
+  state.customerService = payload.item || state.customerService || {};
+  setChecked("customer-respond-all-unread", enableNewSessionsByDefault);
+  await refreshCustomerServiceSessions({silent: true});
+  renderCustomerService((state.overview || {}).counts || {});
+  alert(
+    mode === "all"
+      ? "已设置为“新会话默认响应”。当前列表里的勾选状态保持不变。"
+      : "已设置为“新会话默认忽略”。当前列表里的勾选状态保持不变。"
+  );
 }
 
 async function loadCustomerProfiles() {
@@ -1391,32 +2022,44 @@ async function loadOverview() {
   ]);
   state.overview = knowledge;
   const counts = knowledge.counts || {};
-  document.getElementById("metric-products").textContent = counts.products ?? "-";
+  document.getElementById("metric-knowledge-total").textContent = counts.knowledge_total ?? "-";
   document.getElementById("metric-candidates").textContent = counts.pending_candidates ?? "-";
   updateCandidateCountBadge(counts.pending_candidates ?? 0);
   document.getElementById("metric-diagnostics").textContent = system.ok ? "正常" : "待查";
   document.getElementById("overview-cards").innerHTML = `
-    <div class="metric-card"><span>${counts.categories ?? 0}</span><label>知识门类</label></div>
-    <div class="metric-card"><span>${counts.products ?? 0}</span><label>商品知识</label></div>
-    <div class="metric-card"><span>${counts.faqs ?? 0}</span><label>规则问答</label></div>
-    <div class="metric-card"><span>${counts.style_examples ?? 0}</span><label>话术样例</label></div>
+    <div class="metric-card"><span>${counts.knowledge_total ?? 0}</span><label>总知识条数</label></div>
+    <div class="metric-card"><span>${counts.formal_knowledge_total ?? 0}</span><label>正式知识</label></div>
+    <div class="metric-card"><span>${counts.chats ?? counts.style_examples ?? 0}</span><label>聊天话术与记录</label></div>
+    <div class="metric-card"><span>${counts.policies ?? 0}</span><label>规则政策</label></div>
+    <div class="metric-card"><span>${counts.product_master ?? counts.products ?? 0}</span><label>商品主数据</label></div>
+    <div class="metric-card"><span>${counts.product_pending_review ?? 0}</span><label>商品待确认</label></div>
     <div class="metric-card"><span>${counts.pending_candidates ?? 0}</span><label>待审核候选</label></div>
     <div class="metric-card"><span>${counts.new_knowledge ?? 0}</span><label>新加入知识</label></div>
-    <div class="metric-card"><span>${counts.raw_messages ?? 0}</span><label>原始消息</label></div>
     <div class="metric-card"><span>${system.ok ? "正常" : "异常"}</span><label>系统状态</label></div>
   `;
 }
 
 async function loadKnowledge() {
-  const payload = await apiGet("/api/knowledge/categories");
-  state.categories = payload.items || [];
-  const selectable = knowledgeCategoryOptions();
-  if ((!state.activeCategoryId || !selectable.some((item) => item.id === state.activeCategoryId)) && selectable.length) {
-    state.activeCategoryId = selectable[0].id;
+  state.categoryItemsLoading = true;
+  state.categoryItemsError = "";
+  renderKnowledgeList();
+  try {
+    const payload = await apiGet("/api/knowledge/categories");
+    state.categories = payload.items || [];
+    const selectable = knowledgeCategoryOptions();
+    if ((!state.activeCategoryId || !selectable.some((item) => item.id === state.activeCategoryId)) && selectable.length) {
+      state.activeCategoryId = selectable[0].id;
+    }
+    renderCategorySelect();
+    renderGeneratorCategorySelect();
+    await loadCategoryItems();
+  } catch (error) {
+    state.categoryItemsLoading = false;
+    state.categoryItemsLoadingMore = false;
+    state.categoryItemsError = error?.message || String(error || "正式知识加载失败");
+    console.warn("knowledge categories load failed", error);
+    renderKnowledgeList();
   }
-  renderCategorySelect();
-  renderGeneratorCategorySelect();
-  await loadCategoryItems();
 }
 
 function renderCategorySelect() {
@@ -1431,7 +2074,7 @@ function renderCategorySelect() {
 }
 
 function visibleKnowledgeCategories() {
-  return state.categories.filter((category) => category.scope !== "tenant_product");
+  return state.categories.filter((category) => category.scope !== "tenant_product" && category.scope !== "product_master");
 }
 
 function knowledgeCategoryOptions() {
@@ -1448,17 +2091,62 @@ function knowledgeCategoryOptions() {
 function renderGeneratorCategorySelect() {
   const select = document.getElementById("generator-category");
   if (!select) return;
-  select.innerHTML = `<option value="">自动判断门类</option>` + state.categories
+  select.innerHTML = `<option value="">自动判断门类</option>` + visibleKnowledgeCategories()
     .map((category) => `<option value="${escapeHtml(category.id)}">${escapeHtml(category.name || category.id)}</option>`)
     .join("");
 }
 
-async function loadCategoryItems() {
+async function loadCategoryItems(options = {}) {
   if (!state.activeCategoryId) return;
-  const payload = await apiGet(`/api/knowledge/categories/${encodeURIComponent(state.activeCategoryId)}/items`);
-  state.categoryItems = sortKnowledgeItemsForReview(payload.items || []);
-  state.selectedKnowledge = state.categoryItems[0] || null;
-  state.knowledgeMode = "view";
+  const append = Boolean(options.append);
+  const query = (document.getElementById("knowledge-search")?.value || "").trim();
+  const offset = append ? state.categoryItems.length : 0;
+  if (append && state.categoryItemsLoadingMore) return;
+  state.categoryItemsLoadingOffset = offset;
+  state.categoryItemsLoadingLimit = KNOWLEDGE_LIST_PAGE_SIZE;
+  state.categoryItemsLoadingQuery = query;
+  state.categoryItemsError = "";
+  if (!append) {
+    state.categoryItemsTotal = query ? 0 : Math.max(0, Number(activeCategory()?.item_count || 0) || 0);
+    state.categoryItemsHasMore = false;
+  }
+  state.categoryItemsLoading = !append;
+  state.categoryItemsLoadingMore = append;
+  renderKnowledgeList();
+  const params = new URLSearchParams({
+    limit: String(KNOWLEDGE_LIST_PAGE_SIZE),
+    offset: String(offset),
+  });
+  if (query) params.set("query", query);
+  let loaded = false;
+  try {
+    const payload = await apiGet(`/api/knowledge/categories/${encodeURIComponent(state.activeCategoryId)}/items?${params.toString()}`);
+    const nextItems = sortKnowledgeItemsForReview(payload.items || []);
+    state.categoryItems = append ? sortKnowledgeItemsForReview([...(state.categoryItems || []), ...nextItems]) : nextItems;
+    state.categoryItemsTotal = Math.max(0, Number(payload.total ?? state.categoryItems.length) || 0);
+    state.categoryItemsHasMore = Boolean(payload.has_more ?? (state.categoryItems.length < state.categoryItemsTotal));
+    loaded = true;
+  } catch (error) {
+    state.categoryItemsError = knowledgeLoadErrorMessage(error, offset);
+    if (!append) {
+      state.categoryItems = [];
+      state.selectedKnowledge = null;
+    }
+    console.warn("knowledge category items load failed", error);
+  } finally {
+    state.categoryItemsLoading = false;
+    state.categoryItemsLoadingMore = false;
+  }
+  if (!loaded) {
+    renderKnowledgeList();
+    renderKnowledgeDetail();
+    return;
+  }
+  state.knowledgeListVisibleCount = KNOWLEDGE_LIST_PAGE_SIZE;
+  if (!append) {
+    state.selectedKnowledge = state.categoryItems[0] || null;
+    state.knowledgeMode = "view";
+  }
   renderKnowledgeList();
   renderKnowledgeDetail();
 }
@@ -1486,6 +2174,44 @@ function knowledgeReviewTimestamp(item) {
 
 function activeCategory() {
   return state.categories.find((item) => item.id === state.activeCategoryId) || null;
+}
+
+function knownCategoryItemTotal() {
+  const query = String(state.categoryItemsLoadingQuery || document.getElementById("knowledge-search")?.value || "").trim();
+  if (query) return 0;
+  const total = Number(state.categoryItemsTotal || activeCategory()?.item_count || 0);
+  return Number.isFinite(total) && total > 0 ? total : 0;
+}
+
+function knowledgeLoadingProgressText() {
+  const offset = Math.max(0, Number(state.categoryItemsLoadingOffset) || 0);
+  const limit = Math.max(1, Number(state.categoryItemsLoadingLimit) || KNOWLEDGE_LIST_PAGE_SIZE);
+  const total = knownCategoryItemTotal();
+  const start = total ? Math.min(offset + 1, total) : offset + 1;
+  const end = total ? Math.min(offset + limit, total) : offset + limit;
+  const query = String(state.categoryItemsLoadingQuery || "").trim();
+  const prefix = query ? "正在搜索并加载" : "正在加载";
+  return `${prefix}第 ${start}-${end} 条${total ? ` / 共 ${total} 条` : ""}${query ? `（关键词：${query}）` : ""}`;
+}
+
+function knowledgeNextPageText() {
+  const total = Math.max(0, Number(state.categoryItemsTotal || activeCategory()?.item_count || 0) || 0);
+  const offset = Math.max(0, state.categoryItems.length);
+  const remaining = Math.max(0, total - offset);
+  const start = total ? Math.min(offset + 1, total) : offset + 1;
+  const end = total ? Math.min(offset + KNOWLEDGE_LIST_PAGE_SIZE, total) : offset + KNOWLEDGE_LIST_PAGE_SIZE;
+  return {
+    remaining,
+    progress: `第 ${start}-${end} 条${total ? ` / 共 ${total} 条` : ""}`,
+    button: `再加载 ${Math.min(KNOWLEDGE_LIST_PAGE_SIZE, remaining || KNOWLEDGE_LIST_PAGE_SIZE)} 条`,
+  };
+}
+
+function knowledgeLoadErrorMessage(error, offset = 0) {
+  const rawMessage = error?.message || String(error || "未知错误");
+  const progressText = knowledgeLoadingProgressText();
+  const retryHint = offset > 0 ? "当前页加载失败，已保留前面已加载的内容。" : "第一页加载失败，暂时没有可展示内容。";
+  return `${progressText}失败：${rawMessage}。${retryHint}`;
 }
 
 function categoryById(categoryId) {
@@ -1572,7 +2298,7 @@ function knowledgeScopeBadges(category, item) {
   if (isProductScopedCategory(category)) {
     return [{label: `只用于：${knowledgeProductName(item)}`, tone: "info"}];
   }
-  if (category.id === "products") return [{label: "同步到商品库", tone: "info"}];
+  if (category.id === "products") return [{label: "商品主数据", tone: "info"}];
   if (!["chats", "policies"].includes(category.id)) return [];
   const scope = data.applicability_scope || "global";
   if (scope === "specific_product") return [{label: `指定商品：${productDisplayName(data.product_id) || data.product_id || "未填写"}`, tone: "info"}];
@@ -1594,8 +2320,8 @@ function knowledgeContextNoticeHtml(category, item, options = {}) {
   if (category.id === "products") {
     return `
       <div class="helper-card context-card">
-        <strong>商品资料会同步显示在商品库。</strong>
-        <span>库存、在售/归档和常用运营动作建议优先在商品库操作；这里适合补充规格、物流、售后和高级字段。</span>
+        <strong>这是商品主数据，不属于普通正式知识。</strong>
+        <span>库存、价格、规格和在售状态请优先在商品库维护；RAG经验和候选知识不能反向写入这里。</span>
       </div>
     `;
   }
@@ -1622,37 +2348,114 @@ function renderKnowledgeList() {
   const titleField = category?.schema?.item_title_field || "title";
   const subtitleField = category?.schema?.item_subtitle_field || "";
   const list = document.getElementById("knowledge-list");
+  if (state.categoryItemsLoading && !state.categoryItemsLoadingMore) {
+    const progressText = knowledgeLoadingProgressText();
+    list.innerHTML = `
+      <div class="status-card loading">
+        <strong><span class="loading-spinner" aria-hidden="true"></span>正在加载正式知识</strong>
+        <span>${escapeHtml(progressText)}。系统每页只拉取 ${KNOWLEDGE_LIST_PAGE_SIZE} 条，数量多时不会一次性加载全部话术。</span>
+      </div>
+    `;
+    return;
+  }
   const filtered = sortKnowledgeItemsForReview(state.categoryItems.filter((item) => {
     const text = `${item.id} ${businessSearchText(item.data || {})}`.toLowerCase();
     return !query || text.includes(query);
   }));
-  list.innerHTML = filtered
+  const visibleItems = filtered;
+  const errorHtml = state.categoryItemsError ? `
+    <div class="status-card error">
+      <strong>正式知识加载失败</strong>
+      <span>${escapeHtml(state.categoryItemsError)}</span>
+      <div class="button-row">
+        <button class="secondary-button knowledge-retry-load" type="button">重试加载</button>
+      </div>
+    </div>
+  ` : "";
+  const rowsHtml = visibleItems
     .map((item, index) => {
       const title = item.data?.[titleField] || item.id;
       const subtitle = subtitleField ? item.data?.[subtitleField] : item.status;
       const active = state.selectedKnowledge?.id === item.id ? " is-selected" : "";
       const highlighted = diagnosticTargetMatches(category?.id, item.id) ? " diagnostic-highlight" : "";
       const badges = [...(item.display_badges || []), ...knowledgeScopeBadges(category, item)];
+      const runtime = item.runtime || {};
       return `
-        <button class="record-row${active}${highlighted}" data-index="${index}">
-          <strong>${escapeHtml(title)}</strong>
-          <span>${escapeHtml(item.id)} · ${escapeHtml(subtitle || item.status || "")}</span>
+        <button class="product-card knowledge-card knowledge-row${active}${highlighted}" data-index="${index}" aria-label="查看 ${escapeHtml(title)} 的完整知识">
+          <div class="product-card-head">
+            <div>
+              <strong>${escapeHtml(title)}</strong>
+              <span>${escapeHtml(category?.name || category?.id || "正式知识")}</span>
+            </div>
+            <em class="${item.status === "archived" ? "is-muted" : ""}">${item.status === "archived" ? "已归档" : "启用中"}</em>
+          </div>
+          <div class="product-card-facts">
+            <span><b>知识 ID</b>${escapeHtml(item.id)}</span>
+            <span><b>回复方式</b>${runtime.requires_handoff ? "需请示" : runtime.allow_auto_reply === false ? "不自动回" : "可自动回"}</span>
+          </div>
+          <p>${escapeHtml(knowledgeCardSummary(category, item, subtitle))}</p>
           ${badgeListHtml(badges)}
+          <small>点击查看完整内容</small>
         </button>
       `;
     })
     .join("");
-  list.querySelectorAll(".record-row").forEach((button) => {
+  list.innerHTML = errorHtml + rowsHtml;
+  if (state.categoryItemsHasMore) {
+    const nextPage = knowledgeNextPageText();
+    list.innerHTML += `
+      <div class="helper-card">
+        <strong>已显示 ${state.categoryItems.length}/${state.categoryItemsTotal || state.categoryItems.length} 条</strong>
+        <span>${state.categoryItemsLoadingMore ? `${escapeHtml(knowledgeLoadingProgressText())}。` : `下一页将加载 ${escapeHtml(nextPage.progress)}。`}数据较多时按页从后台加载，避免一次性拉取 900+ 条导致页面卡顿。</span>
+        <div class="button-row">
+          <button class="secondary-button knowledge-load-more" ${state.categoryItemsLoadingMore ? "disabled" : ""}>${state.categoryItemsLoadingMore ? `加载中：${escapeHtml(knowledgeLoadingProgressText())}` : nextPage.button}</button>
+        </div>
+      </div>
+    `;
+  }
+  list.querySelectorAll(".knowledge-row").forEach((button) => {
     button.addEventListener("click", () => {
-      state.selectedKnowledge = filtered[Number(button.dataset.index)];
+      state.selectedKnowledge = visibleItems[Number(button.dataset.index)];
       state.knowledgeMode = "view";
       renderKnowledgeList();
       renderKnowledgeDetail();
+      openKnowledgeDetailModal();
     });
   });
-  if (!filtered.length) {
+  list.querySelector(".knowledge-retry-load")?.addEventListener("click", () => {
+    loadCategoryItems({append: state.categoryItems.length > 0}).catch((error) => alert(error.message));
+  });
+  list.querySelector(".knowledge-load-more")?.addEventListener("click", () => {
+    loadCategoryItems({append: true}).catch((error) => alert(error.message));
+  });
+  if (!filtered.length && !state.categoryItemsError) {
     list.innerHTML = `<div class="empty-state">没有匹配结果</div>`;
   }
+}
+
+function knowledgeCardSummary(category, item, fallback = "") {
+  const fields = category?.schema?.fields || [];
+  const data = item?.data || {};
+  const preferredIds = [
+    category?.schema?.item_subtitle_field,
+    "content",
+    "answer",
+    "service_reply",
+    "reply",
+    "description",
+    "summary",
+    "question",
+    "customer_message",
+  ].filter(Boolean);
+  for (const fieldId of preferredIds) {
+    const value = displayBusinessValue(data[fieldId]);
+    if (value) return shortBusinessText(value, 118);
+  }
+  for (const field of fields) {
+    const value = displayBusinessValue(data[field.id]);
+    if (value && value !== fallback) return shortBusinessText(value, 118);
+  }
+  return shortBusinessText(fallback || "这条知识暂无摘要，点开后可查看完整字段。", 118);
 }
 
 function renderKnowledgeDetail() {
@@ -1671,6 +2474,13 @@ function renderKnowledgeDetail() {
   detail.innerHTML = state.knowledgeMode === "view" ? knowledgeReadonlyHtml(category, item) : knowledgeFormHtml(category, item);
   bindDynamicEditors(detail);
   detail.querySelector(".knowledge-acknowledge")?.addEventListener("click", () => acknowledgeKnowledgeItem().catch((error) => alert(error.message)));
+  detail.querySelectorAll(".knowledge-modal-close").forEach((button) => {
+    button.addEventListener("click", closeKnowledgeDetailModal);
+  });
+  detail.querySelector(".knowledge-edit-inline")?.addEventListener("click", editKnowledgeItem);
+  detail.querySelector(".knowledge-archive-inline")?.addEventListener("click", () => archiveKnowledgeItem().catch((error) => alert(error.message)));
+  detail.querySelector(".knowledge-save-inline")?.addEventListener("click", () => saveKnowledgeItem().catch((error) => alert(error.message)));
+  detail.querySelector(".knowledge-cancel-inline")?.addEventListener("click", cancelKnowledgeEdit);
 }
 
 async function loadProductCatalog(options = {}) {
@@ -1682,9 +2492,8 @@ async function loadProductCatalog(options = {}) {
     state.productDetailMode = "view";
     state.productScopedEditor = null;
   }
-  state.selectedProduct = state.selectedProduct || items.find((item) => item.status === "active") || items[0] || null;
   renderProductCatalog();
-  if (options.loadDetail !== false && state.selectedProduct?.id) {
+  if (options.loadDetail === true && state.selectedProduct?.id) {
     await loadProductDetail(state.selectedProduct.id);
   }
 }
@@ -1696,6 +2505,7 @@ function renderProductCatalog() {
     <div class="metric-card"><span>${counts.active ?? 0}</span><label>在售商品</label></div>
     <div class="metric-card"><span>${counts.in_stock ?? 0}</span><label>有库存</label></div>
     <div class="metric-card"><span>${counts.sold_out ?? 0}</span><label>无库存</label></div>
+    <div class="metric-card"><span>${counts.unread ?? 0}</span><label>NEW待确认</label></div>
     <div class="metric-card"><span>${counts.archived ?? 0}</span><label>已归档</label></div>
   `;
   renderProductCatalogList();
@@ -1704,20 +2514,38 @@ function renderProductCatalog() {
 
 function renderProductCatalogList() {
   const list = document.getElementById("product-catalog-list");
-  const items = state.productCatalog?.items || [];
+  const items = sortProductCatalogItemsForReview(state.productCatalog?.items || []);
   list.innerHTML = items.map((item, index) => {
     const display = item.display || {};
-    const active = state.selectedProduct?.id === item.id ? " is-selected" : "";
+    const data = item.data || {};
+    const isNew = productItemIsNew(item);
     const badges = [
-      {label: display.stock_label || "库存未填写", tone: item.stock_state === "in_stock" ? "ok" : item.stock_state === "archived" ? "muted" : "warning"},
-      {label: `${(item.scoped_counts || {}).product_faq || 0} 问答`, tone: "info"},
-      {label: `${(item.scoped_counts || {}).product_rules || 0} 规则`, tone: "info"},
+      ...(isNew ? [{label: "新商品待确认", tone: "warning"}] : []),
+      {label: item.status === "archived" ? "已归档" : "在售", tone: item.status === "archived" ? "muted" : "ok"},
+      {label: display.stock_label || "库存未填写", tone: productStockTone(item)},
+      {label: `${productScopedTotal(item)} 条专属话术`, tone: "info"},
     ];
     return `
-      <button class="record-row product-row${active}" data-index="${index}">
-        <strong>${escapeHtml(display.name || item.id)}</strong>
-        <span>${escapeHtml(display.sku || item.id)} · ${escapeHtml(display.category || "未分类")} · ${escapeHtml(formatProductPrice(display))}</span>
+      <button class="product-card product-row" data-index="${index}" aria-label="查看 ${escapeHtml(display.name || data.name || item.id)} 的完整资料">
+        ${isNew ? `
+          <span class="product-new-float" aria-label="新商品">
+            <span class="experience-new-badge">NEW</span>
+          </span>
+        ` : ""}
+        <div class="product-card-head">
+          <div>
+            <strong>${escapeHtml(display.name || data.name || item.id)}</strong>
+            <span>${escapeHtml(display.category || data.category || "未分类")}</span>
+          </div>
+          <em>${escapeHtml(formatProductPrice(display))}</em>
+        </div>
+        <div class="product-card-facts">
+          <span><b>库存</b>${escapeHtml(display.stock_label || "未填写")}</span>
+          <span><b>编号</b>${escapeHtml(display.sku || item.id)}</span>
+        </div>
+        <p>${escapeHtml(productCardSummary(item))}</p>
         ${badgeListHtml(badges)}
+        <small>点击查看完整信息</small>
       </button>
     `;
   }).join("") || `<div class="empty-state">暂无商品。可以点击“新增商品”，或在上方用一句话添加。</div>`;
@@ -1732,7 +2560,7 @@ function renderProductCatalogList() {
   });
 }
 
-async function loadProductDetail(productId) {
+async function loadProductDetail(productId, options = {}) {
   if (!productId) {
     renderProductCatalogDetail();
     return;
@@ -1742,6 +2570,7 @@ async function loadProductDetail(productId) {
   state.productDetailScopedKnowledge = payload.scoped_knowledge || {};
   renderProductCatalogList();
   renderProductCatalogDetail();
+  if (options.open !== false) openProductDetailModal();
 }
 
 function renderProductCatalogDetail(scopedKnowledge = null) {
@@ -1753,6 +2582,8 @@ function renderProductCatalogDetail(scopedKnowledge = null) {
   }
   const data = item.data || {};
   const display = item.display || {};
+  const isNew = productItemIsNew(item);
+  const acknowledgeLoading = state.productAcknowledgeLoadingIds.has(item.id);
   if (scopedKnowledge) state.productDetailScopedKnowledge = scopedKnowledge;
   const scoped = scopedKnowledge || state.productDetailScopedKnowledge || {};
   if (state.productDetailMode === "edit") {
@@ -1764,23 +2595,25 @@ function renderProductCatalogDetail(scopedKnowledge = null) {
     <div class="read-head">
       <div>
         <p class="eyebrow">商品详情</p>
-        <h2>${escapeHtml(display.name || data.name || item.id)}</h2>
+        <h2 id="product-detail-title">${escapeHtml(display.name || data.name || item.id)}</h2>
         ${badgeListHtml([
+          ...(isNew ? [{label: "NEW 新商品待确认", tone: "warning"}] : []),
           {label: display.stock_label || "库存未填写", tone: item.stock_state === "in_stock" ? "ok" : item.stock_state === "archived" ? "muted" : "warning"},
           {label: item.status === "archived" ? "已归档" : "在售", tone: item.status === "archived" ? "muted" : "ok"},
         ])}
       </div>
       <div class="read-actions">
+        <button class="secondary-button product-modal-close" type="button">关闭</button>
+        ${isNew ? `<button class="secondary-button product-acknowledge ${acknowledgeLoading ? "is-loading" : ""}" type="button" ${acknowledgeLoading ? "disabled" : ""}>${acknowledgeLoading ? `<span class="loading-spinner button-spinner" aria-hidden="true"></span><span>确认中</span>` : "已阅"}</button>` : ""}
         <button class="secondary-button product-edit-form" type="button">编辑详情</button>
-        <button class="secondary-button product-open-formal" type="button">高级结构化编辑</button>
         <button class="secondary-button danger-button product-archive" type="button">${item.status === "archived" ? "重新上架" : "归档"}</button>
       </div>
     </div>
     <div class="summary-table product-summary-table">
       <div><span>价格</span><strong>${escapeHtml(formatProductPrice(display))}</strong></div>
-      <div><span>库存</span><strong>${escapeHtml(display.stock_label || "未填写")}</strong></div>
-      <div><span>SKU</span><strong>${escapeHtml(display.sku || item.id)}</strong></div>
-      <div><span>类目</span><strong>${escapeHtml(display.category || "未分类")}</strong></div>
+      <div><span>库存/状态</span><strong>${escapeHtml(display.stock_label || "未填写")}</strong></div>
+      <div><span>内部编号</span><strong>${escapeHtml(display.sku || item.id)}</strong></div>
+      <div><span>类型</span><strong>${escapeHtml(display.category || "未分类")}</strong></div>
     </div>
     <div class="inventory-tools">
       <button class="secondary-button product-stock-decrease" type="button">卖出 1 件</button>
@@ -1789,11 +2622,12 @@ function renderProductCatalogDetail(scopedKnowledge = null) {
       <button class="primary-button product-stock-set" type="button">保存库存</button>
     </div>
     <div class="read-grid">
-      ${productInfoField("客户常用叫法", (data.aliases || []).join("、"))}
-      ${productInfoField("规格参数", data.specs)}
-      ${productInfoField("发货/物流", data.shipping_policy)}
-      ${productInfoField("售后/保修", data.warranty_policy)}
-      ${productInfoField("风险提醒", (data.risk_rules || []).join("、"))}
+      ${productInfoField("客户常用叫法", userVisibleTags(data.aliases).join("、"))}
+      ${productInfoField("核心参数/车况", data.specs)}
+      ${productInfoField("阶梯价/优惠", productPriceTierText(data.price_tiers))}
+      ${productInfoField("看车/交付说明", data.shipping_policy)}
+      ${productInfoField("售后/合同口径", data.warranty_policy)}
+      ${productInfoField("需要谨慎确认的点", (data.risk_rules || []).join("、"))}
     </div>
     ${productReplyTemplatesReadonlyHtml(data.reply_templates, display.name || data.name || item.id)}
     <div class="product-scoped-panel">
@@ -1815,6 +2649,8 @@ function renderProductCatalogDetail(scopedKnowledge = null) {
     const quantity = Number(document.getElementById("product-stock-set-value")?.value || 0);
     adjustProductInventory("set", quantity);
   });
+  detail.querySelector(".product-modal-close")?.addEventListener("click", closeProductDetailModal);
+  detail.querySelector(".product-acknowledge")?.addEventListener("click", () => acknowledgeProductItem().catch((error) => alert(error.message)));
   detail.querySelector(".product-archive")?.addEventListener("click", () => {
     const operation = item.status === "archived" ? "activate" : "archive";
     if (operation === "archive" && !confirm("确认把这个商品归档吗？归档后不会作为在售商品参与客服回答。")) return;
@@ -1825,7 +2661,6 @@ function renderProductCatalogDetail(scopedKnowledge = null) {
     state.productScopedEditor = null;
     renderProductCatalogDetail();
   });
-  detail.querySelector(".product-open-formal")?.addEventListener("click", () => openSelectedProductInFormalKnowledge());
   detail.querySelectorAll(".product-scoped-edit").forEach((button) => {
     button.addEventListener("click", () => openProductScopedInlineEditor(button.dataset.category, button.dataset.itemId));
   });
@@ -1835,9 +2670,113 @@ function renderProductCatalogDetail(scopedKnowledge = null) {
   bindProductScopedEditor(detail);
 }
 
+function productItemIsNew(item) {
+  return Boolean(item?.is_unread || item?.review_state?.is_new);
+}
+
+function sortProductCatalogItemsForReview(items = []) {
+  return [...items].sort((left, right) => {
+    const unreadDiff = (productItemIsNew(left) ? 0 : 1) - (productItemIsNew(right) ? 0 : 1);
+    if (unreadDiff) return unreadDiff;
+    const archivedDiff = (left?.status === "archived" ? 1 : 0) - (right?.status === "archived" ? 1 : 0);
+    if (archivedDiff) return archivedDiff;
+    const timeDiff = productReviewTimestamp(right) - productReviewTimestamp(left);
+    if (timeDiff) return timeDiff;
+    const leftName = left?.display?.name || left?.data?.name || left?.id || "";
+    const rightName = right?.display?.name || right?.data?.name || right?.id || "";
+    return String(leftName).localeCompare(String(rightName), "zh-CN");
+  });
+}
+
+function productReviewTimestamp(item) {
+  const reviewState = item?.review_state || {};
+  const value = productItemIsNew(item)
+    ? reviewState.marked_at || reviewState.updated_at || item?.updated_at || item?.created_at || ""
+    : reviewState.read_at || reviewState.updated_at || reviewState.marked_at || item?.updated_at || item?.created_at || "";
+  const timestamp = Date.parse(value);
+  return Number.isFinite(timestamp) ? timestamp : 0;
+}
+
 function productInfoField(label, value) {
   if (value === undefined || value === null || value === "" || (Array.isArray(value) && !value.length)) return "";
   return `<div class="read-field wide-field"><span>${escapeHtml(label)}</span><p>${escapeHtml(value)}</p></div>`;
+}
+
+function productStockTone(item) {
+  if (item?.stock_state === "in_stock") return "ok";
+  if (item?.stock_state === "archived") return "muted";
+  return "warning";
+}
+
+function productScopedTotal(item) {
+  const counts = item?.scoped_counts || {};
+  return Number(counts.product_faq || 0) + Number(counts.product_rules || 0) + Number(counts.product_explanations || 0);
+}
+
+function productCardSummary(item) {
+  const data = item?.data || {};
+  const parts = [
+    data.specs,
+    data.shipping_policy,
+    userVisibleTags(data.aliases).slice(0, 4).join("、"),
+  ].map((value) => String(value || "").trim()).filter(Boolean);
+  return shortBusinessText(parts.join(" · "), 118) || "暂无概括信息，点开后可以补充核心参数、看车/交付说明和售后口径。";
+}
+
+function userVisibleTags(value) {
+  const tags = Array.isArray(value) ? value : splitTags(String(value || ""));
+  return tags
+    .map((item) => String(item || "").trim())
+    .filter((item) => item && !/^(CHEJIN|LIVEFLOW|LLMSYN|DBG)_[A-Za-z0-9_:-]+$/i.test(item));
+}
+
+function productPriceTierText(tiers) {
+  if (!Array.isArray(tiers) || !tiers.length) return "";
+  return tiers
+    .map((tier) => {
+      const min = tier?.min_quantity ?? tier?.min ?? "";
+      const price = tier?.unit_price ?? tier?.price ?? "";
+      if (min === "" || price === "") return "";
+      return `${min} 件/台起：${price}`;
+    })
+    .filter(Boolean)
+    .join("；");
+}
+
+function openProductDetailModal() {
+  const modal = document.getElementById("product-detail-modal");
+  if (!modal) return;
+  modal.classList.remove("is-hidden");
+  modal.setAttribute("aria-hidden", "false");
+}
+
+function closeProductDetailModal() {
+  const modal = document.getElementById("product-detail-modal");
+  if (!modal) return;
+  modal.classList.add("is-hidden");
+  modal.setAttribute("aria-hidden", "true");
+  state.productDetailMode = "view";
+  state.productScopedEditor = null;
+}
+
+function openKnowledgeDetailModal() {
+  const modal = document.getElementById("knowledge-detail-modal");
+  if (!modal) return;
+  modal.classList.remove("is-hidden");
+  modal.setAttribute("aria-hidden", "false");
+}
+
+function closeKnowledgeDetailModal() {
+  const modal = document.getElementById("knowledge-detail-modal");
+  if (!modal) return;
+  modal.classList.add("is-hidden");
+  modal.setAttribute("aria-hidden", "true");
+  if (state.knowledgeMode === "new" && !state.selectedKnowledge?.id) {
+    state.selectedKnowledge = state.categoryItems[0] || null;
+  }
+  state.knowledgeMode = "view";
+  renderKnowledgeList();
+  renderKnowledgeDetail();
 }
 
 function productReplyTemplatesReadonlyHtml(value, productName) {
@@ -1883,16 +2822,16 @@ function productEditFormHtml(item, scoped) {
     </div>
     <div class="form-grid product-detail-form">
       ${productTextInput("product-data-name", "商品名称 *", data.name || "")}
-      ${productTextInput("product-data-sku", "型号/SKU", data.sku || "")}
-      ${productTextInput("product-data-category", "商品类目", data.category || "")}
-      ${productTextInput("product-data-unit", "计价单位", data.unit || "")}
+      ${productTextInput("product-data-sku", "内部编号/型号", data.sku || "")}
+      ${productTextInput("product-data-category", "类型/类目", data.category || "")}
+      ${productTextInput("product-data-unit", "单位", data.unit || "")}
       ${productTextInput("product-data-price", "基础价格", data.price ?? "", "number")}
       ${productTextInput("product-data-inventory", "库存", data.inventory ?? "", "number")}
-      ${productTextarea("product-data-aliases", "客户常用叫法", displayTags(data.aliases), "一行一个，或用逗号分隔")}
-      ${productTextarea("product-data-specs", "规格参数", data.specs || "")}
-      ${productTextarea("product-data-shipping", "发货/物流", data.shipping_policy || "")}
-      ${productTextarea("product-data-warranty", "售后/保修", data.warranty_policy || "")}
-      ${productTextarea("product-data-risk", "风险提醒", displayTags(data.risk_rules), "一行一个，或用逗号分隔")}
+      ${productTextarea("product-data-aliases", "客户常用叫法", displayTags(userVisibleTags(data.aliases)), "一行一个，或用逗号分隔")}
+      ${productTextarea("product-data-specs", "核心参数/车况", data.specs || "")}
+      ${productTextarea("product-data-shipping", "看车/交付说明", data.shipping_policy || "")}
+      ${productTextarea("product-data-warranty", "售后/合同口径", data.warranty_policy || "")}
+      ${productTextarea("product-data-risk", "需要谨慎确认的点", displayTags(data.risk_rules), "一行一个，或用逗号分隔")}
       ${productReplyTemplateEditorHtml(data.reply_templates, productName)}
     </div>
     <div class="product-scoped-panel">
@@ -2186,7 +3125,14 @@ function clientSafeId(value, fallback) {
 
 function formatProductPrice(display) {
   if (!display || display.price === undefined || display.price === null || display.price === "") return "未填写价格";
-  return `${display.price}${display.unit ? ` / ${display.unit}` : ""}`;
+  const category = String(display.category || "");
+  const sku = String(display.sku || "");
+  const numeric = Number(display.price);
+  const unit = display.unit ? ` / ${display.unit}` : "";
+  if (Number.isFinite(numeric) && numeric > 0 && numeric < 1000 && (category.includes("二手车") || /^CHEJIN-/i.test(sku))) {
+    return `${display.price}万${unit}`;
+  }
+  return `${display.price}${unit}`;
 }
 
 async function adjustProductInventory(operation, quantity) {
@@ -2253,11 +3199,10 @@ function openProductScopedKnowledge(categoryId, itemId, productId) {
 }
 
 function updateKnowledgeButtons() {
-  const editing = state.knowledgeMode !== "view";
-  setHidden("save-knowledge-item", !editing);
-  setHidden("cancel-knowledge-edit", !editing);
-  setHidden("edit-knowledge-item", editing || !state.selectedKnowledge?.id);
-  setHidden("archive-knowledge-item", editing || !state.selectedKnowledge?.id);
+  setHidden("save-knowledge-item", true);
+  setHidden("cancel-knowledge-edit", true);
+  setHidden("edit-knowledge-item", true);
+  setHidden("archive-knowledge-item", true);
 }
 
 function knowledgeReadonlyHtml(category, item) {
@@ -2270,12 +3215,15 @@ function knowledgeReadonlyHtml(category, item) {
     <div class="read-head${highlighted}">
       <div>
         <p class="eyebrow">${escapeHtml(category.name || category.id)}</p>
-        <h2>${escapeHtml(primaryTitle(category, item))}</h2>
+        <h2 id="knowledge-detail-title">${escapeHtml(primaryTitle(category, item))}</h2>
         ${badgeListHtml([...(item.display_badges || []), ...contextBadges])}
       </div>
       <div class="read-actions">
         ${reviewState.is_new ? `<button class="secondary-button knowledge-acknowledge" type="button">已阅</button>` : ""}
         <span class="status-chip ${item.status === "archived" ? "warning" : "ok"}">${item.status === "archived" ? "已归档" : "启用中"}</span>
+        <button class="secondary-button knowledge-modal-close" type="button">关闭</button>
+        <button class="secondary-button knowledge-edit-inline" type="button">编辑</button>
+        <button class="secondary-button danger-button knowledge-archive-inline" type="button">归档</button>
       </div>
     </div>
     ${knowledgeContextNoticeHtml(category, item)}
@@ -2361,6 +3309,17 @@ function knowledgeFormHtml(category, item) {
   const runtime = item.runtime || {};
   const readonlyFields = isProductScopedCategory(category) ? new Set(["product_id"]) : new Set();
   return `
+    <div class="read-head">
+      <div>
+        <p class="eyebrow">${escapeHtml(category.name || category.id)}</p>
+        <h2 id="knowledge-detail-title">${state.knowledgeMode === "new" ? "新增知识" : `编辑：${escapeHtml(primaryTitle(category, item))}`}</h2>
+      </div>
+      <div class="read-actions">
+        <button class="secondary-button knowledge-modal-close" type="button">关闭</button>
+        <button class="secondary-button knowledge-cancel-inline" type="button">取消</button>
+        <button class="primary-button knowledge-save-inline" type="button">保存</button>
+      </div>
+    </div>
     ${knowledgeContextNoticeHtml(category, item, {editing: true})}
     <div class="form-summary">
       <label class="form-field">
@@ -2625,7 +3584,12 @@ async function saveKnowledgeItem() {
     : `/api/knowledge/categories/${categoryId}/items`;
   await apiJson(path, {method: exists ? "PUT" : "POST", body: JSON.stringify(item)});
   state.knowledgeMode = "view";
-  await Promise.all([loadKnowledge(), loadOverview(), refreshProductCatalogIfNeeded(item.category_id).catch(() => {})]);
+  await loadKnowledge();
+  state.selectedKnowledge = state.categoryItems.find((candidate) => candidate.id === item.id) || state.selectedKnowledge || state.categoryItems[0] || null;
+  renderKnowledgeList();
+  renderKnowledgeDetail();
+  openKnowledgeDetailModal();
+  await Promise.all([loadOverview(), refreshProductCatalogIfNeeded(item.category_id).catch(() => {})]);
 }
 
 function newKnowledgeItem() {
@@ -2645,16 +3609,27 @@ function newKnowledgeItem() {
     runtime: {allow_auto_reply: true, requires_handoff: false, risk_level: "normal"},
   };
   state.knowledgeMode = "new";
+  renderKnowledgeList();
   renderKnowledgeDetail();
+  openKnowledgeDetailModal();
 }
 
 function editKnowledgeItem() {
   if (!state.selectedKnowledge) return;
   state.knowledgeMode = "edit";
   renderKnowledgeDetail();
+  openKnowledgeDetailModal();
 }
 
 function cancelKnowledgeEdit() {
+  if (state.knowledgeMode === "new" && !state.selectedKnowledge?.id) {
+    state.selectedKnowledge = state.categoryItems[0] || null;
+    state.knowledgeMode = "view";
+    renderKnowledgeList();
+    renderKnowledgeDetail();
+    closeKnowledgeDetailModal();
+    return;
+  }
   state.knowledgeMode = "view";
   renderKnowledgeDetail();
 }
@@ -2664,6 +3639,7 @@ async function archiveKnowledgeItem() {
   if (!confirm("确认归档这条知识吗？")) return;
   const categoryId = state.activeCategoryId;
   await apiJson(`/api/knowledge/categories/${encodeURIComponent(state.activeCategoryId)}/items/${encodeURIComponent(state.selectedKnowledge.id)}`, {method: "DELETE"});
+  closeKnowledgeDetailModal();
   await Promise.all([loadKnowledge(), loadOverview(), refreshProductCatalogIfNeeded(categoryId).catch(() => {})]);
 }
 
@@ -2881,9 +3857,14 @@ async function uploadSelectedFile() {
     const response = await fetch("/api/uploads/batch", {method: "POST", body: form});
     if (!response.ok) throw new Error(await responseErrorMessage(response, "/api/uploads/batch"));
     const payload = await response.json();
-    const failures = (payload.results || []).filter((item) => !item.ok);
+    const results = Array.isArray(payload.results) ? payload.results : [];
+    const successCount = results.filter((item) => Boolean(item?.ok)).length;
+    const failures = results.filter((item) => !item.ok);
     fileInput.value = "";
     await loadUploads();
+    if (successCount > 0 && state.autoLearnAfterUpload) {
+      await runLearning();
+    }
     if (failures.length) {
       alert(`有 ${failures.length} 个文件上传失败：\n${failures.map((item) => `${item.filename || "未命名文件"}：${item.message || "未知错误"}`).join("\n")}`);
     }
@@ -2903,7 +3884,7 @@ async function loadUploads() {
       <div class="record-row upload-row">
         <div>
           <strong>${escapeHtml(item.filename)}</strong>
-          <span>${escapeHtml(item.kind)} · ${item.learned ? "已学习" : "未学习"} · ${formatBytes(item.size || 0)}</span>
+          <span>${escapeHtml(uploadKindText(item))} · ${item.learned ? "已学习" : "未学习"} · ${formatBytes(item.size || 0)}</span>
         </div>
         <button class="secondary-button danger-button upload-delete" data-upload-id="${escapeHtml(item.upload_id)}" data-filename="${escapeHtml(item.filename)}">删除</button>
       </div>
@@ -3118,34 +4099,85 @@ function renderRagSources(payload = {}) {
 }
 
 async function loadRagExperiences(options = {}) {
-  const fast = options.fast === true;
-  const payload = await apiGet(`/api/rag/experiences?status=all&limit=500&fast=${fast ? "true" : "false"}`);
+  const fast = options.fast !== false;
+  const defaultLimit = 500;
+  const limit = Number.isFinite(Number(options.limit)) ? Math.max(20, Math.min(500, Number(options.limit))) : defaultLimit;
+  const payload = await apiGet(`/api/rag/experiences?status=all&limit=${limit}&fast=${fast ? "true" : "false"}`);
   const rawItems = payload.items || [];
   const filteredItems = rawItems.filter((item) => !shouldHideRagExperience(item));
   const hiddenCount = Math.max(0, rawItems.length - filteredItems.length);
-  const discardedTotal = rawItems.reduce((count, item) => {
-    const displayState = ragExperienceDisplayState(item, item?.formal_relation || item?.status);
-    return count + (displayState === "discarded" ? 1 : 0);
-  }, 0);
+  const displayCounts = normalizeRagExperienceDisplayCounts(payload.display_counts, rawItems);
   state.ragExperienceHiddenCount = hiddenCount;
-  state.ragExperienceDiscardedTotal = discardedTotal;
-  state.ragExperienceTotal = Number(payload?.counts?.total ?? rawItems.length) || rawItems.length;
+  state.ragExperienceDisplayCounts = displayCounts;
+  state.ragExperienceDiscardedTotal = displayCounts.discarded;
+  state.ragExperienceTotal = displayCounts.total;
   state.ragExperiences = filteredItems;
   updateRagExperienceCountBadge(unreviewedRagExperienceCount(state.ragExperiences));
   renderRagExperiences({
     ...payload,
     items: filteredItems,
     ui_hidden_count: hiddenCount,
-    ui_discarded_total: Number(payload?.counts?.discarded ?? discardedTotal) || discardedTotal,
-    ui_total_count: Number(payload?.counts?.total ?? rawItems.length) || rawItems.length,
+    display_counts: displayCounts,
+    ui_discarded_total: displayCounts.discarded,
+    ui_total_count: displayCounts.total,
   });
-  ensureRagExperienceInterpretations(state.ragExperiences).catch((error) => console.warn("rag experience interpretation failed", error));
+  if (options.skipInterpret !== true) {
+    ensureRagExperienceInterpretations(state.ragExperiences).catch((error) => console.warn("rag experience interpretation failed", error));
+  }
+}
+
+function normalizeRagExperienceDisplayCounts(serverCounts = null, items = []) {
+  const fallback = {total: items.length, pending: 0, kept: 0, promoted: 0, discarded: 0, other: 0};
+  for (const item of items) {
+    const displayState = ragExperienceDisplayState(item, item?.formal_relation || item?.status);
+    if (displayState in fallback) fallback[displayState] += 1;
+    else fallback.other += 1;
+  }
+  const source = serverCounts && typeof serverCounts === "object" ? serverCounts : fallback;
+  const counts = {
+    total: Math.max(0, Number(source.total ?? fallback.total) || 0),
+    pending: Math.max(0, Number(source.pending ?? fallback.pending) || 0),
+    kept: Math.max(0, Number(source.kept ?? fallback.kept) || 0),
+    promoted: Math.max(0, Number(source.promoted ?? fallback.promoted) || 0),
+    discarded: Math.max(0, Number(source.discarded ?? fallback.discarded) || 0),
+    other: Math.max(0, Number(source.other ?? fallback.other) || 0),
+  };
+  counts.accounted_total = counts.pending + counts.kept + counts.promoted + counts.discarded + counts.other;
+  counts.consistent = counts.accounted_total === counts.total;
+  if (!counts.consistent && counts.total < counts.accounted_total) {
+    counts.total = counts.accounted_total;
+    counts.consistent = true;
+  }
+  return counts;
+}
+
+function ragExperienceProcessingNoticeHtml() {
+  if (!state.ragInterpretationInProgress) return "";
+  const count = Math.max(0, Number(state.ragInterpretationPendingCount) || 0);
+  return `
+    <div class="status-card loading rag-background-processing">
+      <strong><span class="loading-spinner" aria-hidden="true"></span>后台处理中</strong>
+      <span>AI 正在整理${count ? ` ${count} 条` : ""}RAG经验，处理完成后会自动刷新清单和统计，不会静默隐藏。</span>
+    </div>
+  `;
+}
+
+function ragActionNoticeHtml() {
+  const notice = state.ragActionNotice;
+  if (!notice) return "";
+  const tone = notice.tone === "warning" ? "warning" : notice.tone === "ok" ? "ok" : "loading";
+  return `
+    <div class="status-card ${escapeHtml(tone)} rag-action-notice">
+      <strong>${escapeHtml(notice.title || "处理结果")}</strong>
+      <span>${escapeHtml(notice.message || "")}</span>
+    </div>
+  `;
 }
 
 async function refreshRagExperienceBadge() {
-  const payload = await apiGet("/api/rag/experiences?status=active&limit=200");
-  state.ragExperiences = (payload.items || []).filter((item) => !shouldHideRagExperience(item));
-  updateRagExperienceCountBadge(unreviewedRagExperienceCount(state.ragExperiences));
+  const payload = await apiGet("/api/rag/experiences/unreviewed-count");
+  const count = Math.max(0, Number(payload?.count) || 0);
+  updateRagExperienceCountBadge(count);
 }
 
 function interpretationNeedsRefresh(item) {
@@ -3158,14 +4190,24 @@ async function ensureRagExperienceInterpretations(items = []) {
   const ids = items.filter(interpretationNeedsRefresh).map((item) => item.experience_id).filter(Boolean).slice(0, 40);
   if (!ids.length) return;
   state.ragInterpretationInProgress = true;
+  state.ragInterpretationPendingCount = ids.length;
+  state.ragInterpretationLastResult = null;
+  renderRagExperiences({items: state.ragExperiences});
   try {
     const payload = await apiJson("/api/rag/experiences/interpret", {
       method: "POST",
       body: JSON.stringify({experience_ids: ids, force: false, limit: ids.length}),
     });
+    state.ragInterpretationLastResult = {
+      interpreted_count: Number(payload.interpreted_count || 0),
+      model_count: Number(payload.model_count || 0),
+      fallback_count: Number(payload.fallback_count || 0),
+    };
     mergeInterpretedExperiences(payload.items || []);
   } finally {
     state.ragInterpretationInProgress = false;
+    state.ragInterpretationPendingCount = 0;
+    await loadRagExperiences({fast: true, skipInterpret: true}).catch(() => renderRagExperiences({items: state.ragExperiences}));
   }
 }
 
@@ -3180,6 +4222,29 @@ async function interpretRagExperience(experienceId, options = {}) {
       body: JSON.stringify({force: options.force !== false}),
     });
     mergeInterpretedExperiences(payload.item ? [payload.item] : []);
+    const updated = payload.item || {};
+    const displayState = ragExperienceDisplayState(updated, updated?.formal_relation || updated?.status);
+    if (displayState === "discarded") {
+      if (!state.showDiscardedRagExperiences) {
+        state.showDiscardedRagExperiences = true;
+        localStorage.setItem("showDiscardedRagExperiences", "1");
+        const checkbox = document.getElementById("show-discarded-rag");
+        if (checkbox) checkbox.checked = true;
+      }
+      state.ragActionNotice = {
+        tone: "warning",
+        title: "AI重新评估后已自动废弃",
+        message: "这条经验没有丢失，已归入“已废弃/自动降噪”状态；系统已保持显示全部，方便你继续核对。",
+        experienceId,
+      };
+    } else if (displayState === "kept") {
+      state.ragActionNotice = {
+        tone: "ok",
+        title: "AI重新评估后已吸纳为经验",
+        message: "这条经验已保留在RAG经验层，不会作为新经验继续提醒。",
+        experienceId,
+      };
+    }
   } finally {
     state.ragInterpretationLoadingIds.delete(experienceId);
     renderRagExperiences({items: state.ragExperiences});
@@ -3199,6 +4264,10 @@ function mergeInterpretedExperiences(items = []) {
 function renderRagExperiences(payload = {}) {
   const items = payload.items || state.ragExperiences || [];
   const hiddenCount = Number(payload.ui_hidden_count ?? state.ragExperienceHiddenCount ?? 0);
+  const displayCounts = normalizeRagExperienceDisplayCounts(
+    payload.display_counts || state.ragExperienceDisplayCounts,
+    items
+  );
   const relationCounts = {};
   const qualityCounts = {};
   let activeVisibleCount = 0;
@@ -3224,39 +4293,29 @@ function renderRagExperiences(payload = {}) {
   }
   const cards = document.getElementById("rag-experience-cards");
   if (cards) {
-    const autoKeptCount = Number(relationCounts.auto_kept_experience ?? 0);
-    const keptCount = Number(relationCounts.kept_experience ?? 0);
-    const discardedTotal = Number(
-      payload.ui_discarded_total
-      ?? payload?.counts?.discarded
-      ?? (state.showDiscardedRagExperiences ? discardedVisibleCount : discardedVisibleCount + hiddenCount)
-    ) || 0;
-    const totalCount = Number(
-      payload.ui_total_count
-      ?? payload?.counts?.total
-      ?? (state.showDiscardedRagExperiences ? items.length : items.length + hiddenCount)
-    ) || items.length;
+    const processingNotice = ragExperienceProcessingNoticeHtml();
+    const actionNotice = ragActionNoticeHtml();
     cards.innerHTML = [
-      ["正在使用", activeVisibleCount],
-      ["可参考", retrievableCount],
-      ["需要看看", Number(qualityCounts.low ?? 0)],
-      ["已停用", Number(qualityCounts.blocked ?? 0)],
-      ["可转待确认", relationCounts.promotion_candidate ?? 0],
-      ["已吸纳经验", autoKeptCount + keptCount],
-      ["其中自动吸纳", autoKeptCount],
-      ["正式库已覆盖", relationCounts.covered_by_formal ?? 0],
-      ["已转待确认", promotedVisibleCount],
-      ["已废弃", discardedTotal],
-      ["总经验", totalCount],
+      ["待处理", displayCounts.pending],
+      ["已保留为经验", displayCounts.kept],
+      ["已转待确认", displayCounts.promoted],
+      ["已废弃", displayCounts.discarded],
+      ["其他明确状态", displayCounts.other],
+      ["总经验", displayCounts.total],
     ]
       .map(([label, value]) => `<div class="metric-card"><span>${escapeHtml(value)}</span><label>${escapeHtml(label)}</label></div>`)
-      .join("");
+      .join("") + actionNotice + processingNotice + (!displayCounts.consistent ? `
+        <div class="status-card warning rag-count-warning">
+          <strong>统计口径异常</strong>
+          <span>分项合计 ${escapeHtml(displayCounts.accounted_total)}，总经验 ${escapeHtml(displayCounts.total)}。请刷新或重新加载经验清单。</span>
+        </div>
+      ` : "");
   }
   const list = document.getElementById("rag-experience-list");
   if (!list) return;
   const sortedItems = sortRagExperiencesForReview(items);
   const hiddenNotice = hiddenCount > 0 && !state.showDiscardedRagExperiences
-    ? `<div class="helper-card"><strong>已隐藏 ${hiddenCount} 条已废弃经验。</strong><span>勾选“显示已废弃”可查看全部历史废弃记录。</span></div>`
+    ? `<div class="helper-card"><strong>已按你的筛选隐藏 ${hiddenCount} 条已废弃经验。</strong><span>上方统计仍按全量口径计算；勾选“显示已废弃”可查看全部历史废弃记录。</span></div>`
     : "";
   list.innerHTML = sortedItems.length
     ? `${hiddenNotice}${sortedItems.map((item) => {
@@ -3297,13 +4356,12 @@ function renderRagExperiences(payload = {}) {
         return `
           <div class="record-row rag-experience-row readable-experience-row is-experience-${escapeHtml(displayState)} ${isDiscarded ? "is-discarded" : ""}" data-experience-id="${escapeHtml(experienceId)}" data-review-state="${escapeHtml(displayState)}" data-collapsed="${isExpanded ? "false" : "true"}">
             <div class="rag-experience-main">
+              ${isNew ? `
+                <span class="experience-new-float" aria-label="新经验">
+                  <span class="experience-new-badge">NEW</span>
+                </span>
+              ` : ""}
               <div class="experience-collapse-head">
-                ${isNew ? `
-                  <span class="experience-new-actions">
-                    <span class="experience-new-badge">new</span>
-                    <button class="secondary-button rag-experience-ack ${activeAction === "ack" ? "is-loading" : ""}" data-id="${escapeHtml(item.experience_id || "")}" ${isActionLoading ? "disabled" : ""}>${activeAction === "ack" ? `<span class="loading-spinner button-spinner" aria-hidden="true"></span><span>确认中</span>` : "已阅"}</button>
-                  </span>
-                ` : ""}
                 <button type="button" class="experience-collapse-toggle rag-experience-toggle" data-id="${escapeHtml(experienceId)}" aria-expanded="${isExpanded ? "true" : "false"}">
                   <span class="collapse-caret" aria-hidden="true"></span>
                   <strong>AI经验：${escapeHtml(readableSummary)}</strong>
@@ -3343,9 +4401,6 @@ function renderRagExperiences(payload = {}) {
         `;
       }).join("")}`
     : `<div class="empty-state">${hiddenCount > 0 && !state.showDiscardedRagExperiences ? `当前有 ${hiddenCount} 条经验已被判定为“已废弃/自动降噪”，默认隐藏。勾选“显示已废弃”即可查看。` : "暂无对话经验。系统只有在客服使用参考资料成功回复后，才会在这里生成概括。"}</div>`;
-  list.querySelectorAll(".rag-experience-ack").forEach((button) => {
-    button.addEventListener("click", () => acknowledgeRagExperience(button.dataset.id).catch((error) => alert(error.message)));
-  });
   list.querySelectorAll(".rag-experience-discard").forEach((button) => {
     button.addEventListener("click", () => discardRagExperience(button.dataset.id).catch((error) => alert(error.message)));
   });
@@ -3450,40 +4505,6 @@ async function resolveFormalOverlapExperience(experienceId, strategy) {
       loadOverview().catch(() => {}),
       loadKnowledge().catch(() => {}),
     ]);
-    loadRagExperiences({fast: false}).catch(() => {});
-  } finally {
-    state.ragActionLoadingIds.delete(experienceId);
-    renderRagExperiences({items: state.ragExperiences});
-  }
-}
-
-async function acknowledgeRagExperience(experienceId) {
-  if (!experienceId) return;
-  if (state.ragActionLoadingIds.has(experienceId)) return;
-  state.ragActionLoadingIds.set(experienceId, "ack");
-  renderRagExperiences({items: state.ragExperiences});
-  try {
-    await apiJson(`/api/rag/experiences/${encodeURIComponent(experienceId)}/acknowledge`, {
-      method: "POST",
-      body: "{}",
-    });
-    const nowText = new Date().toISOString();
-    state.ragExperiences = (state.ragExperiences || []).map((item) => {
-      if (String(item?.experience_id || "") !== String(experienceId)) return item;
-      const reviewState = item?.review_state && typeof item.review_state === "object" ? item.review_state : {};
-      return {
-        ...item,
-        review_state: {
-          ...reviewState,
-          is_new: false,
-          read_at: nowText,
-          updated_at: nowText,
-        },
-      };
-    });
-    updateRagExperienceCountBadge(unreviewedRagExperienceCount(state.ragExperiences));
-    renderRagExperiences({items: state.ragExperiences});
-    loadRagExperiences({fast: true}).catch(() => {});
   } finally {
     state.ragActionLoadingIds.delete(experienceId);
     renderRagExperiences({items: state.ragExperiences});
@@ -3526,7 +4547,6 @@ async function discardRagExperience(experienceId) {
       body: JSON.stringify({reason: "discarded in admin"}),
     });
     await Promise.all([loadRagExperiences({fast: true}), loadRagStatus().catch(() => {})]);
-    loadRagExperiences({fast: false}).catch(() => {});
   } finally {
     state.ragActionLoadingIds.delete(experienceId);
     renderRagExperiences({items: state.ragExperiences});
@@ -3544,7 +4564,6 @@ async function keepRagExperience(experienceId) {
       body: JSON.stringify({reason: "kept in experience layer"}),
     });
     await Promise.all([loadRagExperiences({fast: true}), loadRagStatus().catch(() => {})]);
-    loadRagExperiences({fast: false}).catch(() => {});
   } finally {
     state.ragActionLoadingIds.delete(experienceId);
     renderRagExperiences({items: state.ragExperiences});
@@ -3562,7 +4581,6 @@ async function reopenRagExperience(experienceId) {
       body: JSON.stringify({reason: "reopened in admin"}),
     });
     await Promise.all([loadRagExperiences({fast: true}), loadRagStatus().catch(() => {}), loadCandidates().catch(() => {})]);
-    loadRagExperiences({fast: false}).catch(() => {});
   } finally {
     state.ragActionLoadingIds.delete(experienceId);
     renderRagExperiences({items: state.ragExperiences});
@@ -3919,7 +4937,7 @@ function extractTranscriptDialogue(text) {
     const sender = match[1].trim();
     const content = match[2].trim();
     if (!content || sender === "system") continue;
-    if (sender === "self" || content.includes("[车金AI]")) replies.push(content.replace(/^\[车金AI\]\s*/, ""));
+    if (sender === "self" || /^\[[^\]]*(?:AI|客服)\]\s*/i.test(content)) replies.push(content.replace(/^\[[^\]]*(?:AI|客服)\]\s*/i, ""));
     else customer.push(content);
   }
   return {
@@ -4310,7 +5328,9 @@ function ragExperienceTimestamp(item) {
 }
 
 function ragExperienceIsUnread(item) {
-  return Boolean(item?.review_state?.is_new);
+  const isNew = Boolean(item?.review_state?.is_new);
+  if (!isNew) return false;
+  return ragExperienceDisplayState(item, item?.formal_relation || item?.status) === "pending";
 }
 
 function shouldHideRagExperience(item) {
@@ -4402,6 +5422,21 @@ function formatBytes(value) {
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
   return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+}
+
+function uploadKindText(item) {
+  const kind = String(item?.kind || "").trim();
+  const requestedKind = String(item?.requested_kind || "").trim();
+  const labelMap = {
+    products: "商品资料",
+    chats: "聊天记录",
+    policies: "政策规则",
+    erp_exports: "ERP导出",
+  };
+  const resolved = labelMap[kind] || kind || "未识别";
+  if (requestedKind !== "auto") return resolved;
+  const reason = String(item?.kind_detect_reason || "").trim();
+  return reason ? `自动识别为${resolved}（${reason}）` : `自动识别为${resolved}`;
 }
 
 async function runLearning() {
@@ -4550,7 +5585,11 @@ function updateCandidateCountBadge(count) {
 
 function updateRagExperienceCountBadge(count) {
   const value = Number(count || 0);
-  for (const badge of [document.getElementById("rag-experience-tab-badge"), document.getElementById("rag-experience-nav-badge")]) {
+  const badges = [
+    ...document.querySelectorAll("[data-rag-experience-count-badge]"),
+    document.getElementById("rag-experience-nav-badge"),
+  ];
+  for (const badge of badges) {
     if (!badge) continue;
     badge.textContent = value > 99 ? "99+" : String(value);
     badge.classList.toggle("is-hidden", value <= 0);
@@ -4558,11 +5597,7 @@ function updateRagExperienceCountBadge(count) {
 }
 
 function unreviewedRagExperienceCount(items = []) {
-  return items.filter((item) => {
-    const status = String(item?.status || "active");
-    if (status !== "active") return false;
-    return ragExperienceDisplayState(item, item?.formal_relation || status) === "pending";
-  }).length;
+  return items.filter((item) => ragExperienceIsUnread(item)).length;
 }
 
 function candidateIsIncomplete(item) {
@@ -4778,17 +5813,18 @@ async function rejectCandidate(candidateId) {
 }
 
 async function loadRecorder() {
-  const [summaryPayload, conversationsPayload, modulesPayload, runsPayload] = await Promise.all([
+  const [summaryPayload, conversationsPayload, modulesPayload, runsPayload, runtimePayload] = await Promise.all([
     apiGet("/api/recorder/summary"),
-    apiGet("/api/recorder/conversations?status=all"),
+    apiGet("/api/recorder/conversations?status=active"),
     apiGet("/api/recorder/modules").catch(() => ({items: []})),
     apiGet("/api/recorder/exports/runs?status=all&limit=30&ensure_worker=1").catch(() => ({items: [], runtime: {}})),
+    apiGet("/api/recorder/runtime/status").catch(() => ({item: {}})),
   ]);
   state.recorderSummary = summaryPayload.item || {};
   state.recorderConversations = conversationsPayload.items || [];
   state.recorderModules = modulesPayload.items || [];
   state.recorderExportRuns = runsPayload.items || [];
-  state.recorderRuntimeStatus = runsPayload.runtime || state.recorderRuntimeStatus || {};
+  state.recorderRuntimeStatus = runtimePayload.item || runsPayload.runtime || state.recorderRuntimeStatus || {};
   if (
     state.selectedRecorderConversation?.conversation_id &&
     !state.recorderConversations.some((item) => item.conversation_id === state.selectedRecorderConversation.conversation_id)
@@ -4824,14 +5860,22 @@ function renderRecorder() {
   const summary = state.recorderSummary || {};
   const raw = summary.raw || {};
   const settings = summary.settings || {};
+  const runtime = state.recorderRuntimeStatus || {};
   const enabled = settings.enabled !== false;
+  const runtimeRunning = Boolean(runtime.running);
   setChecked("recorder-enabled", enabled);
   document.getElementById("recorder-status").textContent = summary.status || recorderStatusText(settings);
+  const runtimeStatus = document.getElementById("recorder-runtime-status");
+  if (runtimeStatus) runtimeStatus.textContent = recorderRuntimeStatusText(runtime, settings);
   document.getElementById("recorder-notify").checked = Boolean(settings.notify_on_collect);
   document.getElementById("recorder-auto-learn").checked = settings.auto_learn !== false;
   document.getElementById("recorder-use-llm").checked = settings.use_llm !== false;
   const captureButton = document.getElementById("recorder-capture");
   if (captureButton) captureButton.disabled = !enabled;
+  const startButton = document.getElementById("recorder-runtime-start");
+  if (startButton) startButton.disabled = !enabled || runtimeRunning;
+  const stopButton = document.getElementById("recorder-runtime-stop");
+  if (stopButton) stopButton.disabled = !runtimeRunning;
   document.getElementById("recorder-cards").innerHTML = `
     <div class="metric-card"><span>${raw.group_count ?? 0}</span><label>识别群聊</label></div>
     <div class="metric-card"><span>${summary.selected_conversation_count ?? summary.selected_group_count ?? 0}</span><label>正在记录</label></div>
@@ -4841,6 +5885,7 @@ function renderRecorder() {
   renderRecorderModuleInfo();
   renderRecorderExportProgress();
   renderRecorderExportRuns();
+  renderRecorderSelectedSummary();
   renderRecorderGroupList();
   renderRecorderDetail();
 }
@@ -4865,7 +5910,7 @@ function recorderRunStatusTone(status) {
   const key = String(status || "queued");
   if (key === "succeeded") return "ok";
   if (key === "failed") return "warning";
-  if (key === "running") return "loading";
+  if (["running", "preprocessing", "extracting", "reviewing", "exporting"].includes(key)) return "loading";
   return "info";
 }
 
@@ -4873,6 +5918,10 @@ function recorderRunStatusLabel(status) {
   const key = String(status || "queued");
   if (key === "queued") return "排队中";
   if (key === "running") return "处理中";
+  if (key === "preprocessing") return "预处理中";
+  if (key === "extracting") return "结构化抽取中";
+  if (key === "reviewing") return "质量复核中";
+  if (key === "exporting") return "生成导出文件";
   if (key === "succeeded") return "已完成";
   if (key === "failed") return "失败";
   return key;
@@ -4880,7 +5929,16 @@ function recorderRunStatusLabel(status) {
 
 function recorderRunIsActive(status) {
   const key = String(status || "queued");
-  return key === "queued" || key === "running";
+  return ["queued", "running", "preprocessing", "extracting", "reviewing", "exporting"].includes(key);
+}
+
+function recorderRunStageLabel(run) {
+  const progress = run?.progress || {};
+  const stageLabel = String(progress.stage_label || "").trim();
+  if (stageLabel) return stageLabel;
+  const stage = String(run?.stage || "").trim();
+  if (stage) return recorderRunStatusLabel(stage);
+  return recorderRunStatusLabel(run?.status);
 }
 
 function hasRecorderExportActiveRuns(runs = state.recorderExportRuns || []) {
@@ -4907,7 +5965,6 @@ function renderRecorderExportProgress() {
   const monthButton = document.getElementById("recorder-export-run-month");
   const customRangeButton = document.getElementById("recorder-export-run-custom");
   const clearDateButton = document.getElementById("recorder-export-date-clear");
-  const refreshButton = document.getElementById("recorder-export-runs-refresh");
   if (createButton) {
     createButton.classList.toggle("is-loading", state.recorderExportRunBusy);
     createButton.disabled = !state.authToken || state.recorderExportRunBusy;
@@ -4920,7 +5977,6 @@ function renderRecorderExportProgress() {
   if (monthButton) monthButton.disabled = !state.authToken || state.recorderExportRunBusy;
   if (customRangeButton) customRangeButton.disabled = !state.authToken || state.recorderExportRunBusy;
   if (clearDateButton) clearDateButton.disabled = !state.authToken || state.recorderExportRunBusy;
-  if (refreshButton) refreshButton.disabled = !state.authToken || state.recorderExportRunBusy;
   if (!panel) return;
 
   const runs = state.recorderExportRuns || [];
@@ -4945,11 +6001,18 @@ function renderRecorderExportProgress() {
     const runningCount = activeRuns.filter((run) => String(run.status || "") === "running").length;
     const lead = activeRuns[0] || {};
     const elapsed = formatElapsedFrom(lead.started_at || lead.created_at || "");
+    const progress = lead.progress || {};
+    const processed = Number(progress.processed_messages ?? 0);
+    const total = Number(progress.total_messages ?? 0);
+    const stageLabel = recorderRunStageLabel(lead);
+    const percent = Number(progress.percent ?? 0);
+    const percentText = Number.isFinite(percent) ? `${Math.round(Math.max(0, Math.min(percent, 1)) * 100)}%` : "";
     const tone = workerRunning ? "loading" : "warning";
     panel.innerHTML = `
       <div class="status-card ${tone}">
-        <strong><span class="loading-spinner" aria-hidden="true"></span>${runningCount > 0 ? "结构化导出处理中" : "结构化导出排队中"}</strong>
+        <strong><span class="loading-spinner" aria-hidden="true"></span>${runningCount > 0 ? "结构化导出处理中" : "结构化导出排队中"} · ${escapeHtml(stageLabel)}</strong>
         <span>任务数：排队 ${queuedCount} · 处理中 ${runningCount}${elapsed ? ` · 已持续 ${escapeHtml(elapsed)}` : ""}</span>
+        <span>${total > 0 ? `进度：${escapeHtml(String(processed))}/${escapeHtml(String(total))}（${escapeHtml(percentText)}）` : "进度：正在初始化任务..."}</span>
         <span>${escapeHtml(workerRunning ? "后台导出 worker 在线，系统正在自动处理。" : "后台导出 worker 暂未检测到在线，系统正在自动拉起。")} 队列：待执行 ${escapeHtml(String(queue.pending ?? 0))} · 执行中 ${escapeHtml(String(queue.running ?? 0))}。</span>
       </div>
     `;
@@ -4980,7 +6043,7 @@ function renderRecorderExportProgress() {
   panel.innerHTML = `
     <div class="status-card">
       <strong>暂无进行中的结构化导出任务</strong>
-      <span>点击“创建结构化导出任务”后，这里会实时显示排队和处理进度。</span>
+      <span>点击“导出所有记录（结构化）”后，这里会实时显示排队和处理进度。</span>
     </div>
   `;
 }
@@ -4995,6 +6058,14 @@ function renderRecorderExportRuns() {
         const status = String(run.status || "queued");
         const statusTone = recorderRunStatusTone(status);
         const stats = run.stats || {};
+        const progress = run.progress || {};
+        const stageLabel = recorderRunStageLabel(run);
+        const processed = Number(progress.processed_messages ?? 0);
+        const total = Number(progress.total_messages ?? 0);
+        const percent = Number(progress.percent ?? 0);
+        const progressText = total > 0
+          ? `${processed}/${total}（${Math.round(Math.max(0, Math.min(percent, 1)) * 100)}%）`
+          : "初始化中";
         const elapsed = recorderRunIsActive(status) ? formatElapsedFrom(run.started_at || run.created_at || "") : "";
         return `
           <div class="record-row">
@@ -5002,17 +6073,19 @@ function renderRecorderExportRuns() {
               <strong>${escapeHtml(run.run_id || "")}</strong>
               <span class="status-chip ${statusTone}">${escapeHtml(recorderRunStatusLabel(status))}</span>
             </div>
-            <span>模块：${escapeHtml(run.module_name || run.module_key || "-")} · 版本：${escapeHtml(run.module_version || "-")} · 创建：${escapeHtml(run.created_at || "-")}${elapsed ? ` · 已持续 ${escapeHtml(elapsed)}` : ""}</span>
-            <span>输入消息：${escapeHtml(String(stats.input_message_count ?? 0))} · 导出行：${escapeHtml(String(stats.export_row_count ?? 0))} · 需复核：${escapeHtml(String(stats.needs_review_count ?? 0))}</span>
+            <span>模块：${escapeHtml(run.module_name || run.module_key || "-")} · 版本：${escapeHtml(run.module_version || "-")} · 阶段：${escapeHtml(stageLabel)} · 创建：${escapeHtml(run.created_at || "-")}${elapsed ? ` · 已持续 ${escapeHtml(elapsed)}` : ""}</span>
+            <span>输入消息：${escapeHtml(String(stats.input_message_count ?? 0))} · 导出行：${escapeHtml(String(stats.export_row_count ?? 0))} · 需复核：${escapeHtml(String(stats.needs_review_count ?? 0))} · 进度：${escapeHtml(progressText)}</span>
+            <span>LLM调用：${escapeHtml(String(stats.llm_calls ?? 0))}（分段 ${escapeHtml(String(stats.llm_segment_calls ?? 0))} · 修复 ${escapeHtml(String(stats.llm_repair_calls ?? 0))}）</span>
             ${run.error ? `<span>失败原因：${escapeHtml(run.error)}</span>` : ""}
             <div class="button-row">
               <button class="secondary-button recorder-run-download" data-run-id="${escapeAttr(run.run_id || "")}" ${status !== "succeeded" ? "disabled" : ""}>下载Excel</button>
               <button class="secondary-button recorder-run-report" data-run-id="${escapeAttr(run.run_id || "")}" ${status !== "succeeded" ? "disabled" : ""}>下载报告</button>
+              <button class="secondary-button danger-button recorder-run-delete" data-run-id="${escapeAttr(run.run_id || "")}">删除</button>
             </div>
           </div>
         `;
       }).join("")
-      : `<div class="empty-state">暂无结构化导出任务。点击“创建结构化导出任务”发起新任务。</div>`
+      : `<div class="empty-state">暂无结构化导出任务。点击“导出所有记录（结构化）”发起新任务。</div>`
   }`;
   list.querySelectorAll(".recorder-run-download").forEach((button) => {
     button.addEventListener("click", () => downloadRecorderRunArtifact(button.dataset.runId, "xlsx").catch((error) => alert(error.message)));
@@ -5020,6 +6093,28 @@ function renderRecorderExportRuns() {
   list.querySelectorAll(".recorder-run-report").forEach((button) => {
     button.addEventListener("click", () => downloadRecorderRunArtifact(button.dataset.runId, "report").catch((error) => alert(error.message)));
   });
+  list.querySelectorAll(".recorder-run-delete").forEach((button) => {
+    button.addEventListener("click", () => deleteRecorderExportRun(button.dataset.runId).catch((error) => alert(error.message)));
+  });
+}
+
+function renderRecorderSelectedSummary() {
+  const panel = document.getElementById("recorder-selected-summary");
+  if (!panel) return;
+  const conversations = state.recorderConversations || [];
+  const selected = conversations.filter((item) => item.selected_by_user);
+  const groupCount = selected.filter((item) => item.conversation_type === "group").length;
+  const privateCount = selected.filter((item) => item.conversation_type === "private").length;
+  const ftCount = selected.filter((item) => item.conversation_type === "file_transfer").length;
+  const previewNames = selected
+    .slice(0, 6)
+    .map((item) => item.display_name || item.target_name || item.conversation_id)
+    .filter(Boolean);
+  const more = selected.length > previewNames.length ? ` 等 ${selected.length} 个` : "";
+  panel.innerHTML = `
+    <strong>当前监听会话：${escapeHtml(String(selected.length))} 个（群聊 ${escapeHtml(String(groupCount))} · 私聊 ${escapeHtml(String(privateCount))} · 文件传输助手 ${escapeHtml(String(ftCount))}）</strong>
+    <span>${selected.length ? `已选择：${escapeHtml(previewNames.join("、"))}${escapeHtml(more)}` : "尚未选择监听会话，请在下方列表勾选。"} </span>
+  `;
 }
 
 function renderRecorderGroupList() {
@@ -5036,11 +6131,14 @@ function renderRecorderGroupList() {
           ${badgeListHtml([{key: item.conversation_type || "unknown", label: recorderConversationTypeLabel(item.conversation_type), tone: "info"}, ...(selected ? [{key: "recording", label: "记录中", tone: "ok"}] : [{key: "paused", label: "未选择", tone: "muted"}])])}
         </button>
         <div class="inline-actions">
-          <button class="secondary-button recorder-toggle" data-id="${escapeHtml(item.conversation_id)}" data-selected="${selected ? "0" : "1"}">${selected ? "停止" : "记录"}</button>
+          <label class="checkbox-line">
+            <input class="recorder-toggle-checkbox" type="checkbox" data-id="${escapeHtml(item.conversation_id)}" ${selected ? "checked" : ""} />
+            记录中
+          </label>
         </div>
       </div>
     `;
-  }).join("") : `<div class="empty-state">尚未识别到群聊。点击“识别群列表”后，再选择需要记录的群。</div>`;
+  }).join("") : `<div class="empty-state">尚未识别到会话。点击“识别会话”后，再勾选需要监听的对象。</div>`;
   list.querySelectorAll(".recorder-select").forEach((button) => {
     button.addEventListener("click", async () => {
       const newIndex = Number(button.dataset.index);
@@ -5053,9 +6151,37 @@ function renderRecorderGroupList() {
       await loadRecorderMessages();
     });
   });
-  list.querySelectorAll(".recorder-toggle").forEach((button) => {
-    button.addEventListener("click", () => updateRecorderConversation(button.dataset.id, {selected_by_user: button.dataset.selected === "1"}).catch((error) => alert(error.message)));
+  list.querySelectorAll(".recorder-toggle-checkbox").forEach((checkbox) => {
+    checkbox.addEventListener("change", () => {
+      const conversationId = checkbox.dataset.id || "";
+      updateRecorderConversation(conversationId, {selected_by_user: checkbox.checked}).catch((error) => alert(error.message));
+    });
   });
+}
+
+async function applyRecorderSelection(mode = "groups") {
+  const conversations = state.recorderConversations || [];
+  const patchTargets = [];
+  for (const item of conversations) {
+    let selectedTarget = Boolean(item.selected_by_user);
+    if (mode === "groups") selectedTarget = item.conversation_type === "group";
+    if (mode === "none") selectedTarget = false;
+    if (Boolean(item.selected_by_user) !== selectedTarget) {
+      patchTargets.push({conversation_id: item.conversation_id, selected_by_user: selectedTarget});
+    }
+  }
+  if (!patchTargets.length) {
+    alert(mode === "none" ? "当前已经是空选择。" : "当前会话选择已是最新状态。");
+    return;
+  }
+  for (const item of patchTargets) {
+    await apiJson(`/api/recorder/conversations/${encodeURIComponent(item.conversation_id)}`, {
+      method: "PATCH",
+      body: JSON.stringify({selected_by_user: item.selected_by_user}),
+    });
+  }
+  await loadRecorder();
+  alert(mode === "none" ? "已清空监听会话选择。" : "已自动选择全部群聊。");
 }
 
 function candidateReadableSummary(item, category) {
@@ -5161,6 +6287,7 @@ function displayValue(value) {
 function renderRecorderDetail() {
   const detail = document.getElementById("recorder-detail");
   const conversation = state.selectedRecorderConversation;
+  const recorderMessages = state.recorderMessages || [];
   if (!conversation) {
     detail.innerHTML = `<div class="empty-state">请选择一个群查看最近记录。</div>`;
     return;
@@ -5170,12 +6297,13 @@ function renderRecorderDetail() {
       <div>
         <p class="eyebrow">${escapeHtml(recorderConversationTypeLabel(conversation.conversation_type))}记录</p>
         <h2>${escapeHtml(conversation.display_name || conversation.target_name || conversation.conversation_id)}</h2>
+        <p class="source-line">共 ${recorderMessages.length} 条原始消息，内容区默认最多展示 20 条高度，超出可在框内滚动查看。</p>
         ${badgeListHtml([{key: conversation.conversation_type || "unknown", label: recorderConversationTypeLabel(conversation.conversation_type), tone: "info"}, ...(conversation.selected_by_user ? [{key: "recording", label: "记录中", tone: "ok"}] : [{key: "paused", label: "未选择", tone: "muted"}])])}
       </div>
       <button class="secondary-button recorder-refresh-messages" type="button">刷新消息</button>
     </div>
-    <div class="compact-list compact-list-small">
-      ${(state.recorderMessages || []).map((item) => `
+    <div class="compact-list compact-list-small recorder-message-scroll" role="region" aria-label="会话原始消息列表">
+      ${recorderMessages.map((item) => `
         <div class="compact-row">
           <strong>${escapeHtml(item.sender || item.sender_role || "unknown")}</strong>
           <span>${escapeHtml(item.message_time || item.observed_at || "")}</span>
@@ -5208,6 +6336,15 @@ function recorderStatusText(settings = {}) {
   return "已开启，可按会话配置采集聊天记录。";
 }
 
+function recorderRuntimeStatusText(runtime = {}, settings = {}) {
+  if (runtime.running) {
+    const interval = Number(settings.capture_interval_seconds || 30);
+    return `监听中（轮询间隔 ${Number.isFinite(interval) && interval > 0 ? interval : 30}s）`;
+  }
+  if (settings.enabled === false) return "已停止（总开关关闭）";
+  return "未启动（可点击“启动监听”）";
+}
+
 async function saveRecorderSettings() {
   const payload = await apiJson("/api/recorder/settings", {
     method: "PUT",
@@ -5223,9 +6360,43 @@ async function saveRecorderSettings() {
 }
 
 async function discoverRecorderSessions() {
-  const result = await apiJson("/api/recorder/discover", {method: "POST", body: "{}"});
-  if (!result.ok) alert("未能连接微信主窗口，请确认微信已登录并保持主窗口可见。");
+  const button = document.getElementById("recorder-discover");
+  const originalText = button ? button.textContent : "";
+  if (button) {
+    button.disabled = true;
+    button.textContent = "识别中...";
+  }
+  try {
+    const result = await apiJson("/api/recorder/discover", {method: "POST", body: "{}"});
+    if (!result.ok) {
+      alert(result.message || "未能连接微信主窗口，请确认微信已登录并保持主窗口可见。");
+    }
+    await loadRecorder();
+    if (result.ok) {
+      const count = Array.isArray(result.items) ? result.items.length : 0;
+      const archivedCount = Number(result.archived_count || 0);
+      alert(`会话识别完成：共 ${count} 条，已归档旧会话 ${archivedCount} 条。`);
+    }
+  } finally {
+    if (button) {
+      button.disabled = false;
+      button.textContent = originalText || "识别会话";
+    }
+  }
+}
+
+async function startRecorderRuntime() {
+  const result = await apiJson("/api/recorder/runtime/start", {method: "POST", body: "{}"});
+  state.recorderRuntimeStatus = result.item || state.recorderRuntimeStatus || {};
   await loadRecorder();
+  alert(result.message || "AI智能记录员已启动监听。");
+}
+
+async function stopRecorderRuntime() {
+  const result = await apiJson("/api/recorder/runtime/stop", {method: "POST", body: "{}"});
+  state.recorderRuntimeStatus = result.item || state.recorderRuntimeStatus || {};
+  await loadRecorder();
+  alert(result.message || "AI智能记录员已停止监听。");
 }
 
 async function captureRecorderNow() {
@@ -5235,7 +6406,7 @@ async function captureRecorderNow() {
     alert(result.message || "AI智能记录员已关闭，请先开启后再执行采集。");
     return;
   }
-  alert(`本轮记录完成：新增 ${result.inserted_count || 0} 条消息。`);
+  alert(`本轮补采完成：新增 ${result.inserted_count || 0} 条消息。`);
 }
 
 async function updateRecorderConversation(conversationId, patch) {
@@ -5310,7 +6481,7 @@ function collectRecorderExportDateRange(options = {}) {
   let label = "全部日期";
 
   if (mode === "all" && !preset) {
-    return {startTime: "", endTime: "", label};
+    return {startTime: "", endTime: "", dateFrom: "", dateTo: "", quickRange: "", label};
   }
 
   if (preset) {
@@ -5340,6 +6511,9 @@ function collectRecorderExportDateRange(options = {}) {
   return {
     startTime: `${startDateText} 00:00:00`,
     endTime: `${endDateText} 23:59:59`,
+    dateFrom: startDateText,
+    dateTo: endDateText,
+    quickRange: preset || "",
     label: `${startDateText} ~ ${endDateText}`,
   };
 }
@@ -5367,6 +6541,9 @@ async function createRecorderExportRun(options = {}) {
     target_names: selected.map((item) => item.target_name || item.display_name).filter(Boolean),
     start_time: dateRange.startTime,
     end_time: dateRange.endTime,
+    date_from: dateRange.dateFrom || "",
+    date_to: dateRange.dateTo || "",
+    quick_range: dateRange.quickRange || "",
     limit: RECORDER_EXPORT_DEFAULT_LIMIT,
     ensure_worker: true,
   };
@@ -5425,6 +6602,14 @@ async function refreshRecorderExportRuns(options = {}) {
   }
 }
 
+async function deleteRecorderExportRun(runId) {
+  if (!runId) return;
+  if (!confirm(`确认删除导出任务 ${runId} 吗？删除后无法恢复。`)) return;
+  await apiJson(`/api/recorder/exports/runs/${encodeURIComponent(runId)}`, {method: "DELETE"});
+  await refreshRecorderExportRuns();
+  alert(`已删除导出任务：${runId}`);
+}
+
 async function downloadRecorderRunArtifact(runId, kind = "xlsx") {
   if (!runId) return;
   const endpoint = kind === "report"
@@ -5448,12 +6633,14 @@ async function downloadRecorderRunArtifact(runId, kind = "xlsx") {
 }
 
 async function downloadKnowledgeExport(sortBy) {
-  const response = await fetch(`/api/exports/knowledge/download?sort_by=${encodeURIComponent(sortBy)}`, {headers: apiHeaders()});
-  if (!response.ok) throw new Error(await responseErrorMessage(response, "/api/exports/knowledge/download"));
+  const mode = sortBy === "time" ? "time" : "session";
+  const endpoint = `/api/exports/raw-chats/download?mode=${encodeURIComponent(mode)}`;
+  const response = await fetch(endpoint, {headers: apiHeaders()});
+  if (!response.ok) throw new Error(await responseErrorMessage(response, "/api/exports/raw-chats/download"));
   const blob = await response.blob();
   const disposition = response.headers.get("content-disposition") || "";
   const match = disposition.match(/filename="?([^"]+)"?/i);
-  const filename = match?.[1] || `knowledge_${sortBy}.xlsx`;
+  const filename = match?.[1] || `wechat_chat_records_${mode}.xlsx`;
   const url = URL.createObjectURL(blob);
   const link = document.createElement("a");
   link.href = url;
@@ -5474,6 +6661,9 @@ async function runDiagnostics(mode) {
   const reportEl = document.getElementById("diagnostics-report");
   const quickBtn = document.getElementById("quick-diagnostics");
   const fullBtn = document.getElementById("full-diagnostics");
+  const controller = new AbortController();
+  const timeoutMs = mode === "full" ? 180000 : 45000;
+  const timeoutId = window.setTimeout(() => controller.abort(), timeoutMs);
 
   if (quickBtn) quickBtn.disabled = true;
   if (fullBtn) fullBtn.disabled = true;
@@ -5487,17 +6677,28 @@ async function runDiagnostics(mode) {
   `;
 
   try {
-    const payload = await apiJson("/api/diagnostics/run", {method: "POST", body: JSON.stringify({mode})});
+    const payload = await apiJson("/api/diagnostics/run", {
+      method: "POST",
+      signal: controller.signal,
+      body: JSON.stringify({
+        mode,
+        include_llm_audit: mode === "full",
+      }),
+    });
     state.diagnosticsPayload = payload;
     renderDiagnostics(payload);
   } catch (error) {
+    const message = error?.name === "AbortError"
+      ? `检测超过 ${Math.round(timeoutMs / 1000)} 秒仍未完成，已停止等待。请稍后重试，或改用全量检测。`
+      : error.message;
     reportEl.innerHTML = `
       <div class="status-card error">
         <strong>检测失败</strong>
-        <span>${escapeHtml(error.message)}</span>
+        <span>${escapeHtml(message)}</span>
       </div>
     `;
   } finally {
+    window.clearTimeout(timeoutId);
     if (quickBtn) quickBtn.disabled = false;
     if (fullBtn) fullBtn.disabled = false;
   }
@@ -5876,6 +7077,332 @@ async function rollbackVersion(versionId) {
   await Promise.all([loadOverview(), loadKnowledge(), loadVersions()]);
 }
 
+async function loadWorkflowGovernance() {
+  const gateText = JSON.stringify(WORKFLOW_DEFAULT_METRICS_GATE, null, 2);
+  ["wf-eval-metrics-gate", "wf-release-metrics-gate"].forEach((id) => {
+    const element = document.getElementById(id);
+    if (element && !String(element.value || "").trim()) element.value = gateText;
+  });
+  if (!state.workflowLastResult) return;
+  workflowShowResult("最近一次执行结果", state.workflowLastResult, {preservePayload: true});
+}
+
+function resetWorkflowResult() {
+  state.workflowLastResult = null;
+  const summary = document.getElementById("wf-result-summary");
+  const jsonPanel = document.getElementById("wf-result-json");
+  const action = document.getElementById("wf-last-action");
+  if (summary) {
+    summary.innerHTML = '<div class="status-card info"><strong>暂无结果</strong><span>执行任一步后会自动填充 job_id/release_id 并展示摘要。</span></div>';
+  }
+  if (jsonPanel) jsonPanel.textContent = "等待执行结果";
+  if (action) action.textContent = "等待操作";
+}
+
+function workflowShowResult(actionLabel, payload, options = {}) {
+  if (!options.preservePayload) state.workflowLastResult = payload;
+  const subject = workflowSubject(payload);
+  workflowFillFieldsFromResult(subject);
+
+  const summary = document.getElementById("wf-result-summary");
+  const jsonPanel = document.getElementById("wf-result-json");
+  const action = document.getElementById("wf-last-action");
+  if (action) action.textContent = `${actionLabel} · ${new Date().toLocaleString("zh-CN")}`;
+  if (jsonPanel) jsonPanel.textContent = JSON.stringify(payload, null, 2);
+  if (!summary) return;
+
+  const cards = workflowSummaryCards(actionLabel, payload, subject);
+  summary.innerHTML = cards.map((card) => `
+      <div class="status-card ${escapeHtml(card.tone || "info")}">
+        <strong>${escapeHtml(card.title)}</strong>
+        <span>${escapeHtml(card.detail)}</span>
+      </div>
+    `).join("");
+}
+
+function workflowSummaryCards(actionLabel, payload, subject) {
+  const isOk = payload?.ok !== false;
+  const gatePass = payload?.gate_pass;
+  const tone = isOk ? (gatePass === false ? "warning" : "ok") : "error";
+  const cards = [
+    {
+      tone,
+      title: actionLabel,
+      detail: workflowPrimaryDetail(payload, subject),
+    },
+  ];
+
+  if (payload?.message) {
+    cards.push({tone: isOk ? "warning" : "error", title: "接口信息", detail: String(payload.message)});
+  }
+
+  if (subject?.summary && typeof subject.summary === "object") {
+    cards.push({tone: "info", title: "摘要", detail: workflowObjectSummary(subject.summary)});
+  }
+  if (payload?.metrics && typeof payload.metrics === "object") {
+    cards.push({tone: gatePass === false ? "warning" : "ok", title: "评估指标", detail: workflowObjectSummary(payload.metrics)});
+  }
+  if (payload?.gate_result && typeof payload.gate_result === "object") {
+    cards.push({tone: gatePass === false ? "warning" : "ok", title: "门禁结果", detail: workflowObjectSummary(payload.gate_result)});
+  }
+
+  const blockedItems = Array.isArray(subject?.blocked_items) ? subject.blocked_items : [];
+  if (blockedItems.length) {
+    cards.push({tone: "warning", title: "阻断项", detail: `${blockedItems.length} 条（详情见下方 JSON）`});
+  }
+
+  return cards.slice(0, 6);
+}
+
+function workflowPrimaryDetail(payload, subject) {
+  const id = workflowResultId(subject, payload);
+  const status = String(subject?.status || payload?.status || (payload?.ok === false ? "failed" : "completed"));
+  const tenant = String(subject?.tenant_id || payload?.tenant_id || workflowTenantId());
+  const releaseVersion = String(subject?.release_version || payload?.release_version || "");
+  const parts = [`状态 ${status}`, `租户 ${tenant}`];
+  if (id) parts.push(`ID ${id}`);
+  if (releaseVersion) parts.push(`版本 ${releaseVersion}`);
+  return parts.join(" · ");
+}
+
+function workflowResultId(subject, payload) {
+  const item = subject || {};
+  return String(item.job_id || item.eval_job_id || item.report_id || item.release_id || payload?.release_id || "").trim();
+}
+
+function workflowObjectSummary(payload, maxFields = 8) {
+  const entries = Object.entries(payload || {}).slice(0, maxFields);
+  const chunks = entries.map(([key, value]) => `${key}: ${workflowSummaryValue(value)}`);
+  if (Object.keys(payload || {}).length > maxFields) chunks.push("...");
+  return chunks.join("；") || "无";
+}
+
+function workflowSummaryValue(value) {
+  if (value === null || value === undefined || value === "") return "空";
+  if (typeof value === "number" || typeof value === "boolean") return String(value);
+  if (Array.isArray(value)) return `${value.length} 项`;
+  if (typeof value === "object") return "对象";
+  return shortBusinessText(String(value), 80);
+}
+
+function workflowSubject(payload) {
+  if (!payload || typeof payload !== "object") return {};
+  if (payload.item && typeof payload.item === "object") return payload.item;
+  if (payload.release && typeof payload.release === "object") return payload.release;
+  return payload;
+}
+
+function workflowFillFieldsFromResult(subject) {
+  if (!subject || typeof subject !== "object") return;
+  if (subject.curated_file) workflowSetInputValue("wf-import-input-file", subject.curated_file);
+  if (subject.job_id && String(subject.job_id).startsWith("curate_job_")) workflowSetInputValue("wf-curation-job-id", subject.job_id);
+  if (subject.job_id && String(subject.job_id).startsWith("import_job_")) workflowSetInputValue("wf-import-job-id", subject.job_id);
+  if (subject.source_dry_run_job_id) workflowSetInputValue("wf-import-job-id", subject.source_dry_run_job_id);
+  if (subject.eval_job_id) workflowSetInputValue("wf-eval-job-id", subject.eval_job_id);
+  if (subject.release_id) workflowSetInputValue("wf-release-id", subject.release_id);
+  if (Array.isArray(subject.import_job_ids) && subject.import_job_ids.length) {
+    workflowSetInputValue("wf-release-import-job-ids", subject.import_job_ids.join("\n"));
+  }
+  const releaseVersion = String(subject.release_version || "");
+  if (releaseVersion) {
+    workflowSetInputValue("wf-import-release-version", releaseVersion);
+    workflowSetInputValue("wf-eval-release-version", releaseVersion);
+    workflowSetInputValue("wf-release-version", releaseVersion);
+  }
+  const rollbackTo = String(subject.rollback_to || subject.rolled_back_to || "");
+  if (rollbackTo) workflowSetInputValue("wf-release-rollback-to", rollbackTo);
+}
+
+function workflowSetInputValue(id, value) {
+  const element = document.getElementById(id);
+  if (!element || value === undefined || value === null) return;
+  element.value = String(value);
+}
+
+function workflowSetBusy(busy) {
+  state.workflowOpsBusy = Boolean(busy);
+  WORKFLOW_ACTION_BUTTON_IDS.forEach((id) => {
+    const button = document.getElementById(id);
+    if (button) button.disabled = Boolean(busy);
+  });
+}
+
+function workflowTenantId() {
+  return String(state.activeTenantId || "default").trim() || "default";
+}
+
+function workflowInputValue(id) {
+  const element = document.getElementById(id);
+  return String(element?.value || "").trim();
+}
+
+function workflowChecked(id) {
+  const element = document.getElementById(id);
+  return Boolean(element?.checked);
+}
+
+function workflowListInput(id) {
+  const raw = workflowInputValue(id);
+  if (!raw) return [];
+  return Array.from(new Set(raw.split(/[\r\n,，;；]+/).map((item) => item.trim()).filter(Boolean)));
+}
+
+function workflowJsonInput(id, label) {
+  const text = workflowInputValue(id);
+  if (!text) return {};
+  let payload;
+  try {
+    payload = JSON.parse(text);
+  } catch (error) {
+    throw new Error(`${label} 不是合法 JSON：${error.message}`);
+  }
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
+    throw new Error(`${label} 必须是 JSON 对象`);
+  }
+  return payload;
+}
+
+async function workflowRunAction(actionLabel, fn) {
+  if (state.workflowOpsBusy) return null;
+  workflowSetBusy(true);
+  try {
+    const payload = await fn();
+    workflowShowResult(actionLabel, payload);
+    return payload;
+  } catch (error) {
+    workflowShowResult(`${actionLabel}失败`, {ok: false, status: "failed", message: error.message || "未知错误"});
+    throw error;
+  } finally {
+    workflowSetBusy(false);
+  }
+}
+
+async function runWorkflowCuration() {
+  const batchId = workflowInputValue("wf-curation-batch-id");
+  const sourceFiles = workflowListInput("wf-curation-source-files");
+  if (!batchId) throw new Error("请先填写批次 ID（batch_id）");
+  if (!sourceFiles.length) throw new Error("请至少填写一个源文件路径");
+  return workflowRunAction("数据治理完成", async () => apiJson("/api/workflow/curation/jobs", {
+    method: "POST",
+    body: JSON.stringify({
+      tenant_id: workflowTenantId(),
+      industry_id: workflowInputValue("wf-curation-industry-id"),
+      batch_id: batchId,
+      source_files: sourceFiles,
+      strict_mode: workflowChecked("wf-curation-strict-mode"),
+    }),
+  }));
+}
+
+async function fetchWorkflowCurationJob() {
+  const jobId = workflowInputValue("wf-curation-job-id");
+  if (!jobId) throw new Error("请先填写清洗任务 ID");
+  return workflowRunAction("清洗任务查询完成", async () => apiGet(`/api/workflow/curation/jobs/${encodeURIComponent(jobId)}`));
+}
+
+async function runWorkflowImportDryRun() {
+  const inputFile = workflowInputValue("wf-import-input-file");
+  if (!inputFile) throw new Error("请先填写模板文件路径");
+  return workflowRunAction("Dry-run 完成", async () => apiJson("/api/workflow/template-import/dry-run", {
+    method: "POST",
+    body: JSON.stringify({
+      tenant_id: workflowTenantId(),
+      industry_id: workflowInputValue("wf-import-industry-id"),
+      input_file: inputFile,
+    }),
+  }));
+}
+
+async function fetchWorkflowImportJob() {
+  const jobId = workflowInputValue("wf-import-job-id");
+  if (!jobId) throw new Error("请先填写导入任务 ID");
+  return workflowRunAction("导入任务查询完成", async () => apiGet(`/api/workflow/template-import/jobs/${encodeURIComponent(jobId)}`));
+}
+
+async function runWorkflowImportApply() {
+  const dryRunJobId = workflowInputValue("wf-import-job-id");
+  const inputFile = workflowInputValue("wf-import-input-file");
+  if (!dryRunJobId && !inputFile) throw new Error("请填写 Dry-run 任务 ID，或提供 input_file 让系统自动 dry-run 后 apply");
+  return workflowRunAction("Apply 导入完成", async () => apiJson("/api/workflow/template-import/apply", {
+    method: "POST",
+    body: JSON.stringify({
+      tenant_id: workflowTenantId(),
+      industry_id: workflowInputValue("wf-import-industry-id"),
+      dry_run_job_id: dryRunJobId,
+      input_file: inputFile,
+      release_version: workflowInputValue("wf-import-release-version"),
+    }),
+  }));
+}
+
+async function runWorkflowReplayEval() {
+  const releaseVersion = workflowInputValue("wf-eval-release-version");
+  if (!releaseVersion) throw new Error("请先填写发布版本（release_version）");
+  return workflowRunAction("回放评估完成", async () => apiJson("/api/workflow/replay-eval/run", {
+    method: "POST",
+    body: JSON.stringify({
+      tenant_id: workflowTenantId(),
+      release_version: releaseVersion,
+      suite_id: workflowInputValue("wf-eval-suite-id"),
+      suite_file: workflowInputValue("wf-eval-suite-file"),
+      metrics_gate: workflowJsonInput("wf-eval-metrics-gate", "评估门禁"),
+    }),
+  }));
+}
+
+async function fetchWorkflowEvalJob() {
+  const evalJobId = workflowInputValue("wf-eval-job-id");
+  if (!evalJobId) throw new Error("请先填写评估任务 ID");
+  return workflowRunAction("评估任务查询完成", async () => apiGet(`/api/workflow/replay-eval/jobs/${encodeURIComponent(evalJobId)}`));
+}
+
+async function runWorkflowReleaseCreate() {
+  const importJobIds = workflowListInput("wf-release-import-job-ids");
+  if (!importJobIds.length) throw new Error("请至少填写一个导入任务 ID");
+  return workflowRunAction("发布候选创建完成", async () => apiJson("/api/workflow/releases", {
+    method: "POST",
+    body: JSON.stringify({
+      tenant_id: workflowTenantId(),
+      release_version: workflowInputValue("wf-release-version"),
+      industry_id: workflowInputValue("wf-release-industry-id"),
+      import_job_ids: importJobIds,
+      feature_flags: workflowJsonInput("wf-release-feature-flags", "功能开关"),
+      metrics_gate: workflowJsonInput("wf-release-metrics-gate", "发布门禁"),
+    }),
+  }));
+}
+
+async function fetchWorkflowRelease() {
+  const releaseId = workflowInputValue("wf-release-id");
+  if (!releaseId) throw new Error("请先填写发布 ID");
+  return workflowRunAction("发布查询完成", async () => apiGet(`/api/workflow/releases/${encodeURIComponent(releaseId)}`));
+}
+
+async function runWorkflowReleaseApprove() {
+  const releaseId = workflowInputValue("wf-release-id");
+  if (!releaseId) throw new Error("请先填写发布 ID");
+  return workflowRunAction("发布审批完成", async () => apiJson(`/api/workflow/releases/${encodeURIComponent(releaseId)}/approve`, {
+    method: "POST",
+    body: JSON.stringify({
+      approved_by: workflowInputValue("wf-release-approved-by") || "admin_console",
+      approval_note: workflowInputValue("wf-release-approval-note"),
+    }),
+  }));
+}
+
+async function runWorkflowReleaseRollback() {
+  const releaseId = workflowInputValue("wf-release-id");
+  if (!releaseId) throw new Error("请先填写发布 ID");
+  if (!confirm(`确认回滚发布 ${releaseId} 吗？`)) return null;
+  return workflowRunAction("发布回滚完成", async () => apiJson(`/api/workflow/releases/${encodeURIComponent(releaseId)}/rollback`, {
+    method: "POST",
+    body: JSON.stringify({
+      rollback_to_version: workflowInputValue("wf-release-rollback-to"),
+      reason: workflowInputValue("wf-release-rollback-reason"),
+    }),
+  }));
+}
+
 function statusText(status) {
   if (status === "ok") return "检测通过";
   if (status === "warning") return "需要关注";
@@ -6004,6 +7531,41 @@ async function acknowledgeKnowledgeItem() {
     renderKnowledgeDetail();
   }
   await Promise.all([loadCategoryItems(), loadOverview()]);
+}
+
+async function acknowledgeProductItem() {
+  const selectedId = state.selectedProduct?.id || "";
+  if (!selectedId || state.productAcknowledgeLoadingIds.has(selectedId)) return;
+  state.productAcknowledgeLoadingIds.add(selectedId);
+  renderProductCatalogDetail();
+  try {
+    await apiJson(`/api/knowledge/categories/products/items/${encodeURIComponent(selectedId)}/acknowledge`, {
+      method: "POST",
+      body: "{}",
+    });
+    if (state.selectedProduct?.id === selectedId) {
+      state.selectedProduct = {
+        ...state.selectedProduct,
+        is_unread: false,
+        runtime_usable: state.selectedProduct.status !== "archived",
+        review_state: {
+          ...(state.selectedProduct.review_state || {}),
+          is_new: false,
+          read_at: new Date().toISOString(),
+        },
+      };
+      renderProductCatalogList();
+      renderProductCatalogDetail();
+    }
+    await Promise.all([loadProductCatalog({loadDetail: false}), loadOverview().catch(() => {})]);
+    if (state.selectedProduct?.id === selectedId) {
+      await loadProductDetail(selectedId, {open: false});
+    }
+  } finally {
+    state.productAcknowledgeLoadingIds.delete(selectedId);
+    renderProductCatalogList();
+    renderProductCatalogDetail();
+  }
 }
 
 function escapeAttr(value) {
@@ -6169,12 +7731,15 @@ async function loadActiveSubsection() {
     if (state.activeReferenceTab === "sources") await loadRagStatus();
     if (state.activeReferenceTab === "experiences") await loadRagExperiences();
   }
+  if (state.activeView === "knowledge_center") await loadOverview();
+  if (state.activeView === "knowledge") await loadKnowledge();
   if (state.activeView === "recorder") await loadRecorder();
   if (state.activeView === "product_catalog") await loadProductCatalog();
   if (state.activeView === "customer_service") await loadCustomerService();
   if (state.activeView === "customer_profiles") await loadCustomerProfiles();
 }
 
+initHelperCardCollapsing();
 bindNavigation();
 renderCustomerServiceRuntime();
 document.getElementById("refresh-overview").addEventListener("click", () => loadOverview().catch(console.error));
@@ -6184,7 +7749,6 @@ document.getElementById("tenant-select")?.addEventListener("change", async (even
   await Promise.all([
     refreshAccountContext().catch(console.error),
     loadOverview().catch(console.error),
-    loadKnowledge().catch(console.error),
     refreshRagExperienceBadge().catch(console.error),
   ]);
   scheduleStartupSync();
@@ -6195,7 +7759,14 @@ document.getElementById("category-select").addEventListener("change", async (eve
   state.activeCategoryId = event.target.value;
   await loadCategoryItems();
 });
-document.getElementById("knowledge-search").addEventListener("input", renderKnowledgeList);
+document.getElementById("knowledge-search").addEventListener("input", () => {
+  state.knowledgeListVisibleCount = KNOWLEDGE_LIST_PAGE_SIZE;
+  renderKnowledgeList();
+  if (state.knowledgeSearchTimer) clearTimeout(state.knowledgeSearchTimer);
+  state.knowledgeSearchTimer = setTimeout(() => {
+    loadCategoryItems().catch((error) => console.warn("knowledge search reload failed", error));
+  }, 250);
+});
 document.getElementById("create-category").addEventListener("click", () => createCustomCategory().catch((error) => alert(error.message)));
 document.getElementById("new-knowledge-item").addEventListener("click", newKnowledgeItem);
 document.getElementById("edit-knowledge-item").addEventListener("click", editKnowledgeItem);
@@ -6207,6 +7778,14 @@ document.getElementById("reset-generator").addEventListener("click", resetGenera
 document.getElementById("confirm-generator").addEventListener("click", () => confirmGenerator().catch((error) => alert(error.message)));
 document.getElementById("upload-button").addEventListener("click", () => uploadSelectedFile().catch((error) => alert(error.message)));
 document.getElementById("upload-file").addEventListener("change", () => uploadSelectedFile().catch((error) => alert(error.message)));
+const uploadAutoLearnCheckbox = document.getElementById("upload-auto-learn");
+if (uploadAutoLearnCheckbox) {
+  uploadAutoLearnCheckbox.checked = state.autoLearnAfterUpload;
+  uploadAutoLearnCheckbox.addEventListener("change", (event) => {
+    state.autoLearnAfterUpload = Boolean(event.target.checked);
+    localStorage.setItem("uploadAutoLearnAfterSelect", state.autoLearnAfterUpload ? "1" : "0");
+  });
+}
 document.getElementById("refresh-rag").addEventListener("click", () => loadRagStatus().catch((error) => alert(error.message)));
 document.getElementById("rebuild-rag").addEventListener("click", () => rebuildRag().catch((error) => alert(error.message)));
 document.getElementById("rag-search").addEventListener("click", () => searchRag().catch((error) => alert(error.message)));
@@ -6224,11 +7803,18 @@ document.getElementById("run-learning").addEventListener("click", () => runLearn
 document.getElementById("refresh-candidates")?.addEventListener("click", () => loadCandidates().catch((error) => alert(error.message)));
 document.getElementById("refresh-customer-service")?.addEventListener("click", () => loadCustomerService().catch((error) => alert(error.message)));
 document.getElementById("customer-save-settings")?.addEventListener("click", () => saveCustomerServiceSettings().catch((error) => alert(error.message)));
+document.getElementById("customer-service-discover")?.addEventListener("click", () => discoverCustomerServiceSessions().catch((error) => alert(error.message)));
+document.getElementById("customer-service-select-all")?.addEventListener("click", () => applyCustomerServiceSessionSelection("all").catch((error) => alert(error.message)));
+document.getElementById("customer-service-clear-selection")?.addEventListener("click", () => applyCustomerServiceSessionSelection("none").catch((error) => alert(error.message)));
 document.getElementById("refresh-product-catalog")?.addEventListener("click", () => loadProductCatalog().catch((error) => alert(error.message)));
 document.getElementById("run-product-command")?.addEventListener("click", () => runProductCommand().catch((error) => alert(error.message)));
 document.getElementById("recorder-discover")?.addEventListener("click", () => discoverRecorderSessions().catch((error) => alert(error.message)));
 document.getElementById("recorder-capture")?.addEventListener("click", () => captureRecorderNow().catch((error) => alert(error.message)));
 document.getElementById("recorder-save-settings")?.addEventListener("click", () => saveRecorderSettings().catch((error) => alert(error.message)));
+document.getElementById("recorder-runtime-start")?.addEventListener("click", () => startRecorderRuntime().catch((error) => alert(error.message)));
+document.getElementById("recorder-runtime-stop")?.addEventListener("click", () => stopRecorderRuntime().catch((error) => alert(error.message)));
+document.getElementById("recorder-select-groups")?.addEventListener("click", () => applyRecorderSelection("groups").catch((error) => alert(error.message)));
+document.getElementById("recorder-clear-selection")?.addEventListener("click", () => applyRecorderSelection("none").catch((error) => alert(error.message)));
 document.getElementById("recorder-export-run-create")?.addEventListener("click", () => createRecorderExportRun({mode: "all"}).catch((error) => alert(error.message)));
 document.getElementById("recorder-export-run-day")?.addEventListener("click", () => createRecorderExportRun({preset: "day"}).catch((error) => alert(error.message)));
 document.getElementById("recorder-export-run-week")?.addEventListener("click", () => createRecorderExportRun({preset: "week"}).catch((error) => alert(error.message)));
@@ -6242,8 +7828,18 @@ document.getElementById("full-diagnostics").addEventListener("click", () => runD
 document.getElementById("create-backup").addEventListener("click", () => createBackup().catch((error) => alert(error.message)));
 document.getElementById("refresh-versions").addEventListener("click", () => loadVersions().catch((error) => alert(error.message)));
 document.getElementById("llm-config-form")?.addEventListener("submit", (event) => saveLlmConfig(event).catch((error) => alert(error.message)));
-document.getElementById("llm-config-test")?.addEventListener("click", () => testLlmConfig().catch((error) => alert(error.message)));
+document.getElementById("llm-config-test")?.addEventListener("click", () => testLlmConfig("flash").catch((error) => alert(error.message)));
+document.getElementById("llm-config-test-pro")?.addEventListener("click", () => testLlmConfig("pro").catch((error) => alert(error.message)));
 document.getElementById("llm-config-toggle")?.addEventListener("click", toggleLlmApiKeyVisibility);
+document.getElementById("llm-provider-select")?.addEventListener("change", applyLlmProviderPreset);
+document.getElementById("llm-base-url-input")?.addEventListener("input", updateLlmInfoPanel);
+document.getElementById("llm-flash-model-select")?.addEventListener("change", () => applyLlmModelSelect("flash"));
+document.getElementById("llm-pro-model-select")?.addEventListener("change", () => applyLlmModelSelect("pro"));
+["llm-flash-reasoning-input", "llm-pro-reasoning-input"].forEach((id) => {
+  document.getElementById(id)?.addEventListener("change", updateLlmInfoPanel);
+});
+document.getElementById("llm-api-key-input")?.addEventListener("input", updateLlmTestButtonState);
+document.getElementById("llm-insecure-tls-input")?.addEventListener("change", updateLlmInfoPanel);
 document.getElementById("local-password-form")?.addEventListener("submit", (event) => changeLocalPassword(event).catch((error) => alert(error.message)));
 document.getElementById("local-email-form")?.addEventListener("submit", (event) => bindLocalEmail(event).catch((error) => alert(error.message)));
 document.getElementById("local-logout-button")?.addEventListener("click", () => logoutLocal().catch((error) => alert(error.message)));
@@ -6256,6 +7852,14 @@ document.getElementById("product-llm-intake-send")?.addEventListener("click", ()
 document.getElementById("product-llm-intake-input")?.addEventListener("keydown", (e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendProductLlmIntake().catch((error) => alert(error.message)); } });
 document.getElementById("product-llm-intake-apply")?.addEventListener("click", () => applyProductLlmIntake().catch((error) => alert(error.message)));
 document.getElementById("product-llm-intake-reset")?.addEventListener("click", resetProductLlmIntake);
+document.querySelectorAll(".product-detail-close").forEach((node) => node.addEventListener("click", closeProductDetailModal));
+document.querySelectorAll(".knowledge-detail-close").forEach((node) => node.addEventListener("click", closeKnowledgeDetailModal));
+document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape") {
+    closeProductDetailModal();
+    closeKnowledgeDetailModal();
+  }
+});
 
 document.body.classList.add("auth-locked");
 initCustomerServiceFloat();

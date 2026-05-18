@@ -8,7 +8,7 @@
   },
   "data": {
     "title": "客服通用表达与边界原则",
-    "guideline_text": "回复要自然，先接住客户使用场景，再问关键参数。对功率、续航、最低价等不确定内容，不能凭空承诺。适合自动回复的内容：参数收集、常规质保说明、使用场景推荐。需要转人工的内容：最低价、特殊补偿、先发货后付款。",
+    "guideline_text": "回复要自然，先接住客户使用场景，再问关键参数。对功率、续航、最低价等不确定内容，不能凭空承诺。适合自动回复的内容：参数收集、常规质保说明、使用场景推荐。需要转人工的内容：最低价、特殊补偿、先发货后付款。称呼只在开场寒暄和新话题切入时有选择地使用，连续对话中不要每条都加；男性称呼可在“姓哥/哥/老板”之间自然轮换，女性称呼可用“姓姐/姐”，不要把非真人会话名拆成姓氏称呼。",
     "intent_tags": [
       "greeting",
       "small_talk",
@@ -20,7 +20,8 @@
     "tone_tags": [
       "natural",
       "truthful",
-      "safe"
+      "safe",
+      "contextual_honorific"
     ],
     "priority": 100,
     "always_include": true,
@@ -35,7 +36,7 @@
     "risk_level": "normal"
   },
   "metadata": {
-    "updated_at": "2026-04-27T03:15:56",
-    "updated_by": "three_layer_migration"
+    "updated_at": "2026-05-18T00:00:00",
+    "updated_by": "codex"
   }
 }

@@ -13,6 +13,7 @@ from apps.wechat_ai_customer_service.workflows.knowledge_runtime import (
     PRODUCT_SCOPED_SCHEMAS,
     KnowledgeRuntime,
 )
+from apps.wechat_ai_customer_service.product_master import product_master_category_record
 
 
 APP_ROOT = Path(__file__).resolve().parents[2]
@@ -188,6 +189,7 @@ def compile_global_guideline(item: dict[str, Any]) -> dict[str, Any]:
 
 def compile_manifest(runtime: KnowledgeRuntime) -> dict[str, Any]:
     categories = runtime.list_categories(enabled_only=True)
+    product_master_category = product_master_category_record()
     product_scoped_categories = [
         {
             "id": category_id,
@@ -200,16 +202,25 @@ def compile_manifest(runtime: KnowledgeRuntime) -> dict[str, Any]:
     return {
         "schema_version": 1,
         "scope": "wechat_ai_customer_service",
-        "source": "three_layer_knowledge",
+        "source": "product_master_plus_formal_knowledge",
         "compiled_at": now(),
         "items": [
             {
-                "id": category.get("id"),
-                "path": category.get("path"),
-                "summary": category.get("name"),
-                "participates_in_reply": bool(category.get("participates_in_reply", False)),
-            }
-            for category in [*categories, *product_scoped_categories]
+                "id": product_master_category.get("id"),
+                "path": product_master_category.get("path"),
+                "summary": product_master_category.get("name"),
+                "scope": product_master_category.get("scope"),
+                "participates_in_reply": True,
+            },
+            *[
+                {
+                    "id": category.get("id"),
+                    "path": category.get("path"),
+                    "summary": category.get("name"),
+                    "participates_in_reply": bool(category.get("participates_in_reply", False)),
+                }
+                for category in [*categories, *product_scoped_categories]
+            ],
         ],
     }
 
@@ -231,7 +242,7 @@ def compile_metadata(runtime: KnowledgeRuntime, product_knowledge: dict[str, Any
             "faq": len(product_knowledge.get("faq", []) or []),
             "style_examples": len(style_examples.get("examples", []) or []),
         },
-        "note": "Compatibility export only. Formal runtime source is shared_knowledge plus tenant knowledge_bases and product_item_knowledge.",
+        "note": "Compatibility export only. Product facts come from product_master; formal runtime source is shared_knowledge plus tenant knowledge_bases and product_item_knowledge.",
     }
 
 

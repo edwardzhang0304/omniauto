@@ -14,13 +14,20 @@ from apps.wechat_ai_customer_service.platform_safety_rules import guard_term_set
 
 
 OBSERVED_WECHAT_SOURCE_TYPES = {
+    "cleaned_real_chat_pack",
+    "real_chat",
     "raw_wechat_private",
     "raw_wechat_group",
     "raw_wechat_file_transfer",
     "wechat_raw_message",
 }
+SOURCE_AUTHORITY_POLICY_VERSION = "source_authority_v2"
 PRODUCT_MASTER_CATEGORIES = {"products", "erp_exports"}
 PRODUCT_SCOPED_CATEGORIES = {"product_faq", "product_rules", "product_explanations"}
+FALLBACK_PERSONALIZED_TOKENS = ("许聪", "许哥", "你们店里", "到店看车")
+FALLBACK_SITUATIONAL_HANDOFF_TOKENS = ("转人工", "同事跟进", "人工确认", "请示")
+FALLBACK_FINANCE_BOUNDARY_TOKENS = ("首付", "月供", "贷款", "征信", "按揭", "利率")
+PERSONAL_NAME_SCENE_RE = re.compile(r"[\u4e00-\u9fff]{2,4}(?:询问|问|说|表示)")
 
 
 def visible_rule_patterns(group: str) -> list[str]:
@@ -30,6 +37,10 @@ def visible_rule_patterns(group: str) -> list[str]:
 
 def matches_visible_patterns(text: str, group: str) -> bool:
     return any(re.search(pattern, text) for pattern in visible_rule_patterns(group))
+
+
+def contains_any_token(text: str, tokens: tuple[str, ...]) -> bool:
+    return any(token in text for token in tokens)
 
 
 def candidate_target_category(candidate: dict[str, Any]) -> str:
@@ -131,9 +142,15 @@ def observed_chat_candidate_is_too_specific(candidate: dict[str, Any]) -> bool:
     )
     if matches_visible_patterns(primary_text, "personalized_reply_patterns"):
         return True
+    if contains_any_token(primary_text, FALLBACK_PERSONALIZED_TOKENS) or bool(PERSONAL_NAME_SCENE_RE.search(primary_text)):
+        return True
     if matches_visible_patterns(service_reply, "situational_handoff_patterns"):
         return True
+    if contains_any_token(service_reply, FALLBACK_SITUATIONAL_HANDOFF_TOKENS):
+        return True
     if matches_visible_patterns(customer_message + "\n" + service_reply, "finance_boundary_patterns"):
+        return True
+    if contains_any_token(customer_message + "\n" + service_reply, FALLBACK_FINANCE_BOUNDARY_TOKENS):
         return True
     return False
 
@@ -149,12 +166,12 @@ def evaluate_candidate_source_authority(candidate: dict[str, Any]) -> dict[str, 
     observed_wechat = is_observed_wechat_source(source_types)
     contains_model_reply = candidate_contains_model_reply(candidate)
 
-    if observed_wechat and category in PRODUCT_MASTER_CATEGORIES:
+    if category in PRODUCT_MASTER_CATEGORIES:
         return denied(
             category,
             source_types,
-            "observed_wechat_cannot_write_product_master",
-            "聊天记录只能作为AI经验或线索，不能新增或修改商品资料、价格、库存、订单等权威数据。",
+            "product_master_manual_intake_only",
+            "商品资料属于权威主数据，不能通过候选知识链路写入；请走商品库手动导入/维护入口。",
         )
     if observed_wechat and contains_model_reply and category != "chats":
         return denied(
@@ -184,7 +201,7 @@ def evaluate_candidate_source_authority(candidate: dict[str, Any]) -> dict[str, 
         "source_types": sorted(source_types),
         "observed_wechat": observed_wechat,
         "contains_model_reply": contains_model_reply,
-        "policy_version": "source_authority_v1",
+        "policy_version": SOURCE_AUTHORITY_POLICY_VERSION,
     }
 
 
@@ -196,7 +213,7 @@ def denied(category: str, source_types: set[str], reason: str, message: str) -> 
         "reason": reason,
         "message": message,
         "observed_wechat": is_observed_wechat_source(source_types),
-        "policy_version": "source_authority_v1",
+        "policy_version": SOURCE_AUTHORITY_POLICY_VERSION,
     }
 
 
@@ -264,9 +281,15 @@ def observed_chat_experience_is_too_specific(item: dict[str, Any]) -> bool:
     text = experience_review_text(item)
     if matches_visible_patterns(text, "personalized_reply_patterns"):
         return True
+    if contains_any_token(text, FALLBACK_PERSONALIZED_TOKENS) or bool(PERSONAL_NAME_SCENE_RE.search(text)):
+        return True
     if matches_visible_patterns(text, "situational_handoff_patterns"):
         return True
+    if contains_any_token(text, FALLBACK_SITUATIONAL_HANDOFF_TOKENS):
+        return True
     if matches_visible_patterns(text, "finance_boundary_patterns"):
+        return True
+    if contains_any_token(text, FALLBACK_FINANCE_BOUNDARY_TOKENS):
         return True
     return False
 
@@ -275,12 +298,12 @@ def evaluate_experience_source_authority(item: dict[str, Any], category: str) ->
     source_types = experience_source_types(item)
     observed_wechat = is_observed_wechat_source(source_types)
     contains_model_reply = experience_contains_model_reply(item)
-    if observed_wechat and category in PRODUCT_MASTER_CATEGORIES:
+    if category in PRODUCT_MASTER_CATEGORIES:
         return denied(
             category,
             source_types,
-            "observed_wechat_rag_cannot_promote_to_product_master",
-            "这条AI经验来自微信聊天，只能作为经验或话术线索，不能升级为商品资料、价格、库存或订单数据。",
+            "rag_product_master_promotion_disabled",
+            "商品资料属于权威主数据，RAG经验不能升级为商品资料；请通过商品库手动导入/维护。",
         )
     if observed_wechat and contains_model_reply and category != "chats":
         return denied(
@@ -302,5 +325,5 @@ def evaluate_experience_source_authority(item: dict[str, Any], category: str) ->
         "source_types": sorted(source_types),
         "observed_wechat": observed_wechat,
         "contains_model_reply": contains_model_reply,
-        "policy_version": "source_authority_v1",
+        "policy_version": SOURCE_AUTHORITY_POLICY_VERSION,
     }

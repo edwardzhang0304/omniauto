@@ -6,6 +6,7 @@ import json
 import os
 import shutil
 import sys
+import time
 import zipfile
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -30,6 +31,7 @@ from apps.wechat_ai_customer_service.sync.vps_sync import local_node_cache_path,
 
 
 _PASSWORD_OVERRIDES: dict[str, str] = {}
+WINDOWS_FILE_RETRY_DELAYS = (0.05, 0.1, 0.2, 0.35, 0.5, 0.75, 1.0, 1.25)
 
 
 def main() -> int:
@@ -265,10 +267,10 @@ def check_vps_poll_uses_cached_node_identity() -> None:
     finally:
         if old_cache is None:
             if cache_path.exists():
-                cache_path.unlink()
+                remove_file(cache_path)
         else:
             cache_path.parent.mkdir(parents=True, exist_ok=True)
-            cache_path.write_text(old_cache, encoding="utf-8")
+            write_text(cache_path, old_cache)
         if old_node_id is not None:
             os.environ["WECHAT_LOCAL_NODE_ID"] = old_node_id
         if old_node_token is not None:
@@ -279,11 +281,11 @@ def check_shared_cloud_snapshot_pull_with_mock_vps() -> None:
     cache_root = shared_runtime_cache_root()
     backup_root = TEST_ROOT / "previous_shared_cloud_cache"
     if backup_root.exists():
-        shutil.rmtree(backup_root)
+        remove_tree(backup_root)
     had_cache = cache_root.exists()
     if had_cache:
         shutil.copytree(cache_root, backup_root)
-        shutil.rmtree(cache_root)
+        remove_tree(cache_root)
     service = VpsLocalSyncService(vps_base_url="https://vps.example.local")
 
     class FakeVps:
@@ -362,22 +364,22 @@ def check_shared_cloud_snapshot_pull_with_mock_vps() -> None:
         assert_true(str(cached.get("lease_id") or "").startswith("lease-renewed-"), "renewed lease persisted to snapshot cache")
     finally:
         if cache_root.exists():
-            shutil.rmtree(cache_root)
+            remove_tree(cache_root)
         if had_cache and backup_root.exists():
             shutil.copytree(backup_root, cache_root)
         if backup_root.exists():
-            shutil.rmtree(backup_root)
+            remove_tree(backup_root)
 
 
 def check_expired_shared_cloud_cache_is_not_runtime_root() -> None:
     cache_root = shared_runtime_cache_root()
     backup_root = TEST_ROOT / "expired_shared_cloud_cache_backup"
     if backup_root.exists():
-        shutil.rmtree(backup_root)
+        remove_tree(backup_root)
     had_cache = cache_root.exists()
     if had_cache:
         shutil.copytree(cache_root, backup_root)
-        shutil.rmtree(cache_root)
+        remove_tree(cache_root)
     try:
         now = datetime.now(timezone.utc)
         (cache_root / "global_guidelines" / "items").mkdir(parents=True, exist_ok=True)
@@ -398,11 +400,11 @@ def check_expired_shared_cloud_cache_is_not_runtime_root() -> None:
         assert_true(cache_root not in runtime_knowledge_roots("default"), "expired cloud shared cache must not be a runtime root")
     finally:
         if cache_root.exists():
-            shutil.rmtree(cache_root)
+            remove_tree(cache_root)
         if had_cache and backup_root.exists():
             shutil.copytree(backup_root, cache_root)
         if backup_root.exists():
-            shutil.rmtree(backup_root)
+            remove_tree(backup_root)
 
 
 def check_formal_shared_candidate_upload_with_mock_vps() -> None:
@@ -467,7 +469,7 @@ def check_formal_shared_candidate_upload_with_mock_vps() -> None:
             encoding="utf-8",
         )
         if cache_path.exists():
-            cache_path.unlink()
+            remove_file(cache_path)
         uploaded = service.upload_formal_knowledge_candidates(tenant_id=tenant_id, use_llm=False, limit=10, token="customer-token")
         assert_true(uploaded.get("ok") is True, "formal shared candidate upload ok")
         assert_true(uploaded.get("uploaded"), "mock VPS should receive at least one formal shared candidate")
@@ -480,15 +482,15 @@ def check_formal_shared_candidate_upload_with_mock_vps() -> None:
     finally:
         for path in (item_path, private_item_path):
             if path.exists():
-                path.unlink()
+                remove_file(path)
         tenant_root_path = item_dir.parents[2]
         if tenant_root_path.name == tenant_id and tenant_root_path.exists():
-            shutil.rmtree(tenant_root_path)
+            remove_tree(tenant_root_path)
         if cache_path.exists():
-            cache_path.unlink()
+            remove_file(cache_path)
         if old_cache is not None:
             cache_path.parent.mkdir(parents=True, exist_ok=True)
-            cache_path.write_text(old_cache, encoding="utf-8")
+            write_text(cache_path, old_cache)
 
 
 def context_for(role: Role, tenant_scope: str, active_tenant: str) -> AuthContext:
@@ -622,13 +624,88 @@ def cleanup_test_root() -> None:
     if expected_parent not in resolved.parents and resolved != expected_parent:
         raise RuntimeError(f"unsafe test cleanup path: {resolved}")
     if resolved.exists():
-        shutil.rmtree(resolved)
+        remove_tree(resolved)
     resolved.mkdir(parents=True, exist_ok=True)
 
 
 def write_json(path: Path, payload: Any) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    serialized = json.dumps(payload, ensure_ascii=False, indent=2) + "\n"
+    write_text(path, serialized)
+
+
+def write_text(path: Path, serialized: str) -> None:
+    temp = path.with_name(f".{path.name}.{os.getpid()}.{time.time_ns()}.tmp")
+    temp.write_text(serialized, encoding="utf-8")
+    try:
+        replace_path(temp, path)
+    finally:
+        if temp.exists():
+            remove_file(temp)
+
+
+def is_transient_windows_file_error(exc: OSError) -> bool:
+    return (
+        os.name == "nt"
+        and (
+            int(getattr(exc, "errno", 0) or 0) in {13, 22}
+            or int(getattr(exc, "winerror", 0) or 0) in {5, 32, 33}
+        )
+    )
+
+
+def replace_path(source: Path, destination: Path) -> None:
+    last_error: OSError | None = None
+    for index, delay in enumerate(WINDOWS_FILE_RETRY_DELAYS):
+        try:
+            source.replace(destination)
+            return
+        except FileNotFoundError:
+            return
+        except OSError as exc:
+            last_error = exc
+            if not is_transient_windows_file_error(exc):
+                raise
+            if index < len(WINDOWS_FILE_RETRY_DELAYS) - 1:
+                time.sleep(delay)
+    if last_error is not None:
+        raise last_error
+
+
+def remove_tree(path: Path) -> None:
+    last_error: OSError | None = None
+    for index, delay in enumerate(WINDOWS_FILE_RETRY_DELAYS):
+        try:
+            shutil.rmtree(path)
+            return
+        except FileNotFoundError:
+            return
+        except OSError as exc:
+            last_error = exc
+            if not is_transient_windows_file_error(exc):
+                raise
+            if index < len(WINDOWS_FILE_RETRY_DELAYS) - 1:
+                time.sleep(delay)
+    if last_error is not None:
+        raise last_error
+
+
+def remove_file(path: Path) -> None:
+    last_error: OSError | None = None
+    for index, delay in enumerate(WINDOWS_FILE_RETRY_DELAYS):
+        try:
+            path.unlink()
+            return
+        except FileNotFoundError:
+            return
+        except OSError as exc:
+            last_error = exc
+            if not is_transient_windows_file_error(exc):
+                raise
+            if index < len(WINDOWS_FILE_RETRY_DELAYS) - 1:
+                time.sleep(delay)
+    if last_error is not None:
+        raise last_error
 
 
 def assert_equal(actual: Any, expected: Any, message: str) -> None:

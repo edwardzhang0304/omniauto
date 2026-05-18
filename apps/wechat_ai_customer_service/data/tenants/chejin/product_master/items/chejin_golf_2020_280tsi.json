@@ -1,0 +1,47 @@
+{
+  "schema_version": 1,
+  "category_id": "products",
+  "id": "chejin_golf_2020_280tsi",
+  "status": "active",
+  "source": {
+    "type": "test_fixture",
+    "batch_token": "CHEJIN_SEED_20260507",
+    "legacy_migrated_from": "knowledge_bases/products"
+  },
+  "data": {
+    "name": "2020款大众高尔夫280TSI DSG舒适型",
+    "sku": "CHEJIN-GOLF-2020-280TSI",
+    "category": "二手车/紧凑型轿车",
+    "aliases": [
+      "高尔夫",
+      "大众高尔夫",
+      "小钢炮",
+      "两厢车",
+      "省油代步"
+    ],
+    "specs": "2020年3月上牌，表显4.5万公里，1.4T自动挡，女士一手车，内饰整洁，外观两处轻微补漆。",
+    "price": 8.28,
+    "unit": "台",
+    "inventory": 1,
+    "shipping_policy": "南京看车优先，异地客户可协商物流，费用自理。",
+    "warranty_policy": "车况以检测报告为准，外观补漆情况会如实告知，不隐瞒。",
+    "reply_templates": {
+      "recommendation": "这台高尔夫适合8到9万预算、城市代步和新手练车，省油好开，保值率高。"
+    },
+    "risk_rules": [
+      "不承诺最低价",
+      "价格可谈但需到店沟通"
+    ]
+  },
+  "runtime": {
+    "allow_auto_reply": true,
+    "requires_handoff": false,
+    "risk_level": "normal"
+  },
+  "metadata": {
+    "created_at": "2026-05-07T10:00:00",
+    "updated_at": "2026-05-16T22:51:06",
+    "created_by": "admin",
+    "updated_by": "admin"
+  }
+}

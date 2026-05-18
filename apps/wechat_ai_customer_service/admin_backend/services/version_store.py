@@ -3,7 +3,10 @@
 from __future__ import annotations
 
 import json
+import os
 import shutil
+import stat
+import tempfile
 import zipfile
 import uuid
 from datetime import datetime
@@ -120,8 +123,10 @@ class VersionStore:
         if shared_source.exists():
             replace_tree(shared_source, SHARED_KNOWLEDGE_ROOT)
         if tenants_source.exists():
+            preserved_learning_packs = snapshot_learning_pack_artifacts()
             replace_tree(tenants_source, TENANTS_ROOT)
-        elif knowledge_source.exists():
+            restore_learning_pack_artifacts(preserved_learning_packs)
+        if knowledge_source.exists():
             replace_tree(knowledge_source, KNOWLEDGE_BASE_ROOT)
         refresh_postgres_formal_knowledge()
         append_audit("rollback_applied", {"version_id": version_id, "rollback_snapshot": rollback_snapshot["version_id"]})
@@ -193,12 +198,93 @@ def replace_tree(source: Path, target: Path) -> None:
     if target.exists():
         for child in target.iterdir():
             if child.is_dir():
-                shutil.rmtree(child)
+                remove_tree_best_effort(child)
             else:
-                child.unlink()
+                unlink_best_effort(child)
     else:
         target.mkdir(parents=True, exist_ok=True)
     shutil.copytree(source, target, dirs_exist_ok=True)
+
+
+def remove_tree_best_effort(path: Path) -> None:
+    try:
+        shutil.rmtree(path)
+        return
+    except FileNotFoundError:
+        return
+    except PermissionError:
+        pass
+    make_writable(path)
+    try:
+        shutil.rmtree(path, ignore_errors=True)
+    except OSError:
+        return
+
+
+def unlink_best_effort(path: Path) -> None:
+    try:
+        path.unlink()
+        return
+    except PermissionError:
+        pass
+    make_writable(path)
+    try:
+        path.unlink(missing_ok=True)
+    except OSError:
+        return
+
+
+def make_writable(path: Path) -> None:
+    if not path.exists():
+        return
+    try:
+        os.chmod(path, stat.S_IWRITE | stat.S_IREAD)
+    except OSError:
+        pass
+    if path.is_dir():
+        for child in path.rglob("*"):
+            try:
+                os.chmod(child, stat.S_IWRITE | stat.S_IREAD)
+            except OSError:
+                continue
+
+
+def snapshot_learning_pack_artifacts() -> Path | None:
+    if not TENANTS_ROOT.exists():
+        return None
+    has_any = False
+    preserved_root = Path(tempfile.mkdtemp(prefix="wechat_preserve_learning_packs_"))
+    for tenant_dir in TENANTS_ROOT.iterdir():
+        if not tenant_dir.is_dir():
+            continue
+        learning_pack_root = tenant_dir / "learning_packs"
+        if not learning_pack_root.exists():
+            continue
+        target = preserved_root / tenant_dir.name / "learning_packs"
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copytree(learning_pack_root, target, dirs_exist_ok=True)
+        has_any = True
+    if has_any:
+        return preserved_root
+    shutil.rmtree(preserved_root, ignore_errors=True)
+    return None
+
+
+def restore_learning_pack_artifacts(preserved_root: Path | None) -> None:
+    if not preserved_root or not preserved_root.exists():
+        return
+    try:
+        for tenant_dir in preserved_root.iterdir():
+            if not tenant_dir.is_dir():
+                continue
+            source = tenant_dir / "learning_packs"
+            if not source.exists():
+                continue
+            target = TENANTS_ROOT / tenant_dir.name / "learning_packs"
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copytree(source, target, dirs_exist_ok=True)
+    finally:
+        shutil.rmtree(preserved_root, ignore_errors=True)
 
 
 def refresh_postgres_formal_knowledge() -> None:
@@ -207,6 +293,7 @@ def refresh_postgres_formal_knowledge() -> None:
         return
     tenant_id = active_tenant_id()
     from apps.wechat_ai_customer_service.admin_backend.services.knowledge_base_store import product_scoped_category_records
+    from apps.wechat_ai_customer_service.product_master import PRODUCT_MASTER_DB_LAYER, product_master_category_record
     from apps.wechat_ai_customer_service.workflows.migrate_file_storage_to_postgres import collect_file_storage
 
     plan = collect_file_storage(tenant_id)
@@ -217,6 +304,7 @@ def refresh_postgres_formal_knowledge() -> None:
         db.upsert_category(tenant_id, "shared", category)
     for category in plan["tenant_categories"]:
         db.upsert_category(tenant_id, "tenant", category)
+    db.upsert_category(tenant_id, PRODUCT_MASTER_DB_LAYER, product_master_category_record())
     for category in product_scoped_category_records():
         db.upsert_category(tenant_id, "tenant_product", category)
     for item in plan["knowledge_items"]:
