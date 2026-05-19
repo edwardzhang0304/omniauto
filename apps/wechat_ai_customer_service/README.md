@@ -1,65 +1,274 @@
-# WeChat AI Customer Service
+﻿# 微信智能客服
 
-This application package contains the task-specific implementation for the OmniAuto-based WeChat AI customer-service workflow.
+> 当前 README 是微信智能客服的最新版用户说明。历史方案、阶段性开发文档、旧验收报告已经归档到 [`docs/history/`](docs/history/)，不再作为当前行为的最终依据。
 
-The current stable prototype still lives under:
+## 这是什么
 
-```text
-workflows/temporary/desktop/wechat_customer_service/
-```
+微信智能客服是 OmniAuto 下的本地优先微信客服系统。它通过 RPA 监听微信会话，结合商品库、正式知识库、RAG 经验、实盘话术风格和当前聊天上下文，自动生成更接近真人客服的回复。
 
-During the migration, this package becomes the permanent home for:
+当前版本的核心目标是：
 
-- customer-service workflows;
-- WeChat adapters and sidecars;
-- task-specific configs;
-- structured business data;
-- raw data inboxes;
-- review-only AI candidates;
-- offline regression scenarios;
-- task-specific operation docs.
+- 能监听多个微信会话，不只盯一个固定客户。
+- 能识别连续多条客户消息，把同一件事合并理解。
+- 能按商品事实、正式规则、RAG 经验和话术风格分层回复。
+- 能避免明显暴露 AI 身份，遇到边界问题用“请示负责人/确认后回复”的说法转接人工。
+- 能把上传资料和实盘聊天先沉淀为 RAG 经验，再按治理规则进入候选知识，避免污染正式知识库。
+- 能通过本地 Web 管理台维护商品、知识、RAG 经验、候选知识和客服监听配置。
 
-OmniAuto platform code should only receive reusable infrastructure. WeChat business data, customer-service prompts, test contacts, product knowledge, and operator policies belong here.
+## 快速启动
 
-For safe live smoke tests, prefer `configs/file_transfer_smoke.example.json`. It targets only `文件传输助手`, enables product knowledge, keeps LLM advisory disabled, and writes state/audit artifacts under `runtime/apps/wechat_ai_customer_service/`.
-
-## Local Knowledge Admin
-
-Start the local Web admin console:
+启动本地管理台：
 
 ```powershell
 uv run python -m apps.wechat_ai_customer_service.admin_backend.app
 ```
 
-Default URL:
+默认访问地址：
 
 ```text
 http://127.0.0.1:8765
 ```
 
-The admin console is local-first. It can view formal knowledge, create drafts, validate and apply changes with version snapshots, upload raw materials, generate review candidates, apply or reject candidates, run diagnostics, and inspect runtime status.
+如果通过本地启动器或测试脚本运行，端口可能按配置切到 `8766`、`8767` 等；以启动日志和当前配置为准。
 
-## Directory Guide
+本地云端鉴权/同步调试优先使用双端口模拟：
 
-```text
-configs/                 Runtime configs for dry-run, test-contact, and later production profiles.
-workflows/               Executable task workflows.
-adapters/                Thin WeChat-specific adapters over OmniAuto infrastructure.
-prompts/                 Persona, reply policy, handoff policy, and evidence-pack templates.
-data/structured/         Reviewed business data used by the workflow.
-data/raw_inbox/          Raw chats, product sheets, policy files, and ERP exports awaiting extraction.
-data/review_candidates/  AI-generated candidates awaiting human review.
-tests/scenarios/         Offline customer-service regression scenarios.
-docs/                    Task-specific operation and debugging notes.
+```powershell
+python apps\wechat_ai_customer_service\tests\run_vps_local_two_port_shared_sync_checks.py
 ```
 
-## Planning Docs
+## 用户能看到的主要功能
 
-- `docs/KNOWLEDGE_ADMIN_REQUIREMENTS.md`: 知识管理台需求文档。
-- `docs/KNOWLEDGE_ADMIN_DEVELOPMENT_GUIDE.md`: 知识管理台开发文档。
-- `docs/KNOWLEDGE_ADMIN_CODE_ROADMAP.md`: 知识管理台代码落地清单。
-- `docs/AUTH_SECURITY_COMMERCIAL_READINESS.md`: 密码修改、邮箱验证码登录与商用安全补齐清单。
+### 微信智能客服
 
-## Migration Rule
+- 支持选择监听名单中的客户会话。
+- 支持“新会话默认响应 / 新会话默认忽略”，用于处理新加微信咨询客户。
+- 支持连续消息批处理：客户连发多句时，系统会等待短窗口并合并理解。
+- 支持极端长消息场景的历史回补：当前页面看不到最早消息时，优先复用底层 RPA 上翻能力补齐上下文。
+- 支持边界问题转人工，但对客户不说“转人工”，而是说“需要请示负责人/核实资料后再回复”。
+- 支持防 AI 暴露开关：开启后，客户问“是不是 AI/机器人”时会明确否认并转回业务话题。
 
-Keep the old temporary workflow runnable until the new application entry points pass their own dry-run and offline regression checks.
+### 资料导入与知识成长
+
+- 用户从“资料导入”上传清洗资料或业务资料。
+- 系统自动识别资料类型，先进入 RAG/候选审核链路，而不是直接污染正式知识。
+- RAG 经验池会显示总数、待处理、已废弃、已生成候选等显式状态，不允许隐藏未统计状态。
+- 高价值经验可以自动生成“待审核候选知识”。
+- 候选知识必须人工审核后才能进入正式知识库。
+
+### 商品库
+
+- 商品库是权威商品主数据，例如车型、价格、库存、车况、配置、检测信息。
+- 商品资料只能通过人工或特批商品入口导入维护。
+- 商品资料不能由聊天经验、RAG 经验、候选知识或 AI 推断反向写入。
+- 前端以列表展示概况，点击后弹出详情，适合非技术用户查看。
+
+### 正式知识库
+
+- 正式知识库保存稳定、可复用、可审计的规则和话术。
+- 实盘聊天原文、临场推荐、单次客户问题不应直接进入正式知识库。
+- 动态推荐类内容需要运行时结合商品库计算，不写死为通用规则。
+- 页面采用分页和详情展示，避免一次加载大量知识导致卡顿。
+
+### 实盘话术风格适配器
+
+- 用真实客服聊天样本学习语气、节奏、寒暄、追问和转化方式。
+- 它只影响“怎么说”，不决定“事实是什么”。
+- 称呼不会每次机械重复；只在寒暄或新话题时适度使用。
+- 高频机械短语会被降权，最终回复还会经过大模型润色。
+
+## 当前层级架构
+
+系统分为“离线治理线”和“实时回复线”。
+
+```text
+离线治理线：
+上传资料 / 聊天记录
+  -> 来源权威判断
+  -> RAG 来源与切片
+  -> RAG 经验
+  -> 治理状态判断
+  -> 候选知识（待人工审核）
+  -> 正式知识库
+
+实时回复线：
+微信新消息
+  -> 会话监听与连续消息合并
+  -> 意图和风险识别
+  -> 商品库 / 正式知识 / RAG / 风格记忆检索
+  -> 业务边界与人工接管判断
+  -> 初稿回复
+  -> 最终可见 AI 润色
+  -> 发送微信并写审计记录
+```
+
+### 1. 商品库
+
+最高权威的商品事实层。适合存放车型、价格、库存、配置、检测、车况等确定信息。
+
+原则：
+
+- 只允许人工或明确商品导入入口维护。
+- 不允许从 RAG 经验、聊天记录、候选知识晋升而来。
+- 回复时可以引用，但不能被聊天内容反向改写。
+
+### 2. 正式知识库
+
+稳定规则和标准话术层。适合存放贷款边界、置换流程、看车预约、售后说明、报价原则、客户信息收集规则等。
+
+原则：
+
+- 必须稳定、通用、可审计。
+- 可以由候选知识人工确认后进入。
+- 不放具体库存推荐、临时价格、单次客户问答。
+
+### 3. RAG 经验层
+
+真实聊天和上传资料沉淀出来的经验层。它用于帮助模型理解相似场景，而不是直接当成硬规则。
+
+治理状态包括：
+
+- `retrievable_experience`：可作为 RAG 参考。
+- `style_only`：只学习话术风格，不作为事实依据。
+- `candidate_suggested`：建议生成候选知识。
+- `candidate_created`：已生成待审核候选。
+- `auto_discarded` / `user_discarded`：已废弃。
+- `blocked`：因商品事实、测试污染、模型自回复等原因被阻断。
+
+### 4. 候选知识层
+
+候选知识是正式知识库前的审核缓冲区。
+
+原则：
+
+- RAG 经验可以自动提名为候选知识。
+- 候选知识不能自动进入正式知识库。
+- 商品主数据不能通过候选知识链路写入商品库。
+- 人工审核通过后才进入正式知识库，并保留审计和新加入标识。
+
+### 5. 实盘话术风格层
+
+风格层学习真实客服怎么表达，例如：
+
+- 先接住客户情绪，再推进需求。
+- 问清预算、用途、置换、上牌、贷款、到店时间。
+- 避免每次都用同一句开场或同一个称呼。
+- 边界问题不生硬拒绝，而是礼貌请示或核实。
+
+风格层不能新增事实、价格、库存、承诺。
+
+### 6. 当前会话上下文
+
+当前客户连续对话的短期记忆。用于理解客户刚刚给出的预算、用途、车型、家庭成员、试驾意向、联系方式等。
+
+原则：
+
+- 同一客户连续聊天时要保持上下文连贯。
+- 文件传输助手这类测试会话可能混杂多个场景，测试时要按场景隔离判断。
+- 客户已经给过的信息不应反复追问。
+
+### 7. 最终可见 AI 润色层
+
+这是客户真正看到之前的最后一层。
+
+职责：
+
+- 把模板化回复润色得更自然。
+- 避免连续多次完全相同话术。
+- 防止暴露 AI 身份。
+- 保留原始业务边界和事实，不添加未经确认的信息。
+- 对贷款包过、最低价、合同发票、事故车况、三电保证等敏感问题，不允许润色成承诺语气。
+
+## 知识晋升规则
+
+```text
+允许：
+真实聊天/上传资料 -> RAG经验 -> 治理判断 -> 候选知识 -> 人工审核 -> 正式知识库
+
+禁止：
+真实聊天/上传资料 -> 正式知识库
+RAG经验 -> 正式知识库
+RAG经验/候选知识 -> 商品库
+模型测试消息/文件传输助手污染 -> 可检索知识
+```
+
+判断优先级：
+
+1. 商品事实优先来自商品库。
+2. 稳定业务规则来自正式知识库。
+3. RAG 经验只能作为参考和场景证据。
+4. 风格记忆只改表达方式。
+5. 最终润色只能改口吻，不能改事实和承诺边界。
+
+## 回复生成原理
+
+一条客户消息进入系统后，会经过下面几个阶段：
+
+1. 监听器发现目标会话的新消息。
+2. 连续消息批处理器等待短窗口，合并同一事件中的多条消息。
+3. 如果页面上已经看不到早期未读消息，优先调用现有 RPA 上翻能力补齐。
+4. 意图识别器判断客户是在问车源、价格、贷款、置换、合同、售后、AI 身份、闲聊还是边界问题。
+5. 证据构建器检索商品库、正式知识、RAG 经验、风格记忆和当前客户资料。
+6. 安全边界判断器决定是否能直接回答，或是否需要请示负责人。
+7. 回复生成器产出业务正确的初稿。
+8. 最终可见润色层用当前模型做自然化表达，同时检查不能跑题、不能新增承诺、不能暴露 AI。
+9. 微信发送器发出回复，并写入运行审计、客户资料和必要的人工接管提示。
+
+## 模型与成本控制
+
+系统支持 OpenAI 兼容接口和 DeepSeek 兼容接口。全局切换时，会忽略旧供应商残留的模型名和 base URL，避免出现“设置了 OpenAI 但某个模块仍走 DeepSeek”的串线问题。
+
+成本控制思路：
+
+- 实时回复优先用确定性规则和小证据包。
+- 只有最终可见话术、复杂边界、候选提炼等场景调用大模型。
+- 商品筛选由程序先做，模型只解释和表达，不在大上下文里自由猜车。
+- 离线知识整理可以慢一点，实时微信回复必须尽量快。
+
+## chejin 测试账号数据
+
+当前仓库包含 `chejin` 测试租户的二手车样例数据，用于在另一台电脑复现当前测试状态。
+
+包括：
+
+- 二手车商品库。
+- 商品专属知识。
+- 正式规则和标准话术。
+- 清洗后的实盘聊天 RAG 经验。
+- RAG 索引和治理状态。
+
+注意：`chejin` 是测试账号和测试数据，不代表生产客户数据。
+
+## 目录说明
+
+```text
+configs/                 运行配置和示例配置。
+adapters/                微信适配器和 sidecar 对接。
+admin_backend/           本地 Web 管理台后端、前端静态页面和服务层。
+workflows/               微信监听、回复生成、RAG、风格记忆、知识治理等工作流。
+prompts/                 角色、回复策略、接管策略和证据包提示词。
+data/                    测试租户、商品库、正式知识、RAG 经验与索引。
+tests/                   离线回归、逻辑检查、实盘辅助测试脚本。
+docs/                    历史文档归档，不作为当前行为最终说明。
+```
+
+历史文档索引：[`docs/history/INDEX.md`](docs/history/INDEX.md)。
+
+## 常用验证命令
+
+```powershell
+node --check apps\wechat_ai_customer_service\admin_backend\static\app.js
+python apps\wechat_ai_customer_service\tests\run_rag_governance_checks.py
+python apps\wechat_ai_customer_service\tests\run_rag_candidate_nomination_checks.py
+python apps\wechat_ai_customer_service\tests\run_workflow_logic_checks.py
+```
+
+云端/本地鉴权模拟：
+
+```powershell
+python apps\wechat_ai_customer_service\tests\run_vps_local_two_port_shared_sync_checks.py
+```
+
+## 当前判断标准
+
+如果后续继续优化，以本 README 和代码测试为准；`docs/history/` 中的文档只用于追溯当时为什么这么设计，不再覆盖当前最新版逻辑。
