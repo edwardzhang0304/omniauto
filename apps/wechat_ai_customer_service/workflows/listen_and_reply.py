@@ -47,6 +47,7 @@ from customer_service_loop import BOT_PREFIX, ReplyDecision, decide_reply, forma
 from apps.wechat_ai_customer_service.cloud_gate import cloud_gate_status, cloud_required_enabled
 from apps.wechat_ai_customer_service.llm_config import resolve_effective_llm_provider
 from apps.wechat_ai_customer_service.platform_safety_rules import guard_term_set, load_platform_safety_rules
+from final_visible_llm_polish import maybe_polish_customer_visible_reply
 from knowledge_loader import build_evidence_pack
 from llm_intent_router import route_intent, IntentRouteResult
 from llm_reply_synthesis import maybe_synthesize_reply
@@ -98,6 +99,7 @@ EXPLICIT_HANDOFF_PATTERNS = (
 )
 PRICE_HARD_BOUNDARY_TERMS = ("价格", "报价", "最低", "底价", "优惠", "折扣", "少点", "便宜", "贷款", "金融", "包过", "首付", "月供")
 APPOINTMENT_TERMS = ("试驾", "到店", "看车", "订金", "定金", "留车", "锁车", "预约", "周末", "周六", "周日", "上午", "下午", "几点", "安排", "过去", "来店", "门店")
+SAME_DAY_DELIVERY_TERMS = ("办手续", "直接办", "当天办", "提车", "直接提", "当天提", "临牌", "过户", "交车")
 LOCATION_CONTACT_TERMS = ("门店地址", "店地址", "地址", "导航", "位置", "在哪", "哪里", "找谁", "联系人", "对接人", "到了找")
 LOCATION_CONTACT_STRONG_TERMS = ("门店地址", "店地址", "地址", "导航", "位置", "在哪", "哪里", "找谁", "对接人", "到了找", "到店找", "跑错")
 LOCATION_VISIT_CONTEXT_TERMS = ("门店", "店里", "到店", "到了", "过去", "看车", "试驾", "来店", "导航", "地址")
@@ -952,6 +954,20 @@ def process_target(
         event["outbound_naturalness_handoff"] = handoff_naturalness
         if handoff_naturalness.get("applied"):
             prebuilt_handoff_reply_text = str(handoff_naturalness.get("reply_text") or prebuilt_handoff_reply_text)
+        if not (send and operator_handoff_required and not handoff_enabled):
+            final_handoff_polish = finalize_customer_visible_reply_with_llm(
+                prebuilt_handoff_reply_text,
+                config=config,
+                combined=combined,
+                recent_reply_texts=recent_reply_texts,
+                source_channel="handoff",
+                needs_handoff=True,
+            )
+            event["final_visible_llm_polish_handoff"] = final_handoff_polish
+            if final_handoff_polish.get("passed"):
+                prebuilt_handoff_reply_text = str(final_handoff_polish.get("reply_text") or prebuilt_handoff_reply_text)
+            elif final_visible_polish_blocks_send(final_handoff_polish):
+                return block_for_final_visible_polish_failure(event, target, final_handoff_polish)
         decision = ReplyDecision(
             reply_text=split_reply_prefix(prebuilt_handoff_reply_text, config)[1],
             rule_name=decision.rule_name,
@@ -1101,6 +1117,19 @@ def process_target(
         event["outbound_naturalness"] = outbound_naturalness
         if outbound_naturalness.get("applied"):
             reply_text = str(outbound_naturalness.get("reply_text") or reply_text)
+        final_polish = finalize_customer_visible_reply_with_llm(
+            reply_text,
+            config=config,
+            combined=combined,
+            recent_reply_texts=recent_reply_texts,
+            source_channel=str(style_channel or "normal"),
+            needs_handoff=False,
+        )
+        event["final_visible_llm_polish"] = final_polish
+        if final_polish.get("passed"):
+            reply_text = str(final_polish.get("reply_text") or reply_text)
+        elif final_visible_polish_blocks_send(final_polish):
+            return block_for_final_visible_polish_failure(event, target, final_polish)
         event["decision"]["reply_text"] = reply_text
         verified = connector.send_text_and_verify(target.name, reply_text, exact=target.exact)
         event["send_result"] = verified
@@ -1234,6 +1263,19 @@ def handle_rate_limit_block(
 
     reply_prefix = configured_reply_prefix(config)
     notice_text = format_reply(build_rate_limit_notice_text(config, rate_check), reply_prefix)
+    final_notice_polish = finalize_customer_visible_reply_with_llm(
+        notice_text,
+        config=config,
+        combined=str(event.get("combined_content") or ""),
+        recent_reply_texts=recent_customer_visible_reply_texts(target_state),
+        source_channel="rate_limit",
+        needs_handoff=False,
+    )
+    event["final_visible_llm_polish_rate_limit"] = final_notice_polish
+    if final_notice_polish.get("passed"):
+        notice_text = str(final_notice_polish.get("reply_text") or notice_text)
+    elif final_visible_polish_blocks_send(final_notice_polish):
+        return block_for_final_visible_polish_failure(event, target, final_notice_polish)
     verified = connector.send_text_and_verify(target.name, notice_text, exact=target.exact)
     event["rate_limit_notice"] = {
         "reply_text": notice_text,
@@ -1510,6 +1552,16 @@ def concealed_handoff_reply(*, combined: str = "", reason: str = "", recent_repl
             context=context,
             recent_reply_texts=recent_reply_texts,
         )
+    if any(term in context for term in SAME_DAY_DELIVERY_TERMS):
+        return choose_customer_visible_variant(
+            [
+                "这个要看车源状态、手续资料、付款方式、过户和临牌安排，不能只凭一句话保证当天提。我先把这些环节核清楚，确认能不能当天办完再回复您。",
+                "当天提车不是不能安排，但要先确认车况报告、合同资料、付款到账、过户和临牌这些节点。我先核实门店流程，确认稳了再跟您说。",
+                "您想当天办完我理解，这个我先确认车源、手续资料和过户排期，能不能当天交车要核准后再给您准话，避免您白跑或等太久。",
+            ],
+            context=context,
+            recent_reply_texts=recent_reply_texts,
+        )
     if any(term in context for term in DOCUMENT_TERMS):
         if any(term in context for term in ("少开", "低开", "金额")):
             return choose_customer_visible_variant(
@@ -1536,6 +1588,16 @@ def concealed_handoff_reply(*, combined: str = "", reason: str = "", recent_repl
                 "您想今天定，我理解，价格和金融这块我不能为了促成就随口保证。我先把车源、付款方式和负责人意见确认好，再给您明确答复。",
                 "价格我肯定帮您争取，但最低价和贷款结果不能直接口头保证。我核实一下具体车源、成交方式和负责人意见，再回复您。",
                 "这个我先帮您往下问，争取归争取，但价格、库存和金融结果都要确认过才稳。我核清楚后再给您准话。",
+            ],
+            context=context,
+            recent_reply_texts=recent_reply_texts,
+        )
+    if any(term in context for term in SAME_DAY_DELIVERY_TERMS):
+        return choose_customer_visible_variant(
+            [
+                "这个要看车源状态、手续资料、付款方式、过户和临牌安排，不能只凭一句话保证当天提。我先把这些环节核清楚，确认能不能当天办完再回复您。",
+                "当天提车不是不能安排，但要先确认车况报告、合同资料、付款到账、过户和临牌这些节点。我先核实门店流程，确认稳了再跟您说。",
+                "您想当天办完我理解，这个我先确认车源、手续资料和过户排期，能不能当天交车要核准后再给您准话，避免您白跑或等太久。",
             ],
             context=context,
             recent_reply_texts=recent_reply_texts,
@@ -1660,6 +1722,48 @@ def polish_customer_visible_reply_text(
         "raw_reply_text": polished if guard.get("allowed") else body,
         "guard": guard,
     }
+
+
+def finalize_customer_visible_reply_with_llm(
+    reply_text: str,
+    *,
+    config: dict[str, Any],
+    combined: str = "",
+    recent_reply_texts: list[str] | None = None,
+    source_channel: str = "normal",
+    needs_handoff: bool = False,
+) -> dict[str, Any]:
+    prefix, body = split_reply_prefix(reply_text, config)
+    result = maybe_polish_customer_visible_reply(
+        config=config,
+        customer_message=combined,
+        reply_text=body or str(reply_text or "").strip(),
+        recent_reply_texts=recent_reply_texts or [],
+        source_channel=source_channel,
+        needs_handoff=needs_handoff,
+    )
+    if result.get("passed"):
+        polished_body = str(result.get("reply_text") or body or reply_text).strip()
+        result["reply_text"] = format_reply(polished_body, prefix or configured_reply_prefix(config))
+    return result
+
+
+def final_visible_polish_blocks_send(result: dict[str, Any]) -> bool:
+    return bool(result.get("enabled") and result.get("required") and not result.get("passed"))
+
+
+def block_for_final_visible_polish_failure(event: dict[str, Any], target: TargetConfig, result: dict[str, Any]) -> dict[str, Any]:
+    event["action"] = "blocked"
+    event["ok"] = False
+    event["reason"] = "final_visible_llm_polish_failed"
+    write_runtime_status(
+        "blocked",
+        "发送前AI轻润色未通过，已暂停自动回复，避免把未润色模板直接发给客户。",
+        target=target.name,
+        last_action="blocked",
+        last_reason=str(result.get("reason") or "final_visible_llm_polish_failed"),
+    )
+    return event
 
 
 def normalize_customer_visible_mechanics(
@@ -1829,7 +1933,7 @@ def build_operator_handoff_reply_text(
         return format_reply(handoff_acknowledgement_text(config, combined=combined), configured_reply_prefix(config))
     if product_knowledge and product_knowledge.get("reply_text"):
         return current_reply_text
-    return format_reply(handoff_acknowledgement_text(config), configured_reply_prefix(config))
+    return format_reply(handoff_acknowledgement_text(config, combined=combined), configured_reply_prefix(config))
 
 
 def handoff_acknowledgement_text(config: dict[str, Any], *, combined: str = "") -> str:
@@ -1840,6 +1944,8 @@ def handoff_acknowledgement_text(config: dict[str, Any], *, combined: str = "") 
         or "这个问题我当前无法直接确认，我把情况记下，问清楚负责人意见后再回复您。"
     )
     if handoff_acknowledgement_is_formulaic(text):
+        if str(combined or "").strip() and conceal_handoff:
+            return concealed_handoff_reply(combined=combined, reason="")
         if "直接按" in str(combined or ""):
             if conceal_handoff:
                 return "这类价格我不能直接确认，我问下负责人再跟您说准。"
@@ -1858,6 +1964,8 @@ def handoff_acknowledgement_is_formulaic(text: str) -> bool:
         "这个问题需要销售人工确认，我先帮您记录并提醒同事跟进",
         "我先帮您记录并提醒同事跟进",
         "当前无法直接确认，我先帮您记录",
+        "不能直接确认",
+        "问清楚负责人",
     )
     return any(term in str(text or "") for term in formulaic_terms)
 
@@ -2235,6 +2343,20 @@ def apply_local_customer_service_settings(config: dict[str, Any]) -> dict[str, A
     llm_synthesis.setdefault("require_structured_for_authority", True)
     llm_synthesis.setdefault("fallback_to_existing_reply", True)
     merged["llm_reply_synthesis"] = llm_synthesis
+
+    final_polish = dict(merged.get("final_visible_llm_polish", {}) or {})
+    final_polish["enabled"] = use_llm and settings.get("final_visible_llm_polish_enabled", True) is not False
+    final_polish["identity_guard_enabled"] = settings.get("identity_guard_enabled", True) is not False
+    if use_llm and str(final_polish.get("provider") or "manual_json") == "manual_json" and not isinstance(final_polish.get("candidate"), dict):
+        final_polish["provider"] = "deepseek"
+    final_polish.setdefault("required_for_send", True)
+    final_polish.setdefault("model_tier", "flash")
+    final_polish.setdefault("max_tokens", 260)
+    final_polish.setdefault("timeout_seconds", 4)
+    final_polish.setdefault("retry_count", 0)
+    final_polish.setdefault("temperature", 0.45)
+    final_polish.setdefault("max_reply_chars", 620)
+    merged["final_visible_llm_polish"] = final_polish
 
     data_capture = dict(merged.get("data_capture", {}) or {})
     data_capture["enabled"] = settings.get("data_capture_enabled", True) is not False

@@ -168,6 +168,19 @@
     "platform_safety_rules_path": "apps/wechat_ai_customer_service/configs/platform_safety_rules.example.json",
     "platform_understanding_rules_path": "apps/wechat_ai_customer_service/configs/platform_understanding_rules.example.json"
   },
+  "final_visible_llm_polish": {
+    "enabled": true,
+    "required_for_send": true,
+    "provider": "deepseek",
+    "model_tier": "flash",
+    "model": "deepseek-v4-flash",
+    "timeout_seconds": 4,
+    "retry_count": 0,
+    "max_tokens": 260,
+    "temperature": 0.45,
+    "max_reply_chars": 620,
+    "min_confidence": 0.25
+  },
   "data_capture": {
     "enabled": true,
     "workbook_path": "runtime/apps/wechat_ai_customer_service/tenants/chejin/test_artifacts/xucong_live_leads.xlsx",

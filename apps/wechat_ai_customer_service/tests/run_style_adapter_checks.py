@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import sys
 from pathlib import Path
 from typing import Any
@@ -20,7 +21,8 @@ os.environ.setdefault("WECHAT_CLOUD_REQUIRED", "0")
 os.environ.setdefault("WECHAT_CLOUD_STRICT_ONLINE", "0")
 
 from apps.wechat_ai_customer_service.admin_backend.services.customer_service_settings import CustomerServiceSettings  # noqa: E402
-from apps.wechat_ai_customer_service.knowledge_paths import tenant_context  # noqa: E402
+from apps.wechat_ai_customer_service.knowledge_paths import tenant_context, tenant_root  # noqa: E402
+from apps.wechat_ai_customer_service.workflows.rag_experience_store import RagExperienceStore  # noqa: E402
 from knowledge_loader import build_evidence_pack  # noqa: E402
 from listen_and_reply import apply_local_customer_service_settings  # noqa: E402
 from reply_style_adapter import adapt_reply_style, guard_adapted_reply, infer_source_channel  # noqa: E402
@@ -51,6 +53,7 @@ def main() -> int:
         check_source_channel_inference_prefers_realtime,
         check_local_settings_can_disable_style_adapter,
         check_chejin_real_pack_is_available_to_adapter,
+        check_governed_style_only_rag_fallback_is_available,
     ):
         try:
             results.append({"name": check.__name__, "ok": bool(check())})
@@ -388,6 +391,66 @@ def check_chejin_real_pack_is_available_to_adapter() -> bool:
         pack = build_evidence_pack("价格有点贵，预算十万左右", context={})
     examples = retrieve_style_examples("价格有点贵，预算十万左右", evidence_pack=pack, tenant_id=TENANT_ID)
     return bool(examples) and any(str(item.get("service_reply") or "") for item in examples)
+
+
+def check_governed_style_only_rag_fallback_is_available() -> bool:
+    tenant_id = "style_only_rag_fallback_probe"
+    reset_tenant(tenant_id)
+    try:
+        with tenant_context(tenant_id):
+            store = RagExperienceStore()
+            record = store.record_reply(
+                target="style_only_probe",
+                message_ids=["style-only-001"],
+                question="最低多少钱？",
+                reply_text="这个价格我需要请示负责人确认一下，确认好再给您准确答复。",
+                raw_reply_text="这个价格我需要请示负责人确认一下，确认好再给您准确答复。",
+                intent_assist={"intent": "price", "recommended_action": "answer"},
+                rag_reply={
+                    "applied": True,
+                    "hit": {
+                        "chunk_id": "style-only-chunk",
+                        "source_id": "style-only-source",
+                        "score": 0.88,
+                        "category": "chats",
+                        "source_type": "cleaned_real_chat_pack",
+                        "text": "客户问最低价，客服请示负责人后再回复。",
+                    },
+                },
+            )
+            store.update_metadata(
+                record["experience_id"],
+                {
+                    "source": "real_chat_style",
+                    "source_type": "cleaned_real_chat_pack",
+                    "ai_interpretation": {
+                        "recommended_action": "discard",
+                        "auto_triage": {"reason_code": "product_master_facts_must_stay_manual"},
+                    },
+                    "experience_review": {"status": "auto_kept"},
+                },
+                rebuild_index=False,
+            )
+            examples = retrieve_style_examples(
+                "这个车最低多少钱",
+                evidence_pack={},
+                tenant_id=tenant_id,
+                limit=2,
+                include_rag_style_hits=True,
+            )
+        return bool(examples) and any(str(item.get("source") or "") == "rag_style_only" for item in examples)
+    finally:
+        reset_tenant(tenant_id)
+
+
+def reset_tenant(tenant_id: str) -> None:
+    root = tenant_root(tenant_id)
+    resolved = root.resolve()
+    expected_parent = (APP_ROOT / "data" / "tenants").resolve()
+    if expected_parent not in resolved.parents:
+        raise RuntimeError(f"refusing to remove unexpected tenant root: {root}")
+    if root.exists():
+        shutil.rmtree(root)
 
 
 def style_config(*, identity_guard: bool = True) -> dict[str, Any]:

@@ -55,6 +55,11 @@ from .rag_experience_interpreter import (  # noqa: E402
     content_fingerprint,
     interpretation_looks_corrupted,
 )
+from .rag_experience_governance import (  # noqa: E402
+    attach_governance,
+    governance_counts,
+    governance_display_state,
+)
 from .raw_message_store import RawMessageStore  # noqa: E402
 from .source_authority_policy import PRODUCT_MASTER_CATEGORIES, evaluate_experience_source_authority, experience_contains_model_reply  # noqa: E402
 
@@ -88,6 +93,7 @@ class RagAdminService:
     def status(self) -> dict[str, Any]:
         payload = self.rag.status()
         payload["experience_counts"] = self.experiences.counts()
+        payload["experience_governance_counts"] = self.experience_accounting_counts()["governance_counts"]
         return payload
 
     def _virtualize_auto_triaged_experience(
@@ -187,39 +193,52 @@ class RagAdminService:
                 raw_store=self.raw_messages,
                 conversation_cache=source_dialogue_cache,
             )
+            annotated = attach_governance(annotated)
             if status == "active" and str(annotated.get("status") or "active") != "active":
                 continue
             items.append(annotated)
         relation_counts = Counter(str(item.get("formal_relation") or "unknown") for item in items)
         quality_counts = Counter(str((item.get("quality") or {}).get("band") or "unknown") for item in items)
-        retrieval_counts = Counter("retrievable" if (item.get("quality") or {}).get("retrieval_allowed") else "not_retrievable" for item in items)
+        retrieval_counts = Counter("retrievable" if (item.get("governance") or {}).get("retrieval_allowed") else "not_retrievable" for item in items)
         raw_counts = self.experiences.counts()
-        display_counts = self.display_counts()
+        accounting_counts = self.experience_accounting_counts()
+        display_counts = accounting_counts["display_counts"]
+        all_governance_counts = accounting_counts["governance_counts"]
         return {
             "ok": True,
             "items": items,
             "counts": raw_counts,
             "display_counts": display_counts,
+            "governance_counts": all_governance_counts,
             "relation_counts": dict(relation_counts),
             "quality_counts": dict(quality_counts),
             "retrieval_counts": dict(retrieval_counts),
+            "loaded_count": len(items),
+            "requested_limit": limit,
             "formal_knowledge_policy": "rag_experience_only_not_formal_knowledge",
         }
 
-    def display_counts(self) -> dict[str, int]:
+    def experience_accounting_counts(self) -> dict[str, dict[str, int]]:
         records = self.experiences.list_for_counts()
         counts = {"total": len(records), "pending": 0, "kept": 0, "promoted": 0, "discarded": 0, "other": 0}
+        governed_records = []
         for record in records:
             enriched = with_quality(record)
             annotated = annotate_experience_from_cache(enriched)
+            annotated = attach_governance(annotated)
+            governed_records.append(annotated)
             relation_value = str(annotated.get("formal_relation") or enriched.get("status") or "novel")
-            display_state = rag_experience_display_state(enriched, relation_value=relation_value)
+            display_state = rag_experience_display_state(annotated, relation_value=relation_value)
             if display_state in {"pending", "kept", "promoted", "discarded"}:
                 counts[display_state] += 1
             else:
                 counts["other"] += 1
         counts["accounted_total"] = counts["pending"] + counts["kept"] + counts["promoted"] + counts["discarded"] + counts["other"]
         counts["consistent"] = counts["accounted_total"] == counts["total"]
+        return {"display_counts": counts, "governance_counts": governance_counts(governed_records)}
+
+    def display_counts(self) -> dict[str, int]:
+        return self.experience_accounting_counts()["display_counts"]
         return counts
 
     def unreviewed_experience_count(self) -> dict[str, Any]:
@@ -228,8 +247,9 @@ class RagAdminService:
         for record in records:
             enriched = with_quality(record)
             annotated = annotate_experience_from_cache(enriched)
+            annotated = attach_governance(annotated)
             relation_value = str(annotated.get("formal_relation") or enriched.get("status") or "novel")
-            if rag_experience_display_state(enriched, relation_value=relation_value) != "pending":
+            if rag_experience_display_state(annotated, relation_value=relation_value) != "pending":
                 continue
             review_state = enriched.get("review_state") if isinstance(enriched.get("review_state"), dict) else {}
             if bool(review_state.get("is_new")):
@@ -1259,6 +1279,9 @@ def rag_experience_display_state(item: dict[str, Any], *, relation_value: str = 
     relation = str(relation_value or item.get("formal_relation") or status or "")
     review_status = experience_review_status(item)
     review = item.get("experience_review") if isinstance(item.get("experience_review"), dict) else {}
+    governance = item.get("governance") if isinstance(item.get("governance"), dict) else {}
+    if governance:
+        return governance_display_state(item, fallback="pending")
     if status == "discarded" or auto_triage_should_discard(review):
         return "discarded"
     if status == "promoted" or relation == "promoted":

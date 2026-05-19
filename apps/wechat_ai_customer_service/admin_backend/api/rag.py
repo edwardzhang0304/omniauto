@@ -7,6 +7,7 @@ from typing import Any
 from fastapi import APIRouter, HTTPException
 
 from ..services.rag_admin_service import RagAdminService
+from ..services.rag_experience_candidate_nominator import RagExperienceCandidateNominator
 
 
 router = APIRouter(prefix="/api/rag", tags=["rag"])
@@ -54,6 +55,11 @@ def unreviewed_experience_count() -> dict[str, Any]:
 @router.post("/experiences/interpret")
 def interpret_experiences(payload: dict[str, Any] | None = None) -> dict[str, Any]:
     return rag_service().interpret_experiences(payload or {})
+
+
+@router.post("/experiences/nominate-candidates")
+def nominate_experience_candidates(payload: dict[str, Any] | None = None) -> dict[str, Any]:
+    return RagExperienceCandidateNominator().nominate(payload or {})
 
 
 @router.post("/experiences/{experience_id}/interpret")

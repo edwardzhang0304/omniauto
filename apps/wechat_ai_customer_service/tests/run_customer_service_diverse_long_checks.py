@@ -383,6 +383,7 @@ def test_config() -> dict[str, Any]:
         "identity_guard_enabled": True,
         "cost_controls": {"enabled": True, "max_llm_calls_per_run": 0},
     }
+    config["final_visible_llm_polish"] = {"enabled": False}
     config["reply_style_adapter"] = style_config()["reply_style_adapter"]
     config["customer_profiles"] = {"enabled": True, "analysis": {"enabled": False}, "greeting": {"enabled": False}}
     config["operator_alert"] = {"enabled": False}

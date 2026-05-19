@@ -59,9 +59,17 @@ from listen_and_reply import (  # noqa: E402
     _apply_greeting,
 )
 from apps.wechat_ai_customer_service.admin_backend.services.customer_service_settings import CustomerServiceSettings  # noqa: E402
-from apps.wechat_ai_customer_service.llm_config import DEFAULT_DEEPSEEK_CONTEXT_WINDOW_TOKENS, resolve_deepseek_model, resolve_deepseek_tier_model  # noqa: E402
+from apps.wechat_ai_customer_service.llm_config import (  # noqa: E402
+    DEFAULT_DEEPSEEK_CONTEXT_WINDOW_TOKENS,
+    resolve_deepseek_model,
+    resolve_deepseek_tier_model,
+    resolve_llm_base_url,
+    resolve_llm_tier_model,
+)
+from final_visible_llm_polish import guard_polished_reply, maybe_polish_customer_visible_reply  # noqa: E402
 from llm_reply_guard import guard_synthesized_reply  # noqa: E402
 from realtime_reply_router import reply_similarity  # noqa: E402
+from reply_style_adapter import adapt_reply_style  # noqa: E402
 from wxauto4_sidecar import is_wechat_main_window  # noqa: E402
 
 
@@ -120,12 +128,19 @@ def run_checks() -> dict[str, Any]:
         check_concealed_handoff_store_contact_preempts_prior_customer_data,
         check_concealed_handoff_denies_ai_identity_probe,
         check_concealed_handoff_softens_document_boundary,
+        check_concealed_handoff_softens_finance_price_boundary,
+        check_concealed_handoff_same_day_delivery_is_specific,
+        check_final_visible_polish_preserves_boundary_topic,
+        check_final_visible_polish_removes_risky_affirmative_opening,
         check_outbound_naturalness_polishes_templates_without_changing_facts,
         check_outbound_naturalness_diversifies_repeated_structure,
+        check_final_visible_polish_gate_applies_before_normal_send,
+        check_final_visible_polish_blocks_unpolished_send_when_required,
         check_customer_data_write_allows_soft_handoff_only,
         check_multi_target_iteration_scans_whitelist_even_without_active_changes,
         check_multi_target_dynamic_unread_mode_supports_new_sessions,
         check_deepseek_flash_is_default,
+        check_provider_switch_ignores_stale_provider_scoped_overrides,
         check_llm_reply_application_guards,
         check_llm_boundary_fallback_on_invalid_model_output,
         check_review_queue_reports_pending_and_handoff_items,
@@ -606,6 +621,7 @@ def check_customer_service_console_switches_take_effect() -> None:
         assert_true(disabled_config["handoff"]["enabled"] is False, "handoff switch should disable operator handoff")
         assert_true(disabled_config["operator_alert"]["enabled"] is False, "operator-alert switch should disable operator alerts")
         assert_true(disabled_config["reply_style_adapter"]["enabled"] is False, "style-adapter switch should disable reply style adaptation")
+        assert_true(disabled_config["final_visible_llm_polish"]["enabled"] is False, "LLM switch should disable final visible polish")
 
         disabled_event = process_target(
             connector=FakeConnector([{"id": "off-1", "type": "text", "content": "商用冰箱多少钱", "sender": "self"}]),  # type: ignore[arg-type]
@@ -640,6 +656,8 @@ def check_customer_service_console_switches_take_effect() -> None:
         assert_true(record_only_config["llm_reply_synthesis"]["enabled"] is True, "LLM switch should enable guarded reply synthesis")
         assert_equal(record_only_config["llm_reply_synthesis"]["provider"], "deepseek", "guarded reply synthesis should call configured model provider")
         assert_true(record_only_config["reply_style_adapter"]["enabled"] is True, "style-adapter switch should enable reply adaptation")
+        assert_true(record_only_config["final_visible_llm_polish"]["enabled"] is True, "LLM switch should enable final visible polish")
+        assert_equal(record_only_config["final_visible_llm_polish"]["provider"], "deepseek", "final visible polish should call configured model provider")
         record_only_event = process_target(
             connector=FakeConnector([{"id": "record-1", "type": "text", "content": "商用冰箱多少钱", "sender": "self"}]),  # type: ignore[arg-type]
             target=parse_targets(record_only_config)[0],
@@ -873,6 +891,133 @@ def check_concealed_handoff_softens_document_boundary() -> None:
     assert_true("随口承诺" not in reply and "按规范" not in reply, "document boundary should avoid stiff compliance wording")
 
 
+def check_concealed_handoff_softens_finance_price_boundary() -> None:
+    reply = concealed_handoff_reply(
+        combined="如果今天交定金，你能保证贷款包过并且价格最低吗？",
+        reason="finance_details_need_human,price_approval_required",
+    )
+    assert_true(
+        any(marker in reply for marker in ("价格", "贷款", "金融", "最低价", "付款", "成交")),
+        "finance/price boundary should stay on price or loan topic",
+    )
+    assert_true(
+        not any(marker in reply for marker in ("排期", "到店时间", "门店排期")),
+        "finance/price boundary must not fall into generic appointment wording",
+    )
+    assert_true("转人工" not in reply and "人工客服" not in reply, "finance/price handoff should stay concealed")
+    operator_reply = build_operator_handoff_reply_text(
+        load_smoke_config(),
+        ReplyDecision(
+            reply_text="",
+            rule_name="no_rule_matched",
+            matched=False,
+            need_handoff=True,
+            reason="finance_details_need_human",
+        ),
+        None,
+        "",
+        intent_assist={"evidence": {"safety": {"must_handoff": True, "reasons": ["finance_details_need_human"]}}},
+        combined="我就问清楚点，今天交定金的话，贷款能不能保证包过，价格是不是最低？",
+    )
+    assert_true(
+        any(marker in operator_reply for marker in ("价格", "贷款", "金融", "最低价", "付款", "成交")),
+        "operator handoff reply should pass finance/price context into concealed wording",
+    )
+    assert_true(
+        not any(marker in operator_reply for marker in ("排期", "到店时间", "门店排期")),
+        "operator handoff reply must not become appointment wording for finance/price boundary",
+    )
+    style = adapt_reply_style(
+        config={
+            "reply": {"prefix": "[测试] "},
+            "reply_style_adapter": {"enabled": True, "mode": "fast_local", "apply_to_handoff": True},
+            "llm_reply_synthesis": {"identity_guard_enabled": True},
+        },
+        customer_message="我就问清楚点，今天交定金的话，贷款能不能保证包过，价格是不是最低？",
+        reply_text="[测试] 这点我不能直接替您定，我把问题记下，问清楚负责人意见后再回您。",
+        source_channel="handoff",
+        recent_reply_texts=[],
+        needs_handoff=True,
+    )
+    style_reply = str(style.get("reply_text") or "")
+    assert_true(style.get("applied") is True, "style adapter should apply a specific finance/price handoff")
+    assert_true(
+        any(marker in style_reply for marker in ("价格", "贷款", "金融", "最低价", "付款", "成交")),
+        "style adapter handoff must keep finance/price topic before appointment terms",
+    )
+    assert_true(
+        not any(marker in style_reply for marker in ("排期", "到店时间", "门店排期")),
+        "style adapter must not route finance/price boundary to appointment wording",
+    )
+
+
+def check_concealed_handoff_same_day_delivery_is_specific() -> None:
+    reply = concealed_handoff_reply(
+        combined="如果试驾没问题，我当天能不能直接办手续提车？",
+        reason="same_day_delivery_boundary",
+    )
+    assert_true(
+        any(marker in reply for marker in ("手续", "过户", "临牌", "提车", "付款", "交车")),
+        "same-day delivery boundary should mention concrete handoff checks",
+    )
+    assert_true(
+        "想看的时间" not in reply and "车型记下" not in reply and "门店排期" not in reply,
+        "same-day delivery boundary must not fall back to generic appointment wording",
+    )
+    assert_true("转人工" not in reply and "人工客服" not in reply, "same-day delivery handoff should stay concealed")
+
+
+def check_final_visible_polish_preserves_boundary_topic() -> None:
+    guard = guard_polished_reply(
+        base_reply="您想今天定，我理解，价格和金融这块我不能为了促成就随口保证。我先把车源、付款方式和负责人意见确认好，再给您明确答复。",
+        polished_reply="收到，您的安排我先记下了。我这边先确认排期，并核实车源状态后，第一时间给您回复。",
+        recent_reply_texts=[],
+        settings={"identity_guard_enabled": True, "max_reply_chars": 620},
+        source_channel="handoff",
+    )
+    assert_true(guard.get("allowed") is False, "final polish must reject topic drift on finance/price boundary")
+    assert_equal(guard.get("reason"), "polish_changed_topic_terms", "topic drift should use an actionable guard reason")
+
+
+def check_final_visible_polish_removes_risky_affirmative_opening() -> None:
+    base = "价格我肯定帮您争取，但最低价和贷款结果不能直接口头保证。我核实一下具体车源、成交方式和负责人意见，再回复您。"
+    guard = guard_polished_reply(
+        base_reply=base,
+        polished_reply="可以的，价格这边我尽力给您争取，但最低价和贷款结果不能直接口头保证，我核实后回复您。",
+        recent_reply_texts=[],
+        settings={"identity_guard_enabled": True, "max_reply_chars": 620},
+        source_channel="handoff",
+    )
+    assert_equal(
+        guard.get("reason"),
+        "polish_introduced_risky_affirmative_opening",
+        "direct guard should reject risky affirmative openers on finance/price boundaries",
+    )
+    result = maybe_polish_customer_visible_reply(
+        config={
+            "final_visible_llm_polish": {
+                "enabled": True,
+                "required_for_send": True,
+                "provider": "manual_json",
+                "candidate": {
+                    "reply": "可以的，价格这边我尽力给您争取，但最低价和贷款结果不能直接口头保证，我核实后回复您。",
+                    "confidence": 1,
+                    "reason": "unit test",
+                },
+            }
+        },
+        customer_message="贷款能不能保证包过，价格是不是最低？",
+        reply_text=base,
+        recent_reply_texts=[],
+        source_channel="handoff",
+        needs_handoff=True,
+    )
+    text = str(result.get("reply_text") or "")
+    assert_true(result.get("passed") is True, "safe final polish should pass after removing risky affirmative opener")
+    assert_true(not text.startswith("可以"), "finance/price boundary reply must not start with a risky affirmative")
+    assert_true("贷款" in text and "价格" in text, "sanitized final polish should keep finance/price topic")
+
+
 def check_outbound_naturalness_polishes_templates_without_changing_facts() -> None:
     original = "这个问题我当前无法直接确认，我先帮您记录并请示上级，稍后给您准确回复。这类问题我需要先核实关键细节，再给您准确处理意见，请稍等我回复您。车价是9.58万，表显3.6万公里。"
     result = polish_customer_visible_reply_text(
@@ -902,6 +1047,82 @@ def check_outbound_naturalness_diversifies_repeated_structure() -> None:
     assert_true(text != original, "diversified reply should not be identical")
     assert_true(reply_similarity(text, original) <= 1.0, "diversified reply should remain comparable and safe")
     assert_true("预算" in text and "用途" in text, "diversification must keep the required information request")
+
+
+def check_final_visible_polish_gate_applies_before_normal_send() -> None:
+    config = load_smoke_config()
+    config["final_visible_llm_polish"] = {
+        "enabled": True,
+        "required_for_send": True,
+        "provider": "manual_json",
+        "candidate": {
+            "reply": "资料看到了，还差姓名。您把姓名补一下，我这边就能继续跟进。",
+            "confidence": 1.0,
+            "reason": "unit test final polish",
+        },
+    }
+    workbook_path = TEST_ARTIFACTS / "workflow_logic_final_polish_leads.xlsx"
+    remove_file(workbook_path)
+    config.setdefault("data_capture", {})["workbook_path"] = str(workbook_path)
+    connector = FakeConnector(
+        [
+            {
+                "id": "polish-1",
+                "type": "text",
+                "content": "客户资料\n电话：13900002222\n地址：杭州市余杭区测试路 9 号\n产品：商用冰箱\n数量：2 台",
+                "sender": "self",
+            }
+        ]
+    )
+    event = process_target(
+        connector=connector,  # type: ignore[arg-type]
+        target=parse_targets(config)[0],
+        config=config,
+        rules=load_rules(resolve_path(config.get("rules_path"))),
+        state={"version": 1, "targets": {}},
+        send=True,
+        write_data=True,
+        allow_fallback_send=False,
+        mark_dry_run=False,
+    )
+    assert_equal(event.get("action"), "sent", "normal customer-visible reply should still send after final polish")
+    polish = event.get("final_visible_llm_polish", {}) or {}
+    assert_true(polish.get("passed") is True, "final visible polish should pass before normal send")
+    assert_true("继续跟进" in connector.sent_texts[-1], "sent text should use final LLM-polished wording")
+    assert_true(connector.sent_texts[-1].startswith(config["reply"]["prefix"]), "configured prefix should be preserved")
+
+
+def check_final_visible_polish_blocks_unpolished_send_when_required() -> None:
+    config = load_smoke_config()
+    config["final_visible_llm_polish"] = {
+        "enabled": True,
+        "required_for_send": True,
+        "provider": "manual_json",
+    }
+    connector = FakeConnector(
+        [
+            {
+                "id": "polish-block-1",
+                "type": "text",
+                "content": "客户资料\n电话：13900003333\n地址：杭州市余杭区测试路 10 号\n产品：商用冰箱\n数量：2 台",
+                "sender": "self",
+            }
+        ]
+    )
+    event = process_target(
+        connector=connector,  # type: ignore[arg-type]
+        target=parse_targets(config)[0],
+        config=config,
+        rules=load_rules(resolve_path(config.get("rules_path"))),
+        state={"version": 1, "targets": {}},
+        send=True,
+        write_data=True,
+        allow_fallback_send=False,
+        mark_dry_run=False,
+    )
+    assert_equal(event.get("action"), "blocked", "required final polish should block when no LLM candidate is available")
+    assert_equal(event.get("reason"), "final_visible_llm_polish_failed", "block reason should identify final polish failure")
+    assert_true(not connector.sent_texts, "unpolished template must not be sent when final polish is required")
 
 
 def check_customer_data_write_allows_soft_handoff_only() -> None:
@@ -946,6 +1167,43 @@ def check_deepseek_flash_is_default() -> None:
         resolve_deepseek_tier_model(tier="pro", read_secret_fn=lambda name: ""),
         "deepseek-v4-pro",
         "DeepSeek Pro tier should keep the 1M-context V4 Pro model",
+    )
+
+
+def check_provider_switch_ignores_stale_provider_scoped_overrides() -> None:
+    config = {
+        "OPENAI_FLASH_MODEL": "gpt-test-flash",
+        "OPENAI_BASE_URL": "https://openai.test.local/v1",
+        "DEEPSEEK_FLASH_MODEL": "deepseek-v4-flash",
+        "DEEPSEEK_BASE_URL": "https://api.deepseek.com",
+    }
+    assert_equal(
+        resolve_llm_tier_model(
+            provider="openai",
+            tier="flash",
+            explicit_model="deepseek-v4-flash",
+            config=config,
+        ),
+        "gpt-test-flash",
+        "OpenAI switch should ignore stale DeepSeek explicit model names",
+    )
+    assert_equal(
+        resolve_llm_base_url(
+            provider="openai",
+            explicit_base_url="https://api.deepseek.com",
+            config=config,
+        ),
+        "https://openai.test.local/v1",
+        "OpenAI switch should ignore stale DeepSeek explicit base URLs",
+    )
+    assert_equal(
+        resolve_llm_base_url(
+            provider="openai",
+            explicit_base_url="https://45.113.1.228/v1",
+            config=config,
+        ),
+        "https://45.113.1.228/v1",
+        "custom OpenAI-compatible gateways should remain allowed for OpenAI",
     )
 
 

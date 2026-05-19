@@ -73,7 +73,10 @@ def retrieve_style_examples(
             if normalized:
                 examples.append(normalized)
 
-    examples.extend(load_persisted_style_examples(customer_message, tenant_id=tenant, limit=limit * 3))
+    persisted_examples = load_persisted_style_examples(customer_message, tenant_id=tenant, limit=limit * 3)
+    examples.extend(persisted_examples)
+    if len(persisted_examples) < max(1, int(limit or 1)) and include_rag_style_hits:
+        examples.extend(load_governed_rag_style_examples(customer_message, tenant_id=tenant, limit=limit * 3))
     deduped = dedupe_examples(examples)
     threshold = max(0.0, float(min_similarity or 0.0))
     filtered = [item for item in deduped if float(item.get("score") or 0.0) >= threshold]
@@ -163,6 +166,51 @@ def load_persisted_style_examples(customer_message: str, *, tenant_id: str, limi
             loaded.sort(key=lambda item: (float(item.get("score") or 0.0), float(item.get("quality_score") or 0.0)), reverse=True)
             return loaded[:scan_cap]
     return loaded
+
+
+def load_governed_rag_style_examples(customer_message: str, *, tenant_id: str, limit: int) -> list[dict[str, Any]]:
+    """Load style-only RAG experiences as a fallback style memory source."""
+
+    try:
+        from apps.wechat_ai_customer_service.admin_backend.services.rag_experience_governance import attach_governance
+        from apps.wechat_ai_customer_service.workflows.rag_experience_store import RagExperienceStore, with_quality
+    except Exception:
+        return []
+    loaded: list[dict[str, Any]] = []
+    scan_cap = max(100, min(max(1, int(limit or 1)) * 120, 1200))
+    try:
+        records = RagExperienceStore(tenant_id=tenant_id).list_for_counts()
+    except Exception:
+        return []
+    for raw in records[:scan_cap]:
+        item = attach_governance(with_quality(raw))
+        governance = item.get("governance") if isinstance(item.get("governance"), dict) else {}
+        if str(governance.get("effective_state") or "") != "style_only":
+            continue
+        if not bool(governance.get("style_allowed")):
+            continue
+        if bool(governance.get("retrieval_allowed")):
+            continue
+        example = normalize_style_example(
+            {
+                "id": f"rag_style_only_{item.get('experience_id') or ''}",
+                "source_id": item.get("experience_id"),
+                "source_type": item.get("source_type") or item.get("source") or "rag_style_only",
+                "customer_message": item.get("question") or item.get("summary") or "",
+                "service_reply": item.get("reply_text") or item.get("evidence_excerpt") or "",
+                "score": (item.get("quality") or {}).get("score") or 0.5,
+                "quality_score": (item.get("quality") or {}).get("score") or 0.5,
+            },
+            customer_message=customer_message,
+            tenant_id=tenant_id,
+            source="rag_style_only",
+        )
+        if example:
+            loaded.append(example)
+        if len(loaded) >= scan_cap:
+            break
+    loaded.sort(key=lambda item: (float(item.get("score") or 0.0), float(item.get("quality_score") or 0.0)), reverse=True)
+    return loaded[:scan_cap]
 
 
 def rag_hit_looks_like_style(hit: dict[str, Any]) -> bool:

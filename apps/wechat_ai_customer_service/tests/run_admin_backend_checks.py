@@ -678,6 +678,29 @@ def check_rag_experience_api(client: TestClient) -> None:
 
         listed_all = client.get("/api/rag/experiences", params={"status": "all", "limit": 50}).json()
         all_items = listed_all.get("items", [])
+        display_counts = listed_all.get("display_counts", {})
+        governance_counts = listed_all.get("governance_counts", {})
+        raw_total = int((listed_all.get("counts") or {}).get("total") or 0)
+        assert_equal(
+            int(display_counts.get("accounted_total") or 0),
+            int(display_counts.get("total") or -1),
+            "rag experience display counts should account for every explicit display state",
+        )
+        assert_equal(
+            int(governance_counts.get("accounted_total") or 0),
+            int(governance_counts.get("total") or -1),
+            "rag experience governance counts should account for every effective state",
+        )
+        assert_equal(
+            int(governance_counts.get("total") or 0),
+            raw_total,
+            "rag experience governance counts should use full accounting total, not just the loaded page",
+        )
+        assert_equal(
+            int(listed_all.get("loaded_count") or 0),
+            len(all_items),
+            "rag experience list should expose how many rows are loaded on this page",
+        )
         active_item = next(item for item in all_items if item.get("experience_id") == record["experience_id"])
         assert_true("formal_relation" in active_item, "rag experience should expose formal relation annotation")
         assert_true("recommended_action" in active_item, "rag experience should expose recommended action")
@@ -685,6 +708,9 @@ def check_rag_experience_api(client: TestClient) -> None:
         fast_listed = client.get("/api/rag/experiences", params={"status": "all", "limit": 80, "fast": "true"})
         assert_equal(fast_listed.status_code, 200, "rag experience fast list endpoint")
         fast_items = fast_listed.json().get("items", [])
+        nominate_dry_run = client.post("/api/rag/experiences/nominate-candidates", json={"dry_run": True, "limit": 1})
+        assert_equal(nominate_dry_run.status_code, 200, "rag experience candidate nomination endpoint")
+        assert_true(nominate_dry_run.json().get("ok") is True, "rag experience candidate nomination dry-run should be ok")
         virtual_item = next(item for item in fast_items if item.get("experience_id") == virtual_discard_record["experience_id"])
         assert_equal(
             rag_admin_service_module.rag_experience_display_state(
@@ -1709,7 +1735,7 @@ def check_upload_learning_candidate_apply_and_reject(client: TestClient) -> None
         check_company_profile_classification_and_reclassify(client)
         check_llm_upload_hallucination_falls_back_to_local_parse()
 
-        empty_job = client.post("/api/learning/jobs", json={"upload_ids": []}).json()
+        empty_job = client.post("/api/learning/jobs", json={"upload_ids": [], "use_llm": False}).json()
         assert_true(empty_job.get("ok"), f"empty learning job should be ok: {empty_job}")
         assert_equal(empty_job["job"]["candidate_count"], 0, "empty learning job should not relearn all uploads")
         missing_apply = client.post("/api/candidates/missing_candidate/apply")
@@ -1755,7 +1781,7 @@ def check_upload_learning_candidate_apply_and_reject(client: TestClient) -> None
         assert_true(delete_upload_id not in {item.get("upload_id") for item in after_delete_uploads}, "deleted upload should leave upload index")
         missing_upload_delete = client.delete(f"/api/uploads/{delete_upload_id}")
         assert_equal(missing_upload_delete.status_code, 404, "deleting missing upload should return 404")
-        excel_job = client.post("/api/learning/jobs", json={"upload_ids": [excel_upload["item"]["upload_id"]]}).json()
+        excel_job = client.post("/api/learning/jobs", json={"upload_ids": [excel_upload["item"]["upload_id"]], "use_llm": False}).json()
         assert_true(excel_job.get("ok"), f"xlsx learning job should be ok: {excel_job}")
         assert_equal(excel_job["job"]["candidate_count"], 0, "xlsx upload learning should not create pending candidates directly")
         assert_equal(excel_job["job"]["rag_experience_count"], 1, "xlsx upload learning should create rag experience for manual promotion")
@@ -1787,7 +1813,7 @@ def check_upload_learning_candidate_apply_and_reject(client: TestClient) -> None
             data={"kind": "products"},
             files={"file": ("admin_policy_under_products.txt", "开票规则：客户要求专票时，需要提供公司名称、税号、地址电话和开户行。".encode("utf-8"), "text/plain")},
         ).json()
-        policy_job = client.post("/api/learning/jobs", json={"upload_ids": [wrong_kind_policy["item"]["upload_id"]]}).json()
+        policy_job = client.post("/api/learning/jobs", json={"upload_ids": [wrong_kind_policy["item"]["upload_id"]], "use_llm": False}).json()
         assert_equal(policy_job["job"]["candidate_count"], 0, "policy upload learning should not create pending candidates directly")
         assert_equal(policy_job["job"]["rag_experience_count"], 1, "policy upload learning should create rag experience")
         policy_candidate = review_candidate_generator.build_candidates(Path(wrong_kind_policy["item"]["path"]), use_llm=False)[0]
@@ -1839,7 +1865,7 @@ def check_upload_learning_candidate_apply_and_reject(client: TestClient) -> None
             data={"kind": "products"},
             files={"file": ("admin_incomplete_product.txt", "商品：暂存缺价测试商品\n规格：超轻铝合金，支持定制颜色。".encode("utf-8"), "text/plain")},
         ).json()
-        incomplete_job = client.post("/api/learning/jobs", json={"upload_ids": [incomplete_upload["item"]["upload_id"]]}).json()
+        incomplete_job = client.post("/api/learning/jobs", json={"upload_ids": [incomplete_upload["item"]["upload_id"]], "use_llm": False}).json()
         assert_equal(incomplete_job["job"]["candidate_count"], 0, "incomplete upload learning should not create pending candidates directly")
         assert_equal(incomplete_job["job"]["rag_experience_count"], 1, "incomplete upload learning should create rag experience")
         incomplete_candidate = review_candidate_generator.build_candidates(Path(incomplete_upload["item"]["path"]), use_llm=False)[0]
@@ -1853,7 +1879,7 @@ def check_upload_learning_candidate_apply_and_reject(client: TestClient) -> None
         ).json()
         assert_true(upload.get("ok"), f"upload should be ok: {upload}")
         upload_id = upload["item"]["upload_id"]
-        job = client.post("/api/learning/jobs", json={"upload_ids": [upload_id]}).json()
+        job = client.post("/api/learning/jobs", json={"upload_ids": [upload_id], "use_llm": False}).json()
         assert_true(job.get("ok"), f"learning job should be ok: {job}")
         assert_equal(job["job"]["candidate_count"], 0, "chat upload learning should not create pending candidates directly")
         assert_equal(job["job"]["rag_experience_count"], 1, "chat upload learning should create rag experience")
@@ -1864,7 +1890,7 @@ def check_upload_learning_candidate_apply_and_reject(client: TestClient) -> None
             data={"kind": "chats"},
             files={"file": ("admin_reject_sample.txt", reject_content.encode("utf-8"), "text/plain")},
         ).json()
-        reject_job = client.post("/api/learning/jobs", json={"upload_ids": [reject_upload["item"]["upload_id"]]}).json()
+        reject_job = client.post("/api/learning/jobs", json={"upload_ids": [reject_upload["item"]["upload_id"]], "use_llm": False}).json()
         assert_equal(reject_job["job"]["candidate_count"], 0, "reject sample learning should not create pending candidates directly")
         assert_equal(reject_job["job"]["rag_experience_count"], 1, "reject sample learning should create rag experience")
     finally:
@@ -2347,7 +2373,7 @@ def check_diagnostics_and_system_status(client: TestClient) -> None:
         assert_true(backup.get("ok"), f"manual backup should be ok: {backup}")
         created_version_ids.append(backup["item"]["version_id"])
 
-        quick = client.post("/api/diagnostics/run", json={"mode": "quick"}).json()
+        quick = client.post("/api/diagnostics/run", json={"mode": "quick", "include_llm_audit": False}).json()
         assert_true("run_id" in quick, "quick diagnostics should return run id")
         assert_true(quick.get("status") in {"ok", "warning", "error"}, "quick diagnostics should return status")
         run_id = quick["run_id"]
@@ -2365,7 +2391,7 @@ def check_diagnostics_and_system_status(client: TestClient) -> None:
         ignores = client.get("/api/diagnostics/ignores").json().get("items", [])
         assert_true(test_fingerprint in {item.get("fingerprint") for item in ignores}, "diagnostic ignore should be listed")
 
-        full = client.post("/api/diagnostics/run", json={"mode": "full"}).json()
+        full = client.post("/api/diagnostics/run", json={"mode": "full", "include_llm_audit": False}).json()
         assert_true(full.get("checks"), "full diagnostics should include checks")
         check_names = {item.get("name") for item in full.get("checks", [])}
         assert_true("offline_regression" in check_names, "full diagnostics should run offline regression")
