@@ -1,0 +1,47 @@
+{
+  "schema_version": 1,
+  "category_id": "chats",
+  "id": "raw_wechat_generalized_chat_apply_probe",
+  "status": "active",
+  "source": {
+    "type": "raw_wechat_private"
+  },
+  "data": {
+    "customer_message": "置换流程怎么走",
+    "service_reply": "置换可以先做个大概区间。您把车型、上牌年份、公里数、所在城市、事故水泡火烧情况和照片发我，我先按行情粗估，最终价格再结合车况复核。",
+    "intent_tags": [
+      "置换",
+      "收资"
+    ],
+    "tone_tags": [
+      "自然",
+      "有帮助"
+    ],
+    "usable_as_template": true
+  },
+  "runtime": {
+    "allow_auto_reply": true,
+    "requires_handoff": false,
+    "risk_level": "normal"
+  },
+  "review_state": {
+    "is_new": true,
+    "new_reason": "newly_added_formal_knowledge",
+    "marked_at": "2026-05-19T05:11:26",
+    "updated_at": "2026-05-19T05:11:26",
+    "read_at": "",
+    "read_by": "",
+    "source": {
+      "source_module": "candidate",
+      "candidate_id": "raw_wechat_generalized_chat_apply_probe",
+      "target_category": "chats",
+      "item_id": "raw_wechat_generalized_chat_apply_probe"
+    }
+  },
+  "metadata": {
+    "created_at": "2026-05-19T05:11:26",
+    "updated_at": "2026-05-19T05:11:26",
+    "created_by": "admin",
+    "updated_by": "admin"
+  }
+}

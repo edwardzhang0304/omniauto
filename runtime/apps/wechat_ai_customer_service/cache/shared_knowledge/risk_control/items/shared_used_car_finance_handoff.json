@@ -1,0 +1,52 @@
+{
+  "title": "二手车金融审批风险边界",
+  "guideline_text": "征信、审批通过率、放款时效等不能保证；只能说明流程与所需资料，并转人工顾问。",
+  "allow_auto_reply": false,
+  "requires_handoff": true,
+  "handoff_reason": "used_car_finance_manual_review",
+  "schema_version": 1,
+  "id": "shared_used_car_finance_handoff",
+  "item_id": "shared_used_car_finance_handoff",
+  "industry_id": "used_car",
+  "category_id": "risk_control",
+  "status": "active",
+  "content": "征信、审批通过率、放款时效等不能保证；只能说明流程与所需资料，并转人工顾问。",
+  "keywords": [
+    "征信",
+    "审批",
+    "放款",
+    "首付",
+    "月供"
+  ],
+  "applies_to": "二手车金融问答",
+  "data": {
+    "title": "二手车金融审批风险边界",
+    "guideline_text": "征信、审批通过率、放款时效等不能保证；只能说明流程与所需资料，并转人工顾问。",
+    "allow_auto_reply": false,
+    "requires_handoff": true,
+    "handoff_reason": "used_car_finance_manual_review",
+    "keywords": [
+      "征信",
+      "审批",
+      "放款",
+      "首付",
+      "月供"
+    ],
+    "applies_to": "二手车金融问答"
+  },
+  "runtime": {
+    "allow_auto_reply": false,
+    "requires_handoff": true,
+    "risk_level": "high"
+  },
+  "source": {
+    "type": "cloud_official_shared_library",
+    "item_id": "shared_used_car_finance_handoff",
+    "version": ""
+  },
+  "metadata": {
+    "knowledge_layer": "shared",
+    "cloud_item_id": "shared_used_car_finance_handoff",
+    "cloud_updated_at": "2026-05-07T21:57:53+00:00"
+  }
+}

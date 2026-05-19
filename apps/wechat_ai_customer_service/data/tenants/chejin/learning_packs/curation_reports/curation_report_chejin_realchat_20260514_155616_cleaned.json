@@ -1,0 +1,59 @@
+{
+  "ok": true,
+  "tenant_id": "chejin",
+  "industry_id": "used_car",
+  "batch_id": "chejin_realchat_20260514_155616",
+  "input_file": "D:\\AI\\omniauto\\apps\\wechat_ai_customer_service\\data\\tenants\\chejin\\raw_inbox\\chats\\upload_85a726a66e67c0e6_wechat_usedcar_chat_templates_strict.jsonl",
+  "raw_candidates": 2875,
+  "accepted_after_cleaning": 2865,
+  "rejected": 0,
+  "safe_selected": 870,
+  "handoff_selected": 65,
+  "review_count": 10,
+  "ready_item_count": 935,
+  "reason_counter": {
+    "condition_overpromise_rewrite": 1,
+    "deposit_requires_human_rewrite": 26,
+    "finance_high_risk_rewrite": 48,
+    "intent_mismatch_finance_vs_condition": 5,
+    "normal": 2778,
+    "price_absolute_softened": 4,
+    "transfer_overpromise_rewrite": 8,
+    "unresolved_risk_promise": 5
+  },
+  "outputs": {
+    "curated_file": "apps\\wechat_ai_customer_service\\data\\tenants\\chejin\\learning_packs\\curated_templates\\templates_chejin_realchat_20260514_155616_cleaned.jsonl",
+    "handoff_file": "apps\\wechat_ai_customer_service\\data\\tenants\\chejin\\learning_packs\\curated_templates\\templates_chejin_realchat_20260514_155616_handoff.jsonl",
+    "review_file": "apps\\wechat_ai_customer_service\\data\\tenants\\chejin\\learning_packs\\curation_reports\\templates_chejin_realchat_20260514_155616_review.jsonl"
+  },
+  "import": {
+    "dry_run": {
+      "ok": true,
+      "job_id": "import_job_97eee167d3a9",
+      "summary": {
+        "total": 935,
+        "new_items": 935,
+        "updated_items": 0,
+        "skipped_items": 0,
+        "blocked_items": 0
+      },
+      "blocked_items": 0
+    },
+    "apply": {
+      "ok": true,
+      "job_id": "import_job_836bd4841fc3",
+      "status": "completed",
+      "summary": {
+        "total": 935,
+        "applied_items": 935,
+        "failed_items": 0,
+        "new_items": 935,
+        "updated_items": 0,
+        "skipped_items": 0,
+        "blocked_items": 0
+      },
+      "failed_items": 0
+    }
+  },
+  "generated_at": "2026-05-14T15:56:16"
+}

@@ -1,14 +1,1 @@
-{
-  "local_init_YgZCEaVQPUDTDJQMpWpa9w-grbdfGgE-": {
-    "challenge_id": "local_init_YgZCEaVQPUDTDJQMpWpa9w-grbdfGgE-",
-    "purpose": "initialize_account_pending",
-    "username": "customer",
-    "user_id": "customer",
-    "role": "customer",
-    "tenant_id": "default",
-    "device_fingerprint": "56a7358f8a9bce75f7820bd46ebcac5507e834232a9a7ae0c25b9a2e9429d3bf",
-    "device_name": "",
-    "expires_at": "2026-05-09T06:45:34+00:00",
-    "created_at": "2026-05-09T06:15:34+00:00"
-  }
-}
+{}

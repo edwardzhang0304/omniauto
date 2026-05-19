@@ -1,0 +1,378 @@
+{
+  "ok": false,
+  "run_id": "diag_20260508_055958_c82cc0",
+  "mode": "full",
+  "status": "error",
+  "created_at": "2026-05-08T06:09:54",
+  "checks": [
+    {
+      "name": "quick_knowledge_validation",
+      "ok": false,
+      "issues": [
+        {
+          "code": "llm_duplicate_semantic",
+          "severity": "warning",
+          "title": "LLM：语义重复",
+          "detail": "这些RAG经验条目内容高度重复（包括商品资料、聊天记录、私聊消息），只是测试批次不同，造成语义冗余，影响检索效率。",
+          "target": "rag_exp_bc4c24eb93b3b8bac7f7",
+          "target_label": "rag_exp_bc4c24eb93b3b8bac7f7, rag_exp_46d8b9e415415f1bf470, rag_exp_c3985e2b8c9c20449a45, rag_exp_43ceed95b9dceddded19, rag_exp_fbe0e51a58894a2511bd, rag_exp_b71d0b889cd0d3f7fd98, rag_exp_33564e4b4b1e27ea8c49, rag_exp_c4d462ae49165d25ec80, rag_exp_94f1529db8f4bccdf53c, rag_exp_28af1d68069955154986, rag_exp_003ac5e85005fe991425, rag_exp_351fa58ff874d3d92ce8, rag_exp_2ce4ea80bcbae934df01, rag_exp_5083471a57aa7df08a63, rag_exp_ffd1ef904ee06cc548b9, rag_exp_66380df76e5ce81aaaa7",
+          "repairable": false,
+          "action_type": "merge",
+          "involved_targets": [
+            "rag_exp_bc4c24eb93b3b8bac7f7",
+            "rag_exp_46d8b9e415415f1bf470",
+            "rag_exp_c3985e2b8c9c20449a45",
+            "rag_exp_43ceed95b9dceddded19",
+            "rag_exp_fbe0e51a58894a2511bd",
+            "rag_exp_b71d0b889cd0d3f7fd98",
+            "rag_exp_33564e4b4b1e27ea8c49",
+            "rag_exp_c4d462ae49165d25ec80",
+            "rag_exp_94f1529db8f4bccdf53c",
+            "rag_exp_28af1d68069955154986",
+            "rag_exp_003ac5e85005fe991425",
+            "rag_exp_351fa58ff874d3d92ce8",
+            "rag_exp_2ce4ea80bcbae934df01",
+            "rag_exp_5083471a57aa7df08a63",
+            "rag_exp_ffd1ef904ee06cc548b9",
+            "rag_exp_66380df76e5ce81aaaa7"
+          ],
+          "llm_reasoning": "这些RAG经验条目内容高度重复（包括商品资料、聊天记录、私聊消息），只是测试批次不同，造成语义冗余，影响检索效率。",
+          "suggestions": [
+            {
+              "title": "建议合并",
+              "detail": "多条知识表达同一含义，建议保留信息最完整的一条，将其余归档。",
+              "level": "warning"
+            }
+          ]
+        },
+        {
+          "code": "llm_inappropriate",
+          "severity": "error",
+          "title": "LLM：场景不适用",
+          "detail": "条目中包含无关的边界噪音（如“今天午饭吃什么”），与知识库业务无关，可能影响AI回答准确性。",
+          "target": "rag_exp_bc4c24eb93b3b8bac7f7",
+          "target_label": "rag_exp_bc4c24eb93b3b8bac7f7, rag_exp_46d8b9e415415f1bf470",
+          "repairable": false,
+          "action_type": "delete",
+          "involved_targets": [
+            "rag_exp_bc4c24eb93b3b8bac7f7",
+            "rag_exp_46d8b9e415415f1bf470"
+          ],
+          "llm_reasoning": "条目中包含无关的边界噪音（如“今天午饭吃什么”），与知识库业务无关，可能影响AI回答准确性。",
+          "suggestions": [
+            {
+              "title": "建议删除",
+              "detail": "该条目存在明显错误或不适用，建议归档或废弃。",
+              "level": "danger"
+            }
+          ]
+        },
+        {
+          "code": "knowledge_token_budget_large",
+          "severity": "info",
+          "title": "知识体积较大",
+          "detail": "当前分类知识库总量估算约 42826 token。这不是知识格式故障，也没有某条知识需要立即删除；它提醒后续继续按客户问题检索相关知识，避免一次性加载全部知识。",
+          "target_label": "全局知识库",
+          "details": [
+            {
+              "label": "问题性质",
+              "value": "容量提示，不是知识格式故障",
+              "level": "normal"
+            },
+            {
+              "label": "估算总量",
+              "value": "约 42826 token",
+              "level": "warning"
+            },
+            {
+              "label": "检测阈值",
+              "value": "超过 7000 token 时提示",
+              "level": "normal"
+            },
+            {
+              "label": "文件数量",
+              "value": "68 个 JSON 文件",
+              "level": "normal"
+            },
+            {
+              "label": "chats",
+              "value": "约 8788 token / 16 个文件",
+              "level": "normal"
+            },
+            {
+              "label": "erp_exports",
+              "value": "约 860 token / 2 个文件",
+              "level": "normal"
+            },
+            {
+              "label": "policies",
+              "value": "约 24976 token / 39 个文件",
+              "level": "normal"
+            },
+            {
+              "label": "products",
+              "value": "约 7508 token / 11 个文件",
+              "level": "normal"
+            }
+          ],
+          "suggestions": [
+            {
+              "title": "不建议自动删除知识",
+              "detail": "当前没有发现哪一条知识错误，系统不能为了降低体积擅自删内容。",
+              "level": "danger"
+            },
+            {
+              "title": "继续保持按门类和问题范围检索",
+              "detail": "客服运行时应只取相关商品、政策、话术和上下文证据，不要把全库一次性塞给大模型。",
+              "level": "normal"
+            },
+            {
+              "title": "如果后续继续变大",
+              "detail": "优先拆分过长政策、归档过期商品、把重复话术合并为模板，再重新检测。",
+              "level": "warning"
+            }
+          ],
+          "repairable": false
+        }
+      ],
+      "token_budget_estimate": 42826,
+      "recent_only": false
+    },
+    {
+      "name": "knowledge_runtime",
+      "ok": false,
+      "returncode": 1,
+      "stdout_tail": "nce item: products/commercial_fridge_bx_200; pack={'schema_version': 1, 'input_text': '商用冰箱多少钱？', 'intent_tags': ['product', 'quote'], 'matched_categories': ['chats', 'global_guidelines'], 'evidence_items': [{'category_id': 'global_guidelines', 'item_id': 'customer_service_style_guidelines', 'title': '客服通用表达与边界原则', 'matched_fields': ['always_include', 'intent_tags'], 'match_reason': 'global_style_guideline', 'confidence': 0.66, 'knowledge_layer': 'shared', 'reply_excerpt': '回复要自然，先接住客户使用场景，再问关键参数。对功率、续航、最低价等不确定内容，不能凭空承诺。适合自动回复的内容：参数收集、常规质保说明、使用场景推荐。需要转人工的内容：最低价、特殊补偿、先发货后付款。', 'allow_auto_reply': True, 'requires_handoff': False, 'risk_level': 'normal', 'handoff_reason': ''}, {'category_id': 'chats', 'item_id': 'chejin_budget_chat_commuter', 'title': '8万预算自动挡省油代步', 'matched_fields': ['intent_tags'], 'match_reason': 'chat_style_or_intent', 'confidence': 0.55, 'knowledge_layer': 'tenant', 'reply_excerpt': '可以优先看凯美瑞、思域、秦PLUS DM-i，先确认城市、贷款、置换和到店时间。', 'allow_auto_reply': True, 'requires_handoff': False, 'risk_level': 'normal', 'handoff_reason': ''}], 'safety': {'allowed_auto_reply': False, 'must_handoff': True, 'reasons': ['no_relevant_business_evidence']}, 'context': {}}\\\")\"\n    }\n  ]\n}\n",
+      "stderr_tail": "",
+      "issues": [
+        {
+          "severity": "error",
+          "title": "knowledge_runtime 未通过",
+          "detail": "数收集、常规质保说明、使用场景推荐。需要转人工的内容：最低价、特殊补偿、先发货后付款。', 'allow_auto_reply': True, 'requires_handoff': False, 'risk_level': 'normal', 'handoff_reason': ''}, {'category_id': 'chats', 'item_id': 'chejin_budget_chat_commuter', 'title': '8万预算自动挡省油代步', 'matched_fields': ['intent_tags'], 'match_reason': 'chat_style_or_intent', 'confidence': 0.55, 'knowledge_layer': 'tenant', 'reply_excerpt': '可以优先看凯美瑞、思域、秦PLUS DM-i，先确认城市、贷款、置换和到店时间。', 'allow_auto_reply': True, 'requires_handoff': False, 'risk_level': 'normal', 'handoff_reason': ''}], 'safety': {'allowed_auto_reply': False, 'must_handoff': True, 'reasons': ['no_relevant_business_evidence']}, 'context': {}}\\\")\"\n    }\n  ],\n  \"results\": [\n    {\n      \"name\": \"check_product_alias_hits_products\",\n      \"ok\": false,\n      \"error\": \"AssertionError(\\\"missing evidence item: products/commercial_fridge_bx_200; pack={'schema_version': 1, 'input_text': '商用冰箱多少钱？', 'intent_tags': ['product', 'quote'], 'matched_categories': ['chats', 'global_guidelines'], 'evidence_items': [{'category_id': 'global_guidelines', 'item_id': 'customer_service_style_guidelines', 'title': '客服通用表达与边界原则', 'matched_fields': ['always_include', 'intent_tags'], 'match_reason': 'global_style_guideline', 'confidence': 0.66, 'knowledge_layer': 'shared', 'reply_excerpt': '回复要自然，先接住客户使用场景，再问关键参数。对功率、续航、最低价等不确定内容，不能凭空承诺。适合自动回复的内容：参数收集、常规质保说明、使用场景推荐。需要转人工的内容：最低价、特殊补偿、先发货后付款。', 'allow_auto_reply': True, 'requires_handoff': False, 'risk_level': 'normal', 'handoff_reason': ''}, {'category_id': 'chats', 'item_id': 'chejin_budget_chat_commuter', 'title': '8万预算自动挡省油代步', 'matched_fields': ['intent_tags'], 'match_reason': 'chat_style_or_intent', 'confidence': 0.55, 'knowledge_layer': 'tenant', 'reply_excerpt': '可以优先看凯美瑞、思域、秦PLUS DM-i，先确认城市、贷款、置换和到店时间。', 'allow_auto_reply': True, 'requires_handoff': False, 'risk_level': 'normal', 'handoff_reason': ''}], 'safety': {'allowed_auto_reply': False, 'must_handoff': True, 'reasons': ['no_relevant_business_evidence']}, 'context': {}}\\\")\"\n    }\n  ]\n}\n\n"
+        }
+      ]
+    },
+    {
+      "name": "knowledge_compiler",
+      "ok": false,
+      "returncode": 1,
+      "stdout_tail": "{\n  \"ok\": false,\n  \"count\": 3,\n  \"failures\": [\n    {\n      \"name\": \"check_compiled_product_knowledge_is_legacy_compatible\",\n      \"ok\": false,\n      \"error\": \"AssertionError('compiled product knowledge should answer product questions: expected True, got False')\"\n    }\n  ],\n  \"results\": [\n    {\n      \"name\": \"check_compile_to_disk_writes_expected_files\",\n      \"ok\": true\n    },\n    {\n      \"name\": \"check_compiled_counts_match_category_source\",\n      \"ok\": true\n    },\n    {\n      \"name\": \"check_compiled_product_knowledge_is_legacy_compatible\",\n      \"ok\": false,\n      \"error\": \"AssertionError('compiled product knowledge should answer product questions: expected True, got False')\"\n    }\n  ]\n}\n",
+      "stderr_tail": "",
+      "issues": [
+        {
+          "severity": "error",
+          "title": "knowledge_compiler 未通过",
+          "detail": "{\n  \"ok\": false,\n  \"count\": 3,\n  \"failures\": [\n    {\n      \"name\": \"check_compiled_product_knowledge_is_legacy_compatible\",\n      \"ok\": false,\n      \"error\": \"AssertionError('compiled product knowledge should answer product questions: expected True, got False')\"\n    }\n  ],\n  \"results\": [\n    {\n      \"name\": \"check_compile_to_disk_writes_expected_files\",\n      \"ok\": true\n    },\n    {\n      \"name\": \"check_compiled_counts_match_category_source\",\n      \"ok\": true\n    },\n    {\n      \"name\": \"check_compiled_product_knowledge_is_legacy_compatible\",\n      \"ok\": false,\n      \"error\": \"AssertionError('compiled product knowledge should answer product questions: expected True, got False')\"\n    }\n  ]\n}\n\n"
+        }
+      ]
+    },
+    {
+      "name": "offline_regression",
+      "ok": false,
+      "returncode": 1,
+      "stdout_tail": "台。另外还有 13 类商品可选。您告诉我具体用途、数量和收货城市，我帮您推荐并核算报价。'\\\")\"\n    },\n    {\n      \"name\": \"product_quote\",\n      \"ok\": false,\n      \"error\": \"AssertionError('matched: expected True, got False')\"\n    },\n    {\n      \"name\": \"below_tier_discount_handoff\",\n      \"ok\": false,\n      \"error\": \"AssertionError('matched: expected True, got False')\"\n    },\n    {\n      \"name\": \"invoice_policy\",\n      \"ok\": false,\n      \"error\": \"AssertionError('matched: expected True, got False')\"\n    },\n    {\n      \"name\": \"warranty_policy\",\n      \"ok\": false,\n      \"error\": \"AssertionError(\\\"match_type: expected 'product', got 'faq'\\\")\"\n    },\n    {\n      \"name\": \"context_shipping\",\n      \"ok\": false,\n      \"error\": \"AssertionError('matched: expected True, got False')\"\n    },\n    {\n      \"name\": \"evidence_discount_handoff\",\n      \"ok\": false,\n      \"error\": \"AssertionError('safety.must_handoff: expected True, got False')\"\n    },\n    {\n      \"name\": \"customer_data_complete\",\n      \"ok\": true\n    },\n    {\n      \"name\": \"greeting_not_customer_data\",\n      \"ok\": true\n    },\n    {\n      \"name\": \"manual_handoff_contract\",\n      \"ok\": true\n    },\n    {\n      \"name\": \"no_relevant_business_evidence\",\n      \"ok\": true\n    }\n  ]\n}\n",
+      "stderr_tail": "",
+      "issues": [
+        {
+          "severity": "error",
+          "title": "offline_regression 未通过",
+          "detail": " got False')\"\n    },\n    {\n      \"name\": \"warranty_policy\",\n      \"ok\": false,\n      \"error\": \"AssertionError(\\\"match_type: expected 'product', got 'faq'\\\")\"\n    },\n    {\n      \"name\": \"context_shipping\",\n      \"ok\": false,\n      \"error\": \"AssertionError('matched: expected True, got False')\"\n    },\n    {\n      \"name\": \"evidence_discount_handoff\",\n      \"ok\": false,\n      \"error\": \"AssertionError('safety.must_handoff: expected True, got False')\"\n    }\n  ],\n  \"results\": [\n    {\n      \"name\": \"catalog_request\",\n      \"ok\": false,\n      \"error\": \"AssertionError(\\\"reply_text: expected to contain '商用冰箱 BX-200', got '目前测试商品主要有：2019款宝马5系 530Li 领先型 M运动套装（二手车/豪华轿车）：24.8 元/台；2018款奥迪A4L 40 TFSI 进取型（二手车/豪华轿车）：14.5 元/台；2020款奔驰C级 C 260 L 运动版（二手车/豪华轿车）：19.8 元/台；2019款本田凌派180TURBO CVT舒适版（二手车/紧凑型轿车）：5.88 元/台。另外还有 13 类商品可选。您告诉我具体用途、数量和收货城市，我帮您推荐并核算报价。'\\\")\"\n    },\n    {\n      \"name\": \"product_quote\",\n      \"ok\": false,\n      \"error\": \"AssertionError('matched: expected True, got False')\"\n    },\n    {\n      \"name\": \"below_tier_discount_handoff\",\n      \"ok\": false,\n      \"error\": \"AssertionError('matched: expected True, got False')\"\n    },\n    {\n      \"name\": \"invoice_policy\",\n      \"ok\": false,\n      \"error\": \"AssertionError('matched: expected True, got False')\"\n    },\n    {\n      \"name\": \"warranty_policy\",\n      \"ok\": false,\n      \"error\": \"AssertionError(\\\"match_type: expected 'product', got 'faq'\\\")\"\n    },\n    {\n      \"name\": \"context_shipping\",\n      \"ok\": false,\n      \"error\": \"AssertionError('matched: expected True, got False')\"\n    },\n    {\n      \"name\": \"evidence_discount_handoff\",\n      \"ok\": false,\n      \"error\": \"AssertionError('safety.must_handoff: expected True, got False')\"\n    },\n    {\n      \"name\": \"customer_data_complete\",\n      \"ok\": true\n    },\n    {\n      \"name\": \"greeting_not_customer_data\",\n      \"ok\": true\n    },\n    {\n      \"name\": \"manual_handoff_contract\",\n      \"ok\": true\n    },\n    {\n      \"name\": \"no_relevant_business_evidence\",\n      \"ok\": true\n    }\n  ]\n}\n\n"
+        }
+      ]
+    },
+    {
+      "name": "workflow_logic",
+      "ok": false,
+      "returncode": 1,
+      "stdout_tail": "(\\\"discount/data mixed batch should hand off: expected 'handoff_sent', got 'sent'\\\")\"\n    },\n    {\n      \"name\": \"check_incomplete_customer_data_is_completed_and_written\",\n      \"ok\": true\n    },\n    {\n      \"name\": \"check_rate_limit_notice_and_backoff\",\n      \"ok\": true\n    },\n    {\n      \"name\": \"check_auto_reply_disabled_blocks_runtime_send\",\n      \"ok\": true\n    },\n    {\n      \"name\": \"check_customer_service_console_switches_take_effect\",\n      \"ok\": true\n    },\n    {\n      \"name\": \"check_deepseek_flash_is_default\",\n      \"ok\": true\n    },\n    {\n      \"name\": \"check_llm_reply_application_guards\",\n      \"ok\": true\n    },\n    {\n      \"name\": \"check_llm_boundary_fallback_on_invalid_model_output\",\n      \"ok\": true\n    },\n    {\n      \"name\": \"check_review_queue_reports_pending_and_handoff_items\",\n      \"ok\": true\n    },\n    {\n      \"name\": \"check_evidence_boundary_cases\",\n      \"ok\": false,\n      \"error\": \"AssertionError('fuzzy product scene maps to fridge should map to expected product')\"\n    },\n    {\n      \"name\": \"check_after_sales_intent_preempts_duration_logistics\",\n      \"ok\": true\n    },\n    {\n      \"name\": \"check_wechat_main_window_recognition\",\n      \"ok\": true\n    }\n  ]\n}\n",
+      "stderr_tail": "",
+      "issues": [
+        {
+          "severity": "error",
+          "title": "workflow_logic 未通过",
+          "detail": "{\n  \"ok\": false,\n  \"count\": 13,\n  \"failures\": [\n    {\n      \"name\": \"check_mixed_safety_batch_forces_handoff\",\n      \"ok\": false,\n      \"error\": \"AssertionError(\\\"discount/data mixed batch should hand off: expected 'handoff_sent', got 'sent'\\\")\"\n    },\n    {\n      \"name\": \"check_evidence_boundary_cases\",\n      \"ok\": false,\n      \"error\": \"AssertionError('fuzzy product scene maps to fridge should map to expected product')\"\n    }\n  ],\n  \"results\": [\n    {\n      \"name\": \"check_configured_bot_prefix_is_skipped\",\n      \"ok\": true\n    },\n    {\n      \"name\": \"check_mixed_safety_batch_forces_handoff\",\n      \"ok\": false,\n      \"error\": \"AssertionError(\\\"discount/data mixed batch should hand off: expected 'handoff_sent', got 'sent'\\\")\"\n    },\n    {\n      \"name\": \"check_incomplete_customer_data_is_completed_and_written\",\n      \"ok\": true\n    },\n    {\n      \"name\": \"check_rate_limit_notice_and_backoff\",\n      \"ok\": true\n    },\n    {\n      \"name\": \"check_auto_reply_disabled_blocks_runtime_send\",\n      \"ok\": true\n    },\n    {\n      \"name\": \"check_customer_service_console_switches_take_effect\",\n      \"ok\": true\n    },\n    {\n      \"name\": \"check_deepseek_flash_is_default\",\n      \"ok\": true\n    },\n    {\n      \"name\": \"check_llm_reply_application_guards\",\n      \"ok\": true\n    },\n    {\n      \"name\": \"check_llm_boundary_fallback_on_invalid_model_output\",\n      \"ok\": true\n    },\n    {\n      \"name\": \"check_review_queue_reports_pending_and_handoff_items\",\n      \"ok\": true\n    },\n    {\n      \"name\": \"check_evidence_boundary_cases\",\n      \"ok\": false,\n      \"error\": \"AssertionError('fuzzy product scene maps to fridge should map to expected product')\"\n    },\n    {\n      \"name\": \"check_after_sales_intent_preempts_duration_logistics\",\n      \"ok\": true\n    },\n    {\n      \"name\": \"check_wechat_main_window_recognition\",\n      \"ok\": true\n    }\n  ]\n}\n\n"
+        }
+      ]
+    }
+  ],
+  "issues": [
+    {
+      "code": "llm_duplicate_semantic",
+      "severity": "warning",
+      "title": "LLM：语义重复",
+      "detail": "这些RAG经验条目内容高度重复（包括商品资料、聊天记录、私聊消息），只是测试批次不同，造成语义冗余，影响检索效率。",
+      "target": "rag_exp_bc4c24eb93b3b8bac7f7",
+      "target_label": "rag_exp_bc4c24eb93b3b8bac7f7, rag_exp_46d8b9e415415f1bf470, rag_exp_c3985e2b8c9c20449a45, rag_exp_43ceed95b9dceddded19, rag_exp_fbe0e51a58894a2511bd, rag_exp_b71d0b889cd0d3f7fd98, rag_exp_33564e4b4b1e27ea8c49, rag_exp_c4d462ae49165d25ec80, rag_exp_94f1529db8f4bccdf53c, rag_exp_28af1d68069955154986, rag_exp_003ac5e85005fe991425, rag_exp_351fa58ff874d3d92ce8, rag_exp_2ce4ea80bcbae934df01, rag_exp_5083471a57aa7df08a63, rag_exp_ffd1ef904ee06cc548b9, rag_exp_66380df76e5ce81aaaa7",
+      "repairable": false,
+      "action_type": "merge",
+      "involved_targets": [
+        "rag_exp_bc4c24eb93b3b8bac7f7",
+        "rag_exp_46d8b9e415415f1bf470",
+        "rag_exp_c3985e2b8c9c20449a45",
+        "rag_exp_43ceed95b9dceddded19",
+        "rag_exp_fbe0e51a58894a2511bd",
+        "rag_exp_b71d0b889cd0d3f7fd98",
+        "rag_exp_33564e4b4b1e27ea8c49",
+        "rag_exp_c4d462ae49165d25ec80",
+        "rag_exp_94f1529db8f4bccdf53c",
+        "rag_exp_28af1d68069955154986",
+        "rag_exp_003ac5e85005fe991425",
+        "rag_exp_351fa58ff874d3d92ce8",
+        "rag_exp_2ce4ea80bcbae934df01",
+        "rag_exp_5083471a57aa7df08a63",
+        "rag_exp_ffd1ef904ee06cc548b9",
+        "rag_exp_66380df76e5ce81aaaa7"
+      ],
+      "llm_reasoning": "这些RAG经验条目内容高度重复（包括商品资料、聊天记录、私聊消息），只是测试批次不同，造成语义冗余，影响检索效率。",
+      "suggestions": [
+        {
+          "title": "建议合并",
+          "detail": "多条知识表达同一含义，建议保留信息最完整的一条，将其余归档。",
+          "level": "warning"
+        }
+      ],
+      "fingerprint": "d2d6678eb8b7e5fdf48d6c08"
+    },
+    {
+      "code": "llm_inappropriate",
+      "severity": "error",
+      "title": "LLM：场景不适用",
+      "detail": "条目中包含无关的边界噪音（如“今天午饭吃什么”），与知识库业务无关，可能影响AI回答准确性。",
+      "target": "rag_exp_bc4c24eb93b3b8bac7f7",
+      "target_label": "rag_exp_bc4c24eb93b3b8bac7f7, rag_exp_46d8b9e415415f1bf470",
+      "repairable": false,
+      "action_type": "delete",
+      "involved_targets": [
+        "rag_exp_bc4c24eb93b3b8bac7f7",
+        "rag_exp_46d8b9e415415f1bf470"
+      ],
+      "llm_reasoning": "条目中包含无关的边界噪音（如“今天午饭吃什么”），与知识库业务无关，可能影响AI回答准确性。",
+      "suggestions": [
+        {
+          "title": "建议删除",
+          "detail": "该条目存在明显错误或不适用，建议归档或废弃。",
+          "level": "danger"
+        }
+      ],
+      "fingerprint": "430cf019959a7f7cad505121"
+    },
+    {
+      "severity": "error",
+      "title": "knowledge_runtime 未通过",
+      "detail": "数收集、常规质保说明、使用场景推荐。需要转人工的内容：最低价、特殊补偿、先发货后付款。', 'allow_auto_reply': True, 'requires_handoff': False, 'risk_level': 'normal', 'handoff_reason': ''}, {'category_id': 'chats', 'item_id': 'chejin_budget_chat_commuter', 'title': '8万预算自动挡省油代步', 'matched_fields': ['intent_tags'], 'match_reason': 'chat_style_or_intent', 'confidence': 0.55, 'knowledge_layer': 'tenant', 'reply_excerpt': '可以优先看凯美瑞、思域、秦PLUS DM-i，先确认城市、贷款、置换和到店时间。', 'allow_auto_reply': True, 'requires_handoff': False, 'risk_level': 'normal', 'handoff_reason': ''}], 'safety': {'allowed_auto_reply': False, 'must_handoff': True, 'reasons': ['no_relevant_business_evidence']}, 'context': {}}\\\")\"\n    }\n  ],\n  \"results\": [\n    {\n      \"name\": \"check_product_alias_hits_products\",\n      \"ok\": false,\n      \"error\": \"AssertionError(\\\"missing evidence item: products/commercial_fridge_bx_200; pack={'schema_version': 1, 'input_text': '商用冰箱多少钱？', 'intent_tags': ['product', 'quote'], 'matched_categories': ['chats', 'global_guidelines'], 'evidence_items': [{'category_id': 'global_guidelines', 'item_id': 'customer_service_style_guidelines', 'title': '客服通用表达与边界原则', 'matched_fields': ['always_include', 'intent_tags'], 'match_reason': 'global_style_guideline', 'confidence': 0.66, 'knowledge_layer': 'shared', 'reply_excerpt': '回复要自然，先接住客户使用场景，再问关键参数。对功率、续航、最低价等不确定内容，不能凭空承诺。适合自动回复的内容：参数收集、常规质保说明、使用场景推荐。需要转人工的内容：最低价、特殊补偿、先发货后付款。', 'allow_auto_reply': True, 'requires_handoff': False, 'risk_level': 'normal', 'handoff_reason': ''}, {'category_id': 'chats', 'item_id': 'chejin_budget_chat_commuter', 'title': '8万预算自动挡省油代步', 'matched_fields': ['intent_tags'], 'match_reason': 'chat_style_or_intent', 'confidence': 0.55, 'knowledge_layer': 'tenant', 'reply_excerpt': '可以优先看凯美瑞、思域、秦PLUS DM-i，先确认城市、贷款、置换和到店时间。', 'allow_auto_reply': True, 'requires_handoff': False, 'risk_level': 'normal', 'handoff_reason': ''}], 'safety': {'allowed_auto_reply': False, 'must_handoff': True, 'reasons': ['no_relevant_business_evidence']}, 'context': {}}\\\")\"\n    }\n  ]\n}\n\n",
+      "target_label": "未指定位置",
+      "repairable": false,
+      "fingerprint": "678318e7a4a8c6a10fc8d057",
+      "suggestions": [
+        {
+          "title": "建议优先修复",
+          "detail": "该问题可能影响知识入库、检索或客服回答。请点击查看位置进入对应知识，按提示补齐或修正字段。",
+          "level": "danger"
+        }
+      ]
+    },
+    {
+      "severity": "error",
+      "title": "knowledge_compiler 未通过",
+      "detail": "{\n  \"ok\": false,\n  \"count\": 3,\n  \"failures\": [\n    {\n      \"name\": \"check_compiled_product_knowledge_is_legacy_compatible\",\n      \"ok\": false,\n      \"error\": \"AssertionError('compiled product knowledge should answer product questions: expected True, got False')\"\n    }\n  ],\n  \"results\": [\n    {\n      \"name\": \"check_compile_to_disk_writes_expected_files\",\n      \"ok\": true\n    },\n    {\n      \"name\": \"check_compiled_counts_match_category_source\",\n      \"ok\": true\n    },\n    {\n      \"name\": \"check_compiled_product_knowledge_is_legacy_compatible\",\n      \"ok\": false,\n      \"error\": \"AssertionError('compiled product knowledge should answer product questions: expected True, got False')\"\n    }\n  ]\n}\n\n",
+      "target_label": "未指定位置",
+      "repairable": false,
+      "fingerprint": "ba52a6dd9372ff3a90b1e130",
+      "suggestions": [
+        {
+          "title": "建议优先修复",
+          "detail": "该问题可能影响知识入库、检索或客服回答。请点击查看位置进入对应知识，按提示补齐或修正字段。",
+          "level": "danger"
+        }
+      ]
+    },
+    {
+      "severity": "error",
+      "title": "offline_regression 未通过",
+      "detail": " got False')\"\n    },\n    {\n      \"name\": \"warranty_policy\",\n      \"ok\": false,\n      \"error\": \"AssertionError(\\\"match_type: expected 'product', got 'faq'\\\")\"\n    },\n    {\n      \"name\": \"context_shipping\",\n      \"ok\": false,\n      \"error\": \"AssertionError('matched: expected True, got False')\"\n    },\n    {\n      \"name\": \"evidence_discount_handoff\",\n      \"ok\": false,\n      \"error\": \"AssertionError('safety.must_handoff: expected True, got False')\"\n    }\n  ],\n  \"results\": [\n    {\n      \"name\": \"catalog_request\",\n      \"ok\": false,\n      \"error\": \"AssertionError(\\\"reply_text: expected to contain '商用冰箱 BX-200', got '目前测试商品主要有：2019款宝马5系 530Li 领先型 M运动套装（二手车/豪华轿车）：24.8 元/台；2018款奥迪A4L 40 TFSI 进取型（二手车/豪华轿车）：14.5 元/台；2020款奔驰C级 C 260 L 运动版（二手车/豪华轿车）：19.8 元/台；2019款本田凌派180TURBO CVT舒适版（二手车/紧凑型轿车）：5.88 元/台。另外还有 13 类商品可选。您告诉我具体用途、数量和收货城市，我帮您推荐并核算报价。'\\\")\"\n    },\n    {\n      \"name\": \"product_quote\",\n      \"ok\": false,\n      \"error\": \"AssertionError('matched: expected True, got False')\"\n    },\n    {\n      \"name\": \"below_tier_discount_handoff\",\n      \"ok\": false,\n      \"error\": \"AssertionError('matched: expected True, got False')\"\n    },\n    {\n      \"name\": \"invoice_policy\",\n      \"ok\": false,\n      \"error\": \"AssertionError('matched: expected True, got False')\"\n    },\n    {\n      \"name\": \"warranty_policy\",\n      \"ok\": false,\n      \"error\": \"AssertionError(\\\"match_type: expected 'product', got 'faq'\\\")\"\n    },\n    {\n      \"name\": \"context_shipping\",\n      \"ok\": false,\n      \"error\": \"AssertionError('matched: expected True, got False')\"\n    },\n    {\n      \"name\": \"evidence_discount_handoff\",\n      \"ok\": false,\n      \"error\": \"AssertionError('safety.must_handoff: expected True, got False')\"\n    },\n    {\n      \"name\": \"customer_data_complete\",\n      \"ok\": true\n    },\n    {\n      \"name\": \"greeting_not_customer_data\",\n      \"ok\": true\n    },\n    {\n      \"name\": \"manual_handoff_contract\",\n      \"ok\": true\n    },\n    {\n      \"name\": \"no_relevant_business_evidence\",\n      \"ok\": true\n    }\n  ]\n}\n\n",
+      "target_label": "未指定位置",
+      "repairable": false,
+      "fingerprint": "f2d992ab9824dcfacac6b7a8",
+      "suggestions": [
+        {
+          "title": "建议优先修复",
+          "detail": "该问题可能影响知识入库、检索或客服回答。请点击查看位置进入对应知识，按提示补齐或修正字段。",
+          "level": "danger"
+        }
+      ]
+    },
+    {
+      "severity": "error",
+      "title": "workflow_logic 未通过",
+      "detail": "{\n  \"ok\": false,\n  \"count\": 13,\n  \"failures\": [\n    {\n      \"name\": \"check_mixed_safety_batch_forces_handoff\",\n      \"ok\": false,\n      \"error\": \"AssertionError(\\\"discount/data mixed batch should hand off: expected 'handoff_sent', got 'sent'\\\")\"\n    },\n    {\n      \"name\": \"check_evidence_boundary_cases\",\n      \"ok\": false,\n      \"error\": \"AssertionError('fuzzy product scene maps to fridge should map to expected product')\"\n    }\n  ],\n  \"results\": [\n    {\n      \"name\": \"check_configured_bot_prefix_is_skipped\",\n      \"ok\": true\n    },\n    {\n      \"name\": \"check_mixed_safety_batch_forces_handoff\",\n      \"ok\": false,\n      \"error\": \"AssertionError(\\\"discount/data mixed batch should hand off: expected 'handoff_sent', got 'sent'\\\")\"\n    },\n    {\n      \"name\": \"check_incomplete_customer_data_is_completed_and_written\",\n      \"ok\": true\n    },\n    {\n      \"name\": \"check_rate_limit_notice_and_backoff\",\n      \"ok\": true\n    },\n    {\n      \"name\": \"check_auto_reply_disabled_blocks_runtime_send\",\n      \"ok\": true\n    },\n    {\n      \"name\": \"check_customer_service_console_switches_take_effect\",\n      \"ok\": true\n    },\n    {\n      \"name\": \"check_deepseek_flash_is_default\",\n      \"ok\": true\n    },\n    {\n      \"name\": \"check_llm_reply_application_guards\",\n      \"ok\": true\n    },\n    {\n      \"name\": \"check_llm_boundary_fallback_on_invalid_model_output\",\n      \"ok\": true\n    },\n    {\n      \"name\": \"check_review_queue_reports_pending_and_handoff_items\",\n      \"ok\": true\n    },\n    {\n      \"name\": \"check_evidence_boundary_cases\",\n      \"ok\": false,\n      \"error\": \"AssertionError('fuzzy product scene maps to fridge should map to expected product')\"\n    },\n    {\n      \"name\": \"check_after_sales_intent_preempts_duration_logistics\",\n      \"ok\": true\n    },\n    {\n      \"name\": \"check_wechat_main_window_recognition\",\n      \"ok\": true\n    }\n  ]\n}\n\n",
+      "target_label": "未指定位置",
+      "repairable": false,
+      "fingerprint": "6cb22dfabd7221881ac08c25",
+      "suggestions": [
+        {
+          "title": "建议优先修复",
+          "detail": "该问题可能影响知识入库、检索或客服回答。请点击查看位置进入对应知识，按提示补齐或修正字段。",
+          "level": "danger"
+        }
+      ]
+    }
+  ],
+  "ignored_count": 0,
+  "summary": {
+    "error_count": 5,
+    "warning_count": 1,
+    "info_count": 0,
+    "ignored_count": 0,
+    "hidden_notice_count": 1
+  },
+  "auto_dedup_rag": {
+    "ok": true,
+    "message": "Auto-dedup discarded 6 RAG experience(s)",
+    "discarded": [
+      "rag_exp_76c278b67d400101a85a",
+      "rag_exp_886db4492a5895521947",
+      "rag_exp_367dabe37bbba830d312",
+      "rag_exp_06b43f8903704e05377e",
+      "rag_exp_33d4477961974cf9fd06",
+      "rag_exp_c85a88ad457124dfa6b9"
+    ],
+    "duplicate_groups": [
+      [
+        "rag_exp_d55de58536d5d2b53905",
+        "rag_exp_76c278b67d400101a85a",
+        "rag_exp_aafffb0dc1737cc4de86"
+      ],
+      [
+        "rag_exp_bc4c24eb93b3b8bac7f7",
+        "rag_exp_886db4492a5895521947",
+        "rag_exp_46d8b9e415415f1bf470"
+      ],
+      [
+        "rag_exp_c3985e2b8c9c20449a45",
+        "rag_exp_b71d0b889cd0d3f7fd98",
+        "rag_exp_94f1529db8f4bccdf53c",
+        "rag_exp_367dabe37bbba830d312",
+        "rag_exp_2ce4ea80bcbae934df01"
+      ],
+      [
+        "rag_exp_43ceed95b9dceddded19",
+        "rag_exp_33564e4b4b1e27ea8c49",
+        "rag_exp_28af1d68069955154986",
+        "rag_exp_06b43f8903704e05377e",
+        "rag_exp_5083471a57aa7df08a63"
+      ],
+      [
+        "rag_exp_fbe0e51a58894a2511bd",
+        "rag_exp_c4d462ae49165d25ec80",
+        "rag_exp_33d4477961974cf9fd06",
+        "rag_exp_ffd1ef904ee06cc548b9"
+      ],
+      [
+        "rag_exp_003ac5e85005fe991425",
+        "rag_exp_351fa58ff874d3d92ce8",
+        "rag_exp_c85a88ad457124dfa6b9",
+        "rag_exp_66380df76e5ce81aaaa7"
+      ]
+    ]
+  }
+}

@@ -1,0 +1,35 @@
+{
+  "source": {
+    "source_id": "source_06ef0dde06e045a7",
+    "tenant_id": "chejin",
+    "layer": "tenant",
+    "source_type": "wechat_raw_message",
+    "category": "private",
+    "product_id": "",
+    "source_path": "D:\\AI\\omniauto\\runtime\\apps\\wechat_ai_customer_service\\tenants\\chejin\\raw_messages\\learning_batches\\raw_batch_44f324adefb80f8ef9af.txt",
+    "content_hash": "4eebc11ef5b8a6abdd1681ef9ec127a5",
+    "status": "quarantined",
+    "created_at": "2026-05-06T19:46:52",
+    "updated_at": "2026-05-06T19:46:52",
+    "quarantine_reason": "raw_wechat_source_not_directly_retrievable"
+  },
+  "chunks": [
+    {
+      "chunk_id": "chunk_c33e664ee5aef904",
+      "source_id": "source_06ef0dde06e045a7",
+      "tenant_id": "chejin",
+      "layer": "tenant",
+      "source_type": "wechat_raw_message",
+      "category": "private",
+      "product_id": "",
+      "source_path": "D:\\AI\\omniauto\\runtime\\apps\\wechat_ai_customer_service\\tenants\\chejin\\raw_messages\\learning_batches\\raw_batch_44f324adefb80f8ef9af.txt",
+      "chunk_index": 0,
+      "text": "[2026-05-06T19:46:52] 许聪: 你刚才回我的记录，自己找找。预算10万以上",
+      "char_count": 47,
+      "status": "quarantined",
+      "created_at": "2026-05-06T19:46:52",
+      "quarantine_reason": "raw_wechat_source_not_directly_retrievable",
+      "quarantined_at": "2026-05-19T01:47:03"
+    }
+  ]
+}

@@ -1,0 +1,729 @@
+{
+  "ok": false,
+  "run_id": "diag_20260519_051340_289bcd",
+  "mode": "full",
+  "status": "error",
+  "created_at": "2026-05-19T05:14:38",
+  "checks": [
+    {
+      "name": "quick_knowledge_validation",
+      "ok": false,
+      "issues": [
+        {
+          "code": "llm_inappropriate",
+          "severity": "error",
+          "title": "LLM：场景不适用",
+          "detail": "条目内容明确写明“测试话术，仅用于管理台回归”，属于测试/回归数据，不应作为线上客服知识模板对外使用。",
+          "target": "chats/admin_check_style_example",
+          "target_label": "chats/admin_check_style_example",
+          "repairable": false,
+          "action_type": "delete",
+          "involved_targets": [
+            "chats/admin_check_style_example"
+          ],
+          "llm_reasoning": "条目内容明确写明“测试话术，仅用于管理台回归”，属于测试/回归数据，不应作为线上客服知识模板对外使用。",
+          "suggestions": [
+            {
+              "title": "建议删除",
+              "detail": "该条目存在明显错误或不适用，建议归档或废弃。",
+              "level": "danger"
+            }
+          ]
+        },
+        {
+          "code": "llm_inappropriate",
+          "severity": "error",
+          "title": "LLM：场景不适用",
+          "detail": "该条目是二手车置换收资话术（车型、上牌年份、公里数、事故水泡火烧等），与当前知识库主体的办公设备/企业采购场景明显不匹配。",
+          "target": "chats/raw_wechat_generalized_chat_apply_probe",
+          "target_label": "chats/raw_wechat_generalized_chat_apply_probe",
+          "repairable": false,
+          "action_type": "delete",
+          "involved_targets": [
+            "chats/raw_wechat_generalized_chat_apply_probe"
+          ],
+          "llm_reasoning": "该条目是二手车置换收资话术（车型、上牌年份、公里数、事故水泡火烧等），与当前知识库主体的办公设备/企业采购场景明显不匹配。",
+          "suggestions": [
+            {
+              "title": "建议删除",
+              "detail": "该条目存在明显错误或不适用，建议归档或废弃。",
+              "level": "danger"
+            }
+          ]
+        },
+        {
+          "code": "llm_inappropriate",
+          "severity": "error",
+          "title": "LLM：场景不适用",
+          "detail": "这三条均包含明显workflow测试痕迹（wfcasea123/wfcaseb456/wfcasec789），且内容更像流程联调用例，不是稳定客服知识条目，存在误召回风险。",
+          "target": "chats/wf_tpl_a",
+          "target_label": "chats/wf_tpl_a, chats/wf_tpl_b, chats/wf_tpl_c",
+          "repairable": false,
+          "action_type": "review",
+          "involved_targets": [
+            "chats/wf_tpl_a",
+            "chats/wf_tpl_b",
+            "chats/wf_tpl_c"
+          ],
+          "llm_reasoning": "这三条均包含明显workflow测试痕迹（wfcasea123/wfcaseb456/wfcasec789），且内容更像流程联调用例，不是稳定客服知识条目，存在误召回风险。",
+          "suggestions": [
+            {
+              "title": "建议人工复核",
+              "detail": "LLM认为该条目可能存在问题，请人工确认后决定处理方式。",
+              "level": "warning"
+            }
+          ]
+        },
+        {
+          "code": "llm_logic_error",
+          "severity": "error",
+          "title": "LLM：逻辑错误",
+          "detail": "公司主体信息自相矛盾：company_profile 与 item_2712d3045ad2 使用“杭州云桥办公设备有限公司”，而 company_profile_details 与 bank_account 使用“杭州星澜供应链科技有限公司”。公司名不一致会直接导致对外信息错误。",
+          "target": "policies/company_profile",
+          "target_label": "policies/company_profile, policies/company_profile_details, policies/item_2712d3045ad2, policies/bank_account",
+          "repairable": false,
+          "action_type": "review",
+          "involved_targets": [
+            "policies/company_profile",
+            "policies/company_profile_details",
+            "policies/item_2712d3045ad2",
+            "policies/bank_account"
+          ],
+          "llm_reasoning": "公司主体信息自相矛盾：company_profile 与 item_2712d3045ad2 使用“杭州云桥办公设备有限公司”，而 company_profile_details 与 bank_account 使用“杭州星澜供应链科技有限公司”。公司名不一致会直接导致对外信息错误。",
+          "suggestions": [
+            {
+              "title": "建议人工复核",
+              "detail": "LLM认为该条目可能存在问题，请人工确认后决定处理方式。",
+              "level": "warning"
+            }
+          ]
+        },
+        {
+          "code": "llm_duplicate_semantic",
+          "severity": "warning",
+          "title": "LLM：语义重复",
+          "detail": "两条都在描述同一家公司基础信息与主营范围，语义高度重复，且检索时会造成冗余召回。",
+          "target": "policies/company_profile",
+          "target_label": "policies/company_profile, policies/item_2712d3045ad2",
+          "repairable": false,
+          "action_type": "merge",
+          "involved_targets": [
+            "policies/company_profile",
+            "policies/item_2712d3045ad2"
+          ],
+          "llm_reasoning": "两条都在描述同一家公司基础信息与主营范围，语义高度重复，且检索时会造成冗余召回。",
+          "suggestions": [
+            {
+              "title": "建议合并",
+              "detail": "多条知识表达同一含义，建议保留信息最完整的一条，将其余归档。",
+              "level": "warning"
+            }
+          ]
+        },
+        {
+          "code": "llm_logic_error",
+          "severity": "error",
+          "title": "LLM：逻辑错误",
+          "detail": "同属售后总政策但路由策略不一致：after_sales 标注 requires_handoff=False，而 after_sales_policy_details 标注 requires_handoff=True 并要求部分情形转人工。对同类问题可能产生冲突决策。",
+          "target": "policies/after_sales",
+          "target_label": "policies/after_sales, policies/after_sales_policy_details",
+          "repairable": false,
+          "action_type": "review",
+          "involved_targets": [
+            "policies/after_sales",
+            "policies/after_sales_policy_details"
+          ],
+          "llm_reasoning": "同属售后总政策但路由策略不一致：after_sales 标注 requires_handoff=False，而 after_sales_policy_details 标注 requires_handoff=True 并要求部分情形转人工。对同类问题可能产生冲突决策。",
+          "suggestions": [
+            {
+              "title": "建议人工复核",
+              "detail": "LLM认为该条目可能存在问题，请人工确认后决定处理方式。",
+              "level": "warning"
+            }
+          ]
+        },
+        {
+          "code": "llm_duplicate_semantic",
+          "severity": "warning",
+          "title": "LLM：语义重复",
+          "detail": "两条都覆盖开票类型、所需字段、开票时效与红冲重开规则，核心业务含义重复，建议整合成一条主政策避免重复维护。",
+          "target": "policies/invoice",
+          "target_label": "policies/invoice, policies/invoice_policy_details",
+          "repairable": false,
+          "action_type": "merge",
+          "involved_targets": [
+            "policies/invoice",
+            "policies/invoice_policy_details"
+          ],
+          "llm_reasoning": "两条都覆盖开票类型、所需字段、开票时效与红冲重开规则，核心业务含义重复，建议整合成一条主政策避免重复维护。",
+          "suggestions": [
+            {
+              "title": "建议合并",
+              "detail": "多条知识表达同一含义，建议保留信息最完整的一条，将其余归档。",
+              "level": "warning"
+            }
+          ]
+        },
+        {
+          "code": "llm_duplicate_semantic",
+          "severity": "warning",
+          "title": "LLM：语义重复",
+          "detail": "两条都表达“账期/月结/先货后款需人工审核，AI不能直接同意”，业务意图高度一致，可合并减少重复。",
+          "target": "policies/contract",
+          "target_label": "policies/contract, policies/credit-term-policy",
+          "repairable": false,
+          "action_type": "merge",
+          "involved_targets": [
+            "policies/contract",
+            "policies/credit-term-policy"
+          ],
+          "llm_reasoning": "两条都表达“账期/月结/先货后款需人工审核，AI不能直接同意”，业务意图高度一致，可合并减少重复。",
+          "suggestions": [
+            {
+              "title": "建议合并",
+              "detail": "多条知识表达同一含义，建议保留信息最完整的一条，将其余归档。",
+              "level": "warning"
+            }
+          ]
+        },
+        {
+          "code": "llm_logic_error",
+          "severity": "error",
+          "title": "LLM：逻辑错误",
+          "detail": "两条都覆盖“转人工/人工客服”场景，但执行策略冲突：manual_handoff_reply 配置为 allow_auto_reply=True 且 requires_handoff=False，却回复“已转人工客服”；manual_required 对同类关键词配置为 requires_handoff=True、operator_alert=True。会导致系统在同一触发意图下出现是否真实转人工的矛盾执行。",
+          "target": "policies/manual_handoff_reply",
+          "target_label": "policies/manual_handoff_reply, policies/manual_required",
+          "repairable": false,
+          "action_type": "review",
+          "involved_targets": [
+            "policies/manual_handoff_reply",
+            "policies/manual_required"
+          ],
+          "llm_reasoning": "两条都覆盖“转人工/人工客服”场景，但执行策略冲突：manual_handoff_reply 配置为 allow_auto_reply=True 且 requires_handoff=False，却回复“已转人工客服”；manual_required 对同类关键词配置为 requires_handoff=True、operator_alert=True。会导致系统在同一触发意图下出现是否真实转人工的矛盾执行。",
+          "suggestions": [
+            {
+              "title": "建议人工复核",
+              "detail": "LLM认为该条目可能存在问题，请人工确认后决定处理方式。",
+              "level": "warning"
+            }
+          ]
+        },
+        {
+          "code": "llm_duplicate_semantic",
+          "severity": "warning",
+          "title": "LLM：语义重复",
+          "detail": "两条核心业务含义高度重合：付款方式（对公/微信/支付宝）与“30%定金+发货前尾款”规则基本一致，属于同一付款政策的不同表述，易造成检索命中分散与维护不一致。",
+          "target": "policies/payment",
+          "target_label": "policies/payment, policies/payment_policy_details",
+          "repairable": false,
+          "action_type": "merge",
+          "involved_targets": [
+            "policies/payment",
+            "policies/payment_policy_details"
+          ],
+          "llm_reasoning": "两条核心业务含义高度重合：付款方式（对公/微信/支付宝）与“30%定金+发货前尾款”规则基本一致，属于同一付款政策的不同表述，易造成检索命中分散与维护不一致。",
+          "suggestions": [
+            {
+              "title": "建议合并",
+              "detail": "多条知识表达同一含义，建议保留信息最完整的一条，将其余归档。",
+              "level": "warning"
+            }
+          ]
+        },
+        {
+          "code": "llm_rag_quality_low",
+          "severity": "warning",
+          "title": "LLM：RAG经验质量低",
+          "detail": "该RAG经验是“20万预算省油SUV推荐”的汽车销售场景，与当前知识库主体（企业采购/物流/开票/样品等）明显不匹配，属于跨业务污染；且引用内容含压测与测试日志噪声，不适合作为正式检索经验。",
+          "target": "rag_exp_e2d619cecd90156795f0",
+          "target_label": "rag_exp_e2d619cecd90156795f0",
+          "repairable": false,
+          "action_type": "delete",
+          "involved_targets": [
+            "rag_exp_e2d619cecd90156795f0"
+          ],
+          "llm_reasoning": "该RAG经验是“20万预算省油SUV推荐”的汽车销售场景，与当前知识库主体（企业采购/物流/开票/样品等）明显不匹配，属于跨业务污染；且引用内容含压测与测试日志噪声，不适合作为正式检索经验。",
+          "suggestions": [
+            {
+              "title": "建议删除",
+              "detail": "该条目存在明显错误或不适用，建议归档或废弃。",
+              "level": "danger"
+            }
+          ]
+        },
+        {
+          "code": "llm_rag_quality_low",
+          "severity": "warning",
+          "title": "LLM：RAG经验质量低",
+          "detail": "回复内容基本是复述“查到一条相关说明”并回贴历史问句，未提供商品清单或分类信息，信息增益极低；作为RAG回复示例质量较差，容易在生产中引导出空洞答复。",
+          "target": "rag_exp_b91acdcb32d2eaea0197",
+          "target_label": "rag_exp_b91acdcb32d2eaea0197",
+          "repairable": false,
+          "action_type": "review",
+          "involved_targets": [
+            "rag_exp_b91acdcb32d2eaea0197"
+          ],
+          "llm_reasoning": "回复内容基本是复述“查到一条相关说明”并回贴历史问句，未提供商品清单或分类信息，信息增益极低；作为RAG回复示例质量较差，容易在生产中引导出空洞答复。",
+          "suggestions": [
+            {
+              "title": "建议人工复核",
+              "detail": "LLM认为该条目可能存在问题，请人工确认后决定处理方式。",
+              "level": "warning"
+            }
+          ]
+        },
+        {
+          "code": "llm_rag_quality_low",
+          "severity": "warning",
+          "title": "LLM：RAG经验质量低",
+          "detail": "内容存在明显噪声与重复拼接（同段多次重复），并把“安装调试”答复与“合同盖章+月结”问句混杂在一起，语义对齐差，难以作为稳定可复用经验。",
+          "target": "rag_exp_5528e1e9e45d675b064a",
+          "target_label": "rag_exp_5528e1e9e45d675b064a",
+          "repairable": false,
+          "action_type": "delete",
+          "involved_targets": [
+            "rag_exp_5528e1e9e45d675b064a"
+          ],
+          "llm_reasoning": "内容存在明显噪声与重复拼接（同段多次重复），并把“安装调试”答复与“合同盖章+月结”问句混杂在一起，语义对齐差，难以作为稳定可复用经验。",
+          "suggestions": [
+            {
+              "title": "建议删除",
+              "detail": "该条目存在明显错误或不适用，建议归档或废弃。",
+              "level": "danger"
+            }
+          ]
+        },
+        {
+          "code": "knowledge_token_budget_large",
+          "severity": "info",
+          "title": "知识体积较大",
+          "detail": "当前分类知识库总量估算约 56791 token。这不是知识格式故障，也没有某条知识需要立即删除；它提醒后续继续按客户问题检索相关知识，避免一次性加载全部知识。",
+          "target_label": "全局知识库",
+          "details": [
+            {
+              "label": "问题性质",
+              "value": "容量提示，不是知识格式故障",
+              "level": "normal"
+            },
+            {
+              "label": "估算总量",
+              "value": "约 56791 token",
+              "level": "warning"
+            },
+            {
+              "label": "检测阈值",
+              "value": "超过 7000 token 时提示",
+              "level": "normal"
+            },
+            {
+              "label": "文件数量",
+              "value": "91 个 JSON 文件",
+              "level": "normal"
+            },
+            {
+              "label": "chats",
+              "value": "约 30367 token / 50 个文件",
+              "level": "normal"
+            },
+            {
+              "label": "erp_exports",
+              "value": "约 860 token / 2 个文件",
+              "level": "normal"
+            },
+            {
+              "label": "policies",
+              "value": "约 24980 token / 39 个文件",
+              "level": "normal"
+            }
+          ],
+          "suggestions": [
+            {
+              "title": "不建议自动删除知识",
+              "detail": "当前没有发现哪一条知识错误，系统不能为了降低体积擅自删内容。",
+              "level": "danger"
+            },
+            {
+              "title": "继续保持按门类和问题范围检索",
+              "detail": "客服运行时应只取相关商品、政策、话术和上下文证据，不要把全库一次性塞给大模型。",
+              "level": "normal"
+            },
+            {
+              "title": "如果后续继续变大",
+              "detail": "优先拆分过长政策、归档过期商品、把重复话术合并为模板，再重新检测。",
+              "level": "warning"
+            }
+          ],
+          "repairable": false
+        }
+      ],
+      "token_budget_estimate": 56791,
+      "recent_only": false
+    },
+    {
+      "name": "knowledge_runtime",
+      "ok": true,
+      "returncode": 0,
+      "stdout_tail": "me\": \"check_public_bank_account_can_auto_reply\",\n      \"ok\": true\n    },\n    {\n      \"name\": \"check_context_product_shipping\",\n      \"ok\": true\n    },\n    {\n      \"name\": \"check_chat_style_hits_chats\",\n      \"ok\": true\n    },\n    {\n      \"name\": \"check_global_guidelines_are_layered_style_context\",\n      \"ok\": true\n    },\n    {\n      \"name\": \"check_contextual_honorific_rule_is_shared_reply_style\",\n      \"ok\": true\n    },\n    {\n      \"name\": \"check_tenant_visible_catalog_policy_drives_used_car_catalog\",\n      \"ok\": true\n    },\n    {\n      \"name\": \"check_tenant_formal_overrides_conflicting_shared_public\",\n      \"ok\": true\n    },\n    {\n      \"name\": \"check_product_scoped_rule_requires_product_context\",\n      \"ok\": true\n    },\n    {\n      \"name\": \"check_general_knowledge_applicability_scope\",\n      \"ok\": true\n    },\n    {\n      \"name\": \"check_manual_boundary_requires_handoff\",\n      \"ok\": true\n    },\n    {\n      \"name\": \"check_unknown_business_question_handoffs\",\n      \"ok\": true\n    },\n    {\n      \"name\": \"check_custom_category_can_return_evidence\",\n      \"ok\": true\n    },\n    {\n      \"name\": \"check_unread_formal_product_is_visible_but_not_runtime_usable\",\n      \"ok\": true\n    }\n  ]\n}\n",
+      "stderr_tail": "",
+      "issues": []
+    },
+    {
+      "name": "knowledge_compiler",
+      "ok": true,
+      "returncode": 0,
+      "stdout_tail": "{\n  \"ok\": true,\n  \"count\": 3,\n  \"failures\": [],\n  \"results\": [\n    {\n      \"name\": \"check_compile_to_disk_writes_expected_files\",\n      \"ok\": true\n    },\n    {\n      \"name\": \"check_compiled_counts_match_category_source\",\n      \"ok\": true\n    },\n    {\n      \"name\": \"check_compiled_product_knowledge_is_legacy_compatible\",\n      \"ok\": true\n    }\n  ]\n}\n",
+      "stderr_tail": "",
+      "issues": []
+    },
+    {
+      "name": "offline_regression",
+      "ok": false,
+      "returncode": 1,
+      "stdout_tail": ",\n  \"failures\": [\n    {\n      \"name\": \"product_quote\",\n      \"ok\": false,\n      \"error\": \"AssertionError(\\\"reply_text: expected to contain '999', got '商用冰箱 BX-200 参考价 1000 元/台，阶梯价 5台起，公开优惠规则：5台起 950 元/台，10台起 920 元/台。请发采购数量、联系人和收货城市，我帮您核算。'\\\")\"\n    }\n  ],\n  \"results\": [\n    {\n      \"name\": \"catalog_request\",\n      \"ok\": true\n    },\n    {\n      \"name\": \"product_quote\",\n      \"ok\": false,\n      \"error\": \"AssertionError(\\\"reply_text: expected to contain '999', got '商用冰箱 BX-200 参考价 1000 元/台，阶梯价 5台起，公开优惠规则：5台起 950 元/台，10台起 920 元/台。请发采购数量、联系人和收货城市，我帮您核算。'\\\")\"\n    },\n    {\n      \"name\": \"below_tier_discount_handoff\",\n      \"ok\": true\n    },\n    {\n      \"name\": \"invoice_policy\",\n      \"ok\": true\n    },\n    {\n      \"name\": \"warranty_policy\",\n      \"ok\": true\n    },\n    {\n      \"name\": \"context_shipping\",\n      \"ok\": true\n    },\n    {\n      \"name\": \"evidence_discount_handoff\",\n      \"ok\": true\n    },\n    {\n      \"name\": \"customer_data_complete\",\n      \"ok\": true\n    },\n    {\n      \"name\": \"greeting_not_customer_data\",\n      \"ok\": true\n    },\n    {\n      \"name\": \"manual_handoff_contract\",\n      \"ok\": true\n    },\n    {\n      \"name\": \"no_relevant_business_evidence\",\n      \"ok\": true\n    }\n  ]\n}\n",
+      "stderr_tail": "",
+      "issues": [
+        {
+          "severity": "error",
+          "title": "offline_regression 未通过",
+          "detail": "{\n  \"ok\": false,\n  \"scenario_path\": \"D:\\\\AI\\\\omniauto\\\\apps\\\\wechat_ai_customer_service\\\\tests\\\\scenarios\\\\offline_regression.json\",\n  \"count\": 11,\n  \"failures\": [\n    {\n      \"name\": \"product_quote\",\n      \"ok\": false,\n      \"error\": \"AssertionError(\\\"reply_text: expected to contain '999', got '商用冰箱 BX-200 参考价 1000 元/台，阶梯价 5台起，公开优惠规则：5台起 950 元/台，10台起 920 元/台。请发采购数量、联系人和收货城市，我帮您核算。'\\\")\"\n    }\n  ],\n  \"results\": [\n    {\n      \"name\": \"catalog_request\",\n      \"ok\": true\n    },\n    {\n      \"name\": \"product_quote\",\n      \"ok\": false,\n      \"error\": \"AssertionError(\\\"reply_text: expected to contain '999', got '商用冰箱 BX-200 参考价 1000 元/台，阶梯价 5台起，公开优惠规则：5台起 950 元/台，10台起 920 元/台。请发采购数量、联系人和收货城市，我帮您核算。'\\\")\"\n    },\n    {\n      \"name\": \"below_tier_discount_handoff\",\n      \"ok\": true\n    },\n    {\n      \"name\": \"invoice_policy\",\n      \"ok\": true\n    },\n    {\n      \"name\": \"warranty_policy\",\n      \"ok\": true\n    },\n    {\n      \"name\": \"context_shipping\",\n      \"ok\": true\n    },\n    {\n      \"name\": \"evidence_discount_handoff\",\n      \"ok\": true\n    },\n    {\n      \"name\": \"customer_data_complete\",\n      \"ok\": true\n    },\n    {\n      \"name\": \"greeting_not_customer_data\",\n      \"ok\": true\n    },\n    {\n      \"name\": \"manual_handoff_contract\",\n      \"ok\": true\n    },\n    {\n      \"name\": \"no_relevant_business_evidence\",\n      \"ok\": true\n    }\n  ]\n}\n\n"
+        }
+      ]
+    },
+    {
+      "name": "workflow_logic",
+      "ok": true,
+      "returncode": 0,
+      "stdout_tail": "\",\n      \"ok\": true\n    },\n    {\n      \"name\": \"check_outbound_naturalness_polishes_templates_without_changing_facts\",\n      \"ok\": true\n    },\n    {\n      \"name\": \"check_outbound_naturalness_diversifies_repeated_structure\",\n      \"ok\": true\n    },\n    {\n      \"name\": \"check_customer_data_write_allows_soft_handoff_only\",\n      \"ok\": true\n    },\n    {\n      \"name\": \"check_multi_target_iteration_scans_whitelist_even_without_active_changes\",\n      \"ok\": true\n    },\n    {\n      \"name\": \"check_multi_target_dynamic_unread_mode_supports_new_sessions\",\n      \"ok\": true\n    },\n    {\n      \"name\": \"check_deepseek_flash_is_default\",\n      \"ok\": true\n    },\n    {\n      \"name\": \"check_llm_reply_application_guards\",\n      \"ok\": true\n    },\n    {\n      \"name\": \"check_llm_boundary_fallback_on_invalid_model_output\",\n      \"ok\": true\n    },\n    {\n      \"name\": \"check_review_queue_reports_pending_and_handoff_items\",\n      \"ok\": true\n    },\n    {\n      \"name\": \"check_evidence_boundary_cases\",\n      \"ok\": true\n    },\n    {\n      \"name\": \"check_after_sales_intent_preempts_duration_logistics\",\n      \"ok\": true\n    },\n    {\n      \"name\": \"check_wechat_main_window_recognition\",\n      \"ok\": true\n    }\n  ]\n}\n",
+      "stderr_tail": "",
+      "issues": []
+    }
+  ],
+  "issues": [
+    {
+      "code": "llm_inappropriate",
+      "severity": "warning",
+      "title": "LLM：场景不适用",
+      "detail": "条目内容明确写明“测试话术，仅用于管理台回归”，属于测试/回归数据，不应作为线上客服知识模板对外使用。",
+      "target": "chats/admin_check_style_example",
+      "target_label": "chats/admin_check_style_example",
+      "repairable": false,
+      "action_type": "delete",
+      "involved_targets": [
+        "chats/admin_check_style_example"
+      ],
+      "llm_reasoning": "条目内容明确写明“测试话术，仅用于管理台回归”，属于测试/回归数据，不应作为线上客服知识模板对外使用。",
+      "suggestions": [
+        {
+          "title": "建议删除",
+          "detail": "该条目存在明显错误或不适用，建议归档或废弃。",
+          "level": "danger"
+        }
+      ],
+      "fingerprint": "0189aa168cb01bc4252e0018"
+    },
+    {
+      "code": "llm_inappropriate",
+      "severity": "warning",
+      "title": "LLM：场景不适用",
+      "detail": "该条目是二手车置换收资话术（车型、上牌年份、公里数、事故水泡火烧等），与当前知识库主体的办公设备/企业采购场景明显不匹配。",
+      "target": "chats/raw_wechat_generalized_chat_apply_probe",
+      "target_label": "chats/raw_wechat_generalized_chat_apply_probe",
+      "repairable": false,
+      "action_type": "delete",
+      "involved_targets": [
+        "chats/raw_wechat_generalized_chat_apply_probe"
+      ],
+      "llm_reasoning": "该条目是二手车置换收资话术（车型、上牌年份、公里数、事故水泡火烧等），与当前知识库主体的办公设备/企业采购场景明显不匹配。",
+      "suggestions": [
+        {
+          "title": "建议删除",
+          "detail": "该条目存在明显错误或不适用，建议归档或废弃。",
+          "level": "danger"
+        }
+      ],
+      "fingerprint": "54de4fe4423cb9399473c926"
+    },
+    {
+      "code": "llm_inappropriate",
+      "severity": "warning",
+      "title": "LLM：场景不适用",
+      "detail": "这三条均包含明显workflow测试痕迹（wfcasea123/wfcaseb456/wfcasec789），且内容更像流程联调用例，不是稳定客服知识条目，存在误召回风险。",
+      "target": "chats/wf_tpl_a",
+      "target_label": "chats/wf_tpl_a, chats/wf_tpl_b, chats/wf_tpl_c",
+      "repairable": false,
+      "action_type": "review",
+      "involved_targets": [
+        "chats/wf_tpl_a",
+        "chats/wf_tpl_b",
+        "chats/wf_tpl_c"
+      ],
+      "llm_reasoning": "这三条均包含明显workflow测试痕迹（wfcasea123/wfcaseb456/wfcasec789），且内容更像流程联调用例，不是稳定客服知识条目，存在误召回风险。",
+      "suggestions": [
+        {
+          "title": "建议人工复核",
+          "detail": "LLM认为该条目可能存在问题，请人工确认后决定处理方式。",
+          "level": "warning"
+        }
+      ],
+      "fingerprint": "a4cc873a848b30e3eb24a2b3"
+    },
+    {
+      "code": "llm_logic_error",
+      "severity": "warning",
+      "title": "LLM：逻辑错误",
+      "detail": "公司主体信息自相矛盾：company_profile 与 item_2712d3045ad2 使用“杭州云桥办公设备有限公司”，而 company_profile_details 与 bank_account 使用“杭州星澜供应链科技有限公司”。公司名不一致会直接导致对外信息错误。",
+      "target": "policies/company_profile",
+      "target_label": "policies/company_profile, policies/company_profile_details, policies/item_2712d3045ad2, policies/bank_account",
+      "repairable": false,
+      "action_type": "review",
+      "involved_targets": [
+        "policies/company_profile",
+        "policies/company_profile_details",
+        "policies/item_2712d3045ad2",
+        "policies/bank_account"
+      ],
+      "llm_reasoning": "公司主体信息自相矛盾：company_profile 与 item_2712d3045ad2 使用“杭州云桥办公设备有限公司”，而 company_profile_details 与 bank_account 使用“杭州星澜供应链科技有限公司”。公司名不一致会直接导致对外信息错误。",
+      "suggestions": [
+        {
+          "title": "建议人工复核",
+          "detail": "LLM认为该条目可能存在问题，请人工确认后决定处理方式。",
+          "level": "warning"
+        }
+      ],
+      "fingerprint": "9bcc83a7f25710470ebdf5f6"
+    },
+    {
+      "code": "llm_duplicate_semantic",
+      "severity": "info",
+      "title": "LLM：语义重复",
+      "detail": "两条都在描述同一家公司基础信息与主营范围，语义高度重复，且检索时会造成冗余召回。",
+      "target": "policies/company_profile",
+      "target_label": "policies/company_profile, policies/item_2712d3045ad2",
+      "repairable": false,
+      "action_type": "merge",
+      "involved_targets": [
+        "policies/company_profile",
+        "policies/item_2712d3045ad2"
+      ],
+      "llm_reasoning": "两条都在描述同一家公司基础信息与主营范围，语义高度重复，且检索时会造成冗余召回。",
+      "suggestions": [
+        {
+          "title": "建议合并",
+          "detail": "多条知识表达同一含义，建议保留信息最完整的一条，将其余归档。",
+          "level": "warning"
+        }
+      ],
+      "fingerprint": "fae9d300e64321c5a8884680"
+    },
+    {
+      "code": "llm_logic_error",
+      "severity": "warning",
+      "title": "LLM：逻辑错误",
+      "detail": "同属售后总政策但路由策略不一致：after_sales 标注 requires_handoff=False，而 after_sales_policy_details 标注 requires_handoff=True 并要求部分情形转人工。对同类问题可能产生冲突决策。",
+      "target": "policies/after_sales",
+      "target_label": "policies/after_sales, policies/after_sales_policy_details",
+      "repairable": false,
+      "action_type": "review",
+      "involved_targets": [
+        "policies/after_sales",
+        "policies/after_sales_policy_details"
+      ],
+      "llm_reasoning": "同属售后总政策但路由策略不一致：after_sales 标注 requires_handoff=False，而 after_sales_policy_details 标注 requires_handoff=True 并要求部分情形转人工。对同类问题可能产生冲突决策。",
+      "suggestions": [
+        {
+          "title": "建议人工复核",
+          "detail": "LLM认为该条目可能存在问题，请人工确认后决定处理方式。",
+          "level": "warning"
+        }
+      ],
+      "fingerprint": "9953548f75c5c287314ce421"
+    },
+    {
+      "code": "llm_duplicate_semantic",
+      "severity": "info",
+      "title": "LLM：语义重复",
+      "detail": "两条都覆盖开票类型、所需字段、开票时效与红冲重开规则，核心业务含义重复，建议整合成一条主政策避免重复维护。",
+      "target": "policies/invoice",
+      "target_label": "policies/invoice, policies/invoice_policy_details",
+      "repairable": false,
+      "action_type": "merge",
+      "involved_targets": [
+        "policies/invoice",
+        "policies/invoice_policy_details"
+      ],
+      "llm_reasoning": "两条都覆盖开票类型、所需字段、开票时效与红冲重开规则，核心业务含义重复，建议整合成一条主政策避免重复维护。",
+      "suggestions": [
+        {
+          "title": "建议合并",
+          "detail": "多条知识表达同一含义，建议保留信息最完整的一条，将其余归档。",
+          "level": "warning"
+        }
+      ],
+      "fingerprint": "6d0edd803d1453e4809fad59"
+    },
+    {
+      "code": "llm_duplicate_semantic",
+      "severity": "info",
+      "title": "LLM：语义重复",
+      "detail": "两条都表达“账期/月结/先货后款需人工审核，AI不能直接同意”，业务意图高度一致，可合并减少重复。",
+      "target": "policies/contract",
+      "target_label": "policies/contract, policies/credit-term-policy",
+      "repairable": false,
+      "action_type": "merge",
+      "involved_targets": [
+        "policies/contract",
+        "policies/credit-term-policy"
+      ],
+      "llm_reasoning": "两条都表达“账期/月结/先货后款需人工审核，AI不能直接同意”，业务意图高度一致，可合并减少重复。",
+      "suggestions": [
+        {
+          "title": "建议合并",
+          "detail": "多条知识表达同一含义，建议保留信息最完整的一条，将其余归档。",
+          "level": "warning"
+        }
+      ],
+      "fingerprint": "237f1e5e329949d884cf9355"
+    },
+    {
+      "code": "llm_logic_error",
+      "severity": "warning",
+      "title": "LLM：逻辑错误",
+      "detail": "两条都覆盖“转人工/人工客服”场景，但执行策略冲突：manual_handoff_reply 配置为 allow_auto_reply=True 且 requires_handoff=False，却回复“已转人工客服”；manual_required 对同类关键词配置为 requires_handoff=True、operator_alert=True。会导致系统在同一触发意图下出现是否真实转人工的矛盾执行。",
+      "target": "policies/manual_handoff_reply",
+      "target_label": "policies/manual_handoff_reply, policies/manual_required",
+      "repairable": false,
+      "action_type": "review",
+      "involved_targets": [
+        "policies/manual_handoff_reply",
+        "policies/manual_required"
+      ],
+      "llm_reasoning": "两条都覆盖“转人工/人工客服”场景，但执行策略冲突：manual_handoff_reply 配置为 allow_auto_reply=True 且 requires_handoff=False，却回复“已转人工客服”；manual_required 对同类关键词配置为 requires_handoff=True、operator_alert=True。会导致系统在同一触发意图下出现是否真实转人工的矛盾执行。",
+      "suggestions": [
+        {
+          "title": "建议人工复核",
+          "detail": "LLM认为该条目可能存在问题，请人工确认后决定处理方式。",
+          "level": "warning"
+        }
+      ],
+      "fingerprint": "080b96a64ee6bd35f415ee72"
+    },
+    {
+      "code": "llm_duplicate_semantic",
+      "severity": "info",
+      "title": "LLM：语义重复",
+      "detail": "两条核心业务含义高度重合：付款方式（对公/微信/支付宝）与“30%定金+发货前尾款”规则基本一致，属于同一付款政策的不同表述，易造成检索命中分散与维护不一致。",
+      "target": "policies/payment",
+      "target_label": "policies/payment, policies/payment_policy_details",
+      "repairable": false,
+      "action_type": "merge",
+      "involved_targets": [
+        "policies/payment",
+        "policies/payment_policy_details"
+      ],
+      "llm_reasoning": "两条核心业务含义高度重合：付款方式（对公/微信/支付宝）与“30%定金+发货前尾款”规则基本一致，属于同一付款政策的不同表述，易造成检索命中分散与维护不一致。",
+      "suggestions": [
+        {
+          "title": "建议合并",
+          "detail": "多条知识表达同一含义，建议保留信息最完整的一条，将其余归档。",
+          "level": "warning"
+        }
+      ],
+      "fingerprint": "22a4c7be6741c95031d65018"
+    },
+    {
+      "code": "llm_rag_quality_low",
+      "severity": "info",
+      "title": "LLM：RAG经验质量低",
+      "detail": "该RAG经验是“20万预算省油SUV推荐”的汽车销售场景，与当前知识库主体（企业采购/物流/开票/样品等）明显不匹配，属于跨业务污染；且引用内容含压测与测试日志噪声，不适合作为正式检索经验。",
+      "target": "rag_exp_e2d619cecd90156795f0",
+      "target_label": "rag_exp_e2d619cecd90156795f0",
+      "repairable": false,
+      "action_type": "delete",
+      "involved_targets": [
+        "rag_exp_e2d619cecd90156795f0"
+      ],
+      "llm_reasoning": "该RAG经验是“20万预算省油SUV推荐”的汽车销售场景，与当前知识库主体（企业采购/物流/开票/样品等）明显不匹配，属于跨业务污染；且引用内容含压测与测试日志噪声，不适合作为正式检索经验。",
+      "suggestions": [
+        {
+          "title": "建议删除",
+          "detail": "该条目存在明显错误或不适用，建议归档或废弃。",
+          "level": "danger"
+        }
+      ],
+      "fingerprint": "1b75c12fc964f98f3c3d0867"
+    },
+    {
+      "code": "llm_rag_quality_low",
+      "severity": "info",
+      "title": "LLM：RAG经验质量低",
+      "detail": "回复内容基本是复述“查到一条相关说明”并回贴历史问句，未提供商品清单或分类信息，信息增益极低；作为RAG回复示例质量较差，容易在生产中引导出空洞答复。",
+      "target": "rag_exp_b91acdcb32d2eaea0197",
+      "target_label": "rag_exp_b91acdcb32d2eaea0197",
+      "repairable": false,
+      "action_type": "review",
+      "involved_targets": [
+        "rag_exp_b91acdcb32d2eaea0197"
+      ],
+      "llm_reasoning": "回复内容基本是复述“查到一条相关说明”并回贴历史问句，未提供商品清单或分类信息，信息增益极低；作为RAG回复示例质量较差，容易在生产中引导出空洞答复。",
+      "suggestions": [
+        {
+          "title": "建议人工复核",
+          "detail": "LLM认为该条目可能存在问题，请人工确认后决定处理方式。",
+          "level": "warning"
+        }
+      ],
+      "fingerprint": "eed17a2e7f4d2e08025e1802"
+    },
+    {
+      "code": "llm_rag_quality_low",
+      "severity": "info",
+      "title": "LLM：RAG经验质量低",
+      "detail": "内容存在明显噪声与重复拼接（同段多次重复），并把“安装调试”答复与“合同盖章+月结”问句混杂在一起，语义对齐差，难以作为稳定可复用经验。",
+      "target": "rag_exp_5528e1e9e45d675b064a",
+      "target_label": "rag_exp_5528e1e9e45d675b064a",
+      "repairable": false,
+      "action_type": "delete",
+      "involved_targets": [
+        "rag_exp_5528e1e9e45d675b064a"
+      ],
+      "llm_reasoning": "内容存在明显噪声与重复拼接（同段多次重复），并把“安装调试”答复与“合同盖章+月结”问句混杂在一起，语义对齐差，难以作为稳定可复用经验。",
+      "suggestions": [
+        {
+          "title": "建议删除",
+          "detail": "该条目存在明显错误或不适用，建议归档或废弃。",
+          "level": "danger"
+        }
+      ],
+      "fingerprint": "297710821653fec10fe0e017"
+    },
+    {
+      "severity": "error",
+      "title": "offline_regression 未通过",
+      "detail": "{\n  \"ok\": false,\n  \"scenario_path\": \"D:\\\\AI\\\\omniauto\\\\apps\\\\wechat_ai_customer_service\\\\tests\\\\scenarios\\\\offline_regression.json\",\n  \"count\": 11,\n  \"failures\": [\n    {\n      \"name\": \"product_quote\",\n      \"ok\": false,\n      \"error\": \"AssertionError(\\\"reply_text: expected to contain '999', got '商用冰箱 BX-200 参考价 1000 元/台，阶梯价 5台起，公开优惠规则：5台起 950 元/台，10台起 920 元/台。请发采购数量、联系人和收货城市，我帮您核算。'\\\")\"\n    }\n  ],\n  \"results\": [\n    {\n      \"name\": \"catalog_request\",\n      \"ok\": true\n    },\n    {\n      \"name\": \"product_quote\",\n      \"ok\": false,\n      \"error\": \"AssertionError(\\\"reply_text: expected to contain '999', got '商用冰箱 BX-200 参考价 1000 元/台，阶梯价 5台起，公开优惠规则：5台起 950 元/台，10台起 920 元/台。请发采购数量、联系人和收货城市，我帮您核算。'\\\")\"\n    },\n    {\n      \"name\": \"below_tier_discount_handoff\",\n      \"ok\": true\n    },\n    {\n      \"name\": \"invoice_policy\",\n      \"ok\": true\n    },\n    {\n      \"name\": \"warranty_policy\",\n      \"ok\": true\n    },\n    {\n      \"name\": \"context_shipping\",\n      \"ok\": true\n    },\n    {\n      \"name\": \"evidence_discount_handoff\",\n      \"ok\": true\n    },\n    {\n      \"name\": \"customer_data_complete\",\n      \"ok\": true\n    },\n    {\n      \"name\": \"greeting_not_customer_data\",\n      \"ok\": true\n    },\n    {\n      \"name\": \"manual_handoff_contract\",\n      \"ok\": true\n    },\n    {\n      \"name\": \"no_relevant_business_evidence\",\n      \"ok\": true\n    }\n  ]\n}\n\n",
+      "target_label": "未指定位置",
+      "repairable": false,
+      "fingerprint": "db55bba825d9bf5e7d7a329b",
+      "suggestions": [
+        {
+          "title": "建议优先修复",
+          "detail": "该问题可能影响知识入库、检索或客服回答。请点击查看位置进入对应知识，按提示补齐或修正字段。",
+          "level": "danger"
+        }
+      ]
+    }
+  ],
+  "ignored_count": 0,
+  "summary": {
+    "error_count": 1,
+    "warning_count": 6,
+    "info_count": 7,
+    "ignored_count": 0,
+    "hidden_notice_count": 1
+  },
+  "auto_dedup_rag": {
+    "ok": true,
+    "message": "Auto-dedup discarded 0 RAG experience(s)",
+    "discarded": [],
+    "duplicate_groups": []
+  }
+}

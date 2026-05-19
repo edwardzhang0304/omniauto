@@ -1,0 +1,35 @@
+{
+  "source": {
+    "source_id": "source_41ff3d9e06f1383d",
+    "tenant_id": "chejin",
+    "layer": "tenant",
+    "source_type": "wechat_raw_message",
+    "category": "file_transfer",
+    "product_id": "",
+    "source_path": "D:\\AI\\omniauto\\runtime\\apps\\wechat_ai_customer_service\\tenants\\chejin\\raw_messages\\learning_batches\\raw_batch_2673d024b0eeb99d31f9.txt",
+    "content_hash": "52b83b24b71ed7fe8294b28e8d7c1560",
+    "status": "quarantined",
+    "created_at": "2026-05-06T23:21:59",
+    "updated_at": "2026-05-06T23:21:59",
+    "quarantine_reason": "raw_wechat_source_not_directly_retrievable"
+  },
+  "chunks": [
+    {
+      "chunk_id": "chunk_2629049039a10fdb",
+      "source_id": "source_41ff3d9e06f1383d",
+      "tenant_id": "chejin",
+      "layer": "tenant",
+      "source_type": "wechat_raw_message",
+      "category": "file_transfer",
+      "product_id": "",
+      "source_path": "D:\\AI\\omniauto\\runtime\\apps\\wechat_ai_customer_service\\tenants\\chejin\\raw_messages\\learning_batches\\raw_batch_2673d024b0eeb99d31f9.txt",
+      "chunk_index": 0,
+      "text": "[2026-05-06 23:20:00] system: 23:20\n[2026-05-06T23:21:59] self: [车金AI] 三年内的凯美瑞价格浮动不小，主要看具体车况和地区，我这边没有实时报价不能随口说个数。方便说一下您所在城市，是否考虑贷款或置换吗？我让同事核实清楚后给您准话。",
+      "char_count": 149,
+      "status": "quarantined",
+      "created_at": "2026-05-06T23:21:59",
+      "quarantine_reason": "raw_wechat_source_not_directly_retrievable",
+      "quarantined_at": "2026-05-19T01:47:03"
+    }
+  ]
+}

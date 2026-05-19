@@ -1,0 +1,35 @@
+{
+  "source": {
+    "source_id": "source_3e8f59581cdeddbf",
+    "tenant_id": "chejin",
+    "layer": "tenant",
+    "source_type": "wechat_raw_message",
+    "category": "private",
+    "product_id": "",
+    "source_path": "D:\\AI\\omniauto\\runtime\\apps\\wechat_ai_customer_service\\tenants\\chejin\\raw_messages\\learning_batches\\raw_batch_f5dd5546615d307efde8.txt",
+    "content_hash": "56d189640dcbcac4935271eec29f5b3d",
+    "status": "quarantined",
+    "created_at": "2026-05-06T14:51:18",
+    "updated_at": "2026-05-06T14:51:18",
+    "quarantine_reason": "raw_wechat_source_not_directly_retrievable"
+  },
+  "chunks": [
+    {
+      "chunk_id": "chunk_1657db1b1b91ed48",
+      "source_id": "source_3e8f59581cdeddbf",
+      "tenant_id": "chejin",
+      "layer": "tenant",
+      "source_type": "wechat_raw_message",
+      "category": "private",
+      "product_id": "",
+      "source_path": "D:\\AI\\omniauto\\runtime\\apps\\wechat_ai_customer_service\\tenants\\chejin\\raw_messages\\learning_batches\\raw_batch_f5dd5546615d307efde8.txt",
+      "chunk_index": 0,
+      "text": "[2026-05-06 14:44:00] system: 14:44\n[2026-05-06 14:50:00] system: 14:50\n[2026-05-06T14:51:18] self: 8万预算，想买个省油的车代步，有什么推荐？\n[2026-05-06T14:51:18] self: [OmniAuto客服] 您这个预算可以先看看凯美瑞、思域和秦PLUS DM-i。凯美瑞偏家用稳省心，思域更年轻，秦PLUS更省油。您是在哪个城市看车？是否考虑贷款或置换呢？\n[2026-05-06T14:51:18] self: [OmniAuto客服] 这点我不能直接替您拍板，我先把问题记下，让负责的同事核实后给您准话。\n[2026-05-06T14:51:18] self: [OmniAuto客服] 8万预算省油代步，可以看看凯美瑞、思域和秦PLUS DM-i，这几款口碑都不错。您是在哪个城市看车？是否方便了解一下贷款或置换的考虑？",
+      "char_count": 422,
+      "status": "quarantined",
+      "created_at": "2026-05-06T14:51:18",
+      "quarantine_reason": "raw_wechat_source_not_directly_retrievable",
+      "quarantined_at": "2026-05-19T01:47:03"
+    }
+  ]
+}

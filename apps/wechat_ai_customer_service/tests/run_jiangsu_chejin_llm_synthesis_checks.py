@@ -454,6 +454,11 @@ def assert_foreground_path_handled(event: dict[str, Any], case_id: str) -> None:
     route = event.get("runtime_route") if isinstance(event.get("runtime_route"), dict) else {}
     reason = str(synthesis.get("reason") or "")
     route_level = str(route.get("level") or synthesis.get("route_level") or "")
+    deterministic_handoff = event.get("action") == "handoff_sent" or bool((event.get("decision") or {}).get("need_handoff"))
+    if deterministic_handoff and reason in {"llm_reply_synthesis_disabled", "skipped_by_realtime_route"}:
+        budget = event.get("token_budget") if isinstance(event.get("token_budget"), dict) else {}
+        assert_true(int(budget.get("actual_total_tokens") or 0) == 0, f"{case_id} realtime handoff should use zero foreground LLM tokens: {budget}")
+        return
     assert_true(
         reason == "skipped_by_realtime_route" and route_level in {"L0", "L1"},
         f"{case_id} should either call DeepSeek or be skipped by deterministic realtime route: {synthesis}",

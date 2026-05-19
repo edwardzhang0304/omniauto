@@ -1,0 +1,35 @@
+{
+  "source": {
+    "source_id": "source_400cbd12dfa24b45",
+    "tenant_id": "chejin",
+    "layer": "tenant",
+    "source_type": "wechat_raw_message",
+    "category": "private",
+    "product_id": "",
+    "source_path": "D:\\AI\\omniauto\\runtime\\apps\\wechat_ai_customer_service\\tenants\\chejin\\raw_messages\\learning_batches\\raw_batch_04cabb8211079590e05e.txt",
+    "content_hash": "f4e7a2f2ffb23b8e3155fae3da77fe4b",
+    "status": "quarantined",
+    "created_at": "2026-05-06T19:27:13",
+    "updated_at": "2026-05-06T19:27:13",
+    "quarantine_reason": "raw_wechat_source_not_directly_retrievable"
+  },
+  "chunks": [
+    {
+      "chunk_id": "chunk_87592a031640cc7a",
+      "source_id": "source_400cbd12dfa24b45",
+      "tenant_id": "chejin",
+      "layer": "tenant",
+      "source_type": "wechat_raw_message",
+      "category": "private",
+      "product_id": "",
+      "source_path": "D:\\AI\\omniauto\\runtime\\apps\\wechat_ai_customer_service\\tenants\\chejin\\raw_messages\\learning_batches\\raw_batch_04cabb8211079590e05e.txt",
+      "chunk_index": 0,
+      "text": "[2026-05-06T19:27:13] self: [车金AI] 我看到了客户资料，但还缺少：姓名。请补充后我再记录。",
+      "char_count": 61,
+      "status": "quarantined",
+      "created_at": "2026-05-06T19:27:13",
+      "quarantine_reason": "raw_wechat_source_not_directly_retrievable",
+      "quarantined_at": "2026-05-19T01:47:03"
+    }
+  ]
+}

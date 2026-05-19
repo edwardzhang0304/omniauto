@@ -1,0 +1,545 @@
+{
+  "ok": false,
+  "run_id": "diag_20260506_110135_25d5b9",
+  "mode": "quick",
+  "status": "error",
+  "created_at": "2026-05-06T11:04:35",
+  "checks": [
+    {
+      "name": "quick_knowledge_validation",
+      "ok": false,
+      "issues": [
+        {
+          "code": "llm_logic_error",
+          "severity": "error",
+          "title": "LLM：逻辑错误",
+          "detail": "保修政策字段错误地包含了发货信息'下订单后48小时发货，1年质保'，应为质保条款，误导客服回答。",
+          "target": "products/wooden-rocking-chair",
+          "target_label": "products/wooden-rocking-chair",
+          "repairable": false,
+          "action_type": "review",
+          "involved_targets": [
+            "products/wooden-rocking-chair"
+          ],
+          "llm_reasoning": "保修政策字段错误地包含了发货信息'下订单后48小时发货，1年质保'，应为质保条款，误导客服回答。",
+          "suggestions": [
+            {
+              "title": "建议人工复核",
+              "detail": "LLM认为该条目可能存在问题，请人工确认后决定处理方式。",
+              "level": "warning"
+            }
+          ]
+        },
+        {
+          "code": "llm_logic_error",
+          "severity": "error",
+          "title": "LLM：逻辑错误",
+          "detail": "这些产品的shipping_policy字段中存在完全重复的句子，例如'现货，付款后48小时内发出'出现了两次，造成数据冗余，可能干扰AI解析。",
+          "target": "products/commercial_fridge_bx_200",
+          "target_label": "products/commercial_fridge_bx_200, products/office_chair_oc_300, products/packing_carton_ct_50, products/test_product_standard, products/water_filter_core",
+          "repairable": false,
+          "action_type": "review",
+          "involved_targets": [
+            "products/commercial_fridge_bx_200",
+            "products/office_chair_oc_300",
+            "products/packing_carton_ct_50",
+            "products/test_product_standard",
+            "products/water_filter_core"
+          ],
+          "llm_reasoning": "这些产品的shipping_policy字段中存在完全重复的句子，例如'现货，付款后48小时内发出'出现了两次，造成数据冗余，可能干扰AI解析。",
+          "suggestions": [
+            {
+              "title": "建议人工复核",
+              "detail": "LLM认为该条目可能存在问题，请人工确认后决定处理方式。",
+              "level": "warning"
+            }
+          ]
+        },
+        {
+          "code": "llm_logic_error",
+          "severity": "error",
+          "title": "LLM：逻辑错误",
+          "detail": "条目标识符为office_chair_oc_300，但内部sku为office_chair_oc_301且名称OC-301，标识符与内容严重不一致，会导致产品检索和展示错误。",
+          "target": "products/office_chair_oc_300",
+          "target_label": "products/office_chair_oc_300",
+          "repairable": false,
+          "action_type": "review",
+          "involved_targets": [
+            "products/office_chair_oc_300"
+          ],
+          "llm_reasoning": "条目标识符为office_chair_oc_300，但内部sku为office_chair_oc_301且名称OC-301，标识符与内容严重不一致，会导致产品检索和展示错误。",
+          "suggestions": [
+            {
+              "title": "建议人工复核",
+              "detail": "LLM认为该条目可能存在问题，请人工确认后决定处理方式。",
+              "level": "warning"
+            }
+          ]
+        },
+        {
+          "code": "llm_logic_error",
+          "severity": "error",
+          "title": "LLM：逻辑错误",
+          "detail": "两条售后政策存在冲突：after_sales设置自动回复无需转人工，而after_sales_policy_details要求转人工并标记告警，同时内容高度重复，可能导致客服行为矛盾。",
+          "target": "policies/after_sales",
+          "target_label": "policies/after_sales, policies/after_sales_policy_details",
+          "repairable": false,
+          "action_type": "merge",
+          "involved_targets": [
+            "policies/after_sales",
+            "policies/after_sales_policy_details"
+          ],
+          "llm_reasoning": "两条售后政策存在冲突：after_sales设置自动回复无需转人工，而after_sales_policy_details要求转人工并标记告警，同时内容高度重复，可能导致客服行为矛盾。",
+          "suggestions": [
+            {
+              "title": "建议合并",
+              "detail": "多条知识表达同一含义，建议保留信息最完整的一条，将其余归档。",
+              "level": "warning"
+            }
+          ]
+        },
+        {
+          "code": "llm_duplicate_semantic",
+          "severity": "warning",
+          "title": "LLM：语义重复",
+          "detail": "这两个条目都描述了发票开具的基本信息（支持类型、所需资料、开具时间等），内容高度重叠，表达同一业务含义，应合并避免维护不一致。",
+          "target": "policies/invoice",
+          "target_label": "policies/invoice, policies/invoice_policy_details",
+          "repairable": false,
+          "action_type": "merge",
+          "involved_targets": [
+            "policies/invoice",
+            "policies/invoice_policy_details"
+          ],
+          "llm_reasoning": "这两个条目都描述了发票开具的基本信息（支持类型、所需资料、开具时间等），内容高度重叠，表达同一业务含义，应合并避免维护不一致。",
+          "suggestions": [
+            {
+              "title": "建议合并",
+              "detail": "多条知识表达同一含义，建议保留信息最完整的一条，将其余归档。",
+              "level": "warning"
+            }
+          ]
+        },
+        {
+          "code": "llm_duplicate_semantic",
+          "severity": "warning",
+          "title": "LLM：语义重复",
+          "detail": "物流政策条目和物流政策详情条目内容基本一致，都涵盖仓库、承运商、发货时效、偏远地区说明等，语义重复，建议合并。",
+          "target": "policies/logistics",
+          "target_label": "policies/logistics, policies/logistics_policy_details",
+          "repairable": false,
+          "action_type": "merge",
+          "involved_targets": [
+            "policies/logistics",
+            "policies/logistics_policy_details"
+          ],
+          "llm_reasoning": "物流政策条目和物流政策详情条目内容基本一致，都涵盖仓库、承运商、发货时效、偏远地区说明等，语义重复，建议合并。",
+          "suggestions": [
+            {
+              "title": "建议合并",
+              "detail": "多条知识表达同一含义，建议保留信息最完整的一条，将其余归档。",
+              "level": "warning"
+            }
+          ]
+        },
+        {
+          "code": "llm_duplicate_semantic",
+          "severity": "warning",
+          "title": "LLM：语义重复",
+          "detail": "付款政策条目和付款政策详细条目描述了相同的支付方式、定金政策等，内容重复，建议合并以统一管理。",
+          "target": "policies/payment",
+          "target_label": "policies/payment, policies/payment_policy_details",
+          "repairable": false,
+          "action_type": "merge",
+          "involved_targets": [
+            "policies/payment",
+            "policies/payment_policy_details"
+          ],
+          "llm_reasoning": "付款政策条目和付款政策详细条目描述了相同的支付方式、定金政策等，内容重复，建议合并以统一管理。",
+          "suggestions": [
+            {
+              "title": "建议合并",
+              "detail": "多条知识表达同一含义，建议保留信息最完整的一条，将其余归档。",
+              "level": "warning"
+            }
+          ]
+        },
+        {
+          "code": "llm_duplicate_semantic",
+          "severity": "warning",
+          "title": "LLM：语义重复",
+          "detail": "偏远地区运费规则已在物流政策详情中明确说明，单独条目与物流政策详情中的remote_area_note内容重复，建议合并到物流政策中。",
+          "target": "policies/remote_area_shipping_rule",
+          "target_label": "policies/remote_area_shipping_rule, policies/logistics_policy_details",
+          "repairable": false,
+          "action_type": "merge",
+          "involved_targets": [
+            "policies/remote_area_shipping_rule",
+            "policies/logistics_policy_details"
+          ],
+          "llm_reasoning": "偏远地区运费规则已在物流政策详情中明确说明，单独条目与物流政策详情中的remote_area_note内容重复，建议合并到物流政策中。",
+          "suggestions": [
+            {
+              "title": "建议合并",
+              "detail": "多条知识表达同一含义，建议保留信息最完整的一条，将其余归档。",
+              "level": "warning"
+            }
+          ]
+        },
+        {
+          "code": "llm_logic_error",
+          "severity": "error",
+          "title": "LLM：逻辑错误",
+          "detail": "通用发票条目（invoice）只要求提供公司抬头、税号、开票类型、邮箱和手机号，而增值税专用发票规则（special_invoice_rule）额外要求注册地址、注册电话、开户行和银行账号。若AI仅按通用条目回复专票需求，将导致信息不完整，可能耽误开票。建议修改invoice条目，使其明确区分普票和专票所需资料，或删除专用条目并整合进通用条目。",
+          "target": "policies/invoice",
+          "target_label": "policies/invoice, policies/special_invoice_rule",
+          "repairable": false,
+          "action_type": "review",
+          "involved_targets": [
+            "policies/invoice",
+            "policies/special_invoice_rule"
+          ],
+          "llm_reasoning": "通用发票条目（invoice）只要求提供公司抬头、税号、开票类型、邮箱和手机号，而增值税专用发票规则（special_invoice_rule）额外要求注册地址、注册电话、开户行和银行账号。若AI仅按通用条目回复专票需求，将导致信息不完整，可能耽误开票。建议修改invoice条目，使其明确区分普票和专票所需资料，或删除专用条目并整合进通用条目。",
+          "suggestions": [
+            {
+              "title": "建议人工复核",
+              "detail": "LLM认为该条目可能存在问题，请人工确认后决定处理方式。",
+              "level": "warning"
+            }
+          ]
+        },
+        {
+          "code": "llm_rag_quality_low",
+          "severity": "warning",
+          "title": "LLM：RAG经验质量低",
+          "detail": "该RAG经验内容为微信文件传输日志的重复消息摘要，无任何业务价值，质量极低，会污染知识库并干扰检索。",
+          "target": "rag_exp_d84934c77ccfb04b4994",
+          "target_label": "rag_exp_d84934c77ccfb04b4994",
+          "repairable": false,
+          "action_type": "delete",
+          "involved_targets": [
+            "rag_exp_d84934c77ccfb04b4994"
+          ],
+          "llm_reasoning": "该RAG经验内容为微信文件传输日志的重复消息摘要，无任何业务价值，质量极低，会污染知识库并干扰检索。",
+          "suggestions": [
+            {
+              "title": "建议删除",
+              "detail": "该条目存在明显错误或不适用，建议归档或废弃。",
+              "level": "danger"
+            }
+          ]
+        },
+        {
+          "code": "knowledge_token_budget_large",
+          "severity": "info",
+          "title": "知识体积较大",
+          "detail": "当前分类知识库总量估算约 42826 token。这不是知识格式故障，也没有某条知识需要立即删除；它提醒后续继续按客户问题检索相关知识，避免一次性加载全部知识。",
+          "target_label": "全局知识库",
+          "details": [
+            {
+              "label": "问题性质",
+              "value": "容量提示，不是知识格式故障",
+              "level": "normal"
+            },
+            {
+              "label": "估算总量",
+              "value": "约 42826 token",
+              "level": "warning"
+            },
+            {
+              "label": "检测阈值",
+              "value": "超过 7000 token 时提示",
+              "level": "normal"
+            },
+            {
+              "label": "文件数量",
+              "value": "68 个 JSON 文件",
+              "level": "normal"
+            },
+            {
+              "label": "chats",
+              "value": "约 8788 token / 16 个文件",
+              "level": "normal"
+            },
+            {
+              "label": "erp_exports",
+              "value": "约 860 token / 2 个文件",
+              "level": "normal"
+            },
+            {
+              "label": "policies",
+              "value": "约 24976 token / 39 个文件",
+              "level": "normal"
+            },
+            {
+              "label": "products",
+              "value": "约 7508 token / 11 个文件",
+              "level": "normal"
+            }
+          ],
+          "suggestions": [
+            {
+              "title": "不建议自动删除知识",
+              "detail": "当前没有发现哪一条知识错误，系统不能为了降低体积擅自删内容。",
+              "level": "danger"
+            },
+            {
+              "title": "继续保持按门类和问题范围检索",
+              "detail": "客服运行时应只取相关商品、政策、话术和上下文证据，不要把全库一次性塞给大模型。",
+              "level": "normal"
+            },
+            {
+              "title": "如果后续继续变大",
+              "detail": "优先拆分过长政策、归档过期商品、把重复话术合并为模板，再重新检测。",
+              "level": "warning"
+            }
+          ],
+          "repairable": false
+        }
+      ],
+      "token_budget_estimate": 42826,
+      "recent_only": true
+    }
+  ],
+  "issues": [
+    {
+      "code": "llm_logic_error",
+      "severity": "error",
+      "title": "LLM：逻辑错误",
+      "detail": "保修政策字段错误地包含了发货信息'下订单后48小时发货，1年质保'，应为质保条款，误导客服回答。",
+      "target": "products/wooden-rocking-chair",
+      "target_label": "products/wooden-rocking-chair",
+      "repairable": false,
+      "action_type": "review",
+      "involved_targets": [
+        "products/wooden-rocking-chair"
+      ],
+      "llm_reasoning": "保修政策字段错误地包含了发货信息'下订单后48小时发货，1年质保'，应为质保条款，误导客服回答。",
+      "suggestions": [
+        {
+          "title": "建议人工复核",
+          "detail": "LLM认为该条目可能存在问题，请人工确认后决定处理方式。",
+          "level": "warning"
+        }
+      ],
+      "fingerprint": "9b6fbf37ed6b4202db9cfe26"
+    },
+    {
+      "code": "llm_logic_error",
+      "severity": "error",
+      "title": "LLM：逻辑错误",
+      "detail": "这些产品的shipping_policy字段中存在完全重复的句子，例如'现货，付款后48小时内发出'出现了两次，造成数据冗余，可能干扰AI解析。",
+      "target": "products/commercial_fridge_bx_200",
+      "target_label": "products/commercial_fridge_bx_200, products/office_chair_oc_300, products/packing_carton_ct_50, products/test_product_standard, products/water_filter_core",
+      "repairable": false,
+      "action_type": "review",
+      "involved_targets": [
+        "products/commercial_fridge_bx_200",
+        "products/office_chair_oc_300",
+        "products/packing_carton_ct_50",
+        "products/test_product_standard",
+        "products/water_filter_core"
+      ],
+      "llm_reasoning": "这些产品的shipping_policy字段中存在完全重复的句子，例如'现货，付款后48小时内发出'出现了两次，造成数据冗余，可能干扰AI解析。",
+      "suggestions": [
+        {
+          "title": "建议人工复核",
+          "detail": "LLM认为该条目可能存在问题，请人工确认后决定处理方式。",
+          "level": "warning"
+        }
+      ],
+      "fingerprint": "55213c6fb81ca7121946953f"
+    },
+    {
+      "code": "llm_logic_error",
+      "severity": "error",
+      "title": "LLM：逻辑错误",
+      "detail": "条目标识符为office_chair_oc_300，但内部sku为office_chair_oc_301且名称OC-301，标识符与内容严重不一致，会导致产品检索和展示错误。",
+      "target": "products/office_chair_oc_300",
+      "target_label": "products/office_chair_oc_300",
+      "repairable": false,
+      "action_type": "review",
+      "involved_targets": [
+        "products/office_chair_oc_300"
+      ],
+      "llm_reasoning": "条目标识符为office_chair_oc_300，但内部sku为office_chair_oc_301且名称OC-301，标识符与内容严重不一致，会导致产品检索和展示错误。",
+      "suggestions": [
+        {
+          "title": "建议人工复核",
+          "detail": "LLM认为该条目可能存在问题，请人工确认后决定处理方式。",
+          "level": "warning"
+        }
+      ],
+      "fingerprint": "40e4ba87aeb3acb706747bf5"
+    },
+    {
+      "code": "llm_logic_error",
+      "severity": "error",
+      "title": "LLM：逻辑错误",
+      "detail": "两条售后政策存在冲突：after_sales设置自动回复无需转人工，而after_sales_policy_details要求转人工并标记告警，同时内容高度重复，可能导致客服行为矛盾。",
+      "target": "policies/after_sales",
+      "target_label": "policies/after_sales, policies/after_sales_policy_details",
+      "repairable": false,
+      "action_type": "merge",
+      "involved_targets": [
+        "policies/after_sales",
+        "policies/after_sales_policy_details"
+      ],
+      "llm_reasoning": "两条售后政策存在冲突：after_sales设置自动回复无需转人工，而after_sales_policy_details要求转人工并标记告警，同时内容高度重复，可能导致客服行为矛盾。",
+      "suggestions": [
+        {
+          "title": "建议合并",
+          "detail": "多条知识表达同一含义，建议保留信息最完整的一条，将其余归档。",
+          "level": "warning"
+        }
+      ],
+      "fingerprint": "654e46d6ae5c83075a95f669"
+    },
+    {
+      "code": "llm_duplicate_semantic",
+      "severity": "warning",
+      "title": "LLM：语义重复",
+      "detail": "这两个条目都描述了发票开具的基本信息（支持类型、所需资料、开具时间等），内容高度重叠，表达同一业务含义，应合并避免维护不一致。",
+      "target": "policies/invoice",
+      "target_label": "policies/invoice, policies/invoice_policy_details",
+      "repairable": false,
+      "action_type": "merge",
+      "involved_targets": [
+        "policies/invoice",
+        "policies/invoice_policy_details"
+      ],
+      "llm_reasoning": "这两个条目都描述了发票开具的基本信息（支持类型、所需资料、开具时间等），内容高度重叠，表达同一业务含义，应合并避免维护不一致。",
+      "suggestions": [
+        {
+          "title": "建议合并",
+          "detail": "多条知识表达同一含义，建议保留信息最完整的一条，将其余归档。",
+          "level": "warning"
+        }
+      ],
+      "fingerprint": "21900eefd6027d89dfe34f84"
+    },
+    {
+      "code": "llm_duplicate_semantic",
+      "severity": "warning",
+      "title": "LLM：语义重复",
+      "detail": "物流政策条目和物流政策详情条目内容基本一致，都涵盖仓库、承运商、发货时效、偏远地区说明等，语义重复，建议合并。",
+      "target": "policies/logistics",
+      "target_label": "policies/logistics, policies/logistics_policy_details",
+      "repairable": false,
+      "action_type": "merge",
+      "involved_targets": [
+        "policies/logistics",
+        "policies/logistics_policy_details"
+      ],
+      "llm_reasoning": "物流政策条目和物流政策详情条目内容基本一致，都涵盖仓库、承运商、发货时效、偏远地区说明等，语义重复，建议合并。",
+      "suggestions": [
+        {
+          "title": "建议合并",
+          "detail": "多条知识表达同一含义，建议保留信息最完整的一条，将其余归档。",
+          "level": "warning"
+        }
+      ],
+      "fingerprint": "78727ce621e64ec14a164326"
+    },
+    {
+      "code": "llm_duplicate_semantic",
+      "severity": "warning",
+      "title": "LLM：语义重复",
+      "detail": "付款政策条目和付款政策详细条目描述了相同的支付方式、定金政策等，内容重复，建议合并以统一管理。",
+      "target": "policies/payment",
+      "target_label": "policies/payment, policies/payment_policy_details",
+      "repairable": false,
+      "action_type": "merge",
+      "involved_targets": [
+        "policies/payment",
+        "policies/payment_policy_details"
+      ],
+      "llm_reasoning": "付款政策条目和付款政策详细条目描述了相同的支付方式、定金政策等，内容重复，建议合并以统一管理。",
+      "suggestions": [
+        {
+          "title": "建议合并",
+          "detail": "多条知识表达同一含义，建议保留信息最完整的一条，将其余归档。",
+          "level": "warning"
+        }
+      ],
+      "fingerprint": "1a345f76d45fe3e96814e357"
+    },
+    {
+      "code": "llm_duplicate_semantic",
+      "severity": "warning",
+      "title": "LLM：语义重复",
+      "detail": "偏远地区运费规则已在物流政策详情中明确说明，单独条目与物流政策详情中的remote_area_note内容重复，建议合并到物流政策中。",
+      "target": "policies/remote_area_shipping_rule",
+      "target_label": "policies/remote_area_shipping_rule, policies/logistics_policy_details",
+      "repairable": false,
+      "action_type": "merge",
+      "involved_targets": [
+        "policies/remote_area_shipping_rule",
+        "policies/logistics_policy_details"
+      ],
+      "llm_reasoning": "偏远地区运费规则已在物流政策详情中明确说明，单独条目与物流政策详情中的remote_area_note内容重复，建议合并到物流政策中。",
+      "suggestions": [
+        {
+          "title": "建议合并",
+          "detail": "多条知识表达同一含义，建议保留信息最完整的一条，将其余归档。",
+          "level": "warning"
+        }
+      ],
+      "fingerprint": "c3ed69f388338e0fe1818b3c"
+    },
+    {
+      "code": "llm_logic_error",
+      "severity": "error",
+      "title": "LLM：逻辑错误",
+      "detail": "通用发票条目（invoice）只要求提供公司抬头、税号、开票类型、邮箱和手机号，而增值税专用发票规则（special_invoice_rule）额外要求注册地址、注册电话、开户行和银行账号。若AI仅按通用条目回复专票需求，将导致信息不完整，可能耽误开票。建议修改invoice条目，使其明确区分普票和专票所需资料，或删除专用条目并整合进通用条目。",
+      "target": "policies/invoice",
+      "target_label": "policies/invoice, policies/special_invoice_rule",
+      "repairable": false,
+      "action_type": "review",
+      "involved_targets": [
+        "policies/invoice",
+        "policies/special_invoice_rule"
+      ],
+      "llm_reasoning": "通用发票条目（invoice）只要求提供公司抬头、税号、开票类型、邮箱和手机号，而增值税专用发票规则（special_invoice_rule）额外要求注册地址、注册电话、开户行和银行账号。若AI仅按通用条目回复专票需求，将导致信息不完整，可能耽误开票。建议修改invoice条目，使其明确区分普票和专票所需资料，或删除专用条目并整合进通用条目。",
+      "suggestions": [
+        {
+          "title": "建议人工复核",
+          "detail": "LLM认为该条目可能存在问题，请人工确认后决定处理方式。",
+          "level": "warning"
+        }
+      ],
+      "fingerprint": "666db65e33a304397fda10e4"
+    },
+    {
+      "code": "llm_rag_quality_low",
+      "severity": "warning",
+      "title": "LLM：RAG经验质量低",
+      "detail": "该RAG经验内容为微信文件传输日志的重复消息摘要，无任何业务价值，质量极低，会污染知识库并干扰检索。",
+      "target": "rag_exp_d84934c77ccfb04b4994",
+      "target_label": "rag_exp_d84934c77ccfb04b4994",
+      "repairable": false,
+      "action_type": "delete",
+      "involved_targets": [
+        "rag_exp_d84934c77ccfb04b4994"
+      ],
+      "llm_reasoning": "该RAG经验内容为微信文件传输日志的重复消息摘要，无任何业务价值，质量极低，会污染知识库并干扰检索。",
+      "suggestions": [
+        {
+          "title": "建议删除",
+          "detail": "该条目存在明显错误或不适用，建议归档或废弃。",
+          "level": "danger"
+        }
+      ],
+      "fingerprint": "26e05c638a1ffc1c0bf66bf2"
+    }
+  ],
+  "ignored_count": 0,
+  "summary": {
+    "error_count": 5,
+    "warning_count": 5,
+    "info_count": 0,
+    "ignored_count": 0,
+    "hidden_notice_count": 1
+  },
+  "auto_dedup_rag": null
+}

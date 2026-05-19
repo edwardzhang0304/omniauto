@@ -26,6 +26,7 @@ ADMIN_GENERATOR_ROOT = PROJECT_ROOT / "runtime" / "apps" / "wechat_ai_customer_s
 DIAGNOSTIC_IGNORES_PATH = PROJECT_ROOT / "runtime" / "apps" / "wechat_ai_customer_service" / "admin" / "diagnostic_ignores.json"
 TEST_ARTIFACTS = PROJECT_ROOT / "runtime" / "apps" / "wechat_ai_customer_service" / "test_artifacts"
 VERSIONS_ROOT = APP_ROOT / "data" / "versions"
+COMPILED_COMPAT_ROOT = APP_ROOT / "data" / "compiled" / "structured_compat"
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 os.environ.setdefault("WECHAT_CLOUD_REQUIRED", "0")
@@ -136,6 +137,22 @@ def _ensure_cloud_snapshot() -> None:
     snapshot_path.write_text(json.dumps(minimal, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
+def snapshot_files(paths: list[Path]) -> dict[Path, bytes | None]:
+    snapshot: dict[Path, bytes | None] = {}
+    for path in paths:
+        snapshot[path] = path.read_bytes() if path.exists() else None
+    return snapshot
+
+
+def restore_file_snapshot(snapshot: dict[Path, bytes | None]) -> None:
+    for path, content in snapshot.items():
+        if content is None:
+            path.unlink(missing_ok=True)
+            continue
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(content)
+
+
 CHAPTERS = ["foundation", "readonly", "drafts", "generator", "candidates", "diagnostics", "all"]
 KNOWLEDGE_BASE_ROOT = default_admin_knowledge_base_root()
 
@@ -161,19 +178,33 @@ def main() -> int:
 
 def run_checks(chapter: str) -> dict[str, Any]:
     _ensure_cloud_snapshot()
+    product_store = ProductMasterStore()
+    source_fixture_snapshot = snapshot_files(
+        [
+            product_store.manifest_path,
+            product_store.item_path("commercial_fridge_bx_200"),
+            COMPILED_COMPAT_ROOT / "manifest.json",
+            COMPILED_COMPAT_ROOT / "metadata.json",
+            COMPILED_COMPAT_ROOT / "product_knowledge.example.json",
+            COMPILED_COMPAT_ROOT / "style_examples.json",
+        ]
+    )
     client = TestClient(create_app())
     checks = checks_for_chapter(chapter)
     results = []
-    for check in checks:
-        try:
-            check(client)
-            results.append({"name": check.__name__, "ok": True})
-        except Exception as exc:
-            results.append({"name": check.__name__, "ok": False, "error": repr(exc)})
-            if chapter != "all":
-                break
-    failures = [item for item in results if not item.get("ok")]
-    return {"ok": not failures, "chapter": chapter, "count": len(results), "failures": failures, "results": results}
+    try:
+        for check in checks:
+            try:
+                check(client)
+                results.append({"name": check.__name__, "ok": True})
+            except Exception as exc:
+                results.append({"name": check.__name__, "ok": False, "error": repr(exc)})
+                if chapter != "all":
+                    break
+        failures = [item for item in results if not item.get("ok")]
+        return {"ok": not failures, "chapter": chapter, "count": len(results), "failures": failures, "results": results}
+    finally:
+        restore_file_snapshot(source_fixture_snapshot)
 
 
 def checks_for_chapter(chapter: str) -> list[Any]:
@@ -367,6 +398,8 @@ def check_static_assets(client: TestClient) -> None:
     assert_true("category-select" in js.text, "frontend should expose category selector")
     assert_true("rag-search" in js.text, "frontend should expose rag search action")
     assert_true("/api/rag/status" in js.text, "frontend should call rag status endpoint")
+    assert_true("本账号通用" in js.text, "frontend should label tenant-level scope as account-level, not cross-account shared knowledge")
+    assert_true("不代表VPS公共共享知识" in js.text, "frontend should clarify account-global knowledge is not VPS shared public knowledge")
     assert_true("/api/rag/sources" in js.text, "frontend should call rag source list endpoint")
     assert_true("/api/rag/analytics" in js.text, "frontend should call rag analytics endpoint")
     assert_true("ai_reference" in js.text, "frontend should expose AI reference page")
@@ -1261,6 +1294,7 @@ def check_customer_service_and_product_console(client: TestClient) -> None:
     settings_item = settings_response.json().get("item", {})
     original_settings = dict(settings_item.get("settings") or {})
     created_session_ids: list[str] = []
+    product_fixture_snapshot: dict[Path, bytes | None] = {}
     try:
         updated_settings = {
             **original_settings,
@@ -1295,6 +1329,8 @@ def check_customer_service_and_product_console(client: TestClient) -> None:
         active_product = next((item for item in items if item.get("id") == "commercial_fridge_bx_200"), None)
         active_product = active_product or next((item for item in items if item.get("status") == "active"), items[0])
         product_id = str(active_product.get("id") or "")
+        product_store = ProductMasterStore()
+        product_fixture_snapshot = snapshot_files([product_store.item_path(product_id), product_store.manifest_path])
         original_inventory = coerce_test_inventory((active_product.get("data") or {}).get("inventory"))
         inventory_update = client.post(
             f"/api/product-console/products/{product_id}/inventory",
@@ -1356,6 +1392,7 @@ def check_customer_service_and_product_console(client: TestClient) -> None:
     finally:
         client.put("/api/customer-service/settings", json=original_settings)
         cleanup_generator_sessions(created_session_ids)
+        restore_file_snapshot(product_fixture_snapshot)
 
 
 def check_knowledge_categories_api(client: TestClient) -> None:
@@ -1487,6 +1524,14 @@ def check_ai_knowledge_generator_flow(client: TestClient) -> None:
     created_item_paths: list[Path] = []
     created_session_ids: list[str] = []
     created_rag_experience_ids: list[str] = []
+    compiled_snapshot = snapshot_files(
+        [
+            COMPILED_COMPAT_ROOT / "manifest.json",
+            COMPILED_COMPAT_ROOT / "metadata.json",
+            COMPILED_COMPAT_ROOT / "product_knowledge.example.json",
+            COMPILED_COMPAT_ROOT / "style_examples.json",
+        ]
+    )
     try:
         message = (
             "\u65b0\u589e\u5546\u54c1\uff1a\u7ba1\u7406\u53f0\u751f\u6210\u5668\u6d4b\u8bd5\u5546\u54c1\uff0c"
@@ -1651,7 +1696,7 @@ def check_ai_knowledge_generator_flow(client: TestClient) -> None:
             if path.exists():
                 path.unlink()
         cleanup_generator_sessions(created_session_ids)
-        KnowledgeCompiler().compile_to_disk()
+        restore_file_snapshot(compiled_snapshot)
 
 
 def check_upload_learning_candidate_apply_and_reject(client: TestClient) -> None:

@@ -1,0 +1,695 @@
+{
+  "ok": true,
+  "run_id": "diag_20260508_102704_3cda8b",
+  "mode": "full",
+  "status": "ok",
+  "created_at": "2026-05-08T10:28:50",
+  "checks": [
+    {
+      "name": "quick_knowledge_validation",
+      "ok": true,
+      "issues": [
+        {
+          "code": "llm_duplicate_semantic",
+          "severity": "warning",
+          "title": "LLM：语义重复",
+          "detail": "shipping_policy字段内容重复出现两次'现货，付款后 48 小时内发出'，属于语义重复，建议合并为一条。",
+          "target": "products/commercial_fridge_bx_200",
+          "target_label": "products/commercial_fridge_bx_200",
+          "repairable": false,
+          "action_type": "review",
+          "involved_targets": [
+            "products/commercial_fridge_bx_200"
+          ],
+          "llm_reasoning": "shipping_policy字段内容重复出现两次'现货，付款后 48 小时内发出'，属于语义重复，建议合并为一条。",
+          "suggestions": [
+            {
+              "title": "建议人工复核",
+              "detail": "LLM认为该条目可能存在问题，请人工确认后决定处理方式。",
+              "level": "warning"
+            }
+          ]
+        },
+        {
+          "code": "llm_duplicate_semantic",
+          "severity": "warning",
+          "title": "LLM：语义重复",
+          "detail": "shipping_policy字段内容重复出现两次'现货，付款后 72 小时内发货'，属于语义重复，建议合并为一条。",
+          "target": "products/office_chair_oc_300",
+          "target_label": "products/office_chair_oc_300",
+          "repairable": false,
+          "action_type": "review",
+          "involved_targets": [
+            "products/office_chair_oc_300"
+          ],
+          "llm_reasoning": "shipping_policy字段内容重复出现两次'现货，付款后 72 小时内发货'，属于语义重复，建议合并为一条。",
+          "suggestions": [
+            {
+              "title": "建议人工复核",
+              "detail": "LLM认为该条目可能存在问题，请人工确认后决定处理方式。",
+              "level": "warning"
+            }
+          ]
+        },
+        {
+          "code": "llm_duplicate_semantic",
+          "severity": "warning",
+          "title": "LLM：语义重复",
+          "detail": "shipping_policy字段内容重复出现两次'常规尺寸现货，24 小时内出库'，属于语义重复，建议合并为一条。",
+          "target": "products/packing_carton_ct_50",
+          "target_label": "products/packing_carton_ct_50",
+          "repairable": false,
+          "action_type": "review",
+          "involved_targets": [
+            "products/packing_carton_ct_50"
+          ],
+          "llm_reasoning": "shipping_policy字段内容重复出现两次'常规尺寸现货，24 小时内出库'，属于语义重复，建议合并为一条。",
+          "suggestions": [
+            {
+              "title": "建议人工复核",
+              "detail": "LLM认为该条目可能存在问题，请人工确认后决定处理方式。",
+              "level": "warning"
+            }
+          ]
+        },
+        {
+          "code": "llm_duplicate_semantic",
+          "severity": "warning",
+          "title": "LLM：语义重复",
+          "detail": "shipping_policy字段内容重复出现两次'常备库存，24 小时内发货'，属于语义重复，建议合并为一条。",
+          "target": "products/water_filter_core",
+          "target_label": "products/water_filter_core",
+          "repairable": false,
+          "action_type": "review",
+          "involved_targets": [
+            "products/water_filter_core"
+          ],
+          "llm_reasoning": "shipping_policy字段内容重复出现两次'常备库存，24 小时内发货'，属于语义重复，建议合并为一条。",
+          "suggestions": [
+            {
+              "title": "建议人工复核",
+              "detail": "LLM认为该条目可能存在问题，请人工确认后决定处理方式。",
+              "level": "warning"
+            }
+          ]
+        },
+        {
+          "code": "llm_duplicate_semantic",
+          "severity": "warning",
+          "title": "LLM：语义重复",
+          "detail": "shipping_policy字段内容重复出现两次'下订单后48小时发货，1年质保'，属于语义重复，建议合并为一条。",
+          "target": "products/wooden-rocking-chair",
+          "target_label": "products/wooden-rocking-chair",
+          "repairable": false,
+          "action_type": "review",
+          "involved_targets": [
+            "products/wooden-rocking-chair"
+          ],
+          "llm_reasoning": "shipping_policy字段内容重复出现两次'下订单后48小时发货，1年质保'，属于语义重复，建议合并为一条。",
+          "suggestions": [
+            {
+              "title": "建议人工复核",
+              "detail": "LLM认为该条目可能存在问题，请人工确认后决定处理方式。",
+              "level": "warning"
+            }
+          ]
+        },
+        {
+          "code": "llm_duplicate_semantic",
+          "severity": "warning",
+          "title": "LLM：语义重复",
+          "detail": "两条条目都包含公司名称、地址、主营范围等相同信息，属于语义重复，建议合并。",
+          "target": "policies/company_profile",
+          "target_label": "policies/company_profile, policies/item_2712d3045ad2",
+          "repairable": false,
+          "action_type": "merge",
+          "involved_targets": [
+            "policies/company_profile",
+            "policies/item_2712d3045ad2"
+          ],
+          "llm_reasoning": "两条条目都包含公司名称、地址、主营范围等相同信息，属于语义重复，建议合并。",
+          "suggestions": [
+            {
+              "title": "建议合并",
+              "detail": "多条知识表达同一含义，建议保留信息最完整的一条，将其余归档。",
+              "level": "warning"
+            }
+          ]
+        },
+        {
+          "code": "llm_duplicate_semantic",
+          "severity": "warning",
+          "title": "LLM：语义重复",
+          "detail": "两条条目都涉及账期、月结、先货后款等需要人工审核的政策，内容高度重叠，建议合并或删除一条。",
+          "target": "policies/contract",
+          "target_label": "policies/contract, policies/credit-term-policy",
+          "repairable": false,
+          "action_type": "merge",
+          "involved_targets": [
+            "policies/contract",
+            "policies/credit-term-policy"
+          ],
+          "llm_reasoning": "两条条目都涉及账期、月结、先货后款等需要人工审核的政策，内容高度重叠，建议合并或删除一条。",
+          "suggestions": [
+            {
+              "title": "建议合并",
+              "detail": "多条知识表达同一含义，建议保留信息最完整的一条，将其余归档。",
+              "level": "warning"
+            }
+          ]
+        },
+        {
+          "code": "llm_rag_quality_low",
+          "severity": "warning",
+          "title": "LLM：RAG经验质量低",
+          "detail": "内容完全重复且为测试数据'暂存缺价测试商品'，无实际业务价值，质量极低。",
+          "target": "rag_exp_9a6790ce2d781ce0a11e",
+          "target_label": "rag_exp_9a6790ce2d781ce0a11e",
+          "repairable": false,
+          "action_type": "delete",
+          "involved_targets": [
+            "rag_exp_9a6790ce2d781ce0a11e"
+          ],
+          "llm_reasoning": "内容完全重复且为测试数据'暂存缺价测试商品'，无实际业务价值，质量极低。",
+          "suggestions": [
+            {
+              "title": "建议删除",
+              "detail": "该条目存在明显错误或不适用，建议归档或废弃。",
+              "level": "danger"
+            }
+          ]
+        },
+        {
+          "code": "llm_rag_quality_low",
+          "severity": "warning",
+          "title": "LLM：RAG经验质量低",
+          "detail": "内容重复三次，且为自动化测试数据，实际业务意义不大，影响RAG质量。",
+          "target": "rag_exp_794f04141b28161c0a3e",
+          "target_label": "rag_exp_794f04141b28161c0a3e",
+          "repairable": false,
+          "action_type": "delete",
+          "involved_targets": [
+            "rag_exp_794f04141b28161c0a3e"
+          ],
+          "llm_reasoning": "内容重复三次，且为自动化测试数据，实际业务意义不大，影响RAG质量。",
+          "suggestions": [
+            {
+              "title": "建议删除",
+              "detail": "该条目存在明显错误或不适用，建议归档或废弃。",
+              "level": "danger"
+            }
+          ]
+        },
+        {
+          "code": "llm_rag_quality_low",
+          "severity": "warning",
+          "title": "LLM：RAG经验质量低",
+          "detail": "内容为无意义测试字符串'duplicate candidate probe'重复，完全无用。",
+          "target": "rag_exp_5a574e8d242fc86a1b3d",
+          "target_label": "rag_exp_5a574e8d242fc86a1b3d",
+          "repairable": false,
+          "action_type": "delete",
+          "involved_targets": [
+            "rag_exp_5a574e8d242fc86a1b3d"
+          ],
+          "llm_reasoning": "内容为无意义测试字符串'duplicate candidate probe'重复，完全无用。",
+          "suggestions": [
+            {
+              "title": "建议删除",
+              "detail": "该条目存在明显错误或不适用，建议归档或废弃。",
+              "level": "danger"
+            }
+          ]
+        },
+        {
+          "code": "llm_duplicate_semantic",
+          "severity": "warning",
+          "title": "LLM：语义重复",
+          "detail": "同一对话重复三次，造成冗余，建议仅保留一个实例。",
+          "target": "rag_exp_89af65a4428a33bb5815",
+          "target_label": "rag_exp_89af65a4428a33bb5815",
+          "repairable": false,
+          "action_type": "delete",
+          "involved_targets": [
+            "rag_exp_89af65a4428a33bb5815"
+          ],
+          "llm_reasoning": "同一对话重复三次，造成冗余，建议仅保留一个实例。",
+          "suggestions": [
+            {
+              "title": "建议删除",
+              "detail": "该条目存在明显错误或不适用，建议归档或废弃。",
+              "level": "danger"
+            }
+          ]
+        },
+        {
+          "code": "llm_duplicate_semantic",
+          "severity": "warning",
+          "title": "LLM：语义重复",
+          "detail": "同一对话重复三次，造成冗余，建议仅保留一个实例。",
+          "target": "rag_exp_f971aabb8e11c74a05e0",
+          "target_label": "rag_exp_f971aabb8e11c74a05e0",
+          "repairable": false,
+          "action_type": "delete",
+          "involved_targets": [
+            "rag_exp_f971aabb8e11c74a05e0"
+          ],
+          "llm_reasoning": "同一对话重复三次，造成冗余，建议仅保留一个实例。",
+          "suggestions": [
+            {
+              "title": "建议删除",
+              "detail": "该条目存在明显错误或不适用，建议归档或废弃。",
+              "level": "danger"
+            }
+          ]
+        },
+        {
+          "code": "llm_rag_quality_low",
+          "severity": "warning",
+          "title": "LLM：RAG经验质量低",
+          "detail": "内容重复三次，且与正式知识库'专票开具资料'不完全一致（缺少注册电话和银行账号），可能引起混淆。",
+          "target": "rag_exp_3a14a2970b3c90d11fc5",
+          "target_label": "rag_exp_3a14a2970b3c90d11fc5",
+          "repairable": false,
+          "action_type": "review",
+          "involved_targets": [
+            "rag_exp_3a14a2970b3c90d11fc5"
+          ],
+          "llm_reasoning": "内容重复三次，且与正式知识库'专票开具资料'不完全一致（缺少注册电话和银行账号），可能引起混淆。",
+          "suggestions": [
+            {
+              "title": "建议人工复核",
+              "detail": "LLM认为该条目可能存在问题，请人工确认后决定处理方式。",
+              "level": "warning"
+            }
+          ]
+        },
+        {
+          "code": "knowledge_token_budget_large",
+          "severity": "info",
+          "title": "知识体积较大",
+          "detail": "当前分类知识库总量估算约 42840 token。这不是知识格式故障，也没有某条知识需要立即删除；它提醒后续继续按客户问题检索相关知识，避免一次性加载全部知识。",
+          "target_label": "全局知识库",
+          "details": [
+            {
+              "label": "问题性质",
+              "value": "容量提示，不是知识格式故障",
+              "level": "normal"
+            },
+            {
+              "label": "估算总量",
+              "value": "约 42840 token",
+              "level": "warning"
+            },
+            {
+              "label": "检测阈值",
+              "value": "超过 7000 token 时提示",
+              "level": "normal"
+            },
+            {
+              "label": "文件数量",
+              "value": "68 个 JSON 文件",
+              "level": "normal"
+            },
+            {
+              "label": "chats",
+              "value": "约 8788 token / 16 个文件",
+              "level": "normal"
+            },
+            {
+              "label": "erp_exports",
+              "value": "约 860 token / 2 个文件",
+              "level": "normal"
+            },
+            {
+              "label": "policies",
+              "value": "约 24981 token / 39 个文件",
+              "level": "normal"
+            },
+            {
+              "label": "products",
+              "value": "约 7517 token / 11 个文件",
+              "level": "normal"
+            }
+          ],
+          "suggestions": [
+            {
+              "title": "不建议自动删除知识",
+              "detail": "当前没有发现哪一条知识错误，系统不能为了降低体积擅自删内容。",
+              "level": "danger"
+            },
+            {
+              "title": "继续保持按门类和问题范围检索",
+              "detail": "客服运行时应只取相关商品、政策、话术和上下文证据，不要把全库一次性塞给大模型。",
+              "level": "normal"
+            },
+            {
+              "title": "如果后续继续变大",
+              "detail": "优先拆分过长政策、归档过期商品、把重复话术合并为模板，再重新检测。",
+              "level": "warning"
+            }
+          ],
+          "repairable": false
+        }
+      ],
+      "token_budget_estimate": 42840,
+      "recent_only": false
+    },
+    {
+      "name": "knowledge_runtime",
+      "ok": true,
+      "returncode": 0,
+      "stdout_tail": "rue\n    },\n    {\n      \"name\": \"check_invoice_hits_policies\",\n      \"ok\": true\n    },\n    {\n      \"name\": \"check_public_bank_account_can_auto_reply\",\n      \"ok\": true\n    },\n    {\n      \"name\": \"check_context_product_shipping\",\n      \"ok\": true\n    },\n    {\n      \"name\": \"check_chat_style_hits_chats\",\n      \"ok\": true\n    },\n    {\n      \"name\": \"check_global_guidelines_are_layered_style_context\",\n      \"ok\": true\n    },\n    {\n      \"name\": \"check_tenant_visible_catalog_policy_drives_used_car_catalog\",\n      \"ok\": true\n    },\n    {\n      \"name\": \"check_tenant_formal_overrides_conflicting_shared_public\",\n      \"ok\": true\n    },\n    {\n      \"name\": \"check_product_scoped_rule_requires_product_context\",\n      \"ok\": true\n    },\n    {\n      \"name\": \"check_general_knowledge_applicability_scope\",\n      \"ok\": true\n    },\n    {\n      \"name\": \"check_manual_boundary_requires_handoff\",\n      \"ok\": true\n    },\n    {\n      \"name\": \"check_unknown_business_question_handoffs\",\n      \"ok\": true\n    },\n    {\n      \"name\": \"check_custom_category_can_return_evidence\",\n      \"ok\": true\n    },\n    {\n      \"name\": \"check_unread_formal_product_is_visible_but_not_runtime_usable\",\n      \"ok\": true\n    }\n  ]\n}\n",
+      "stderr_tail": "",
+      "issues": []
+    },
+    {
+      "name": "knowledge_compiler",
+      "ok": true,
+      "returncode": 0,
+      "stdout_tail": "{\n  \"ok\": true,\n  \"count\": 3,\n  \"failures\": [],\n  \"results\": [\n    {\n      \"name\": \"check_compile_to_disk_writes_expected_files\",\n      \"ok\": true\n    },\n    {\n      \"name\": \"check_compiled_counts_match_category_source\",\n      \"ok\": true\n    },\n    {\n      \"name\": \"check_compiled_product_knowledge_is_legacy_compatible\",\n      \"ok\": true\n    }\n  ]\n}\n",
+      "stderr_tail": "",
+      "issues": []
+    },
+    {
+      "name": "offline_regression",
+      "ok": true,
+      "returncode": 0,
+      "stdout_tail": "{\n  \"ok\": true,\n  \"scenario_path\": \"D:\\\\AI\\\\omniauto\\\\apps\\\\wechat_ai_customer_service\\\\tests\\\\scenarios\\\\offline_regression.json\",\n  \"count\": 11,\n  \"failures\": [],\n  \"results\": [\n    {\n      \"name\": \"catalog_request\",\n      \"ok\": true\n    },\n    {\n      \"name\": \"product_quote\",\n      \"ok\": true\n    },\n    {\n      \"name\": \"below_tier_discount_handoff\",\n      \"ok\": true\n    },\n    {\n      \"name\": \"invoice_policy\",\n      \"ok\": true\n    },\n    {\n      \"name\": \"warranty_policy\",\n      \"ok\": true\n    },\n    {\n      \"name\": \"context_shipping\",\n      \"ok\": true\n    },\n    {\n      \"name\": \"evidence_discount_handoff\",\n      \"ok\": true\n    },\n    {\n      \"name\": \"customer_data_complete\",\n      \"ok\": true\n    },\n    {\n      \"name\": \"greeting_not_customer_data\",\n      \"ok\": true\n    },\n    {\n      \"name\": \"manual_handoff_contract\",\n      \"ok\": true\n    },\n    {\n      \"name\": \"no_relevant_business_evidence\",\n      \"ok\": true\n    }\n  ]\n}\n",
+      "stderr_tail": "",
+      "issues": []
+    },
+    {
+      "name": "workflow_logic",
+      "ok": true,
+      "returncode": 0,
+      "stdout_tail": "s\": [],\n  \"results\": [\n    {\n      \"name\": \"check_configured_bot_prefix_is_skipped\",\n      \"ok\": true\n    },\n    {\n      \"name\": \"check_mixed_safety_batch_forces_handoff\",\n      \"ok\": true\n    },\n    {\n      \"name\": \"check_incomplete_customer_data_is_completed_and_written\",\n      \"ok\": true\n    },\n    {\n      \"name\": \"check_rate_limit_notice_and_backoff\",\n      \"ok\": true\n    },\n    {\n      \"name\": \"check_auto_reply_disabled_blocks_runtime_send\",\n      \"ok\": true\n    },\n    {\n      \"name\": \"check_customer_service_console_switches_take_effect\",\n      \"ok\": true\n    },\n    {\n      \"name\": \"check_deepseek_flash_is_default\",\n      \"ok\": true\n    },\n    {\n      \"name\": \"check_llm_reply_application_guards\",\n      \"ok\": true\n    },\n    {\n      \"name\": \"check_llm_boundary_fallback_on_invalid_model_output\",\n      \"ok\": true\n    },\n    {\n      \"name\": \"check_review_queue_reports_pending_and_handoff_items\",\n      \"ok\": true\n    },\n    {\n      \"name\": \"check_evidence_boundary_cases\",\n      \"ok\": true\n    },\n    {\n      \"name\": \"check_after_sales_intent_preempts_duration_logistics\",\n      \"ok\": true\n    },\n    {\n      \"name\": \"check_wechat_main_window_recognition\",\n      \"ok\": true\n    }\n  ]\n}\n",
+      "stderr_tail": "",
+      "issues": []
+    }
+  ],
+  "issues": [
+    {
+      "code": "llm_duplicate_semantic",
+      "severity": "info",
+      "title": "LLM：语义重复",
+      "detail": "shipping_policy字段内容重复出现两次'现货，付款后 48 小时内发出'，属于语义重复，建议合并为一条。",
+      "target": "products/commercial_fridge_bx_200",
+      "target_label": "products/commercial_fridge_bx_200",
+      "repairable": false,
+      "action_type": "review",
+      "involved_targets": [
+        "products/commercial_fridge_bx_200"
+      ],
+      "llm_reasoning": "shipping_policy字段内容重复出现两次'现货，付款后 48 小时内发出'，属于语义重复，建议合并为一条。",
+      "suggestions": [
+        {
+          "title": "建议人工复核",
+          "detail": "LLM认为该条目可能存在问题，请人工确认后决定处理方式。",
+          "level": "warning"
+        }
+      ],
+      "fingerprint": "8f5a841487a90d58b299137d"
+    },
+    {
+      "code": "llm_duplicate_semantic",
+      "severity": "info",
+      "title": "LLM：语义重复",
+      "detail": "shipping_policy字段内容重复出现两次'现货，付款后 72 小时内发货'，属于语义重复，建议合并为一条。",
+      "target": "products/office_chair_oc_300",
+      "target_label": "products/office_chair_oc_300",
+      "repairable": false,
+      "action_type": "review",
+      "involved_targets": [
+        "products/office_chair_oc_300"
+      ],
+      "llm_reasoning": "shipping_policy字段内容重复出现两次'现货，付款后 72 小时内发货'，属于语义重复，建议合并为一条。",
+      "suggestions": [
+        {
+          "title": "建议人工复核",
+          "detail": "LLM认为该条目可能存在问题，请人工确认后决定处理方式。",
+          "level": "warning"
+        }
+      ],
+      "fingerprint": "35c3e2a67593ab024b8b272e"
+    },
+    {
+      "code": "llm_duplicate_semantic",
+      "severity": "info",
+      "title": "LLM：语义重复",
+      "detail": "shipping_policy字段内容重复出现两次'常规尺寸现货，24 小时内出库'，属于语义重复，建议合并为一条。",
+      "target": "products/packing_carton_ct_50",
+      "target_label": "products/packing_carton_ct_50",
+      "repairable": false,
+      "action_type": "review",
+      "involved_targets": [
+        "products/packing_carton_ct_50"
+      ],
+      "llm_reasoning": "shipping_policy字段内容重复出现两次'常规尺寸现货，24 小时内出库'，属于语义重复，建议合并为一条。",
+      "suggestions": [
+        {
+          "title": "建议人工复核",
+          "detail": "LLM认为该条目可能存在问题，请人工确认后决定处理方式。",
+          "level": "warning"
+        }
+      ],
+      "fingerprint": "a5c56f717a1e9f9494456b4c"
+    },
+    {
+      "code": "llm_duplicate_semantic",
+      "severity": "info",
+      "title": "LLM：语义重复",
+      "detail": "shipping_policy字段内容重复出现两次'常备库存，24 小时内发货'，属于语义重复，建议合并为一条。",
+      "target": "products/water_filter_core",
+      "target_label": "products/water_filter_core",
+      "repairable": false,
+      "action_type": "review",
+      "involved_targets": [
+        "products/water_filter_core"
+      ],
+      "llm_reasoning": "shipping_policy字段内容重复出现两次'常备库存，24 小时内发货'，属于语义重复，建议合并为一条。",
+      "suggestions": [
+        {
+          "title": "建议人工复核",
+          "detail": "LLM认为该条目可能存在问题，请人工确认后决定处理方式。",
+          "level": "warning"
+        }
+      ],
+      "fingerprint": "141a0eb342d060ebf99ecba8"
+    },
+    {
+      "code": "llm_duplicate_semantic",
+      "severity": "info",
+      "title": "LLM：语义重复",
+      "detail": "shipping_policy字段内容重复出现两次'下订单后48小时发货，1年质保'，属于语义重复，建议合并为一条。",
+      "target": "products/wooden-rocking-chair",
+      "target_label": "products/wooden-rocking-chair",
+      "repairable": false,
+      "action_type": "review",
+      "involved_targets": [
+        "products/wooden-rocking-chair"
+      ],
+      "llm_reasoning": "shipping_policy字段内容重复出现两次'下订单后48小时发货，1年质保'，属于语义重复，建议合并为一条。",
+      "suggestions": [
+        {
+          "title": "建议人工复核",
+          "detail": "LLM认为该条目可能存在问题，请人工确认后决定处理方式。",
+          "level": "warning"
+        }
+      ],
+      "fingerprint": "3cf8032ac9f1e8136812b3c7"
+    },
+    {
+      "code": "llm_duplicate_semantic",
+      "severity": "info",
+      "title": "LLM：语义重复",
+      "detail": "两条条目都包含公司名称、地址、主营范围等相同信息，属于语义重复，建议合并。",
+      "target": "policies/company_profile",
+      "target_label": "policies/company_profile, policies/item_2712d3045ad2",
+      "repairable": false,
+      "action_type": "merge",
+      "involved_targets": [
+        "policies/company_profile",
+        "policies/item_2712d3045ad2"
+      ],
+      "llm_reasoning": "两条条目都包含公司名称、地址、主营范围等相同信息，属于语义重复，建议合并。",
+      "suggestions": [
+        {
+          "title": "建议合并",
+          "detail": "多条知识表达同一含义，建议保留信息最完整的一条，将其余归档。",
+          "level": "warning"
+        }
+      ],
+      "fingerprint": "4f8fe0d57753ad58a3b4aee8"
+    },
+    {
+      "code": "llm_duplicate_semantic",
+      "severity": "info",
+      "title": "LLM：语义重复",
+      "detail": "两条条目都涉及账期、月结、先货后款等需要人工审核的政策，内容高度重叠，建议合并或删除一条。",
+      "target": "policies/contract",
+      "target_label": "policies/contract, policies/credit-term-policy",
+      "repairable": false,
+      "action_type": "merge",
+      "involved_targets": [
+        "policies/contract",
+        "policies/credit-term-policy"
+      ],
+      "llm_reasoning": "两条条目都涉及账期、月结、先货后款等需要人工审核的政策，内容高度重叠，建议合并或删除一条。",
+      "suggestions": [
+        {
+          "title": "建议合并",
+          "detail": "多条知识表达同一含义，建议保留信息最完整的一条，将其余归档。",
+          "level": "warning"
+        }
+      ],
+      "fingerprint": "244dc1adafdb59c38d9b57d4"
+    },
+    {
+      "code": "llm_rag_quality_low",
+      "severity": "info",
+      "title": "LLM：RAG经验质量低",
+      "detail": "内容完全重复且为测试数据'暂存缺价测试商品'，无实际业务价值，质量极低。",
+      "target": "rag_exp_9a6790ce2d781ce0a11e",
+      "target_label": "rag_exp_9a6790ce2d781ce0a11e",
+      "repairable": false,
+      "action_type": "delete",
+      "involved_targets": [
+        "rag_exp_9a6790ce2d781ce0a11e"
+      ],
+      "llm_reasoning": "内容完全重复且为测试数据'暂存缺价测试商品'，无实际业务价值，质量极低。",
+      "suggestions": [
+        {
+          "title": "建议删除",
+          "detail": "该条目存在明显错误或不适用，建议归档或废弃。",
+          "level": "danger"
+        }
+      ],
+      "fingerprint": "084c84d805fd8c562d37b896"
+    },
+    {
+      "code": "llm_rag_quality_low",
+      "severity": "info",
+      "title": "LLM：RAG经验质量低",
+      "detail": "内容重复三次，且为自动化测试数据，实际业务意义不大，影响RAG质量。",
+      "target": "rag_exp_794f04141b28161c0a3e",
+      "target_label": "rag_exp_794f04141b28161c0a3e",
+      "repairable": false,
+      "action_type": "delete",
+      "involved_targets": [
+        "rag_exp_794f04141b28161c0a3e"
+      ],
+      "llm_reasoning": "内容重复三次，且为自动化测试数据，实际业务意义不大，影响RAG质量。",
+      "suggestions": [
+        {
+          "title": "建议删除",
+          "detail": "该条目存在明显错误或不适用，建议归档或废弃。",
+          "level": "danger"
+        }
+      ],
+      "fingerprint": "555d6eabb36aa57849372506"
+    },
+    {
+      "code": "llm_rag_quality_low",
+      "severity": "info",
+      "title": "LLM：RAG经验质量低",
+      "detail": "内容为无意义测试字符串'duplicate candidate probe'重复，完全无用。",
+      "target": "rag_exp_5a574e8d242fc86a1b3d",
+      "target_label": "rag_exp_5a574e8d242fc86a1b3d",
+      "repairable": false,
+      "action_type": "delete",
+      "involved_targets": [
+        "rag_exp_5a574e8d242fc86a1b3d"
+      ],
+      "llm_reasoning": "内容为无意义测试字符串'duplicate candidate probe'重复，完全无用。",
+      "suggestions": [
+        {
+          "title": "建议删除",
+          "detail": "该条目存在明显错误或不适用，建议归档或废弃。",
+          "level": "danger"
+        }
+      ],
+      "fingerprint": "125f97e3efffaab70949b425"
+    },
+    {
+      "code": "llm_duplicate_semantic",
+      "severity": "info",
+      "title": "LLM：语义重复",
+      "detail": "同一对话重复三次，造成冗余，建议仅保留一个实例。",
+      "target": "rag_exp_89af65a4428a33bb5815",
+      "target_label": "rag_exp_89af65a4428a33bb5815",
+      "repairable": false,
+      "action_type": "delete",
+      "involved_targets": [
+        "rag_exp_89af65a4428a33bb5815"
+      ],
+      "llm_reasoning": "同一对话重复三次，造成冗余，建议仅保留一个实例。",
+      "suggestions": [
+        {
+          "title": "建议删除",
+          "detail": "该条目存在明显错误或不适用，建议归档或废弃。",
+          "level": "danger"
+        }
+      ],
+      "fingerprint": "139c5ec5efc1e3ac3ff7b32a"
+    },
+    {
+      "code": "llm_duplicate_semantic",
+      "severity": "info",
+      "title": "LLM：语义重复",
+      "detail": "同一对话重复三次，造成冗余，建议仅保留一个实例。",
+      "target": "rag_exp_f971aabb8e11c74a05e0",
+      "target_label": "rag_exp_f971aabb8e11c74a05e0",
+      "repairable": false,
+      "action_type": "delete",
+      "involved_targets": [
+        "rag_exp_f971aabb8e11c74a05e0"
+      ],
+      "llm_reasoning": "同一对话重复三次，造成冗余，建议仅保留一个实例。",
+      "suggestions": [
+        {
+          "title": "建议删除",
+          "detail": "该条目存在明显错误或不适用，建议归档或废弃。",
+          "level": "danger"
+        }
+      ],
+      "fingerprint": "6a2baf66ba1a8b329bd1c1f8"
+    },
+    {
+      "code": "llm_rag_quality_low",
+      "severity": "info",
+      "title": "LLM：RAG经验质量低",
+      "detail": "内容重复三次，且与正式知识库'专票开具资料'不完全一致（缺少注册电话和银行账号），可能引起混淆。",
+      "target": "rag_exp_3a14a2970b3c90d11fc5",
+      "target_label": "rag_exp_3a14a2970b3c90d11fc5",
+      "repairable": false,
+      "action_type": "review",
+      "involved_targets": [
+        "rag_exp_3a14a2970b3c90d11fc5"
+      ],
+      "llm_reasoning": "内容重复三次，且与正式知识库'专票开具资料'不完全一致（缺少注册电话和银行账号），可能引起混淆。",
+      "suggestions": [
+        {
+          "title": "建议人工复核",
+          "detail": "LLM认为该条目可能存在问题，请人工确认后决定处理方式。",
+          "level": "warning"
+        }
+      ],
+      "fingerprint": "d23b11743bbdd214cadb8ba9"
+    }
+  ],
+  "ignored_count": 0,
+  "summary": {
+    "error_count": 0,
+    "warning_count": 0,
+    "info_count": 13,
+    "ignored_count": 0,
+    "hidden_notice_count": 1
+  },
+  "auto_dedup_rag": {
+    "ok": true,
+    "message": "Auto-dedup discarded 0 RAG experience(s)",
+    "discarded": [],
+    "duplicate_groups": []
+  }
+}

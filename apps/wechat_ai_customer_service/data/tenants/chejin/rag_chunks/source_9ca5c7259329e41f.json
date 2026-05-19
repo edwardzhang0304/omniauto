@@ -1,0 +1,35 @@
+{
+  "source": {
+    "source_id": "source_9ca5c7259329e41f",
+    "tenant_id": "chejin",
+    "layer": "tenant",
+    "source_type": "wechat_raw_message",
+    "category": "private",
+    "product_id": "",
+    "source_path": "D:\\AI\\omniauto\\runtime\\apps\\wechat_ai_customer_service\\tenants\\chejin\\raw_messages\\learning_batches\\raw_batch_b6594278e05d2b49bc71.txt",
+    "content_hash": "d18438de934c4239fbb64b12c8511a38",
+    "status": "quarantined",
+    "created_at": "2026-05-16T20:04:33",
+    "updated_at": "2026-05-16T20:04:33",
+    "quarantine_reason": "raw_wechat_source_not_directly_retrievable"
+  },
+  "chunks": [
+    {
+      "chunk_id": "chunk_ee271188df96f13a",
+      "source_id": "source_9ca5c7259329e41f",
+      "tenant_id": "chejin",
+      "layer": "tenant",
+      "source_type": "wechat_raw_message",
+      "category": "private",
+      "product_id": "",
+      "source_path": "D:\\AI\\omniauto\\runtime\\apps\\wechat_ai_customer_service\\tenants\\chejin\\raw_messages\\learning_batches\\raw_batch_b6594278e05d2b49bc71.txt",
+      "chunk_index": 0,
+      "text": "[2026-05-16T20:04:31] self: 合同和发票怎么开？抬头税号怎么给你？",
+      "char_count": 46,
+      "status": "quarantined",
+      "created_at": "2026-05-16T20:04:33",
+      "quarantine_reason": "raw_wechat_source_not_directly_retrievable",
+      "quarantined_at": "2026-05-19T01:47:03"
+    }
+  ]
+}

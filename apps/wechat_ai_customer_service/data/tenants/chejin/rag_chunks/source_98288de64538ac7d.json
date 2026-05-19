@@ -1,0 +1,35 @@
+{
+  "source": {
+    "source_id": "source_98288de64538ac7d",
+    "tenant_id": "chejin",
+    "layer": "tenant",
+    "source_type": "wechat_raw_message",
+    "category": "private",
+    "product_id": "",
+    "source_path": "D:\\AI\\omniauto\\runtime\\apps\\wechat_ai_customer_service\\tenants\\chejin\\raw_messages\\learning_batches\\raw_batch_1f9e84c09738d04fc776.txt",
+    "content_hash": "da1414d24ba23ada5a3bfe58b10ea69a",
+    "status": "quarantined",
+    "created_at": "2026-05-06T19:50:37",
+    "updated_at": "2026-05-06T19:50:37",
+    "quarantine_reason": "raw_wechat_source_not_directly_retrievable"
+  },
+  "chunks": [
+    {
+      "chunk_id": "chunk_7e806de0e7fe5315",
+      "source_id": "source_98288de64538ac7d",
+      "tenant_id": "chejin",
+      "layer": "tenant",
+      "source_type": "wechat_raw_message",
+      "category": "private",
+      "product_id": "",
+      "source_path": "D:\\AI\\omniauto\\runtime\\apps\\wechat_ai_customer_service\\tenants\\chejin\\raw_messages\\learning_batches\\raw_batch_1f9e84c09738d04fc776.txt",
+      "chunk_index": 0,
+      "text": "[2026-05-06T19:50:37] self: [车金AI] 许哥，预算10万以上的话，我看过不少车型。您方便说说主要在哪个城市用车、是家用还是代步？我帮您先筛几款，不过具体库存和价格需要销售同事跟您确认，我这边把信息转给他们，方便留个电话吗？",
+      "char_count": 126,
+      "status": "quarantined",
+      "created_at": "2026-05-06T19:50:37",
+      "quarantine_reason": "raw_wechat_source_not_directly_retrievable",
+      "quarantined_at": "2026-05-19T01:47:03"
+    }
+  ]
+}

@@ -9,11 +9,11 @@
     "status": "active",
     "exact": true,
     "record_self": true,
-    "learning_enabled": true,
+    "learning_enabled": false,
     "notify_enabled": false,
     "selected_by_user": false,
-    "created_at": "2026-05-10T16:16:40",
-    "updated_at": "2026-05-10T16:16:40",
+    "created_at": "2026-05-19T13:30:02",
+    "updated_at": "2026-05-19T13:30:02",
     "source": {
       "type": "customer_service_listener"
     },
@@ -21,6 +21,71 @@
       "target_name": "文件传输助手",
       "display_name": "文件传输助手",
       "conversation_type": "file_transfer",
+      "status": "active",
+      "exact": true,
+      "record_self": true,
+      "learning_enabled": false,
+      "allow_learning_from_customer_service": false,
+      "notify_enabled": false,
+      "source": {
+        "type": "customer_service_listener"
+      }
+    }
+  },
+  {
+    "tenant_id": "default",
+    "conversation_id": "conv_e3435f9f3d8752cff1",
+    "conversation_type": "private",
+    "target_name": "许聪",
+    "display_name": "许聪",
+    "group_name": "",
+    "status": "active",
+    "exact": true,
+    "record_self": true,
+    "learning_enabled": true,
+    "notify_enabled": false,
+    "selected_by_user": false,
+    "created_at": "2026-05-15T21:17:45",
+    "updated_at": "2026-05-15T21:17:45",
+    "source": {
+      "type": "customer_service_listener"
+    },
+    "raw_payload": {
+      "target_name": "许聪",
+      "display_name": "许聪",
+      "conversation_type": "private",
+      "status": "active",
+      "exact": true,
+      "record_self": true,
+      "learning_enabled": true,
+      "notify_enabled": false,
+      "source": {
+        "type": "customer_service_listener"
+      }
+    }
+  },
+  {
+    "tenant_id": "default",
+    "conversation_id": "conv_c0a299b033a63d6dd6",
+    "conversation_type": "private",
+    "target_name": "数据测试",
+    "display_name": "数据测试",
+    "group_name": "",
+    "status": "active",
+    "exact": true,
+    "record_self": true,
+    "learning_enabled": true,
+    "notify_enabled": false,
+    "selected_by_user": false,
+    "created_at": "2026-05-15T21:17:41",
+    "updated_at": "2026-05-15T21:17:41",
+    "source": {
+      "type": "customer_service_listener"
+    },
+    "raw_payload": {
+      "target_name": "数据测试",
+      "display_name": "数据测试",
+      "conversation_type": "private",
       "status": "active",
       "exact": true,
       "record_self": true,
@@ -62,38 +127,6 @@
       "source": {
         "type": "live_recorder_test",
         "batch_token": "LIVE_RECORDER_20260501_061249"
-      }
-    }
-  },
-  {
-    "tenant_id": "default",
-    "conversation_id": "conv_e3435f9f3d8752cff1",
-    "conversation_type": "private",
-    "target_name": "许聪",
-    "display_name": "许聪",
-    "group_name": "",
-    "status": "active",
-    "exact": true,
-    "record_self": true,
-    "learning_enabled": true,
-    "notify_enabled": false,
-    "selected_by_user": false,
-    "created_at": "2026-05-09T12:19:19",
-    "updated_at": "2026-05-09T12:19:19",
-    "source": {
-      "type": "customer_service_listener"
-    },
-    "raw_payload": {
-      "target_name": "许聪",
-      "display_name": "许聪",
-      "conversation_type": "private",
-      "status": "active",
-      "exact": true,
-      "record_self": true,
-      "learning_enabled": true,
-      "notify_enabled": false,
-      "source": {
-        "type": "customer_service_listener"
       }
     }
   }

@@ -2,8 +2,8 @@
   "schema_version": 1,
   "scope": "wechat_ai_customer_service_shared_cloud_cache",
   "source": "cloud_official_shared_library",
-  "version": "shared_6cc5c70e9d1d6c3c7a77",
-  "updated_at": "2026-05-11T05:16:11+00:00",
+  "version": "shared_1d259befa2a82f73acc1",
+  "updated_at": "2026-05-19T05:05:14+00:00",
   "categories": [
     {
       "id": "global_guidelines",

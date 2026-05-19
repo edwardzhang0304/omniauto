@@ -1,0 +1,634 @@
+{
+  "ok": true,
+  "run_id": "diag_20260516_234224_be1cdf",
+  "mode": "quick",
+  "status": "warning",
+  "created_at": "2026-05-16T23:43:16",
+  "checks": [
+    {
+      "name": "quick_knowledge_validation",
+      "ok": false,
+      "issues": [
+        {
+          "code": "llm_duplicate_semantic",
+          "severity": "warning",
+          "title": "LLM：语义重复",
+          "detail": "这两个条目都描述了售后政策，内容高度重叠，一个为简短版，一个为详细版，建议合并以避免混淆。",
+          "target": "policies/after_sales",
+          "target_label": "policies/after_sales, policies/after_sales_policy_details",
+          "repairable": false,
+          "action_type": "merge",
+          "involved_targets": [
+            "policies/after_sales",
+            "policies/after_sales_policy_details"
+          ],
+          "llm_reasoning": "这两个条目都描述了售后政策，内容高度重叠，一个为简短版，一个为详细版，建议合并以避免混淆。",
+          "suggestions": [
+            {
+              "title": "建议合并",
+              "detail": "多条知识表达同一含义，建议保留信息最完整的一条，将其余归档。",
+              "level": "warning"
+            }
+          ]
+        },
+        {
+          "code": "llm_duplicate_semantic",
+          "severity": "warning",
+          "title": "LLM：语义重复",
+          "detail": "这两个条目都描述了杭州云桥办公设备有限公司的公司信息，内容基本一致，建议合并。",
+          "target": "policies/company_profile",
+          "target_label": "policies/company_profile, policies/item_2712d3045ad2",
+          "repairable": false,
+          "action_type": "merge",
+          "involved_targets": [
+            "policies/company_profile",
+            "policies/item_2712d3045ad2"
+          ],
+          "llm_reasoning": "这两个条目都描述了杭州云桥办公设备有限公司的公司信息，内容基本一致，建议合并。",
+          "suggestions": [
+            {
+              "title": "建议合并",
+              "detail": "多条知识表达同一含义，建议保留信息最完整的一条，将其余归档。",
+              "level": "warning"
+            }
+          ]
+        },
+        {
+          "code": "llm_duplicate_semantic",
+          "severity": "warning",
+          "title": "LLM：语义重复",
+          "detail": "这两个条目都描述了开票政策，内容高度重叠，建议合并。",
+          "target": "policies/invoice",
+          "target_label": "policies/invoice, policies/invoice_policy_details",
+          "repairable": false,
+          "action_type": "merge",
+          "involved_targets": [
+            "policies/invoice",
+            "policies/invoice_policy_details"
+          ],
+          "llm_reasoning": "这两个条目都描述了开票政策，内容高度重叠，建议合并。",
+          "suggestions": [
+            {
+              "title": "建议合并",
+              "detail": "多条知识表达同一含义，建议保留信息最完整的一条，将其余归档。",
+              "level": "warning"
+            }
+          ]
+        },
+        {
+          "code": "llm_duplicate_semantic",
+          "severity": "warning",
+          "title": "LLM：语义重复",
+          "detail": "这两个条目都描述了物流政策，内容高度重叠，建议合并。",
+          "target": "policies/logistics",
+          "target_label": "policies/logistics, policies/logistics_policy_details",
+          "repairable": false,
+          "action_type": "merge",
+          "involved_targets": [
+            "policies/logistics",
+            "policies/logistics_policy_details"
+          ],
+          "llm_reasoning": "这两个条目都描述了物流政策，内容高度重叠，建议合并。",
+          "suggestions": [
+            {
+              "title": "建议合并",
+              "detail": "多条知识表达同一含义，建议保留信息最完整的一条，将其余归档。",
+              "level": "warning"
+            }
+          ]
+        },
+        {
+          "code": "llm_duplicate_semantic",
+          "severity": "warning",
+          "title": "LLM：语义重复",
+          "detail": "这两个条目都涉及账期、月结、先货后款等需要转人工的条款，内容重叠，建议合并。",
+          "target": "policies/contract",
+          "target_label": "policies/contract, policies/credit-term-policy",
+          "repairable": false,
+          "action_type": "merge",
+          "involved_targets": [
+            "policies/contract",
+            "policies/credit-term-policy"
+          ],
+          "llm_reasoning": "这两个条目都涉及账期、月结、先货后款等需要转人工的条款，内容重叠，建议合并。",
+          "suggestions": [
+            {
+              "title": "建议合并",
+              "detail": "多条知识表达同一含义，建议保留信息最完整的一条，将其余归档。",
+              "level": "warning"
+            }
+          ]
+        },
+        {
+          "code": "llm_duplicate_semantic",
+          "severity": "warning",
+          "title": "LLM：语义重复",
+          "detail": "这两个条目都涉及安装服务需要转人工确认，内容重叠，建议合并。",
+          "target": "policies/installation",
+          "target_label": "policies/installation, policies/door-lock-installation",
+          "repairable": false,
+          "action_type": "merge",
+          "involved_targets": [
+            "policies/installation",
+            "policies/door-lock-installation"
+          ],
+          "llm_reasoning": "这两个条目都涉及安装服务需要转人工确认，内容重叠，建议合并。",
+          "suggestions": [
+            {
+              "title": "建议合并",
+              "detail": "多条知识表达同一含义，建议保留信息最完整的一条，将其余归档。",
+              "level": "warning"
+            }
+          ]
+        },
+        {
+          "code": "llm_inappropriate",
+          "severity": "error",
+          "title": "LLM：场景不适用",
+          "detail": "这些条目内容涉及二手车业务（SUV、贷款、售后质保），与当前知识库主体（办公设备、供应链）场景明显不匹配，应删除或迁移至对应知识库。",
+          "target": "chats/wf_tpl_a",
+          "target_label": "chats/wf_tpl_a, chats/wf_tpl_b, chats/wf_tpl_c",
+          "repairable": false,
+          "action_type": "delete",
+          "involved_targets": [
+            "chats/wf_tpl_a",
+            "chats/wf_tpl_b",
+            "chats/wf_tpl_c"
+          ],
+          "llm_reasoning": "这些条目内容涉及二手车业务（SUV、贷款、售后质保），与当前知识库主体（办公设备、供应链）场景明显不匹配，应删除或迁移至对应知识库。",
+          "suggestions": [
+            {
+              "title": "建议删除",
+              "detail": "该条目存在明显错误或不适用，建议归档或废弃。",
+              "level": "danger"
+            }
+          ]
+        },
+        {
+          "code": "llm_logic_error",
+          "severity": "error",
+          "title": "LLM：逻辑错误",
+          "detail": "公司信息矛盾：policies/company_profile 声称公司为“杭州云桥办公设备有限公司”，而 policies/company_profile_details 和 policies/bank_account 使用“杭州星澜供应链科技有限公司”，客户可能因此混淆。建议统一公司信息或明确测试性质。",
+          "target": "policies/company_profile",
+          "target_label": "policies/company_profile, policies/company_profile_details, policies/bank_account",
+          "repairable": false,
+          "action_type": "review",
+          "involved_targets": [
+            "policies/company_profile",
+            "policies/company_profile_details",
+            "policies/bank_account"
+          ],
+          "llm_reasoning": "公司信息矛盾：policies/company_profile 声称公司为“杭州云桥办公设备有限公司”，而 policies/company_profile_details 和 policies/bank_account 使用“杭州星澜供应链科技有限公司”，客户可能因此混淆。建议统一公司信息或明确测试性质。",
+          "suggestions": [
+            {
+              "title": "建议人工复核",
+              "detail": "LLM认为该条目可能存在问题，请人工确认后决定处理方式。",
+              "level": "warning"
+            }
+          ]
+        },
+        {
+          "code": "llm_duplicate_semantic",
+          "severity": "warning",
+          "title": "LLM：语义重复",
+          "detail": "两个条目都涉及付款政策，内容高度重叠（支付方式、定金规则等），且一个为文本回答，一个为JSON，可能导致不一致或冗余，建议合并。",
+          "target": "policies/payment",
+          "target_label": "policies/payment, policies/payment_policy_details",
+          "repairable": false,
+          "action_type": "merge",
+          "involved_targets": [
+            "policies/payment",
+            "policies/payment_policy_details"
+          ],
+          "llm_reasoning": "两个条目都涉及付款政策，内容高度重叠（支付方式、定金规则等），且一个为文本回答，一个为JSON，可能导致不一致或冗余，建议合并。",
+          "suggestions": [
+            {
+              "title": "建议合并",
+              "detail": "多条知识表达同一含义，建议保留信息最完整的一条，将其余归档。",
+              "level": "warning"
+            }
+          ]
+        },
+        {
+          "code": "llm_logic_error",
+          "severity": "error",
+          "title": "LLM：逻辑错误",
+          "detail": "manual_handoff_reply 设定 requires_handoff: False，但回答声称‘已转人工客服’，自相矛盾；且与 manual_required 的关键词重叠（均含‘转人工’），后者要求实际转人工，导致冲突。",
+          "target": "policies/manual_handoff_reply",
+          "target_label": "policies/manual_handoff_reply, policies/manual_required",
+          "repairable": false,
+          "action_type": "review",
+          "involved_targets": [
+            "policies/manual_handoff_reply",
+            "policies/manual_required"
+          ],
+          "llm_reasoning": "manual_handoff_reply 设定 requires_handoff: False，但回答声称‘已转人工客服’，自相矛盾；且与 manual_required 的关键词重叠（均含‘转人工’），后者要求实际转人工，导致冲突。",
+          "suggestions": [
+            {
+              "title": "建议人工复核",
+              "detail": "LLM认为该条目可能存在问题，请人工确认后决定处理方式。",
+              "level": "warning"
+            }
+          ]
+        },
+        {
+          "code": "llm_rag_quality_low",
+          "severity": "warning",
+          "title": "LLM：RAG经验质量低",
+          "detail": "这些RAG经验内容为测试对话或无效回复（如重复用户问题、日期在2026年），缺乏实际业务价值，且可能干扰系统。",
+          "target": "rag_exp_5528e1e9e45d675b064a",
+          "target_label": "rag_exp_5528e1e9e45d675b064a, rag_exp_b91acdcb32d2eaea0197, rag_exp_e2d619cecd90156795f0",
+          "repairable": false,
+          "action_type": "delete",
+          "involved_targets": [
+            "rag_exp_5528e1e9e45d675b064a",
+            "rag_exp_b91acdcb32d2eaea0197",
+            "rag_exp_e2d619cecd90156795f0"
+          ],
+          "llm_reasoning": "这些RAG经验内容为测试对话或无效回复（如重复用户问题、日期在2026年），缺乏实际业务价值，且可能干扰系统。",
+          "suggestions": [
+            {
+              "title": "建议删除",
+              "detail": "该条目存在明显错误或不适用，建议归档或废弃。",
+              "level": "danger"
+            }
+          ]
+        },
+        {
+          "code": "llm_rag_quality_low",
+          "severity": "warning",
+          "title": "LLM：RAG经验质量低",
+          "detail": "该RAG经验内容与正式知识一致，但日期为2026年，疑似测试数据，建议人工确认是否为有效经验。",
+          "target": "rag_exp_9151bc188e5982efba1c",
+          "target_label": "rag_exp_9151bc188e5982efba1c",
+          "repairable": false,
+          "action_type": "review",
+          "involved_targets": [
+            "rag_exp_9151bc188e5982efba1c"
+          ],
+          "llm_reasoning": "该RAG经验内容与正式知识一致，但日期为2026年，疑似测试数据，建议人工确认是否为有效经验。",
+          "suggestions": [
+            {
+              "title": "建议人工复核",
+              "detail": "LLM认为该条目可能存在问题，请人工确认后决定处理方式。",
+              "level": "warning"
+            }
+          ]
+        },
+        {
+          "code": "knowledge_token_budget_large",
+          "severity": "info",
+          "title": "知识体积较大",
+          "detail": "当前分类知识库总量估算约 56493 token。这不是知识格式故障，也没有某条知识需要立即删除；它提醒后续继续按客户问题检索相关知识，避免一次性加载全部知识。",
+          "target_label": "全局知识库",
+          "details": [
+            {
+              "label": "问题性质",
+              "value": "容量提示，不是知识格式故障",
+              "level": "normal"
+            },
+            {
+              "label": "估算总量",
+              "value": "约 56493 token",
+              "level": "warning"
+            },
+            {
+              "label": "检测阈值",
+              "value": "超过 7000 token 时提示",
+              "level": "normal"
+            },
+            {
+              "label": "文件数量",
+              "value": "90 个 JSON 文件",
+              "level": "normal"
+            },
+            {
+              "label": "chats",
+              "value": "约 30068 token / 49 个文件",
+              "level": "normal"
+            },
+            {
+              "label": "erp_exports",
+              "value": "约 860 token / 2 个文件",
+              "level": "normal"
+            },
+            {
+              "label": "policies",
+              "value": "约 24980 token / 39 个文件",
+              "level": "normal"
+            }
+          ],
+          "suggestions": [
+            {
+              "title": "不建议自动删除知识",
+              "detail": "当前没有发现哪一条知识错误，系统不能为了降低体积擅自删内容。",
+              "level": "danger"
+            },
+            {
+              "title": "继续保持按门类和问题范围检索",
+              "detail": "客服运行时应只取相关商品、政策、话术和上下文证据，不要把全库一次性塞给大模型。",
+              "level": "normal"
+            },
+            {
+              "title": "如果后续继续变大",
+              "detail": "优先拆分过长政策、归档过期商品、把重复话术合并为模板，再重新检测。",
+              "level": "warning"
+            }
+          ],
+          "repairable": false
+        }
+      ],
+      "token_budget_estimate": 56493,
+      "recent_only": true
+    }
+  ],
+  "issues": [
+    {
+      "code": "llm_duplicate_semantic",
+      "severity": "info",
+      "title": "LLM：语义重复",
+      "detail": "这两个条目都描述了售后政策，内容高度重叠，一个为简短版，一个为详细版，建议合并以避免混淆。",
+      "target": "policies/after_sales",
+      "target_label": "policies/after_sales, policies/after_sales_policy_details",
+      "repairable": false,
+      "action_type": "merge",
+      "involved_targets": [
+        "policies/after_sales",
+        "policies/after_sales_policy_details"
+      ],
+      "llm_reasoning": "这两个条目都描述了售后政策，内容高度重叠，一个为简短版，一个为详细版，建议合并以避免混淆。",
+      "suggestions": [
+        {
+          "title": "建议合并",
+          "detail": "多条知识表达同一含义，建议保留信息最完整的一条，将其余归档。",
+          "level": "warning"
+        }
+      ],
+      "fingerprint": "c43bb92e7319ed94c5fa17f1"
+    },
+    {
+      "code": "llm_duplicate_semantic",
+      "severity": "info",
+      "title": "LLM：语义重复",
+      "detail": "这两个条目都描述了杭州云桥办公设备有限公司的公司信息，内容基本一致，建议合并。",
+      "target": "policies/company_profile",
+      "target_label": "policies/company_profile, policies/item_2712d3045ad2",
+      "repairable": false,
+      "action_type": "merge",
+      "involved_targets": [
+        "policies/company_profile",
+        "policies/item_2712d3045ad2"
+      ],
+      "llm_reasoning": "这两个条目都描述了杭州云桥办公设备有限公司的公司信息，内容基本一致，建议合并。",
+      "suggestions": [
+        {
+          "title": "建议合并",
+          "detail": "多条知识表达同一含义，建议保留信息最完整的一条，将其余归档。",
+          "level": "warning"
+        }
+      ],
+      "fingerprint": "4053ef80d1faec5c5e21784a"
+    },
+    {
+      "code": "llm_duplicate_semantic",
+      "severity": "info",
+      "title": "LLM：语义重复",
+      "detail": "这两个条目都描述了开票政策，内容高度重叠，建议合并。",
+      "target": "policies/invoice",
+      "target_label": "policies/invoice, policies/invoice_policy_details",
+      "repairable": false,
+      "action_type": "merge",
+      "involved_targets": [
+        "policies/invoice",
+        "policies/invoice_policy_details"
+      ],
+      "llm_reasoning": "这两个条目都描述了开票政策，内容高度重叠，建议合并。",
+      "suggestions": [
+        {
+          "title": "建议合并",
+          "detail": "多条知识表达同一含义，建议保留信息最完整的一条，将其余归档。",
+          "level": "warning"
+        }
+      ],
+      "fingerprint": "fc735cfdb5d8e72af3bde2d9"
+    },
+    {
+      "code": "llm_duplicate_semantic",
+      "severity": "info",
+      "title": "LLM：语义重复",
+      "detail": "这两个条目都描述了物流政策，内容高度重叠，建议合并。",
+      "target": "policies/logistics",
+      "target_label": "policies/logistics, policies/logistics_policy_details",
+      "repairable": false,
+      "action_type": "merge",
+      "involved_targets": [
+        "policies/logistics",
+        "policies/logistics_policy_details"
+      ],
+      "llm_reasoning": "这两个条目都描述了物流政策，内容高度重叠，建议合并。",
+      "suggestions": [
+        {
+          "title": "建议合并",
+          "detail": "多条知识表达同一含义，建议保留信息最完整的一条，将其余归档。",
+          "level": "warning"
+        }
+      ],
+      "fingerprint": "9925f3900237b77fa9ba4a6c"
+    },
+    {
+      "code": "llm_duplicate_semantic",
+      "severity": "info",
+      "title": "LLM：语义重复",
+      "detail": "这两个条目都涉及账期、月结、先货后款等需要转人工的条款，内容重叠，建议合并。",
+      "target": "policies/contract",
+      "target_label": "policies/contract, policies/credit-term-policy",
+      "repairable": false,
+      "action_type": "merge",
+      "involved_targets": [
+        "policies/contract",
+        "policies/credit-term-policy"
+      ],
+      "llm_reasoning": "这两个条目都涉及账期、月结、先货后款等需要转人工的条款，内容重叠，建议合并。",
+      "suggestions": [
+        {
+          "title": "建议合并",
+          "detail": "多条知识表达同一含义，建议保留信息最完整的一条，将其余归档。",
+          "level": "warning"
+        }
+      ],
+      "fingerprint": "a16b9dd6f90f6bbe3e249198"
+    },
+    {
+      "code": "llm_duplicate_semantic",
+      "severity": "info",
+      "title": "LLM：语义重复",
+      "detail": "这两个条目都涉及安装服务需要转人工确认，内容重叠，建议合并。",
+      "target": "policies/installation",
+      "target_label": "policies/installation, policies/door-lock-installation",
+      "repairable": false,
+      "action_type": "merge",
+      "involved_targets": [
+        "policies/installation",
+        "policies/door-lock-installation"
+      ],
+      "llm_reasoning": "这两个条目都涉及安装服务需要转人工确认，内容重叠，建议合并。",
+      "suggestions": [
+        {
+          "title": "建议合并",
+          "detail": "多条知识表达同一含义，建议保留信息最完整的一条，将其余归档。",
+          "level": "warning"
+        }
+      ],
+      "fingerprint": "5270dc89c97bd178e1b74514"
+    },
+    {
+      "code": "llm_inappropriate",
+      "severity": "warning",
+      "title": "LLM：场景不适用",
+      "detail": "这些条目内容涉及二手车业务（SUV、贷款、售后质保），与当前知识库主体（办公设备、供应链）场景明显不匹配，应删除或迁移至对应知识库。",
+      "target": "chats/wf_tpl_a",
+      "target_label": "chats/wf_tpl_a, chats/wf_tpl_b, chats/wf_tpl_c",
+      "repairable": false,
+      "action_type": "delete",
+      "involved_targets": [
+        "chats/wf_tpl_a",
+        "chats/wf_tpl_b",
+        "chats/wf_tpl_c"
+      ],
+      "llm_reasoning": "这些条目内容涉及二手车业务（SUV、贷款、售后质保），与当前知识库主体（办公设备、供应链）场景明显不匹配，应删除或迁移至对应知识库。",
+      "suggestions": [
+        {
+          "title": "建议删除",
+          "detail": "该条目存在明显错误或不适用，建议归档或废弃。",
+          "level": "danger"
+        }
+      ],
+      "fingerprint": "674a00ccfc45bba264675a0d"
+    },
+    {
+      "code": "llm_logic_error",
+      "severity": "warning",
+      "title": "LLM：逻辑错误",
+      "detail": "公司信息矛盾：policies/company_profile 声称公司为“杭州云桥办公设备有限公司”，而 policies/company_profile_details 和 policies/bank_account 使用“杭州星澜供应链科技有限公司”，客户可能因此混淆。建议统一公司信息或明确测试性质。",
+      "target": "policies/company_profile",
+      "target_label": "policies/company_profile, policies/company_profile_details, policies/bank_account",
+      "repairable": false,
+      "action_type": "review",
+      "involved_targets": [
+        "policies/company_profile",
+        "policies/company_profile_details",
+        "policies/bank_account"
+      ],
+      "llm_reasoning": "公司信息矛盾：policies/company_profile 声称公司为“杭州云桥办公设备有限公司”，而 policies/company_profile_details 和 policies/bank_account 使用“杭州星澜供应链科技有限公司”，客户可能因此混淆。建议统一公司信息或明确测试性质。",
+      "suggestions": [
+        {
+          "title": "建议人工复核",
+          "detail": "LLM认为该条目可能存在问题，请人工确认后决定处理方式。",
+          "level": "warning"
+        }
+      ],
+      "fingerprint": "258f643686364d0a84adb14d"
+    },
+    {
+      "code": "llm_duplicate_semantic",
+      "severity": "info",
+      "title": "LLM：语义重复",
+      "detail": "两个条目都涉及付款政策，内容高度重叠（支付方式、定金规则等），且一个为文本回答，一个为JSON，可能导致不一致或冗余，建议合并。",
+      "target": "policies/payment",
+      "target_label": "policies/payment, policies/payment_policy_details",
+      "repairable": false,
+      "action_type": "merge",
+      "involved_targets": [
+        "policies/payment",
+        "policies/payment_policy_details"
+      ],
+      "llm_reasoning": "两个条目都涉及付款政策，内容高度重叠（支付方式、定金规则等），且一个为文本回答，一个为JSON，可能导致不一致或冗余，建议合并。",
+      "suggestions": [
+        {
+          "title": "建议合并",
+          "detail": "多条知识表达同一含义，建议保留信息最完整的一条，将其余归档。",
+          "level": "warning"
+        }
+      ],
+      "fingerprint": "fe5a01f18e9112d79154d16e"
+    },
+    {
+      "code": "llm_logic_error",
+      "severity": "warning",
+      "title": "LLM：逻辑错误",
+      "detail": "manual_handoff_reply 设定 requires_handoff: False，但回答声称‘已转人工客服’，自相矛盾；且与 manual_required 的关键词重叠（均含‘转人工’），后者要求实际转人工，导致冲突。",
+      "target": "policies/manual_handoff_reply",
+      "target_label": "policies/manual_handoff_reply, policies/manual_required",
+      "repairable": false,
+      "action_type": "review",
+      "involved_targets": [
+        "policies/manual_handoff_reply",
+        "policies/manual_required"
+      ],
+      "llm_reasoning": "manual_handoff_reply 设定 requires_handoff: False，但回答声称‘已转人工客服’，自相矛盾；且与 manual_required 的关键词重叠（均含‘转人工’），后者要求实际转人工，导致冲突。",
+      "suggestions": [
+        {
+          "title": "建议人工复核",
+          "detail": "LLM认为该条目可能存在问题，请人工确认后决定处理方式。",
+          "level": "warning"
+        }
+      ],
+      "fingerprint": "c8c89f093b8677da820ab5b4"
+    },
+    {
+      "code": "llm_rag_quality_low",
+      "severity": "info",
+      "title": "LLM：RAG经验质量低",
+      "detail": "这些RAG经验内容为测试对话或无效回复（如重复用户问题、日期在2026年），缺乏实际业务价值，且可能干扰系统。",
+      "target": "rag_exp_5528e1e9e45d675b064a",
+      "target_label": "rag_exp_5528e1e9e45d675b064a, rag_exp_b91acdcb32d2eaea0197, rag_exp_e2d619cecd90156795f0",
+      "repairable": false,
+      "action_type": "delete",
+      "involved_targets": [
+        "rag_exp_5528e1e9e45d675b064a",
+        "rag_exp_b91acdcb32d2eaea0197",
+        "rag_exp_e2d619cecd90156795f0"
+      ],
+      "llm_reasoning": "这些RAG经验内容为测试对话或无效回复（如重复用户问题、日期在2026年），缺乏实际业务价值，且可能干扰系统。",
+      "suggestions": [
+        {
+          "title": "建议删除",
+          "detail": "该条目存在明显错误或不适用，建议归档或废弃。",
+          "level": "danger"
+        }
+      ],
+      "fingerprint": "0e84f281f49f806f6608ea04"
+    },
+    {
+      "code": "llm_rag_quality_low",
+      "severity": "info",
+      "title": "LLM：RAG经验质量低",
+      "detail": "该RAG经验内容与正式知识一致，但日期为2026年，疑似测试数据，建议人工确认是否为有效经验。",
+      "target": "rag_exp_9151bc188e5982efba1c",
+      "target_label": "rag_exp_9151bc188e5982efba1c",
+      "repairable": false,
+      "action_type": "review",
+      "involved_targets": [
+        "rag_exp_9151bc188e5982efba1c"
+      ],
+      "llm_reasoning": "该RAG经验内容与正式知识一致，但日期为2026年，疑似测试数据，建议人工确认是否为有效经验。",
+      "suggestions": [
+        {
+          "title": "建议人工复核",
+          "detail": "LLM认为该条目可能存在问题，请人工确认后决定处理方式。",
+          "level": "warning"
+        }
+      ],
+      "fingerprint": "1739f3042fe4a7cbc3ee5fea"
+    }
+  ],
+  "ignored_count": 0,
+  "summary": {
+    "error_count": 0,
+    "warning_count": 3,
+    "info_count": 9,
+    "ignored_count": 0,
+    "hidden_notice_count": 1
+  },
+  "auto_dedup_rag": null
+}

@@ -1,0 +1,406 @@
+{
+  "ok": false,
+  "run_id": "diag_20260507_231922_9b366c",
+  "mode": "quick",
+  "status": "error",
+  "created_at": "2026-05-07T23:23:22",
+  "checks": [
+    {
+      "name": "quick_knowledge_validation",
+      "ok": false,
+      "issues": [
+        {
+          "code": "llm_duplicate_semantic",
+          "severity": "warning",
+          "title": "LLM：语义重复",
+          "detail": "两条条目都涉及增值税专用发票的开具要求，但所需字段和开具时间依据不一致（一个要求开票类型、邮箱等，一个要求注册地址电话等；一个写‘订单完成付款后 1-3 个工作日内’，一个写‘订单确认后 3 个工作日内’）。建议合并并统一表述。",
+          "target": "policies/invoice_policy_details",
+          "target_label": "policies/invoice_policy_details, policies/special_invoice_rule",
+          "repairable": false,
+          "action_type": "review",
+          "involved_targets": [
+            "policies/invoice_policy_details",
+            "policies/special_invoice_rule"
+          ],
+          "llm_reasoning": "两条条目都涉及增值税专用发票的开具要求，但所需字段和开具时间依据不一致（一个要求开票类型、邮箱等，一个要求注册地址电话等；一个写‘订单完成付款后 1-3 个工作日内’，一个写‘订单确认后 3 个工作日内’）。建议合并并统一表述。",
+          "suggestions": [
+            {
+              "title": "建议人工复核",
+              "detail": "LLM认为该条目可能存在问题，请人工确认后决定处理方式。",
+              "level": "warning"
+            }
+          ]
+        },
+        {
+          "code": "llm_duplicate_semantic",
+          "severity": "warning",
+          "title": "LLM：语义重复",
+          "detail": "两条条目内容高度一致，均阐述付款方式与定金政策，建议合并为一条以减少冗余。",
+          "target": "policies/payment",
+          "target_label": "policies/payment, policies/payment_policy_details",
+          "repairable": false,
+          "action_type": "merge",
+          "involved_targets": [
+            "policies/payment",
+            "policies/payment_policy_details"
+          ],
+          "llm_reasoning": "两条条目内容高度一致，均阐述付款方式与定金政策，建议合并为一条以减少冗余。",
+          "suggestions": [
+            {
+              "title": "建议合并",
+              "detail": "多条知识表达同一含义，建议保留信息最完整的一条，将其余归档。",
+              "level": "warning"
+            }
+          ]
+        },
+        {
+          "code": "llm_duplicate_semantic",
+          "severity": "warning",
+          "title": "LLM：语义重复",
+          "detail": "物流政策中已包含偏远地区运费规则，与独立的偏远地区运费条目内容重复，建议合并或删除独立条目。",
+          "target": "policies/logistics_policy_details",
+          "target_label": "policies/logistics_policy_details, policies/remote_area_shipping_rule",
+          "repairable": false,
+          "action_type": "merge",
+          "involved_targets": [
+            "policies/logistics_policy_details",
+            "policies/remote_area_shipping_rule"
+          ],
+          "llm_reasoning": "物流政策中已包含偏远地区运费规则，与独立的偏远地区运费条目内容重复，建议合并或删除独立条目。",
+          "suggestions": [
+            {
+              "title": "建议合并",
+              "detail": "多条知识表达同一含义，建议保留信息最完整的一条，将其余归档。",
+              "level": "warning"
+            }
+          ]
+        },
+        {
+          "code": "llm_inappropriate",
+          "severity": "error",
+          "title": "LLM：场景不适用",
+          "detail": "RAG经验内容涉及二手车咨询（凯美瑞），与当前办公设备业务场景完全不匹配，极易造成错误回复。",
+          "target": "rag_exp_909b6276ce4fcc7030f6",
+          "target_label": "rag_exp_909b6276ce4fcc7030f6",
+          "repairable": false,
+          "action_type": "delete",
+          "involved_targets": [
+            "rag_exp_909b6276ce4fcc7030f6"
+          ],
+          "llm_reasoning": "RAG经验内容涉及二手车咨询（凯美瑞），与当前办公设备业务场景完全不匹配，极易造成错误回复。",
+          "suggestions": [
+            {
+              "title": "建议删除",
+              "detail": "该条目存在明显错误或不适用，建议归档或废弃。",
+              "level": "danger"
+            }
+          ]
+        },
+        {
+          "code": "llm_inappropriate",
+          "severity": "error",
+          "title": "LLM：场景不适用",
+          "detail": "RAG经验内容为汽车推荐对话（凯美瑞、思域等），与办公设备业务无关，应移除。",
+          "target": "rag_exp_f223fa9ade5369d7ba94",
+          "target_label": "rag_exp_f223fa9ade5369d7ba94",
+          "repairable": false,
+          "action_type": "delete",
+          "involved_targets": [
+            "rag_exp_f223fa9ade5369d7ba94"
+          ],
+          "llm_reasoning": "RAG经验内容为汽车推荐对话（凯美瑞、思域等），与办公设备业务无关，应移除。",
+          "suggestions": [
+            {
+              "title": "建议删除",
+              "detail": "该条目存在明显错误或不适用，建议归档或废弃。",
+              "level": "danger"
+            }
+          ]
+        },
+        {
+          "code": "llm_duplicate_semantic",
+          "severity": "warning",
+          "title": "LLM：语义重复",
+          "detail": "这三条RAG经验内容完全相同，都是同一份products数据的重复上传，建议合并为一条。",
+          "target": "rag_exp_0a2591fed31aeab15662",
+          "target_label": "rag_exp_0a2591fed31aeab15662, rag_exp_91142fb0735be61f96d5, rag_exp_142f33f56c90065a2689",
+          "repairable": false,
+          "action_type": "merge",
+          "involved_targets": [
+            "rag_exp_0a2591fed31aeab15662",
+            "rag_exp_91142fb0735be61f96d5",
+            "rag_exp_142f33f56c90065a2689"
+          ],
+          "llm_reasoning": "这三条RAG经验内容完全相同，都是同一份products数据的重复上传，建议合并为一条。",
+          "suggestions": [
+            {
+              "title": "建议合并",
+              "detail": "多条知识表达同一含义，建议保留信息最完整的一条，将其余归档。",
+              "level": "warning"
+            }
+          ]
+        },
+        {
+          "code": "llm_rag_quality_low",
+          "severity": "warning",
+          "title": "LLM：RAG经验质量低",
+          "detail": "该RAG经验内容为无实际意义的探测信息'duplicate candidate probe'，不包含可用知识，建议删除。",
+          "target": "rag_exp_5a574e8d242fc86a1b3d",
+          "target_label": "rag_exp_5a574e8d242fc86a1b3d",
+          "repairable": false,
+          "action_type": "delete",
+          "involved_targets": [
+            "rag_exp_5a574e8d242fc86a1b3d"
+          ],
+          "llm_reasoning": "该RAG经验内容为无实际意义的探测信息'duplicate candidate probe'，不包含可用知识，建议删除。",
+          "suggestions": [
+            {
+              "title": "建议删除",
+              "detail": "该条目存在明显错误或不适用，建议归档或废弃。",
+              "level": "danger"
+            }
+          ]
+        },
+        {
+          "code": "knowledge_token_budget_large",
+          "severity": "info",
+          "title": "知识体积较大",
+          "detail": "当前分类知识库总量估算约 42826 token。这不是知识格式故障，也没有某条知识需要立即删除；它提醒后续继续按客户问题检索相关知识，避免一次性加载全部知识。",
+          "target_label": "全局知识库",
+          "details": [
+            {
+              "label": "问题性质",
+              "value": "容量提示，不是知识格式故障",
+              "level": "normal"
+            },
+            {
+              "label": "估算总量",
+              "value": "约 42826 token",
+              "level": "warning"
+            },
+            {
+              "label": "检测阈值",
+              "value": "超过 7000 token 时提示",
+              "level": "normal"
+            },
+            {
+              "label": "文件数量",
+              "value": "68 个 JSON 文件",
+              "level": "normal"
+            },
+            {
+              "label": "chats",
+              "value": "约 8788 token / 16 个文件",
+              "level": "normal"
+            },
+            {
+              "label": "erp_exports",
+              "value": "约 860 token / 2 个文件",
+              "level": "normal"
+            },
+            {
+              "label": "policies",
+              "value": "约 24976 token / 39 个文件",
+              "level": "normal"
+            },
+            {
+              "label": "products",
+              "value": "约 7508 token / 11 个文件",
+              "level": "normal"
+            }
+          ],
+          "suggestions": [
+            {
+              "title": "不建议自动删除知识",
+              "detail": "当前没有发现哪一条知识错误，系统不能为了降低体积擅自删内容。",
+              "level": "danger"
+            },
+            {
+              "title": "继续保持按门类和问题范围检索",
+              "detail": "客服运行时应只取相关商品、政策、话术和上下文证据，不要把全库一次性塞给大模型。",
+              "level": "normal"
+            },
+            {
+              "title": "如果后续继续变大",
+              "detail": "优先拆分过长政策、归档过期商品、把重复话术合并为模板，再重新检测。",
+              "level": "warning"
+            }
+          ],
+          "repairable": false
+        }
+      ],
+      "token_budget_estimate": 42826,
+      "recent_only": true
+    }
+  ],
+  "issues": [
+    {
+      "code": "llm_duplicate_semantic",
+      "severity": "warning",
+      "title": "LLM：语义重复",
+      "detail": "两条条目都涉及增值税专用发票的开具要求，但所需字段和开具时间依据不一致（一个要求开票类型、邮箱等，一个要求注册地址电话等；一个写‘订单完成付款后 1-3 个工作日内’，一个写‘订单确认后 3 个工作日内’）。建议合并并统一表述。",
+      "target": "policies/invoice_policy_details",
+      "target_label": "policies/invoice_policy_details, policies/special_invoice_rule",
+      "repairable": false,
+      "action_type": "review",
+      "involved_targets": [
+        "policies/invoice_policy_details",
+        "policies/special_invoice_rule"
+      ],
+      "llm_reasoning": "两条条目都涉及增值税专用发票的开具要求，但所需字段和开具时间依据不一致（一个要求开票类型、邮箱等，一个要求注册地址电话等；一个写‘订单完成付款后 1-3 个工作日内’，一个写‘订单确认后 3 个工作日内’）。建议合并并统一表述。",
+      "suggestions": [
+        {
+          "title": "建议人工复核",
+          "detail": "LLM认为该条目可能存在问题，请人工确认后决定处理方式。",
+          "level": "warning"
+        }
+      ],
+      "fingerprint": "3df64d0386c05d99d7d6b296"
+    },
+    {
+      "code": "llm_duplicate_semantic",
+      "severity": "warning",
+      "title": "LLM：语义重复",
+      "detail": "两条条目内容高度一致，均阐述付款方式与定金政策，建议合并为一条以减少冗余。",
+      "target": "policies/payment",
+      "target_label": "policies/payment, policies/payment_policy_details",
+      "repairable": false,
+      "action_type": "merge",
+      "involved_targets": [
+        "policies/payment",
+        "policies/payment_policy_details"
+      ],
+      "llm_reasoning": "两条条目内容高度一致，均阐述付款方式与定金政策，建议合并为一条以减少冗余。",
+      "suggestions": [
+        {
+          "title": "建议合并",
+          "detail": "多条知识表达同一含义，建议保留信息最完整的一条，将其余归档。",
+          "level": "warning"
+        }
+      ],
+      "fingerprint": "c1c163379326524694870249"
+    },
+    {
+      "code": "llm_duplicate_semantic",
+      "severity": "warning",
+      "title": "LLM：语义重复",
+      "detail": "物流政策中已包含偏远地区运费规则，与独立的偏远地区运费条目内容重复，建议合并或删除独立条目。",
+      "target": "policies/logistics_policy_details",
+      "target_label": "policies/logistics_policy_details, policies/remote_area_shipping_rule",
+      "repairable": false,
+      "action_type": "merge",
+      "involved_targets": [
+        "policies/logistics_policy_details",
+        "policies/remote_area_shipping_rule"
+      ],
+      "llm_reasoning": "物流政策中已包含偏远地区运费规则，与独立的偏远地区运费条目内容重复，建议合并或删除独立条目。",
+      "suggestions": [
+        {
+          "title": "建议合并",
+          "detail": "多条知识表达同一含义，建议保留信息最完整的一条，将其余归档。",
+          "level": "warning"
+        }
+      ],
+      "fingerprint": "b35545b5813ab85f332c8cc2"
+    },
+    {
+      "code": "llm_inappropriate",
+      "severity": "error",
+      "title": "LLM：场景不适用",
+      "detail": "RAG经验内容涉及二手车咨询（凯美瑞），与当前办公设备业务场景完全不匹配，极易造成错误回复。",
+      "target": "rag_exp_909b6276ce4fcc7030f6",
+      "target_label": "rag_exp_909b6276ce4fcc7030f6",
+      "repairable": false,
+      "action_type": "delete",
+      "involved_targets": [
+        "rag_exp_909b6276ce4fcc7030f6"
+      ],
+      "llm_reasoning": "RAG经验内容涉及二手车咨询（凯美瑞），与当前办公设备业务场景完全不匹配，极易造成错误回复。",
+      "suggestions": [
+        {
+          "title": "建议删除",
+          "detail": "该条目存在明显错误或不适用，建议归档或废弃。",
+          "level": "danger"
+        }
+      ],
+      "fingerprint": "ec7bd24dc9905ed0235b0e3c"
+    },
+    {
+      "code": "llm_inappropriate",
+      "severity": "error",
+      "title": "LLM：场景不适用",
+      "detail": "RAG经验内容为汽车推荐对话（凯美瑞、思域等），与办公设备业务无关，应移除。",
+      "target": "rag_exp_f223fa9ade5369d7ba94",
+      "target_label": "rag_exp_f223fa9ade5369d7ba94",
+      "repairable": false,
+      "action_type": "delete",
+      "involved_targets": [
+        "rag_exp_f223fa9ade5369d7ba94"
+      ],
+      "llm_reasoning": "RAG经验内容为汽车推荐对话（凯美瑞、思域等），与办公设备业务无关，应移除。",
+      "suggestions": [
+        {
+          "title": "建议删除",
+          "detail": "该条目存在明显错误或不适用，建议归档或废弃。",
+          "level": "danger"
+        }
+      ],
+      "fingerprint": "3cfffec66a92c135d14f988c"
+    },
+    {
+      "code": "llm_duplicate_semantic",
+      "severity": "warning",
+      "title": "LLM：语义重复",
+      "detail": "这三条RAG经验内容完全相同，都是同一份products数据的重复上传，建议合并为一条。",
+      "target": "rag_exp_0a2591fed31aeab15662",
+      "target_label": "rag_exp_0a2591fed31aeab15662, rag_exp_91142fb0735be61f96d5, rag_exp_142f33f56c90065a2689",
+      "repairable": false,
+      "action_type": "merge",
+      "involved_targets": [
+        "rag_exp_0a2591fed31aeab15662",
+        "rag_exp_91142fb0735be61f96d5",
+        "rag_exp_142f33f56c90065a2689"
+      ],
+      "llm_reasoning": "这三条RAG经验内容完全相同，都是同一份products数据的重复上传，建议合并为一条。",
+      "suggestions": [
+        {
+          "title": "建议合并",
+          "detail": "多条知识表达同一含义，建议保留信息最完整的一条，将其余归档。",
+          "level": "warning"
+        }
+      ],
+      "fingerprint": "6646283b2319a50908a1f7d4"
+    },
+    {
+      "code": "llm_rag_quality_low",
+      "severity": "warning",
+      "title": "LLM：RAG经验质量低",
+      "detail": "该RAG经验内容为无实际意义的探测信息'duplicate candidate probe'，不包含可用知识，建议删除。",
+      "target": "rag_exp_5a574e8d242fc86a1b3d",
+      "target_label": "rag_exp_5a574e8d242fc86a1b3d",
+      "repairable": false,
+      "action_type": "delete",
+      "involved_targets": [
+        "rag_exp_5a574e8d242fc86a1b3d"
+      ],
+      "llm_reasoning": "该RAG经验内容为无实际意义的探测信息'duplicate candidate probe'，不包含可用知识，建议删除。",
+      "suggestions": [
+        {
+          "title": "建议删除",
+          "detail": "该条目存在明显错误或不适用，建议归档或废弃。",
+          "level": "danger"
+        }
+      ],
+      "fingerprint": "fcb9cf15415fa9ad691c503f"
+    }
+  ],
+  "ignored_count": 0,
+  "summary": {
+    "error_count": 2,
+    "warning_count": 5,
+    "info_count": 0,
+    "ignored_count": 0,
+    "hidden_notice_count": 1
+  },
+  "auto_dedup_rag": null
+}

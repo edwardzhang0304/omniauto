@@ -1,0 +1,35 @@
+{
+  "source": {
+    "source_id": "source_81751355d6169632",
+    "tenant_id": "chejin",
+    "layer": "tenant",
+    "source_type": "wechat_raw_message",
+    "category": "private",
+    "product_id": "",
+    "source_path": "D:\\AI\\omniauto\\runtime\\apps\\wechat_ai_customer_service\\tenants\\chejin\\raw_messages\\learning_batches\\raw_batch_ea2a4133a5fdf6867703.txt",
+    "content_hash": "c63c2249408f32a2865c3af8d9eef476",
+    "status": "quarantined",
+    "created_at": "2026-05-16T02:34:58",
+    "updated_at": "2026-05-16T02:34:58",
+    "quarantine_reason": "raw_wechat_source_not_directly_retrievable"
+  },
+  "chunks": [
+    {
+      "chunk_id": "chunk_d35846ed6ded0a02",
+      "source_id": "source_81751355d6169632",
+      "tenant_id": "chejin",
+      "layer": "tenant",
+      "source_type": "wechat_raw_message",
+      "category": "private",
+      "product_id": "",
+      "source_path": "D:\\AI\\omniauto\\runtime\\apps\\wechat_ai_customer_service\\tenants\\chejin\\raw_messages\\learning_batches\\raw_batch_ea2a4133a5fdf6867703.txt",
+      "chunk_index": 0,
+      "text": "[2026-05-16T02:34:53] 许聪: 你能保证这台车绝对不是事故车吗？如果水泡火烧赔多少钱？",
+      "char_count": 53,
+      "status": "quarantined",
+      "created_at": "2026-05-16T02:34:58",
+      "quarantine_reason": "raw_wechat_source_not_directly_retrievable",
+      "quarantined_at": "2026-05-19T01:47:03"
+    }
+  ]
+}

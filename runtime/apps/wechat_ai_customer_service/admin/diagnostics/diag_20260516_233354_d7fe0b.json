@@ -1,0 +1,533 @@
+{
+  "ok": false,
+  "run_id": "diag_20260516_233354_d7fe0b",
+  "mode": "full",
+  "status": "error",
+  "created_at": "2026-05-16T23:34:46",
+  "checks": [
+    {
+      "name": "quick_knowledge_validation",
+      "ok": false,
+      "issues": [
+        {
+          "code": "llm_duplicate_semantic",
+          "severity": "warning",
+          "title": "LLM：语义重复",
+          "detail": "这三个条目都是公司信息，但公司名称不一致（杭州云桥办公设备有限公司 vs 杭州星澜供应链科技有限公司），内容交叉重复，建议合并并统一公司名称。",
+          "target": "policies/company_profile",
+          "target_label": "policies/company_profile, policies/company_profile_details, policies/item_2712d3045ad2",
+          "repairable": false,
+          "action_type": "merge",
+          "involved_targets": [
+            "policies/company_profile",
+            "policies/company_profile_details",
+            "policies/item_2712d3045ad2"
+          ],
+          "llm_reasoning": "这三个条目都是公司信息，但公司名称不一致（杭州云桥办公设备有限公司 vs 杭州星澜供应链科技有限公司），内容交叉重复，建议合并并统一公司名称。",
+          "suggestions": [
+            {
+              "title": "建议合并",
+              "detail": "多条知识表达同一含义，建议保留信息最完整的一条，将其余归档。",
+              "level": "warning"
+            }
+          ]
+        },
+        {
+          "code": "llm_logic_error",
+          "severity": "error",
+          "title": "LLM：逻辑错误",
+          "detail": "公司名称冲突：company_profile 使用'杭州云桥办公设备有限公司'，而 company_profile_details 使用'杭州星澜供应链科技有限公司'，且地址相同，导致自相矛盾。",
+          "target": "policies/company_profile",
+          "target_label": "policies/company_profile, policies/company_profile_details",
+          "repairable": false,
+          "action_type": "review",
+          "involved_targets": [
+            "policies/company_profile",
+            "policies/company_profile_details"
+          ],
+          "llm_reasoning": "公司名称冲突：company_profile 使用'杭州云桥办公设备有限公司'，而 company_profile_details 使用'杭州星澜供应链科技有限公司'，且地址相同，导致自相矛盾。",
+          "suggestions": [
+            {
+              "title": "建议人工复核",
+              "detail": "LLM认为该条目可能存在问题，请人工确认后决定处理方式。",
+              "level": "warning"
+            }
+          ]
+        },
+        {
+          "code": "llm_logic_error",
+          "severity": "error",
+          "title": "LLM：逻辑错误",
+          "detail": "售后政策中 allow_auto_reply 和 requires_handoff 设置矛盾：after_sales 允许自动回复且 requires_handoff=False，但内容提到需转人工；after_sales_policy_details 则 requires_handoff=True，逻辑不一致。",
+          "target": "policies/after_sales",
+          "target_label": "policies/after_sales, policies/after_sales_policy_details",
+          "repairable": false,
+          "action_type": "review",
+          "involved_targets": [
+            "policies/after_sales",
+            "policies/after_sales_policy_details"
+          ],
+          "llm_reasoning": "售后政策中 allow_auto_reply 和 requires_handoff 设置矛盾：after_sales 允许自动回复且 requires_handoff=False，但内容提到需转人工；after_sales_policy_details 则 requires_handoff=True，逻辑不一致。",
+          "suggestions": [
+            {
+              "title": "建议人工复核",
+              "detail": "LLM认为该条目可能存在问题，请人工确认后决定处理方式。",
+              "level": "warning"
+            }
+          ]
+        },
+        {
+          "code": "llm_inappropriate",
+          "severity": "error",
+          "title": "LLM：场景不适用",
+          "detail": "这三个条目的 industry_id 为 'used_car'（二手车），但当前知识库整体场景为办公设备供应链（如办公家具、空气净化器等），行业不匹配，不应作为当前业务模板。",
+          "target": "chats/wf_tpl_a",
+          "target_label": "chats/wf_tpl_a, chats/wf_tpl_b, chats/wf_tpl_c",
+          "repairable": false,
+          "action_type": "delete",
+          "involved_targets": [
+            "chats/wf_tpl_a",
+            "chats/wf_tpl_b",
+            "chats/wf_tpl_c"
+          ],
+          "llm_reasoning": "这三个条目的 industry_id 为 'used_car'（二手车），但当前知识库整体场景为办公设备供应链（如办公家具、空气净化器等），行业不匹配，不应作为当前业务模板。",
+          "suggestions": [
+            {
+              "title": "建议删除",
+              "detail": "该条目存在明显错误或不适用，建议归档或废弃。",
+              "level": "danger"
+            }
+          ]
+        },
+        {
+          "code": "llm_inappropriate",
+          "severity": "error",
+          "title": "LLM：场景不适用",
+          "detail": "条目明确标注'仅用于管理台回归'，但 usable_as_template=True，可能导致AI客服使用测试话术回复真实用户。",
+          "target": "chats/admin_check_style_example",
+          "target_label": "chats/admin_check_style_example",
+          "repairable": false,
+          "action_type": "review",
+          "involved_targets": [
+            "chats/admin_check_style_example"
+          ],
+          "llm_reasoning": "条目明确标注'仅用于管理台回归'，但 usable_as_template=True，可能导致AI客服使用测试话术回复真实用户。",
+          "suggestions": [
+            {
+              "title": "建议人工复核",
+              "detail": "LLM认为该条目可能存在问题，请人工确认后决定处理方式。",
+              "level": "warning"
+            }
+          ]
+        },
+        {
+          "code": "llm_duplicate_semantic",
+          "severity": "warning",
+          "title": "LLM：语义重复",
+          "detail": "两个条目都涉及付款政策，内容高度重叠（支付方式、定金规则等），建议合并为一个综合的付款政策条目。",
+          "target": "policies/payment",
+          "target_label": "policies/payment, policies/payment_policy_details",
+          "repairable": false,
+          "action_type": "merge",
+          "involved_targets": [
+            "policies/payment",
+            "policies/payment_policy_details"
+          ],
+          "llm_reasoning": "两个条目都涉及付款政策，内容高度重叠（支付方式、定金规则等），建议合并为一个综合的付款政策条目。",
+          "suggestions": [
+            {
+              "title": "建议合并",
+              "detail": "多条知识表达同一含义，建议保留信息最完整的一条，将其余归档。",
+              "level": "warning"
+            }
+          ]
+        },
+        {
+          "code": "llm_logic_error",
+          "severity": "error",
+          "title": "LLM：逻辑错误",
+          "detail": "该条目policy_type为manual_required，handoff_reason明确要求转人工，但allow_auto_reply=True且requires_handoff=False，导致自动回复后不触发转人工，逻辑矛盾。",
+          "target": "policies/manual_handoff_reply",
+          "target_label": "policies/manual_handoff_reply",
+          "repairable": false,
+          "action_type": "review",
+          "involved_targets": [
+            "policies/manual_handoff_reply"
+          ],
+          "llm_reasoning": "该条目policy_type为manual_required，handoff_reason明确要求转人工，但allow_auto_reply=True且requires_handoff=False，导致自动回复后不触发转人工，逻辑矛盾。",
+          "suggestions": [
+            {
+              "title": "建议人工复核",
+              "detail": "LLM认为该条目可能存在问题，请人工确认后决定处理方式。",
+              "level": "warning"
+            }
+          ]
+        },
+        {
+          "code": "llm_rag_quality_low",
+          "severity": "warning",
+          "title": "LLM：RAG经验质量低",
+          "detail": "这些RAG经验条目包含自测、live-regression等测试内容，不应作为正式知识使用，质量极低。",
+          "target": "rag_exp_5528e1e9e45d675b064a",
+          "target_label": "rag_exp_5528e1e9e45d675b064a, rag_exp_b91acdcb32d2eaea0197, rag_exp_e2d619cecd90156795f0, rag_exp_9151bc188e5982efba1c",
+          "repairable": false,
+          "action_type": "delete",
+          "involved_targets": [
+            "rag_exp_5528e1e9e45d675b064a",
+            "rag_exp_b91acdcb32d2eaea0197",
+            "rag_exp_e2d619cecd90156795f0",
+            "rag_exp_9151bc188e5982efba1c"
+          ],
+          "llm_reasoning": "这些RAG经验条目包含自测、live-regression等测试内容，不应作为正式知识使用，质量极低。",
+          "suggestions": [
+            {
+              "title": "建议删除",
+              "detail": "该条目存在明显错误或不适用，建议归档或废弃。",
+              "level": "danger"
+            }
+          ]
+        },
+        {
+          "code": "knowledge_token_budget_large",
+          "severity": "info",
+          "title": "知识体积较大",
+          "detail": "当前分类知识库总量估算约 56493 token。这不是知识格式故障，也没有某条知识需要立即删除；它提醒后续继续按客户问题检索相关知识，避免一次性加载全部知识。",
+          "target_label": "全局知识库",
+          "details": [
+            {
+              "label": "问题性质",
+              "value": "容量提示，不是知识格式故障",
+              "level": "normal"
+            },
+            {
+              "label": "估算总量",
+              "value": "约 56493 token",
+              "level": "warning"
+            },
+            {
+              "label": "检测阈值",
+              "value": "超过 7000 token 时提示",
+              "level": "normal"
+            },
+            {
+              "label": "文件数量",
+              "value": "90 个 JSON 文件",
+              "level": "normal"
+            },
+            {
+              "label": "chats",
+              "value": "约 30068 token / 49 个文件",
+              "level": "normal"
+            },
+            {
+              "label": "erp_exports",
+              "value": "约 860 token / 2 个文件",
+              "level": "normal"
+            },
+            {
+              "label": "policies",
+              "value": "约 24980 token / 39 个文件",
+              "level": "normal"
+            }
+          ],
+          "suggestions": [
+            {
+              "title": "不建议自动删除知识",
+              "detail": "当前没有发现哪一条知识错误，系统不能为了降低体积擅自删内容。",
+              "level": "danger"
+            },
+            {
+              "title": "继续保持按门类和问题范围检索",
+              "detail": "客服运行时应只取相关商品、政策、话术和上下文证据，不要把全库一次性塞给大模型。",
+              "level": "normal"
+            },
+            {
+              "title": "如果后续继续变大",
+              "detail": "优先拆分过长政策、归档过期商品、把重复话术合并为模板，再重新检测。",
+              "level": "warning"
+            }
+          ],
+          "repairable": false
+        }
+      ],
+      "token_budget_estimate": 56493,
+      "recent_only": false
+    },
+    {
+      "name": "knowledge_runtime",
+      "ok": false,
+      "returncode": 1,
+      "stdout_tail": "ledge_track': 'factual', 'reply_excerpt': '先引导客户拍摄视频并确认滤芯安装方向，无法排除时登记售后工单。', 'allow_auto_reply': True, 'requires_handoff': False, 'risk_level': 'normal', 'handoff_reason': ''}, {'category_id': 'policies', 'item_id': 'door-lock-installation', 'title': '门锁安装政策', 'matched_fields': ['policy_type'], 'match_reason': 'resolver_match_fields', 'confidence': 0.6, 'knowledge_layer': 'tenant', 'knowledge_track': 'factual', 'reply_excerpt': '智能门锁可提供安装服务，但安装费用和上门时间需要按城市、门型和订单数量确认。', 'allow_auto_reply': False, 'requires_handoff': True, 'risk_level': 'warning', 'handoff_reason': '安装费用、上门时间、特殊门型必须人工确认'}, {'category_id': 'policies', 'item_id': 'selection_help', 'title': 'selection_help', 'matched_fields': ['answer'], 'match_reason': 'resolver_match_fields', 'confidence': 0.5, 'knowledge_layer': 'tenant', 'knowledge_track': 'factual', 'reply_excerpt': '可以，我先按使用场景帮您缩小范围：饮料冷藏可先看商用冰箱 BX-200；办公室久坐可先看人体工学办公椅 OC-300；净水耗材可先看净水器滤芯标准款；仓库发货可先看五层加硬包装纸箱 CT-50。您告诉我用途、数量和收货城市，我再帮您核算。', 'allow_auto_reply': True, 'requires_handoff': False, 'risk_level': 'normal', 'handoff_reason': ''}], 'safety': {'allowed_auto_reply': False, 'must_handoff': True, 'reasons': ['安装费用、上门时间、特殊门型必须人工确认']}, 'context': {}}\\\")\"\n    }\n  ]\n}\n",
+      "stderr_tail": "",
+      "issues": [
+        {
+          "severity": "error",
+          "title": "knowledge_runtime 未通过",
+          "detail": "chema_version': 1, 'input_text': '商用冰箱售后规则怎么处理？', 'intent_tags': ['after_sales'], 'matched_categories': ['policies'], 'evidence_items': [{'category_id': 'policies', 'item_id': 'after_sales', 'title': 'after_sales', 'matched_fields': ['keywords', 'policy_type'], 'match_reason': 'policy_keyword_or_intent', 'confidence': 0.82, 'knowledge_layer': 'tenant', 'knowledge_track': 'factual', 'reply_excerpt': '签收 7 天内发现非人为质量问题，请提供照片或视频申请售后。外包装破损请先拍照并当场备注；退款、赔偿、争议或投诉需要转人工继续处理。', 'allow_auto_reply': True, 'requires_handoff': False, 'risk_level': 'normal', 'handoff_reason': ''}, {'category_id': 'policies', 'item_id': 'after-sales-ap88-noise', 'title': '静音空气净化器AP-88异响处理', 'matched_fields': ['policy_type'], 'match_reason': 'policy_keyword_or_intent', 'confidence': 0.64, 'knowledge_layer': 'tenant', 'knowledge_track': 'factual', 'reply_excerpt': '先引导客户拍摄视频并确认滤芯安装方向，无法排除时登记售后工单。', 'allow_auto_reply': True, 'requires_handoff': False, 'risk_level': 'normal', 'handoff_reason': ''}, {'category_id': 'policies', 'item_id': 'door-lock-installation', 'title': '门锁安装政策', 'matched_fields': ['policy_type'], 'match_reason': 'resolver_match_fields', 'confidence': 0.6, 'knowledge_layer': 'tenant', 'knowledge_track': 'factual', 'reply_excerpt': '智能门锁可提供安装服务，但安装费用和上门时间需要按城市、门型和订单数量确认。', 'allow_auto_reply': False, 'requires_handoff': True, 'risk_level': 'warning', 'handoff_reason': '安装费用、上门时间、特殊门型必须人工确认'}, {'category_id': 'policies', 'item_id': 'selection_help', 'title': 'selection_help', 'matched_fields': ['answer'], 'match_reason': 'resolver_match_fields', 'confidence': 0.5, 'knowledge_layer': 'tenant', 'knowledge_track': 'factual', 'reply_excerpt': '可以，我先按使用场景帮您缩小范围：饮料冷藏可先看商用冰箱 BX-200；办公室久坐可先看人体工学办公椅 OC-300；净水耗材可先看净水器滤芯标准款；仓库发货可先看五层加硬包装纸箱 CT-50。您告诉我用途、数量和收货城市，我再帮您核算。', 'allow_auto_reply': True, 'requires_handoff': False, 'risk_level': 'normal', 'handoff_reason': ''}], 'safety': {'allowed_auto_reply': False, 'must_handoff': True, 'reasons': ['安装费用、上门时间、特殊门型必须人工确认']}, 'context': {}}\\\")\"\n    }\n  ]\n}\n\n"
+        }
+      ]
+    },
+    {
+      "name": "knowledge_compiler",
+      "ok": true,
+      "returncode": 0,
+      "stdout_tail": "{\n  \"ok\": true,\n  \"count\": 3,\n  \"failures\": [],\n  \"results\": [\n    {\n      \"name\": \"check_compile_to_disk_writes_expected_files\",\n      \"ok\": true\n    },\n    {\n      \"name\": \"check_compiled_counts_match_category_source\",\n      \"ok\": true\n    },\n    {\n      \"name\": \"check_compiled_product_knowledge_is_legacy_compatible\",\n      \"ok\": true\n    }\n  ]\n}\n",
+      "stderr_tail": "",
+      "issues": []
+    },
+    {
+      "name": "offline_regression",
+      "ok": false,
+      "returncode": 1,
+      "stdout_tail": ",\n  \"failures\": [\n    {\n      \"name\": \"product_quote\",\n      \"ok\": false,\n      \"error\": \"AssertionError(\\\"reply_text: expected to contain '999', got '商用冰箱 BX-200 参考价 1000 元/台，阶梯价 5台起，公开优惠规则：5台起 950 元/台，10台起 920 元/台。请发采购数量、联系人和收货城市，我帮您核算。'\\\")\"\n    }\n  ],\n  \"results\": [\n    {\n      \"name\": \"catalog_request\",\n      \"ok\": true\n    },\n    {\n      \"name\": \"product_quote\",\n      \"ok\": false,\n      \"error\": \"AssertionError(\\\"reply_text: expected to contain '999', got '商用冰箱 BX-200 参考价 1000 元/台，阶梯价 5台起，公开优惠规则：5台起 950 元/台，10台起 920 元/台。请发采购数量、联系人和收货城市，我帮您核算。'\\\")\"\n    },\n    {\n      \"name\": \"below_tier_discount_handoff\",\n      \"ok\": true\n    },\n    {\n      \"name\": \"invoice_policy\",\n      \"ok\": true\n    },\n    {\n      \"name\": \"warranty_policy\",\n      \"ok\": true\n    },\n    {\n      \"name\": \"context_shipping\",\n      \"ok\": true\n    },\n    {\n      \"name\": \"evidence_discount_handoff\",\n      \"ok\": true\n    },\n    {\n      \"name\": \"customer_data_complete\",\n      \"ok\": true\n    },\n    {\n      \"name\": \"greeting_not_customer_data\",\n      \"ok\": true\n    },\n    {\n      \"name\": \"manual_handoff_contract\",\n      \"ok\": true\n    },\n    {\n      \"name\": \"no_relevant_business_evidence\",\n      \"ok\": true\n    }\n  ]\n}\n",
+      "stderr_tail": "",
+      "issues": [
+        {
+          "severity": "error",
+          "title": "offline_regression 未通过",
+          "detail": "{\n  \"ok\": false,\n  \"scenario_path\": \"D:\\\\AI\\\\omniauto\\\\apps\\\\wechat_ai_customer_service\\\\tests\\\\scenarios\\\\offline_regression.json\",\n  \"count\": 11,\n  \"failures\": [\n    {\n      \"name\": \"product_quote\",\n      \"ok\": false,\n      \"error\": \"AssertionError(\\\"reply_text: expected to contain '999', got '商用冰箱 BX-200 参考价 1000 元/台，阶梯价 5台起，公开优惠规则：5台起 950 元/台，10台起 920 元/台。请发采购数量、联系人和收货城市，我帮您核算。'\\\")\"\n    }\n  ],\n  \"results\": [\n    {\n      \"name\": \"catalog_request\",\n      \"ok\": true\n    },\n    {\n      \"name\": \"product_quote\",\n      \"ok\": false,\n      \"error\": \"AssertionError(\\\"reply_text: expected to contain '999', got '商用冰箱 BX-200 参考价 1000 元/台，阶梯价 5台起，公开优惠规则：5台起 950 元/台，10台起 920 元/台。请发采购数量、联系人和收货城市，我帮您核算。'\\\")\"\n    },\n    {\n      \"name\": \"below_tier_discount_handoff\",\n      \"ok\": true\n    },\n    {\n      \"name\": \"invoice_policy\",\n      \"ok\": true\n    },\n    {\n      \"name\": \"warranty_policy\",\n      \"ok\": true\n    },\n    {\n      \"name\": \"context_shipping\",\n      \"ok\": true\n    },\n    {\n      \"name\": \"evidence_discount_handoff\",\n      \"ok\": true\n    },\n    {\n      \"name\": \"customer_data_complete\",\n      \"ok\": true\n    },\n    {\n      \"name\": \"greeting_not_customer_data\",\n      \"ok\": true\n    },\n    {\n      \"name\": \"manual_handoff_contract\",\n      \"ok\": true\n    },\n    {\n      \"name\": \"no_relevant_business_evidence\",\n      \"ok\": true\n    }\n  ]\n}\n\n"
+        }
+      ]
+    },
+    {
+      "name": "workflow_logic",
+      "ok": true,
+      "returncode": 0,
+      "stdout_tail": "owledges_contact_appointment\",\n      \"ok\": true\n    },\n    {\n      \"name\": \"check_concealed_handoff_denies_ai_identity_probe\",\n      \"ok\": true\n    },\n    {\n      \"name\": \"check_concealed_handoff_softens_document_boundary\",\n      \"ok\": true\n    },\n    {\n      \"name\": \"check_customer_data_write_allows_soft_handoff_only\",\n      \"ok\": true\n    },\n    {\n      \"name\": \"check_multi_target_iteration_scans_whitelist_even_without_active_changes\",\n      \"ok\": true\n    },\n    {\n      \"name\": \"check_multi_target_dynamic_unread_mode_supports_new_sessions\",\n      \"ok\": true\n    },\n    {\n      \"name\": \"check_deepseek_flash_is_default\",\n      \"ok\": true\n    },\n    {\n      \"name\": \"check_llm_reply_application_guards\",\n      \"ok\": true\n    },\n    {\n      \"name\": \"check_llm_boundary_fallback_on_invalid_model_output\",\n      \"ok\": true\n    },\n    {\n      \"name\": \"check_review_queue_reports_pending_and_handoff_items\",\n      \"ok\": true\n    },\n    {\n      \"name\": \"check_evidence_boundary_cases\",\n      \"ok\": true\n    },\n    {\n      \"name\": \"check_after_sales_intent_preempts_duration_logistics\",\n      \"ok\": true\n    },\n    {\n      \"name\": \"check_wechat_main_window_recognition\",\n      \"ok\": true\n    }\n  ]\n}\n",
+      "stderr_tail": "",
+      "issues": []
+    }
+  ],
+  "issues": [
+    {
+      "code": "llm_duplicate_semantic",
+      "severity": "info",
+      "title": "LLM：语义重复",
+      "detail": "这三个条目都是公司信息，但公司名称不一致（杭州云桥办公设备有限公司 vs 杭州星澜供应链科技有限公司），内容交叉重复，建议合并并统一公司名称。",
+      "target": "policies/company_profile",
+      "target_label": "policies/company_profile, policies/company_profile_details, policies/item_2712d3045ad2",
+      "repairable": false,
+      "action_type": "merge",
+      "involved_targets": [
+        "policies/company_profile",
+        "policies/company_profile_details",
+        "policies/item_2712d3045ad2"
+      ],
+      "llm_reasoning": "这三个条目都是公司信息，但公司名称不一致（杭州云桥办公设备有限公司 vs 杭州星澜供应链科技有限公司），内容交叉重复，建议合并并统一公司名称。",
+      "suggestions": [
+        {
+          "title": "建议合并",
+          "detail": "多条知识表达同一含义，建议保留信息最完整的一条，将其余归档。",
+          "level": "warning"
+        }
+      ],
+      "fingerprint": "4394ec3fe3c4db99c76e177e"
+    },
+    {
+      "code": "llm_logic_error",
+      "severity": "warning",
+      "title": "LLM：逻辑错误",
+      "detail": "公司名称冲突：company_profile 使用'杭州云桥办公设备有限公司'，而 company_profile_details 使用'杭州星澜供应链科技有限公司'，且地址相同，导致自相矛盾。",
+      "target": "policies/company_profile",
+      "target_label": "policies/company_profile, policies/company_profile_details",
+      "repairable": false,
+      "action_type": "review",
+      "involved_targets": [
+        "policies/company_profile",
+        "policies/company_profile_details"
+      ],
+      "llm_reasoning": "公司名称冲突：company_profile 使用'杭州云桥办公设备有限公司'，而 company_profile_details 使用'杭州星澜供应链科技有限公司'，且地址相同，导致自相矛盾。",
+      "suggestions": [
+        {
+          "title": "建议人工复核",
+          "detail": "LLM认为该条目可能存在问题，请人工确认后决定处理方式。",
+          "level": "warning"
+        }
+      ],
+      "fingerprint": "2a735894a61909238792c207"
+    },
+    {
+      "code": "llm_logic_error",
+      "severity": "warning",
+      "title": "LLM：逻辑错误",
+      "detail": "售后政策中 allow_auto_reply 和 requires_handoff 设置矛盾：after_sales 允许自动回复且 requires_handoff=False，但内容提到需转人工；after_sales_policy_details 则 requires_handoff=True，逻辑不一致。",
+      "target": "policies/after_sales",
+      "target_label": "policies/after_sales, policies/after_sales_policy_details",
+      "repairable": false,
+      "action_type": "review",
+      "involved_targets": [
+        "policies/after_sales",
+        "policies/after_sales_policy_details"
+      ],
+      "llm_reasoning": "售后政策中 allow_auto_reply 和 requires_handoff 设置矛盾：after_sales 允许自动回复且 requires_handoff=False，但内容提到需转人工；after_sales_policy_details 则 requires_handoff=True，逻辑不一致。",
+      "suggestions": [
+        {
+          "title": "建议人工复核",
+          "detail": "LLM认为该条目可能存在问题，请人工确认后决定处理方式。",
+          "level": "warning"
+        }
+      ],
+      "fingerprint": "908d6ab2d44dd85af9155a91"
+    },
+    {
+      "code": "llm_inappropriate",
+      "severity": "warning",
+      "title": "LLM：场景不适用",
+      "detail": "这三个条目的 industry_id 为 'used_car'（二手车），但当前知识库整体场景为办公设备供应链（如办公家具、空气净化器等），行业不匹配，不应作为当前业务模板。",
+      "target": "chats/wf_tpl_a",
+      "target_label": "chats/wf_tpl_a, chats/wf_tpl_b, chats/wf_tpl_c",
+      "repairable": false,
+      "action_type": "delete",
+      "involved_targets": [
+        "chats/wf_tpl_a",
+        "chats/wf_tpl_b",
+        "chats/wf_tpl_c"
+      ],
+      "llm_reasoning": "这三个条目的 industry_id 为 'used_car'（二手车），但当前知识库整体场景为办公设备供应链（如办公家具、空气净化器等），行业不匹配，不应作为当前业务模板。",
+      "suggestions": [
+        {
+          "title": "建议删除",
+          "detail": "该条目存在明显错误或不适用，建议归档或废弃。",
+          "level": "danger"
+        }
+      ],
+      "fingerprint": "e378a0e49e66e077ae40e624"
+    },
+    {
+      "code": "llm_inappropriate",
+      "severity": "warning",
+      "title": "LLM：场景不适用",
+      "detail": "条目明确标注'仅用于管理台回归'，但 usable_as_template=True，可能导致AI客服使用测试话术回复真实用户。",
+      "target": "chats/admin_check_style_example",
+      "target_label": "chats/admin_check_style_example",
+      "repairable": false,
+      "action_type": "review",
+      "involved_targets": [
+        "chats/admin_check_style_example"
+      ],
+      "llm_reasoning": "条目明确标注'仅用于管理台回归'，但 usable_as_template=True，可能导致AI客服使用测试话术回复真实用户。",
+      "suggestions": [
+        {
+          "title": "建议人工复核",
+          "detail": "LLM认为该条目可能存在问题，请人工确认后决定处理方式。",
+          "level": "warning"
+        }
+      ],
+      "fingerprint": "cceaee5357691b0952fd84ce"
+    },
+    {
+      "code": "llm_duplicate_semantic",
+      "severity": "info",
+      "title": "LLM：语义重复",
+      "detail": "两个条目都涉及付款政策，内容高度重叠（支付方式、定金规则等），建议合并为一个综合的付款政策条目。",
+      "target": "policies/payment",
+      "target_label": "policies/payment, policies/payment_policy_details",
+      "repairable": false,
+      "action_type": "merge",
+      "involved_targets": [
+        "policies/payment",
+        "policies/payment_policy_details"
+      ],
+      "llm_reasoning": "两个条目都涉及付款政策，内容高度重叠（支付方式、定金规则等），建议合并为一个综合的付款政策条目。",
+      "suggestions": [
+        {
+          "title": "建议合并",
+          "detail": "多条知识表达同一含义，建议保留信息最完整的一条，将其余归档。",
+          "level": "warning"
+        }
+      ],
+      "fingerprint": "b76b4b820692006949991515"
+    },
+    {
+      "code": "llm_logic_error",
+      "severity": "warning",
+      "title": "LLM：逻辑错误",
+      "detail": "该条目policy_type为manual_required，handoff_reason明确要求转人工，但allow_auto_reply=True且requires_handoff=False，导致自动回复后不触发转人工，逻辑矛盾。",
+      "target": "policies/manual_handoff_reply",
+      "target_label": "policies/manual_handoff_reply",
+      "repairable": false,
+      "action_type": "review",
+      "involved_targets": [
+        "policies/manual_handoff_reply"
+      ],
+      "llm_reasoning": "该条目policy_type为manual_required，handoff_reason明确要求转人工，但allow_auto_reply=True且requires_handoff=False，导致自动回复后不触发转人工，逻辑矛盾。",
+      "suggestions": [
+        {
+          "title": "建议人工复核",
+          "detail": "LLM认为该条目可能存在问题，请人工确认后决定处理方式。",
+          "level": "warning"
+        }
+      ],
+      "fingerprint": "615df42389f0a6b547309dca"
+    },
+    {
+      "code": "llm_rag_quality_low",
+      "severity": "info",
+      "title": "LLM：RAG经验质量低",
+      "detail": "这些RAG经验条目包含自测、live-regression等测试内容，不应作为正式知识使用，质量极低。",
+      "target": "rag_exp_5528e1e9e45d675b064a",
+      "target_label": "rag_exp_5528e1e9e45d675b064a, rag_exp_b91acdcb32d2eaea0197, rag_exp_e2d619cecd90156795f0, rag_exp_9151bc188e5982efba1c",
+      "repairable": false,
+      "action_type": "delete",
+      "involved_targets": [
+        "rag_exp_5528e1e9e45d675b064a",
+        "rag_exp_b91acdcb32d2eaea0197",
+        "rag_exp_e2d619cecd90156795f0",
+        "rag_exp_9151bc188e5982efba1c"
+      ],
+      "llm_reasoning": "这些RAG经验条目包含自测、live-regression等测试内容，不应作为正式知识使用，质量极低。",
+      "suggestions": [
+        {
+          "title": "建议删除",
+          "detail": "该条目存在明显错误或不适用，建议归档或废弃。",
+          "level": "danger"
+        }
+      ],
+      "fingerprint": "84b33da09b5cbab498141e3d"
+    },
+    {
+      "severity": "error",
+      "title": "knowledge_runtime 未通过",
+      "detail": "chema_version': 1, 'input_text': '商用冰箱售后规则怎么处理？', 'intent_tags': ['after_sales'], 'matched_categories': ['policies'], 'evidence_items': [{'category_id': 'policies', 'item_id': 'after_sales', 'title': 'after_sales', 'matched_fields': ['keywords', 'policy_type'], 'match_reason': 'policy_keyword_or_intent', 'confidence': 0.82, 'knowledge_layer': 'tenant', 'knowledge_track': 'factual', 'reply_excerpt': '签收 7 天内发现非人为质量问题，请提供照片或视频申请售后。外包装破损请先拍照并当场备注；退款、赔偿、争议或投诉需要转人工继续处理。', 'allow_auto_reply': True, 'requires_handoff': False, 'risk_level': 'normal', 'handoff_reason': ''}, {'category_id': 'policies', 'item_id': 'after-sales-ap88-noise', 'title': '静音空气净化器AP-88异响处理', 'matched_fields': ['policy_type'], 'match_reason': 'policy_keyword_or_intent', 'confidence': 0.64, 'knowledge_layer': 'tenant', 'knowledge_track': 'factual', 'reply_excerpt': '先引导客户拍摄视频并确认滤芯安装方向，无法排除时登记售后工单。', 'allow_auto_reply': True, 'requires_handoff': False, 'risk_level': 'normal', 'handoff_reason': ''}, {'category_id': 'policies', 'item_id': 'door-lock-installation', 'title': '门锁安装政策', 'matched_fields': ['policy_type'], 'match_reason': 'resolver_match_fields', 'confidence': 0.6, 'knowledge_layer': 'tenant', 'knowledge_track': 'factual', 'reply_excerpt': '智能门锁可提供安装服务，但安装费用和上门时间需要按城市、门型和订单数量确认。', 'allow_auto_reply': False, 'requires_handoff': True, 'risk_level': 'warning', 'handoff_reason': '安装费用、上门时间、特殊门型必须人工确认'}, {'category_id': 'policies', 'item_id': 'selection_help', 'title': 'selection_help', 'matched_fields': ['answer'], 'match_reason': 'resolver_match_fields', 'confidence': 0.5, 'knowledge_layer': 'tenant', 'knowledge_track': 'factual', 'reply_excerpt': '可以，我先按使用场景帮您缩小范围：饮料冷藏可先看商用冰箱 BX-200；办公室久坐可先看人体工学办公椅 OC-300；净水耗材可先看净水器滤芯标准款；仓库发货可先看五层加硬包装纸箱 CT-50。您告诉我用途、数量和收货城市，我再帮您核算。', 'allow_auto_reply': True, 'requires_handoff': False, 'risk_level': 'normal', 'handoff_reason': ''}], 'safety': {'allowed_auto_reply': False, 'must_handoff': True, 'reasons': ['安装费用、上门时间、特殊门型必须人工确认']}, 'context': {}}\\\")\"\n    }\n  ]\n}\n\n",
+      "target_label": "未指定位置",
+      "repairable": false,
+      "fingerprint": "acae6da73434e1f7f88ad0fd",
+      "suggestions": [
+        {
+          "title": "建议优先修复",
+          "detail": "该问题可能影响知识入库、检索或客服回答。请点击查看位置进入对应知识，按提示补齐或修正字段。",
+          "level": "danger"
+        }
+      ]
+    },
+    {
+      "severity": "error",
+      "title": "offline_regression 未通过",
+      "detail": "{\n  \"ok\": false,\n  \"scenario_path\": \"D:\\\\AI\\\\omniauto\\\\apps\\\\wechat_ai_customer_service\\\\tests\\\\scenarios\\\\offline_regression.json\",\n  \"count\": 11,\n  \"failures\": [\n    {\n      \"name\": \"product_quote\",\n      \"ok\": false,\n      \"error\": \"AssertionError(\\\"reply_text: expected to contain '999', got '商用冰箱 BX-200 参考价 1000 元/台，阶梯价 5台起，公开优惠规则：5台起 950 元/台，10台起 920 元/台。请发采购数量、联系人和收货城市，我帮您核算。'\\\")\"\n    }\n  ],\n  \"results\": [\n    {\n      \"name\": \"catalog_request\",\n      \"ok\": true\n    },\n    {\n      \"name\": \"product_quote\",\n      \"ok\": false,\n      \"error\": \"AssertionError(\\\"reply_text: expected to contain '999', got '商用冰箱 BX-200 参考价 1000 元/台，阶梯价 5台起，公开优惠规则：5台起 950 元/台，10台起 920 元/台。请发采购数量、联系人和收货城市，我帮您核算。'\\\")\"\n    },\n    {\n      \"name\": \"below_tier_discount_handoff\",\n      \"ok\": true\n    },\n    {\n      \"name\": \"invoice_policy\",\n      \"ok\": true\n    },\n    {\n      \"name\": \"warranty_policy\",\n      \"ok\": true\n    },\n    {\n      \"name\": \"context_shipping\",\n      \"ok\": true\n    },\n    {\n      \"name\": \"evidence_discount_handoff\",\n      \"ok\": true\n    },\n    {\n      \"name\": \"customer_data_complete\",\n      \"ok\": true\n    },\n    {\n      \"name\": \"greeting_not_customer_data\",\n      \"ok\": true\n    },\n    {\n      \"name\": \"manual_handoff_contract\",\n      \"ok\": true\n    },\n    {\n      \"name\": \"no_relevant_business_evidence\",\n      \"ok\": true\n    }\n  ]\n}\n\n",
+      "target_label": "未指定位置",
+      "repairable": false,
+      "fingerprint": "db55bba825d9bf5e7d7a329b",
+      "suggestions": [
+        {
+          "title": "建议优先修复",
+          "detail": "该问题可能影响知识入库、检索或客服回答。请点击查看位置进入对应知识，按提示补齐或修正字段。",
+          "level": "danger"
+        }
+      ]
+    }
+  ],
+  "ignored_count": 0,
+  "summary": {
+    "error_count": 2,
+    "warning_count": 5,
+    "info_count": 3,
+    "ignored_count": 0,
+    "hidden_notice_count": 1
+  },
+  "auto_dedup_rag": {
+    "ok": true,
+    "message": "Auto-dedup discarded 0 RAG experience(s)",
+    "discarded": [],
+    "duplicate_groups": []
+  }
+}

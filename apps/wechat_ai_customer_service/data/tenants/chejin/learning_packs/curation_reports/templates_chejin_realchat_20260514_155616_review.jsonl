@@ -1,0 +1,10 @@
+{"reason": "intent_mismatch_finance_vs_condition", "scenario": "日常沟通", "customer_message": "啊，我看现在🈶好多车子低首付微首付就能做的", "service_reply": "兄弟先看好车况以租代购好谈的", "source_hint_id": "usedcar_tpl_06f1238b6bc1e454", "hit_count": 1}
+{"reason": "intent_mismatch_finance_vs_condition", "scenario": "车况解释", "customer_message": "首付多少", "service_reply": "#事故排查检测# 大众 一汽-CC 经查博士检测，本车结构件、加强件均无重大事故痕迹；无泡水痕迹；无火烧痕迹；", "source_hint_id": "usedcar_tpl_09a3d8324f028d90", "hit_count": 1}
+{"reason": "unresolved_risk_promise", "scenario": "日常沟通", "customer_message": "今天无锡有个11年的白色才1.18", "service_reply": "车况你有保证吗", "source_hint_id": "usedcar_tpl_1b1c3d929222ff1c", "hit_count": 1}
+{"reason": "unresolved_risk_promise", "scenario": "日常沟通", "customer_message": "在我这里就是6.5公里也是3.8 10W公里也是3.8", "service_reply": "他这个车子就算是10万公里，3万8也是非常非常合适的价格，这你绝对放心", "source_hint_id": "usedcar_tpl_3f44fe2d157788bb", "hit_count": 1}
+{"reason": "intent_mismatch_finance_vs_condition", "scenario": "日常沟通", "customer_message": "你这能贷款提车吗", "service_reply": "@客服[姓名已脱敏] 2024款 风云A8 127 驭风版，精品车况 2024款 风云A8 127 驭风版，精品车况", "source_hint_id": "usedcar_tpl_4daab8db63e1c766", "hit_count": 1}
+{"reason": "intent_mismatch_finance_vs_condition", "scenario": "售后服务", "customer_message": "做分期也就十万以内的预算首付个六七万", "service_reply": "主要是像这种BBA，你还是得买个车况好一点的，要不然维修起来太麻烦了", "source_hint_id": "usedcar_tpl_57682af16b945e1a", "hit_count": 1}
+{"reason": "intent_mismatch_finance_vs_condition", "scenario": "日常沟通", "customer_message": "首付多少", "service_reply": "车况几乎就是完美车况", "source_hint_id": "usedcar_tpl_62b4a1e0b0328c1d", "hit_count": 1}
+{"reason": "unresolved_risk_promise", "scenario": "日常沟通", "customer_message": "这些车这个年限价格有点高了", "service_reply": "但是你放心，我们的价格绝对是根据市场来的", "source_hint_id": "usedcar_tpl_6cc98dc7b77a459e", "hit_count": 1}
+{"reason": "unresolved_risk_promise", "scenario": "日常沟通", "customer_message": "这些车这个年限价格有点高了", "service_reply": "绝对是比市场价格要低不会高", "source_hint_id": "usedcar_tpl_a693269308ce0790", "hit_count": 1}
+{"reason": "unresolved_risk_promise", "scenario": "日常沟通", "customer_message": "看着不错，不过有点儿超预算", "service_reply": "毕竟车子不是一个凑合的东西，但是这个价格绝对值得", "source_hint_id": "usedcar_tpl_c21a779cbf2592b8", "hit_count": 1}

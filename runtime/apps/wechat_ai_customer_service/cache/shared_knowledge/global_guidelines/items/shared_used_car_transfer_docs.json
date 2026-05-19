@@ -1,0 +1,42 @@
+{
+  "title": "二手车交易资料完整性",
+  "guideline_text": "提醒客户交易完成后应交付合法证照与交易凭证，涉及过户办理必须按登记流程执行。",
+  "schema_version": 1,
+  "id": "shared_used_car_transfer_docs",
+  "item_id": "shared_used_car_transfer_docs",
+  "industry_id": "used_car",
+  "category_id": "global_guidelines",
+  "status": "active",
+  "content": "提醒客户交易完成后应交付合法证照与交易凭证，涉及过户办理必须按登记流程执行。",
+  "keywords": [
+    "过户",
+    "登记",
+    "发票",
+    "行驶证",
+    "登记证书"
+  ],
+  "applies_to": "二手车交易流程咨询",
+  "data": {
+    "title": "二手车交易资料完整性",
+    "guideline_text": "提醒客户交易完成后应交付合法证照与交易凭证，涉及过户办理必须按登记流程执行。",
+    "keywords": [
+      "过户",
+      "登记",
+      "发票",
+      "行驶证",
+      "登记证书"
+    ],
+    "applies_to": "二手车交易流程咨询"
+  },
+  "runtime": {},
+  "source": {
+    "type": "cloud_official_shared_library",
+    "item_id": "shared_used_car_transfer_docs",
+    "version": ""
+  },
+  "metadata": {
+    "knowledge_layer": "shared",
+    "cloud_item_id": "shared_used_car_transfer_docs",
+    "cloud_updated_at": "2026-05-07T21:57:53+00:00"
+  }
+}

@@ -133,11 +133,15 @@ class ProductMasterStore:
 
     def ensure_structure(self) -> None:
         self.items_dir.mkdir(parents=True, exist_ok=True)
+        changed = False
         if not self.schema_path.exists():
             write_json(self.schema_path, self._legacy_schema() or DEFAULT_PRODUCT_MASTER_SCHEMA)
+            changed = True
         if not self.resolver_path.exists():
             write_json(self.resolver_path, self._legacy_resolver() or DEFAULT_PRODUCT_MASTER_RESOLVER)
-        self.write_manifest()
+            changed = True
+        if changed or self._manifest_needs_refresh():
+            self.write_manifest()
 
     def load_schema(self) -> dict[str, Any]:
         self.ensure_structure()
@@ -241,6 +245,26 @@ class ProductMasterStore:
         if extra:
             payload.update(extra)
         write_json(self.manifest_path, payload)
+
+    def _manifest_needs_refresh(self) -> bool:
+        payload = read_json(self.manifest_path, default=None)
+        if not isinstance(payload, dict):
+            return True
+        compatibility = payload.get("compatibility") if isinstance(payload.get("compatibility"), dict) else {}
+        expected = {
+            "schema_version": 1,
+            "authority": "product_master",
+            "category_id": PRODUCT_MASTER_CATEGORY_ID,
+            "tenant_id": self.tenant_id,
+            "items_path": "items",
+        }
+        for key, value in expected.items():
+            if payload.get(key) != value:
+                return True
+        return (
+            compatibility.get("legacy_read_fallback") != "knowledge_bases/products"
+            or compatibility.get("new_writes_to_legacy") is not False
+        )
 
     def _list_db_items(self, *, include_archived: bool) -> list[dict[str, Any]]:
         db = postgres_store(self.tenant_id)

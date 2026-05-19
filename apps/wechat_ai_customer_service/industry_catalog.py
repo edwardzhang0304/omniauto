@@ -44,7 +44,8 @@ INDUSTRY_ID_SET = {str(item.get("industry_id") or "") for item in INDUSTRY_DEFIN
 DEFAULT_TENANT_INDUSTRY_BINDINGS: dict[str, str] = {
     DEFAULT_TENANT_ID: "home_appliance",
     "test01": "home_appliance",
-    "jiangsu_chejin_usedcar_customer_20260501": "used_car",
+    "chejin": "used_car",
+    "chejin_usedcar_regression": "used_car",
 }
 
 

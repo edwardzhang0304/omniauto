@@ -1,0 +1,512 @@
+{
+  "ok": true,
+  "run_id": "diag_20260508_060007_fb511f",
+  "mode": "quick",
+  "status": "warning",
+  "created_at": "2026-05-08T06:01:37",
+  "checks": [
+    {
+      "name": "quick_knowledge_validation",
+      "ok": true,
+      "issues": [
+        {
+          "code": "llm_rag_quality_low",
+          "severity": "warning",
+          "title": "LLM：RAG经验质量低",
+          "detail": "该RAG经验条目包含了多个独立的规则（金融审批与车况承诺边界、沉睡客户唤醒），内容混杂，缺乏单一主题聚焦，降低了可复用性和清晰度，建议拆分为单独条目或重构。",
+          "target": "chats/ai-ai",
+          "target_label": "chats/ai-ai",
+          "repairable": false,
+          "action_type": "review",
+          "involved_targets": [
+            "chats/ai-ai"
+          ],
+          "llm_reasoning": "该RAG经验条目包含了多个独立的规则（金融审批与车况承诺边界、沉睡客户唤醒），内容混杂，缺乏单一主题聚焦，降低了可复用性和清晰度，建议拆分为单独条目或重构。",
+          "suggestions": [
+            {
+              "title": "建议人工复核",
+              "detail": "LLM认为该条目可能存在问题，请人工确认后决定处理方式。",
+              "level": "warning"
+            }
+          ]
+        },
+        {
+          "code": "llm_duplicate_semantic",
+          "severity": "warning",
+          "title": "LLM：语义重复",
+          "detail": "三个RAG经验条目内容几乎相同，均为新能源秦PLUS咨询对话，只是测试批次号不同，造成信息冗余。",
+          "target": "rag_exp_d55de58536d5d2b53905",
+          "target_label": "rag_exp_d55de58536d5d2b53905, rag_exp_76c278b67d400101a85a, rag_exp_aafffb0dc1737cc4de86",
+          "repairable": false,
+          "action_type": "merge",
+          "involved_targets": [
+            "rag_exp_d55de58536d5d2b53905",
+            "rag_exp_76c278b67d400101a85a",
+            "rag_exp_aafffb0dc1737cc4de86"
+          ],
+          "llm_reasoning": "三个RAG经验条目内容几乎相同，均为新能源秦PLUS咨询对话，只是测试批次号不同，造成信息冗余。",
+          "suggestions": [
+            {
+              "title": "建议合并",
+              "detail": "多条知识表达同一含义，建议保留信息最完整的一条，将其余归档。",
+              "level": "warning"
+            }
+          ]
+        },
+        {
+          "code": "llm_duplicate_semantic",
+          "severity": "warning",
+          "title": "LLM：语义重复",
+          "detail": "三个RAG经验条目内容几乎相同，均为微信群组聊天记录（含商品资料、规则、噪音），只是测试批次号不同，造成信息冗余。",
+          "target": "rag_exp_bc4c24eb93b3b8bac7f7",
+          "target_label": "rag_exp_bc4c24eb93b3b8bac7f7, rag_exp_886db4492a5895521947, rag_exp_46d8b9e415415f1bf470",
+          "repairable": false,
+          "action_type": "merge",
+          "involved_targets": [
+            "rag_exp_bc4c24eb93b3b8bac7f7",
+            "rag_exp_886db4492a5895521947",
+            "rag_exp_46d8b9e415415f1bf470"
+          ],
+          "llm_reasoning": "三个RAG经验条目内容几乎相同，均为微信群组聊天记录（含商品资料、规则、噪音），只是测试批次号不同，造成信息冗余。",
+          "suggestions": [
+            {
+              "title": "建议合并",
+              "detail": "多条知识表达同一含义，建议保留信息最完整的一条，将其余归档。",
+              "level": "warning"
+            }
+          ]
+        },
+        {
+          "code": "llm_duplicate_semantic",
+          "severity": "warning",
+          "title": "LLM：语义重复",
+          "detail": "四个RAG经验条目内容几乎相同，均为客户询问宝马320Li试驾的私信，只是测试批次号不同，造成信息冗余。",
+          "target": "rag_exp_c3985e2b8c9c20449a45",
+          "target_label": "rag_exp_c3985e2b8c9c20449a45, rag_exp_b71d0b889cd0d3f7fd98, rag_exp_94f1529db8f4bccdf53c, rag_exp_367dabe37bbba830d312",
+          "repairable": false,
+          "action_type": "merge",
+          "involved_targets": [
+            "rag_exp_c3985e2b8c9c20449a45",
+            "rag_exp_b71d0b889cd0d3f7fd98",
+            "rag_exp_94f1529db8f4bccdf53c",
+            "rag_exp_367dabe37bbba830d312"
+          ],
+          "llm_reasoning": "四个RAG经验条目内容几乎相同，均为客户询问宝马320Li试驾的私信，只是测试批次号不同，造成信息冗余。",
+          "suggestions": [
+            {
+              "title": "建议合并",
+              "detail": "多条知识表达同一含义，建议保留信息最完整的一条，将其余归档。",
+              "level": "warning"
+            }
+          ]
+        },
+        {
+          "code": "llm_duplicate_semantic",
+          "severity": "warning",
+          "title": "LLM：语义重复",
+          "detail": "四个RAG经验条目内容几乎相同，均为客户表达购车预算和需求的私信，只是测试批次号不同，造成信息冗余。",
+          "target": "rag_exp_43ceed95b9dceddded19",
+          "target_label": "rag_exp_43ceed95b9dceddded19, rag_exp_33564e4b4b1e27ea8c49, rag_exp_28af1d68069955154986, rag_exp_06b43f8903704e05377e",
+          "repairable": false,
+          "action_type": "merge",
+          "involved_targets": [
+            "rag_exp_43ceed95b9dceddded19",
+            "rag_exp_33564e4b4b1e27ea8c49",
+            "rag_exp_28af1d68069955154986",
+            "rag_exp_06b43f8903704e05377e"
+          ],
+          "llm_reasoning": "四个RAG经验条目内容几乎相同，均为客户表达购车预算和需求的私信，只是测试批次号不同，造成信息冗余。",
+          "suggestions": [
+            {
+              "title": "建议合并",
+              "detail": "多条知识表达同一含义，建议保留信息最完整的一条，将其余归档。",
+              "level": "warning"
+            }
+          ]
+        },
+        {
+          "code": "llm_duplicate_semantic",
+          "severity": "warning",
+          "title": "LLM：语义重复",
+          "detail": "三个RAG经验条目内容几乎相同，均为raw_upload/chats中的聊天记录（含预算推荐、置换、沉睡客户唤醒），只是测试批次号不同，造成信息冗余。",
+          "target": "rag_exp_fbe0e51a58894a2511bd",
+          "target_label": "rag_exp_fbe0e51a58894a2511bd, rag_exp_c4d462ae49165d25ec80, rag_exp_33d4477961974cf9fd06",
+          "repairable": false,
+          "action_type": "merge",
+          "involved_targets": [
+            "rag_exp_fbe0e51a58894a2511bd",
+            "rag_exp_c4d462ae49165d25ec80",
+            "rag_exp_33d4477961974cf9fd06"
+          ],
+          "llm_reasoning": "三个RAG经验条目内容几乎相同，均为raw_upload/chats中的聊天记录（含预算推荐、置换、沉睡客户唤醒），只是测试批次号不同，造成信息冗余。",
+          "suggestions": [
+            {
+              "title": "建议合并",
+              "detail": "多条知识表达同一含义，建议保留信息最完整的一条，将其余归档。",
+              "level": "warning"
+            }
+          ]
+        },
+        {
+          "code": "llm_duplicate_semantic",
+          "severity": "warning",
+          "title": "LLM：语义重复",
+          "detail": "这三个RAG经验条目均来自raw_upload/products，内容几乎完全一致（商品资料相同，仅测试批次不同），属于语义重复，应合并为一条以避免冗余。",
+          "target": "rag_exp_351fa58ff874d3d92ce8",
+          "target_label": "rag_exp_351fa58ff874d3d92ce8, rag_exp_c85a88ad457124dfa6b9, rag_exp_66380df76e5ce81aaaa7",
+          "repairable": false,
+          "action_type": "merge",
+          "involved_targets": [
+            "rag_exp_351fa58ff874d3d92ce8",
+            "rag_exp_c85a88ad457124dfa6b9",
+            "rag_exp_66380df76e5ce81aaaa7"
+          ],
+          "llm_reasoning": "这三个RAG经验条目均来自raw_upload/products，内容几乎完全一致（商品资料相同，仅测试批次不同），属于语义重复，应合并为一条以避免冗余。",
+          "suggestions": [
+            {
+              "title": "建议合并",
+              "detail": "多条知识表达同一含义，建议保留信息最完整的一条，将其余归档。",
+              "level": "warning"
+            }
+          ]
+        },
+        {
+          "code": "llm_duplicate_semantic",
+          "severity": "warning",
+          "title": "LLM：语义重复",
+          "detail": "这两个RAG经验条目均来自raw_wechat_private/private，内容均为重复发送的相同消息，属于语义重复，应合并或删除多余条目。",
+          "target": "rag_exp_2ce4ea80bcbae934df01",
+          "target_label": "rag_exp_2ce4ea80bcbae934df01, rag_exp_5083471a57aa7df08a63",
+          "repairable": false,
+          "action_type": "merge",
+          "involved_targets": [
+            "rag_exp_2ce4ea80bcbae934df01",
+            "rag_exp_5083471a57aa7df08a63"
+          ],
+          "llm_reasoning": "这两个RAG经验条目均来自raw_wechat_private/private，内容均为重复发送的相同消息，属于语义重复，应合并或删除多余条目。",
+          "suggestions": [
+            {
+              "title": "建议合并",
+              "detail": "多条知识表达同一含义，建议保留信息最完整的一条，将其余归档。",
+              "level": "warning"
+            }
+          ]
+        },
+        {
+          "code": "llm_duplicate_semantic",
+          "severity": "warning",
+          "title": "LLM：语义重复",
+          "detail": "该RAG经验条目内包含两个完全相同的聊天记录（预算推荐话术重复出现），属于自身内容重复，应清理冗余部分。",
+          "target": "rag_exp_ffd1ef904ee06cc548b9",
+          "target_label": "rag_exp_ffd1ef904ee06cc548b9",
+          "repairable": false,
+          "action_type": "review",
+          "involved_targets": [
+            "rag_exp_ffd1ef904ee06cc548b9"
+          ],
+          "llm_reasoning": "该RAG经验条目内包含两个完全相同的聊天记录（预算推荐话术重复出现），属于自身内容重复，应清理冗余部分。",
+          "suggestions": [
+            {
+              "title": "建议人工复核",
+              "detail": "LLM认为该条目可能存在问题，请人工确认后决定处理方式。",
+              "level": "warning"
+            }
+          ]
+        },
+        {
+          "code": "knowledge_token_budget_large",
+          "severity": "info",
+          "title": "知识体积较大",
+          "detail": "当前分类知识库总量估算约 42826 token。这不是知识格式故障，也没有某条知识需要立即删除；它提醒后续继续按客户问题检索相关知识，避免一次性加载全部知识。",
+          "target_label": "全局知识库",
+          "details": [
+            {
+              "label": "问题性质",
+              "value": "容量提示，不是知识格式故障",
+              "level": "normal"
+            },
+            {
+              "label": "估算总量",
+              "value": "约 42826 token",
+              "level": "warning"
+            },
+            {
+              "label": "检测阈值",
+              "value": "超过 7000 token 时提示",
+              "level": "normal"
+            },
+            {
+              "label": "文件数量",
+              "value": "68 个 JSON 文件",
+              "level": "normal"
+            },
+            {
+              "label": "chats",
+              "value": "约 8788 token / 16 个文件",
+              "level": "normal"
+            },
+            {
+              "label": "erp_exports",
+              "value": "约 860 token / 2 个文件",
+              "level": "normal"
+            },
+            {
+              "label": "policies",
+              "value": "约 24976 token / 39 个文件",
+              "level": "normal"
+            },
+            {
+              "label": "products",
+              "value": "约 7508 token / 11 个文件",
+              "level": "normal"
+            }
+          ],
+          "suggestions": [
+            {
+              "title": "不建议自动删除知识",
+              "detail": "当前没有发现哪一条知识错误，系统不能为了降低体积擅自删内容。",
+              "level": "danger"
+            },
+            {
+              "title": "继续保持按门类和问题范围检索",
+              "detail": "客服运行时应只取相关商品、政策、话术和上下文证据，不要把全库一次性塞给大模型。",
+              "level": "normal"
+            },
+            {
+              "title": "如果后续继续变大",
+              "detail": "优先拆分过长政策、归档过期商品、把重复话术合并为模板，再重新检测。",
+              "level": "warning"
+            }
+          ],
+          "repairable": false
+        }
+      ],
+      "token_budget_estimate": 42826,
+      "recent_only": true
+    }
+  ],
+  "issues": [
+    {
+      "code": "llm_rag_quality_low",
+      "severity": "warning",
+      "title": "LLM：RAG经验质量低",
+      "detail": "该RAG经验条目包含了多个独立的规则（金融审批与车况承诺边界、沉睡客户唤醒），内容混杂，缺乏单一主题聚焦，降低了可复用性和清晰度，建议拆分为单独条目或重构。",
+      "target": "chats/ai-ai",
+      "target_label": "chats/ai-ai",
+      "repairable": false,
+      "action_type": "review",
+      "involved_targets": [
+        "chats/ai-ai"
+      ],
+      "llm_reasoning": "该RAG经验条目包含了多个独立的规则（金融审批与车况承诺边界、沉睡客户唤醒），内容混杂，缺乏单一主题聚焦，降低了可复用性和清晰度，建议拆分为单独条目或重构。",
+      "suggestions": [
+        {
+          "title": "建议人工复核",
+          "detail": "LLM认为该条目可能存在问题，请人工确认后决定处理方式。",
+          "level": "warning"
+        }
+      ],
+      "fingerprint": "c4a7ea62b94170cc75fdd023"
+    },
+    {
+      "code": "llm_duplicate_semantic",
+      "severity": "warning",
+      "title": "LLM：语义重复",
+      "detail": "三个RAG经验条目内容几乎相同，均为新能源秦PLUS咨询对话，只是测试批次号不同，造成信息冗余。",
+      "target": "rag_exp_d55de58536d5d2b53905",
+      "target_label": "rag_exp_d55de58536d5d2b53905, rag_exp_76c278b67d400101a85a, rag_exp_aafffb0dc1737cc4de86",
+      "repairable": false,
+      "action_type": "merge",
+      "involved_targets": [
+        "rag_exp_d55de58536d5d2b53905",
+        "rag_exp_76c278b67d400101a85a",
+        "rag_exp_aafffb0dc1737cc4de86"
+      ],
+      "llm_reasoning": "三个RAG经验条目内容几乎相同，均为新能源秦PLUS咨询对话，只是测试批次号不同，造成信息冗余。",
+      "suggestions": [
+        {
+          "title": "建议合并",
+          "detail": "多条知识表达同一含义，建议保留信息最完整的一条，将其余归档。",
+          "level": "warning"
+        }
+      ],
+      "fingerprint": "aff080a614d1d8211b035d35"
+    },
+    {
+      "code": "llm_duplicate_semantic",
+      "severity": "warning",
+      "title": "LLM：语义重复",
+      "detail": "三个RAG经验条目内容几乎相同，均为微信群组聊天记录（含商品资料、规则、噪音），只是测试批次号不同，造成信息冗余。",
+      "target": "rag_exp_bc4c24eb93b3b8bac7f7",
+      "target_label": "rag_exp_bc4c24eb93b3b8bac7f7, rag_exp_886db4492a5895521947, rag_exp_46d8b9e415415f1bf470",
+      "repairable": false,
+      "action_type": "merge",
+      "involved_targets": [
+        "rag_exp_bc4c24eb93b3b8bac7f7",
+        "rag_exp_886db4492a5895521947",
+        "rag_exp_46d8b9e415415f1bf470"
+      ],
+      "llm_reasoning": "三个RAG经验条目内容几乎相同，均为微信群组聊天记录（含商品资料、规则、噪音），只是测试批次号不同，造成信息冗余。",
+      "suggestions": [
+        {
+          "title": "建议合并",
+          "detail": "多条知识表达同一含义，建议保留信息最完整的一条，将其余归档。",
+          "level": "warning"
+        }
+      ],
+      "fingerprint": "46189d1d9a40fc5819271334"
+    },
+    {
+      "code": "llm_duplicate_semantic",
+      "severity": "warning",
+      "title": "LLM：语义重复",
+      "detail": "四个RAG经验条目内容几乎相同，均为客户询问宝马320Li试驾的私信，只是测试批次号不同，造成信息冗余。",
+      "target": "rag_exp_c3985e2b8c9c20449a45",
+      "target_label": "rag_exp_c3985e2b8c9c20449a45, rag_exp_b71d0b889cd0d3f7fd98, rag_exp_94f1529db8f4bccdf53c, rag_exp_367dabe37bbba830d312",
+      "repairable": false,
+      "action_type": "merge",
+      "involved_targets": [
+        "rag_exp_c3985e2b8c9c20449a45",
+        "rag_exp_b71d0b889cd0d3f7fd98",
+        "rag_exp_94f1529db8f4bccdf53c",
+        "rag_exp_367dabe37bbba830d312"
+      ],
+      "llm_reasoning": "四个RAG经验条目内容几乎相同，均为客户询问宝马320Li试驾的私信，只是测试批次号不同，造成信息冗余。",
+      "suggestions": [
+        {
+          "title": "建议合并",
+          "detail": "多条知识表达同一含义，建议保留信息最完整的一条，将其余归档。",
+          "level": "warning"
+        }
+      ],
+      "fingerprint": "503cb671cdde4df4635bae3f"
+    },
+    {
+      "code": "llm_duplicate_semantic",
+      "severity": "warning",
+      "title": "LLM：语义重复",
+      "detail": "四个RAG经验条目内容几乎相同，均为客户表达购车预算和需求的私信，只是测试批次号不同，造成信息冗余。",
+      "target": "rag_exp_43ceed95b9dceddded19",
+      "target_label": "rag_exp_43ceed95b9dceddded19, rag_exp_33564e4b4b1e27ea8c49, rag_exp_28af1d68069955154986, rag_exp_06b43f8903704e05377e",
+      "repairable": false,
+      "action_type": "merge",
+      "involved_targets": [
+        "rag_exp_43ceed95b9dceddded19",
+        "rag_exp_33564e4b4b1e27ea8c49",
+        "rag_exp_28af1d68069955154986",
+        "rag_exp_06b43f8903704e05377e"
+      ],
+      "llm_reasoning": "四个RAG经验条目内容几乎相同，均为客户表达购车预算和需求的私信，只是测试批次号不同，造成信息冗余。",
+      "suggestions": [
+        {
+          "title": "建议合并",
+          "detail": "多条知识表达同一含义，建议保留信息最完整的一条，将其余归档。",
+          "level": "warning"
+        }
+      ],
+      "fingerprint": "d59f42eda6a80b76e591da2f"
+    },
+    {
+      "code": "llm_duplicate_semantic",
+      "severity": "warning",
+      "title": "LLM：语义重复",
+      "detail": "三个RAG经验条目内容几乎相同，均为raw_upload/chats中的聊天记录（含预算推荐、置换、沉睡客户唤醒），只是测试批次号不同，造成信息冗余。",
+      "target": "rag_exp_fbe0e51a58894a2511bd",
+      "target_label": "rag_exp_fbe0e51a58894a2511bd, rag_exp_c4d462ae49165d25ec80, rag_exp_33d4477961974cf9fd06",
+      "repairable": false,
+      "action_type": "merge",
+      "involved_targets": [
+        "rag_exp_fbe0e51a58894a2511bd",
+        "rag_exp_c4d462ae49165d25ec80",
+        "rag_exp_33d4477961974cf9fd06"
+      ],
+      "llm_reasoning": "三个RAG经验条目内容几乎相同，均为raw_upload/chats中的聊天记录（含预算推荐、置换、沉睡客户唤醒），只是测试批次号不同，造成信息冗余。",
+      "suggestions": [
+        {
+          "title": "建议合并",
+          "detail": "多条知识表达同一含义，建议保留信息最完整的一条，将其余归档。",
+          "level": "warning"
+        }
+      ],
+      "fingerprint": "6f49dc28ed7e593a9dd83cfd"
+    },
+    {
+      "code": "llm_duplicate_semantic",
+      "severity": "warning",
+      "title": "LLM：语义重复",
+      "detail": "这三个RAG经验条目均来自raw_upload/products，内容几乎完全一致（商品资料相同，仅测试批次不同），属于语义重复，应合并为一条以避免冗余。",
+      "target": "rag_exp_351fa58ff874d3d92ce8",
+      "target_label": "rag_exp_351fa58ff874d3d92ce8, rag_exp_c85a88ad457124dfa6b9, rag_exp_66380df76e5ce81aaaa7",
+      "repairable": false,
+      "action_type": "merge",
+      "involved_targets": [
+        "rag_exp_351fa58ff874d3d92ce8",
+        "rag_exp_c85a88ad457124dfa6b9",
+        "rag_exp_66380df76e5ce81aaaa7"
+      ],
+      "llm_reasoning": "这三个RAG经验条目均来自raw_upload/products，内容几乎完全一致（商品资料相同，仅测试批次不同），属于语义重复，应合并为一条以避免冗余。",
+      "suggestions": [
+        {
+          "title": "建议合并",
+          "detail": "多条知识表达同一含义，建议保留信息最完整的一条，将其余归档。",
+          "level": "warning"
+        }
+      ],
+      "fingerprint": "3a9d92abfcd5f63ddc62a60a"
+    },
+    {
+      "code": "llm_duplicate_semantic",
+      "severity": "warning",
+      "title": "LLM：语义重复",
+      "detail": "这两个RAG经验条目均来自raw_wechat_private/private，内容均为重复发送的相同消息，属于语义重复，应合并或删除多余条目。",
+      "target": "rag_exp_2ce4ea80bcbae934df01",
+      "target_label": "rag_exp_2ce4ea80bcbae934df01, rag_exp_5083471a57aa7df08a63",
+      "repairable": false,
+      "action_type": "merge",
+      "involved_targets": [
+        "rag_exp_2ce4ea80bcbae934df01",
+        "rag_exp_5083471a57aa7df08a63"
+      ],
+      "llm_reasoning": "这两个RAG经验条目均来自raw_wechat_private/private，内容均为重复发送的相同消息，属于语义重复，应合并或删除多余条目。",
+      "suggestions": [
+        {
+          "title": "建议合并",
+          "detail": "多条知识表达同一含义，建议保留信息最完整的一条，将其余归档。",
+          "level": "warning"
+        }
+      ],
+      "fingerprint": "3e25ebe43bb5ef36fbf53035"
+    },
+    {
+      "code": "llm_duplicate_semantic",
+      "severity": "warning",
+      "title": "LLM：语义重复",
+      "detail": "该RAG经验条目内包含两个完全相同的聊天记录（预算推荐话术重复出现），属于自身内容重复，应清理冗余部分。",
+      "target": "rag_exp_ffd1ef904ee06cc548b9",
+      "target_label": "rag_exp_ffd1ef904ee06cc548b9",
+      "repairable": false,
+      "action_type": "review",
+      "involved_targets": [
+        "rag_exp_ffd1ef904ee06cc548b9"
+      ],
+      "llm_reasoning": "该RAG经验条目内包含两个完全相同的聊天记录（预算推荐话术重复出现），属于自身内容重复，应清理冗余部分。",
+      "suggestions": [
+        {
+          "title": "建议人工复核",
+          "detail": "LLM认为该条目可能存在问题，请人工确认后决定处理方式。",
+          "level": "warning"
+        }
+      ],
+      "fingerprint": "819b8318a247105d6da655e8"
+    }
+  ],
+  "ignored_count": 0,
+  "summary": {
+    "error_count": 0,
+    "warning_count": 9,
+    "info_count": 0,
+    "ignored_count": 0,
+    "hidden_notice_count": 1
+  },
+  "auto_dedup_rag": null
+}

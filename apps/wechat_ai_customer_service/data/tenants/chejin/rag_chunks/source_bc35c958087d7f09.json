@@ -1,0 +1,35 @@
+{
+  "source": {
+    "source_id": "source_bc35c958087d7f09",
+    "tenant_id": "chejin",
+    "layer": "tenant",
+    "source_type": "wechat_raw_message",
+    "category": "file_transfer",
+    "product_id": "",
+    "source_path": "D:\\AI\\omniauto\\runtime\\apps\\wechat_ai_customer_service\\tenants\\chejin\\raw_messages\\learning_batches\\raw_batch_2ff360d0528f0503d0a1.txt",
+    "content_hash": "43121162363706d477d21c3cf36b21c1",
+    "status": "quarantined",
+    "created_at": "2026-05-06T14:51:18",
+    "updated_at": "2026-05-06T14:51:18",
+    "quarantine_reason": "raw_wechat_source_not_directly_retrievable"
+  },
+  "chunks": [
+    {
+      "chunk_id": "chunk_9ab3eddc7b76bfb0",
+      "source_id": "source_bc35c958087d7f09",
+      "tenant_id": "chejin",
+      "layer": "tenant",
+      "source_type": "wechat_raw_message",
+      "category": "file_transfer",
+      "product_id": "",
+      "source_path": "D:\\AI\\omniauto\\runtime\\apps\\wechat_ai_customer_service\\tenants\\chejin\\raw_messages\\learning_batches\\raw_batch_2ff360d0528f0503d0a1.txt",
+      "chunk_index": 0,
+      "text": "[2026-05-06 14:50:00] system: 14:50\n[2026-05-06T14:51:18] self: [OmniAuto客服] 8万预算省油代步，可以看看凯美瑞、思域和秦PLUS DM-i，这几款口碑都不错。您是在哪个城市看车？是否方便了解一下贷款或置换的考虑？",
+      "char_count": 144,
+      "status": "quarantined",
+      "created_at": "2026-05-06T14:51:18",
+      "quarantine_reason": "raw_wechat_source_not_directly_retrievable",
+      "quarantined_at": "2026-05-19T01:47:04"
+    }
+  ]
+}

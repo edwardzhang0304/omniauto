@@ -1,0 +1,115 @@
+[
+  {
+    "run_id": "recorder_export_run_192da06c330a861d22bc",
+    "tenant_id": "chejin",
+    "requested_by_user_id": "local-admin",
+    "requested_by_username": "admin",
+    "module_key": "raw_message_log_v1",
+    "module_version": "1.0.0",
+    "module_name": "通用原始消息导出V1",
+    "status": "succeeded",
+    "stage": "completed",
+    "queue_name": "recorder_exports",
+    "filters": {
+      "conversation_ids": [],
+      "target_names": [
+        "数据测试"
+      ],
+      "query": "",
+      "start_time": "2026-05-01 00:00:00",
+      "end_time": "2026-05-31 23:59:59",
+      "date_from": "2026-05-01",
+      "date_to": "2026-05-31",
+      "quick_range": "month",
+      "sender": "",
+      "content_type": "",
+      "conversation_type": "",
+      "keywords": [],
+      "offset": 0,
+      "limit": 10000
+    },
+    "progress": {
+      "stage": "completed",
+      "stage_label": "已完成",
+      "processed_messages": 0,
+      "total_messages": 0,
+      "percent": 1.0,
+      "updated_at": "2026-05-17T16:03:02"
+    },
+    "stats": {
+      "input_message_count": 0,
+      "export_row_count": 0,
+      "needs_review_count": 0,
+      "skipped_count": 0,
+      "llm_calls": 0,
+      "llm_segment_calls": 0,
+      "llm_repair_calls": 0
+    },
+    "artifacts": {
+      "xlsx_path": "D:\\AI\\omniauto\\runtime\\apps\\wechat_ai_customer_service\\tenants\\chejin\\recorder\\exports\\files\\recorder_export_run_192da06c330a861d22bc.xlsx",
+      "report_path": "D:\\AI\\omniauto\\runtime\\apps\\wechat_ai_customer_service\\tenants\\chejin\\recorder\\exports\\reports\\recorder_export_run_192da06c330a861d22bc.json"
+    },
+    "error": "",
+    "created_at": "2026-05-17T16:03:00",
+    "updated_at": "2026-05-17T16:03:02",
+    "started_at": "2026-05-17T16:03:02",
+    "finished_at": "2026-05-17T16:03:02"
+  },
+  {
+    "run_id": "recorder_export_run_a8ade77a94ced1428de0",
+    "tenant_id": "chejin",
+    "requested_by_user_id": "chejin",
+    "requested_by_username": "chejin",
+    "module_key": "order_sheet_lab_v1",
+    "module_version": "1.0.0",
+    "module_name": "实验仪器订货表V1",
+    "status": "succeeded",
+    "stage": "completed",
+    "queue_name": "recorder_exports",
+    "filters": {
+      "conversation_ids": [],
+      "target_names": [
+        "服务号",
+        "数据测试"
+      ],
+      "query": "",
+      "start_time": "2026-05-01 00:00:00",
+      "end_time": "2026-05-31 23:59:59",
+      "date_from": "2026-05-01",
+      "date_to": "2026-05-31",
+      "quick_range": "month",
+      "sender": "",
+      "content_type": "",
+      "conversation_type": "",
+      "keywords": [],
+      "offset": 0,
+      "limit": 10000
+    },
+    "progress": {
+      "stage": "completed",
+      "stage_label": "已完成",
+      "processed_messages": 0,
+      "total_messages": 0,
+      "percent": 1.0,
+      "updated_at": "2026-05-17T14:40:41"
+    },
+    "stats": {
+      "input_message_count": 0,
+      "export_row_count": 0,
+      "needs_review_count": 0,
+      "skipped_count": 0,
+      "llm_calls": 0,
+      "llm_segment_calls": 0,
+      "llm_repair_calls": 0
+    },
+    "artifacts": {
+      "xlsx_path": "D:\\AI\\omniauto\\runtime\\apps\\wechat_ai_customer_service\\tenants\\chejin\\recorder\\exports\\files\\recorder_export_run_a8ade77a94ced1428de0.xlsx",
+      "report_path": "D:\\AI\\omniauto\\runtime\\apps\\wechat_ai_customer_service\\tenants\\chejin\\recorder\\exports\\reports\\recorder_export_run_a8ade77a94ced1428de0.json"
+    },
+    "error": "",
+    "created_at": "2026-05-17T14:40:39",
+    "updated_at": "2026-05-17T14:40:41",
+    "started_at": "2026-05-17T14:40:41",
+    "finished_at": "2026-05-17T14:40:41"
+  }
+]

@@ -1,0 +1,35 @@
+{
+  "source": {
+    "source_id": "source_3381c7107a7dbcf5",
+    "tenant_id": "chejin",
+    "layer": "tenant",
+    "source_type": "wechat_raw_message",
+    "category": "private",
+    "product_id": "",
+    "source_path": "D:\\AI\\omniauto\\runtime\\apps\\wechat_ai_customer_service\\tenants\\chejin\\raw_messages\\learning_batches\\raw_batch_55f0afcf3de2c7140180.txt",
+    "content_hash": "c729427d17da6bccc4305ec4f5763619",
+    "status": "quarantined",
+    "created_at": "2026-05-06T19:49:18",
+    "updated_at": "2026-05-06T19:49:18",
+    "quarantine_reason": "raw_wechat_source_not_directly_retrievable"
+  },
+  "chunks": [
+    {
+      "chunk_id": "chunk_6796d1cb86668642",
+      "source_id": "source_3381c7107a7dbcf5",
+      "tenant_id": "chejin",
+      "layer": "tenant",
+      "source_type": "wechat_raw_message",
+      "category": "private",
+      "product_id": "",
+      "source_path": "D:\\AI\\omniauto\\runtime\\apps\\wechat_ai_customer_service\\tenants\\chejin\\raw_messages\\learning_batches\\raw_batch_55f0afcf3de2c7140180.txt",
+      "chunk_index": 0,
+      "text": "[2026-05-06T19:49:18] 许聪: 你直接从现有的车里给我推荐几款吧",
+      "char_count": 42,
+      "status": "quarantined",
+      "created_at": "2026-05-06T19:49:18",
+      "quarantine_reason": "raw_wechat_source_not_directly_retrievable",
+      "quarantined_at": "2026-05-19T01:47:03"
+    }
+  ]
+}

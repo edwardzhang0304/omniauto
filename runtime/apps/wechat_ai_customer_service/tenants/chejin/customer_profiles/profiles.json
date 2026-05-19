@@ -1,0 +1,29 @@
+[
+  {
+    "profile_id": "cust_chejin",
+    "tenant_id": "chejin",
+    "target_name": "文件传输助手",
+    "display_name": "文件传输助手",
+    "status": "active",
+    "basic_info": {
+      "inferred_name": "",
+      "gender": "male",
+      "gender_confidence": 0.9,
+      "region": "",
+      "first_contact_at": "2026-05-08T05:14:54",
+      "last_contact_at": "2026-05-19T12:58:56",
+      "total_messages": 2820,
+      "total_replies": 796,
+      "total_handoffs": 0
+    },
+    "tags": {},
+    "conversation_summary": "",
+    "greeting_preference": {
+      "formality": "casual",
+      "last_greeting_type": ""
+    },
+    "created_at": "2026-05-19T12:58:56",
+    "updated_at": "2026-05-19T12:58:56",
+    "source": {}
+  }
+]

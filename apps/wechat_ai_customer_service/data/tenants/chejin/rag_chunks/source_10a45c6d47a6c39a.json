@@ -1,0 +1,35 @@
+{
+  "source": {
+    "source_id": "source_10a45c6d47a6c39a",
+    "tenant_id": "chejin",
+    "layer": "tenant",
+    "source_type": "wechat_raw_message",
+    "category": "private",
+    "product_id": "",
+    "source_path": "D:\\AI\\omniauto\\runtime\\apps\\wechat_ai_customer_service\\tenants\\chejin\\raw_messages\\learning_batches\\raw_batch_940a241ad312be9d50ab.txt",
+    "content_hash": "bef888fcb2cc8dee91c946bcef970291",
+    "status": "quarantined",
+    "created_at": "2026-05-06T19:23:55",
+    "updated_at": "2026-05-06T19:23:55",
+    "quarantine_reason": "raw_wechat_source_not_directly_retrievable"
+  },
+  "chunks": [
+    {
+      "chunk_id": "chunk_13049fa91ac291a5",
+      "source_id": "source_10a45c6d47a6c39a",
+      "tenant_id": "chejin",
+      "layer": "tenant",
+      "source_type": "wechat_raw_message",
+      "category": "private",
+      "product_id": "",
+      "source_path": "D:\\AI\\omniauto\\runtime\\apps\\wechat_ai_customer_service\\tenants\\chejin\\raw_messages\\learning_batches\\raw_batch_940a241ad312be9d50ab.txt",
+      "chunk_index": 0,
+      "text": "[2026-05-06T19:23:55] 许聪: 能开增值税专票吗？",
+      "char_count": 35,
+      "status": "quarantined",
+      "created_at": "2026-05-06T19:23:55",
+      "quarantine_reason": "raw_wechat_source_not_directly_retrievable",
+      "quarantined_at": "2026-05-19T01:47:03"
+    }
+  ]
+}

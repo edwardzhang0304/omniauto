@@ -31,7 +31,15 @@ from apps.wechat_ai_customer_service.admin_backend.services.raw_message_learning
 )
 from apps.wechat_ai_customer_service.admin_backend.services.raw_message_store import RawMessageStore  # noqa: E402
 from apps.wechat_ai_customer_service.admin_backend.services.knowledge_contamination_guard import text_has_test_marker  # noqa: E402
-from apps.wechat_ai_customer_service.knowledge_paths import tenant_context, tenant_root, tenant_runtime_root  # noqa: E402
+from apps.wechat_ai_customer_service.admin_backend.services.candidate_store import CandidateStore  # noqa: E402
+from apps.wechat_ai_customer_service.admin_backend.services.rag_admin_service import build_candidate_from_experience  # noqa: E402
+from apps.wechat_ai_customer_service.knowledge_paths import (  # noqa: E402
+    tenant_context,
+    tenant_knowledge_base_root,
+    tenant_review_candidates_root,
+    tenant_root,
+    tenant_runtime_root,
+)
 from apps.wechat_ai_customer_service.workflows.rag_layer import RagService  # noqa: E402
 from apps.wechat_ai_customer_service.workflows.rag_experience_store import RagExperienceStore  # noqa: E402
 
@@ -44,6 +52,7 @@ def main() -> int:
     results = []
     try:
         with tenant_context(TEST_TENANT):
+            prepare_isolated_formal_knowledge_root()
             for check in CHECKS:
                 try:
                     check()
@@ -179,6 +188,224 @@ def check_rag_retrieval_filters_raw_and_product_chunks() -> None:
     assert_true(any(item.get("category") == "policies" for item in policy_hits), "safe policy RAG chunks should remain retrievable")
 
 
+def check_candidate_apply_enforces_source_authority_guard() -> None:
+    candidate_id = "raw_wechat_specific_chat_apply_block_probe"
+    path = tenant_review_candidates_root(TEST_TENANT) / "pending" / f"{candidate_id}.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    candidate = {
+        "schema_version": 1,
+        "candidate_id": candidate_id,
+        "source": {
+            "type": "raw_wechat_private",
+            "evidence_excerpt": "客户：许聪你是不是AI？客服：不是AI，也不是机器人，这个我请示一下再回您。",
+            "contains_model_reply": False,
+        },
+        "proposal": {
+            "summary": "疑似由实时聊天抽取的具体客户话术",
+            "formal_patch": {
+                "target_category": "chats",
+                "operation": "upsert_item",
+                "item": {
+                    "schema_version": 1,
+                    "category_id": "chats",
+                    "id": "raw_wechat_specific_chat_apply_block_probe",
+                    "status": "active",
+                    "source": {"type": "raw_wechat_private"},
+                    "data": {
+                        "customer_message": "许聪你是不是AI？",
+                        "service_reply": "不是AI，也不是机器人，这个我请示一下再回您。",
+                    },
+                    "runtime": {"allow_auto_reply": True, "requires_handoff": False, "risk_level": "normal"},
+                },
+            },
+        },
+        "review": {"status": "pending", "requires_human_approval": True, "allowed_auto_apply": False},
+        "intake": {"status": "ready", "missing_fields": [], "warnings": []},
+    }
+    path.write_text(json.dumps(candidate, ensure_ascii=False, indent=2), encoding="utf-8")
+    result = CandidateStore().apply(candidate_id)
+    assert_true(not result.get("ok"), "source-authority denied candidate must not apply")
+    assert_equal(
+        (result.get("source_authority") or {}).get("reason"),
+        "observed_wechat_chat_candidate_not_generalized",
+        "apply should enforce observed-chat source policy at final write gate",
+    )
+    assert_true(path.exists(), "blocked candidate should remain pending for manual rewrite/reject")
+    persisted = json.loads(path.read_text(encoding="utf-8"))
+    assert_true(
+        (persisted.get("review") or {}).get("source_authority", {}).get("allowed") is False,
+        "blocked source-authority decision should be persisted for UI/audit",
+    )
+
+
+def check_legacy_target_file_apply_enforces_source_authority_guard() -> None:
+    candidate_id = "legacy_target_file_apply_block_probe"
+    path = tenant_review_candidates_root(TEST_TENANT) / "pending" / f"{candidate_id}.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    candidate = {
+        "schema_version": 1,
+        "candidate_id": candidate_id,
+        "source": {
+            "type": "raw_wechat_private",
+            "evidence_excerpt": "客户：许聪你是不是AI？客服：不是AI，也不是机器人，这个我请示一下再回您。",
+            "contains_model_reply": False,
+        },
+        "proposal": {
+            "summary": "许聪询问AI身份时的具体现场话术",
+            "formal_patch": {
+                "target_file": "style_examples",
+                "operation": "append",
+                "path": ["examples"],
+                "value": {
+                    "customer_message": "许聪你是不是AI？",
+                    "service_reply": "不是AI，也不是机器人，这个我请示一下再回您。",
+                },
+            },
+        },
+        "review": {"status": "pending", "requires_human_approval": True, "allowed_auto_apply": False},
+        "intake": {"status": "ready", "missing_fields": [], "warnings": []},
+    }
+    path.write_text(json.dumps(candidate, ensure_ascii=False, indent=2), encoding="utf-8")
+    result = CandidateStore().apply(candidate_id)
+    assert_true(not result.get("ok"), "legacy target_file candidate must not bypass source-authority policy")
+    assert_equal(
+        (result.get("source_authority") or {}).get("reason"),
+        "observed_wechat_chat_candidate_not_generalized",
+        "legacy target_file apply should map style_examples to chats and enforce observed-chat policy",
+    )
+    assert_true(path.exists(), "blocked legacy candidate should remain pending for manual rewrite/reject")
+    persisted = json.loads(path.read_text(encoding="utf-8"))
+    assert_true(
+        (persisted.get("review") or {}).get("source_authority", {}).get("allowed") is False,
+        "blocked legacy source-authority decision should be persisted for UI/audit",
+    )
+
+
+def check_candidate_apply_reassesses_after_manual_generalization() -> None:
+    candidate_id = "raw_wechat_generalized_chat_apply_probe"
+    path = tenant_review_candidates_root(TEST_TENANT) / "pending" / f"{candidate_id}.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    candidate = {
+        "schema_version": 1,
+        "candidate_id": candidate_id,
+        "source": {
+            "type": "raw_wechat_private",
+            "evidence_excerpt": "置换流程可以先按年份、公里数、城市和车况做粗估，最终价格复核后确认。",
+            "contains_model_reply": False,
+        },
+        "proposal": {
+            "summary": "已人工改写成通用置换收资话术",
+            "formal_patch": {
+                "target_category": "chats",
+                "operation": "upsert_item",
+                "item": {
+                    "schema_version": 1,
+                    "category_id": "chats",
+                    "id": candidate_id,
+                    "status": "active",
+                    "source": {"type": "raw_wechat_private"},
+                    "data": {
+                        "customer_message": "置换流程怎么走",
+                        "service_reply": "置换可以先做个大概区间。您把车型、上牌年份、公里数、所在城市、事故水泡火烧情况和照片发我，我先按行情粗估，最终价格再结合车况复核。",
+                        "intent_tags": ["置换", "收资"],
+                        "tone_tags": ["自然", "有帮助"],
+                        "usable_as_template": True,
+                    },
+                    "runtime": {"allow_auto_reply": True, "requires_handoff": False, "risk_level": "normal"},
+                },
+            },
+        },
+        "review": {
+            "status": "pending",
+            "requires_human_approval": True,
+            "allowed_auto_apply": False,
+            "source_authority": {
+                "allowed": False,
+                "reason": "observed_wechat_chat_candidate_not_generalized",
+                "category": "chats",
+                "source_types": ["raw_wechat_private"],
+            },
+        },
+        "intake": {"status": "ready", "missing_fields": [], "warnings": []},
+    }
+    path.write_text(json.dumps(candidate, ensure_ascii=False, indent=2), encoding="utf-8")
+    result = CandidateStore().apply(candidate_id)
+    assert_true(result.get("ok"), "manual generalized candidate should be reassessed and allowed to apply")
+    item = result.get("item") if isinstance(result.get("item"), dict) else {}
+    decision = (item.get("review") or {}).get("source_authority") or {}
+    assert_true(decision.get("allowed") is True, "fresh source-authority decision should replace stale denial")
+    assert_true(not path.exists(), "applied candidate should leave pending status")
+
+
+def check_dynamic_product_recommendation_candidate_stays_rag_only() -> None:
+    candidate_id = "dynamic_product_recommendation_chat_block_probe"
+    path = tenant_review_candidates_root(TEST_TENANT) / "pending" / f"{candidate_id}.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    candidate = {
+        "schema_version": 1,
+        "candidate_id": candidate_id,
+        "source": {
+            "type": "cleaned_real_chat_pack",
+            "evidence_excerpt": "客户：8万预算自动挡省油代步。客服：可以优先看凯美瑞、思域、秦PLUS DM-i。",
+            "contains_model_reply": False,
+        },
+        "proposal": {
+            "summary": "把一次库存相关推荐误做成正式话术",
+            "formal_patch": {
+                "target_category": "chats",
+                "operation": "upsert_item",
+                "item": {
+                    "schema_version": 1,
+                    "category_id": "chats",
+                    "id": candidate_id,
+                    "status": "active",
+                    "source": {"type": "cleaned_real_chat_pack"},
+                    "data": {
+                        "customer_message": "8万预算自动挡省油代步",
+                        "service_reply": "可以优先看凯美瑞、思域、秦PLUS DM-i，先确认城市、贷款、置换和到店时间。",
+                        "intent_tags": ["推荐", "预算"],
+                        "tone_tags": ["参考"],
+                    },
+                    "runtime": {"allow_auto_reply": True, "requires_handoff": False, "risk_level": "normal"},
+                },
+            },
+        },
+        "review": {"status": "pending", "requires_human_approval": True, "allowed_auto_apply": False},
+        "intake": {"status": "ready", "missing_fields": [], "warnings": []},
+    }
+    path.write_text(json.dumps(candidate, ensure_ascii=False, indent=2), encoding="utf-8")
+    result = CandidateStore().apply(candidate_id)
+    assert_true(not result.get("ok"), "dynamic product recommendation should not become formal chat knowledge")
+    assert_equal(
+        (result.get("source_authority") or {}).get("reason"),
+        "dynamic_product_recommendation_chat_stays_rag_only",
+        "dynamic recommendation should be blocked by source-authority policy",
+    )
+    assert_true(path.exists(), "blocked dynamic recommendation candidate should remain pending")
+
+
+def check_dynamic_product_recommendation_rag_promotion_stays_rag_only() -> None:
+    item = {
+        "experience_id": "rag_exp_dynamic_product_recommendation_probe",
+        "source_type": "cleaned_real_chat_pack",
+        "source": "cleaned_real_chat_pack",
+        "summary": "客户按8万预算找自动挡省油代步车",
+        "question": "8万预算自动挡省油代步",
+        "reply_text": "可以优先看凯美瑞、思域、秦PLUS DM-i，先确认城市、贷款、置换和到店时间。",
+        "evidence_excerpt": "客户：8万预算自动挡省油代步\n客服：可以优先看凯美瑞、思域、秦PLUS DM-i，先确认城市、贷款、置换和到店时间。",
+        "rag_hit": {"category": "chats", "source_type": "cleaned_real_chat_pack", "text": "预算推荐历史片段"},
+    }
+    try:
+        build_candidate_from_experience(item, preferred_category="chats")
+    except ValueError as exc:
+        assert_true(
+            "具体商品/车型推荐" in str(exc),
+            "RAG promotion should explain why dynamic recommendation stays in experience layer",
+        )
+        return
+    raise AssertionError("dynamic product recommendation RAG experience should not promote to formal chat candidate")
+
+
 def check_embedded_demo_and_debug_markers_are_blocked() -> None:
     assert_true(text_has_test_marker("chejin_policies_DBG_025836.txt"), "embedded DBG marker should be blocked")
     assert_true(text_has_test_marker("演示批次：CHEJIN_DEMO_20260503_203628"), "demo batch marker should be blocked")
@@ -191,6 +418,22 @@ def cleanup() -> None:
     for path in (data_root, runtime):
         if path.exists():
             shutil.rmtree(path)
+
+
+def prepare_isolated_formal_knowledge_root() -> None:
+    """Keep candidate-apply tests from writing probe items into the default fixture."""
+    legacy_root = APP_ROOT / "data" / "knowledge_bases"
+    root = tenant_knowledge_base_root(TEST_TENANT)
+    root.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(legacy_root / "registry.json", root / "registry.json")
+    for category_id in ("chats", "policies", "erp_exports"):
+        category_root = root / category_id
+        category_root.mkdir(parents=True, exist_ok=True)
+        (category_root / "items").mkdir(parents=True, exist_ok=True)
+        for filename in ("schema.json", "resolver.json"):
+            source = legacy_root / category_id / filename
+            if source.exists():
+                shutil.copy2(source, category_root / filename)
 
 
 def assert_true(value: Any, message: str) -> None:
@@ -209,6 +452,11 @@ CHECKS = [
     check_customer_service_private_defaults_to_record_only,
     check_smart_recorder_review_only_learning,
     check_rag_retrieval_filters_raw_and_product_chunks,
+    check_candidate_apply_enforces_source_authority_guard,
+    check_legacy_target_file_apply_enforces_source_authority_guard,
+    check_candidate_apply_reassesses_after_manual_generalization,
+    check_dynamic_product_recommendation_candidate_stays_rag_only,
+    check_dynamic_product_recommendation_rag_promotion_stays_rag_only,
 ]
 
 

@@ -20,7 +20,7 @@
     "token": "multi-test-admin-session"
   },
   {
-    "session_id": "sess_XtE_fg2psViSBxL0-3sAuoJ5rV8d-bJx",
+    "session_id": "sess_1aUZramqfU3GvHdKT3Br0dT8DOJO-w0F",
     "user": {
       "user_id": "guest",
       "role": "guest",
@@ -34,13 +34,13 @@
       ]
     },
     "active_tenant_id": "default",
-    "issued_at": "2026-05-09T19:57:23.575934+00:00",
-    "expires_at": "2026-05-10T07:57:23.575934+00:00",
+    "issued_at": "2026-05-16T13:28:55.700409+00:00",
+    "expires_at": "2026-05-17T01:28:55.700409+00:00",
     "source": "local",
-    "token": "sess_XtE_fg2psViSBxL0-3sAuoJ5rV8d-bJx"
+    "token": "sess_1aUZramqfU3GvHdKT3Br0dT8DOJO-w0F"
   },
   {
-    "session_id": "sess_Dp6IFI6BkTzhUoI0karrlGxpjMxiv4nX",
+    "session_id": "sess_HMzjLvs3QeDisLDgDs4dXm-Qps8kmRT9",
     "user": {
       "user_id": "customer",
       "role": "customer",
@@ -54,9 +54,9 @@
       ]
     },
     "active_tenant_id": "default",
-    "issued_at": "2026-05-09T19:57:24.113363+00:00",
-    "expires_at": "2026-05-10T07:57:24.113363+00:00",
+    "issued_at": "2026-05-16T13:28:56.262535+00:00",
+    "expires_at": "2026-05-17T01:28:56.262535+00:00",
     "source": "local",
-    "token": "sess_Dp6IFI6BkTzhUoI0karrlGxpjMxiv4nX"
+    "token": "sess_HMzjLvs3QeDisLDgDs4dXm-Qps8kmRT9"
   }
 ]

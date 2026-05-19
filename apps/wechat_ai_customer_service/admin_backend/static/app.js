@@ -166,7 +166,7 @@ const optionLabels = {
   risk_level: {normal: "普通", warning: "需关注", high: "高风险"},
   record_type: {product: "商品", inventory: "库存", price: "价格", customer: "客户", order: "订单", other: "其他"},
   sync_status: {imported: "已导入", linked: "已关联", ignored: "已忽略", error: "异常"},
-  applicability_scope: {global: "全部商品通用", product_category: "某类商品适用", specific_product: "指定商品适用"},
+  applicability_scope: {global: "本账号通用", product_category: "某类商品适用", specific_product: "指定商品适用"},
 };
 
 const fieldLabelOverrides = {
@@ -2303,7 +2303,7 @@ function knowledgeScopeBadges(category, item) {
   const scope = data.applicability_scope || "global";
   if (scope === "specific_product") return [{label: `指定商品：${productDisplayName(data.product_id) || data.product_id || "未填写"}`, tone: "info"}];
   if (scope === "product_category") return [{label: `商品类目：${data.product_category || "未填写"}`, tone: "info"}];
-  return [{label: "全部商品通用", tone: "ok"}];
+  return [{label: "本账号通用", tone: "ok"}];
 }
 
 function knowledgeContextNoticeHtml(category, item, options = {}) {
@@ -2326,12 +2326,12 @@ function knowledgeContextNoticeHtml(category, item, options = {}) {
     `;
   }
   if (["chats", "policies"].includes(category.id)) {
-    const badge = knowledgeScopeBadges(category, item)[0]?.label || "全部商品通用";
+    const badge = knowledgeScopeBadges(category, item)[0]?.label || "本账号通用";
     const tip = data.applicability_scope === "specific_product"
       ? "这条知识只在关联商品被识别出来时参与回复。"
       : data.applicability_scope === "product_category"
         ? "这条知识只在对应商品类目被识别出来时参与回复。"
-        : "这条知识会作为通用话术或规则参与回复。";
+        : "这条知识只在当前账号内作为通用话术或规则参与回复，不代表VPS公共共享知识。";
     return `
       <div class="helper-card context-card">
         <strong>${escapeHtml(badge)}</strong>

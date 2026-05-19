@@ -1,0 +1,35 @@
+{
+  "source": {
+    "source_id": "source_de6d85df66aeb6cc",
+    "tenant_id": "chejin",
+    "layer": "tenant",
+    "source_type": "wechat_raw_message",
+    "category": "private",
+    "product_id": "",
+    "source_path": "D:\\AI\\omniauto\\runtime\\apps\\wechat_ai_customer_service\\tenants\\chejin\\raw_messages\\learning_batches\\raw_batch_83513845d9cc9a3b7a3c.txt",
+    "content_hash": "ed1be4a0ac19d10e10f56cedfa1e83fa",
+    "status": "quarantined",
+    "created_at": "2026-05-16T14:09:23",
+    "updated_at": "2026-05-16T14:09:23",
+    "quarantine_reason": "raw_wechat_source_not_directly_retrievable"
+  },
+  "chunks": [
+    {
+      "chunk_id": "chunk_4c701bae9b84adfe",
+      "source_id": "source_de6d85df66aeb6cc",
+      "tenant_id": "chejin",
+      "layer": "tenant",
+      "source_type": "wechat_raw_message",
+      "category": "private",
+      "product_id": "",
+      "source_path": "D:\\AI\\omniauto\\runtime\\apps\\wechat_ai_customer_service\\tenants\\chejin\\raw_messages\\learning_batches\\raw_batch_83513845d9cc9a3b7a3c.txt",
+      "chunk_index": 0,
+      "text": "[2026-05-16T12:30:47] self: 宝马320Li那台今天能到店试驾吗 CHEJIN_20260516_123014",
+      "char_count": 68,
+      "status": "quarantined",
+      "created_at": "2026-05-16T14:09:23",
+      "quarantine_reason": "raw_wechat_source_not_directly_retrievable",
+      "quarantined_at": "2026-05-19T01:47:04"
+    }
+  ]
+}

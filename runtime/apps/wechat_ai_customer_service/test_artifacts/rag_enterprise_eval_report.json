@@ -1,7 +1,13 @@
 {
-  "ok": true,
+  "ok": false,
   "count": 5,
-  "failures": [],
+  "failures": [
+    {
+      "name": "check_experience_layer_active_and_discarded_retrieval",
+      "ok": false,
+      "error": "AssertionError('discarded experience should not be searchable')"
+    }
+  ],
   "results": [
     {
       "name": "check_hybrid_semantic_recall",
@@ -16,12 +22,13 @@
       "ok": true
     },
     {
-      "name": "check_experience_layer_active_and_discarded_retrieval",
+      "name": "check_internal_experience_hit_does_not_become_customer_reply",
       "ok": true
     },
     {
-      "name": "check_operations_analytics_report",
-      "ok": true
+      "name": "check_experience_layer_active_and_discarded_retrieval",
+      "ok": false,
+      "error": "AssertionError('discarded experience should not be searchable')"
     }
   ]
 }

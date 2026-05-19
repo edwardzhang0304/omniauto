@@ -244,78 +244,78 @@
     "updated_at": "2026-05-03T03:47:11",
     "llm_used": true
   },
-  "jiangsu_chejin_usedcar_customer_20260501:chats:chejin_chat_complaint:771a4abd07c03c57": {
+  "chejin:chats:chejin_chat_complaint:771a4abd07c03c57": {
     "status": "uploaded",
     "proposal_id": "proposal_shared_local_86eefda9bfd3763fb0",
     "updated_at": "2026-05-03T20:46:01",
     "llm_used": false
   },
-  "jiangsu_chejin_usedcar_customer_20260501:chats:chejin_chat_duplicate_lead:fc4c846be5e813fb": {
+  "chejin:chats:chejin_chat_duplicate_lead:fc4c846be5e813fb": {
     "status": "uploaded",
     "proposal_id": "proposal_shared_local_245e7f16a43ba04b47",
     "updated_at": "2026-05-03T20:46:01",
     "llm_used": false
   },
-  "jiangsu_chejin_usedcar_customer_20260501:chats:chejin_chat_hold:2f099b2c81f5a63c": {
+  "chejin:chats:chejin_chat_hold:2f099b2c81f5a63c": {
     "status": "uploaded",
     "proposal_id": "proposal_shared_local_0a4fd8c510c133d9f1",
     "updated_at": "2026-05-03T20:46:01",
     "llm_used": false
   },
-  "jiangsu_chejin_usedcar_customer_20260501:chats:chejin_chat_photo_video:2b62fc333d3156d2": {
+  "chejin:chats:chejin_chat_photo_video:2b62fc333d3156d2": {
     "status": "not_recommended",
     "updated_at": "2026-05-03T20:46:01",
     "llm_used": true
   },
-  "jiangsu_chejin_usedcar_customer_20260501:chats:chejin_chat_private_payment:226c64555b1ed764": {
+  "chejin:chats:chejin_chat_private_payment:226c64555b1ed764": {
     "status": "uploaded",
     "proposal_id": "proposal_shared_local_5fb9bbd35b3f5c829b",
     "updated_at": "2026-05-03T20:46:01",
     "llm_used": false
   },
-  "jiangsu_chejin_usedcar_customer_20260501:chats:chejin_chat_universal_handoff:7635fca2b21ee0ea": {
+  "chejin:chats:chejin_chat_universal_handoff:7635fca2b21ee0ea": {
     "status": "uploaded",
     "proposal_id": "proposal_shared_local_7e26d6eeb24319dc63",
     "updated_at": "2026-05-03T20:46:01",
     "llm_used": false
   },
-  "jiangsu_chejin_usedcar_customer_20260501:policies:chejin_complaint_rule:4048136bf6e80983": {
+  "chejin:policies:chejin_complaint_rule:4048136bf6e80983": {
     "status": "uploaded",
     "proposal_id": "proposal_shared_local_75a5c7dfdeea79bc87",
     "updated_at": "2026-05-03T20:46:01",
     "llm_used": false
   },
-  "jiangsu_chejin_usedcar_customer_20260501:policies:chejin_emission_relocation_rule:fb94b002e0990717": {
+  "chejin:policies:chejin_emission_relocation_rule:fb94b002e0990717": {
     "status": "uploaded",
     "proposal_id": "proposal_shared_local_408035cb35dd7c10eb",
     "updated_at": "2026-05-03T20:46:01",
     "llm_used": false
   },
-  "jiangsu_chejin_usedcar_customer_20260501:policies:chejin_generic_manual_transfer:7ca4c4e5702e3093": {
+  "chejin:policies:chejin_generic_manual_transfer:7ca4c4e5702e3093": {
     "status": "uploaded",
     "proposal_id": "proposal_shared_local_de605318a53125e8fd",
     "updated_at": "2026-05-03T20:46:01",
     "llm_used": false
   },
-  "jiangsu_chejin_usedcar_customer_20260501:policies:chejin_maintenance_record_rule:88d074b036e76a9e": {
+  "chejin:policies:chejin_maintenance_record_rule:88d074b036e76a9e": {
     "status": "uploaded",
     "proposal_id": "proposal_shared_local_b8347c98605b419c0d",
     "updated_at": "2026-05-03T20:46:01",
     "llm_used": false
   },
-  "jiangsu_chejin_usedcar_customer_20260501:policies:chejin_odometer_rule:5af4a92ecf5c6d2a": {
+  "chejin:policies:chejin_odometer_rule:5af4a92ecf5c6d2a": {
     "status": "uploaded",
     "proposal_id": "proposal_shared_local_8f26c36438fe4ac117",
     "updated_at": "2026-05-03T20:46:01",
     "llm_used": false
   },
-  "jiangsu_chejin_usedcar_customer_20260501:policies:chejin_vehicle_hold_rule:6b05534228690405": {
+  "chejin:policies:chejin_vehicle_hold_rule:6b05534228690405": {
     "status": "uploaded",
     "proposal_id": "proposal_shared_local_c4bd08d10660f6db19",
     "updated_at": "2026-05-03T20:46:01",
     "llm_used": false
   },
-  "jiangsu_chejin_usedcar_customer_20260501:policies:policy_invoice_actual_transaction:a5a88fab0670e2e8": {
+  "chejin:policies:policy_invoice_actual_transaction:a5a88fab0670e2e8": {
     "status": "not_recommended",
     "updated_at": "2026-05-05T00:34:52",
     "llm_used": true

@@ -1,0 +1,52 @@
+{
+  "enabled": true,
+  "reply_mode": "full_auto",
+  "record_messages": true,
+  "auto_learn": false,
+  "use_llm": true,
+  "rag_enabled": true,
+  "data_capture_enabled": true,
+  "handoff_enabled": true,
+  "operator_alert_enabled": true,
+  "identity_guard_enabled": true,
+  "respond_all_unread_sessions": true,
+  "session_targets_managed": true,
+  "session_targets": [
+    {
+      "name": "许聪",
+      "display_name": "许聪",
+      "enabled": true,
+      "exact": true,
+      "conversation_type": "private",
+      "source": "discovered",
+      "updated_at": "2026-05-15T17:00:00"
+    },
+    {
+      "name": "文件传输助手",
+      "display_name": "文件传输助手",
+      "enabled": false,
+      "exact": true,
+      "conversation_type": "file_transfer",
+      "source": "discovered",
+      "updated_at": "2026-05-15T16:55:02"
+    },
+    {
+      "name": "数据测试",
+      "display_name": "数据测试",
+      "enabled": false,
+      "exact": true,
+      "conversation_type": "private",
+      "source": "discovered",
+      "updated_at": "2026-05-15T16:55:02"
+    },
+    {
+      "name": "服务号",
+      "display_name": "服务号",
+      "enabled": false,
+      "exact": true,
+      "conversation_type": "private",
+      "source": "discovered",
+      "updated_at": "2026-05-15T16:55:02"
+    }
+  ]
+}

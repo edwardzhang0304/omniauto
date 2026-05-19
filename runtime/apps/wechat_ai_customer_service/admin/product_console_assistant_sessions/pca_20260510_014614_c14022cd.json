@@ -1,0 +1,90 @@
+{
+  "session_id": "pca_20260510_014614_c14022cd",
+  "created_at": "2026-05-10T01:46:14",
+  "updated_at": "2026-05-10T01:47:39",
+  "status": "applied",
+  "mode": "command",
+  "use_llm": true,
+  "history": [
+    {
+      "role": "user",
+      "content": "客户问：可以上门安装吗？\n回答：可以，上门安装额外加收150元安装费。请联系人工客服登记上门时间和地点",
+      "created_at": "2026-05-10T01:46:14"
+    },
+    {
+      "role": "user",
+      "content": "小米电视75寸",
+      "created_at": "2026-05-10T01:47:39"
+    }
+  ],
+  "aggregated_text": "客户问：可以上门安装吗？\n回答：可以，上门安装额外加收150元安装费。请联系人工客服登记上门时间和地点\n小米电视75寸",
+  "question": "将为商品「小米电视75寸」新增商品专属问答：客户问：可以上门安装吗？ 回答：可以，上门安装额外加收150元安装费。请联系人工。",
+  "missing_fields": [],
+  "warnings": [],
+  "draft_item": {
+    "data": {
+      "name": "小米电视75寸",
+      "summary": "将为商品「小米电视75寸」新增商品专属问答：客户问：可以上门安装吗？ 回答：可以，上门安装额外加收150元安装费。请联系人工。"
+    }
+  },
+  "command_plan": {
+    "ok": true,
+    "action": "create_product_faq",
+    "target_product_id": "xiaomi-tv-75-100c",
+    "target_product_name": "小米电视75寸",
+    "quantity": null,
+    "fields": {
+      "question": "可以上门安装吗？",
+      "answer": "可以，上门安装额外加收150元安装费。请联系人工客服登记上门时间和地点",
+      "title": "客户问：可以上门安装吗？ 回答：可以，上门安装额外加收150元安装费。请联系人工",
+      "additional_details": {
+        "user_original_description": "客户问：可以上门安装吗？\n回答：可以，上门安装额外加收150元安装费。请联系人工客服登记上门时间和地点\n小米电视75寸"
+      },
+      "product_id": "xiaomi-tv-75-100c"
+    },
+    "llm_assisted": true,
+    "needs_confirmation": true,
+    "summary": "将为商品「小米电视75寸」新增商品专属问答：客户问：可以上门安装吗？ 回答：可以，上门安装额外加收150元安装费。请联系人工。"
+  },
+  "generator_session_id": "",
+  "last_result": {
+    "ok": true,
+    "action": "create_product_faq",
+    "llm_assisted": true,
+    "item": {
+      "id": "product_faq_150_20260510014757_8a681bcf",
+      "category_id": "product_faq",
+      "status": "active",
+      "source": {
+        "type": "manual",
+        "from": "product_console_llm"
+      },
+      "data": {
+        "product_id": "xiaomi-tv-75-100c",
+        "title": "客户问：可以上门安装吗？ 回答：可以，上门安装额外加收150元安装费。请联系人工",
+        "question": "可以上门安装吗？",
+        "answer": "可以，上门安装额外加收150元安装费。请联系人工客服登记上门时间和地点",
+        "additional_details": {
+          "user_original_description": "客户问：可以上门安装吗？\n回答：可以，上门安装额外加收150元安装费。请联系人工客服登记上门时间和地点\n小米电视75寸"
+        }
+      },
+      "schema_version": 1,
+      "runtime": {
+        "allow_auto_reply": true,
+        "requires_handoff": false,
+        "risk_level": "normal"
+      },
+      "metadata": {
+        "created_at": "2026-05-10T01:47:57",
+        "updated_at": "2026-05-10T01:47:57",
+        "created_by": "admin",
+        "updated_by": "admin"
+      }
+    },
+    "operation": "create_product_scoped",
+    "target_product_id": "xiaomi-tv-75-100c",
+    "target_product_name": "小米电视75寸",
+    "target_category": "product_faq"
+  },
+  "applied_at": "2026-05-10T01:47:58"
+}

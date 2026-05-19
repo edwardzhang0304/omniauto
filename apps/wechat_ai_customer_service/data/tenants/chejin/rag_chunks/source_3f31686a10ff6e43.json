@@ -1,0 +1,35 @@
+{
+  "source": {
+    "source_id": "source_3f31686a10ff6e43",
+    "tenant_id": "chejin",
+    "layer": "tenant",
+    "source_type": "wechat_raw_message",
+    "category": "private",
+    "product_id": "",
+    "source_path": "D:\\AI\\omniauto\\runtime\\apps\\wechat_ai_customer_service\\tenants\\chejin\\raw_messages\\learning_batches\\raw_batch_092a48b367b05a7588be.txt",
+    "content_hash": "0430b36b8f861613ae0c1c5f8a303089",
+    "status": "quarantined",
+    "created_at": "2026-05-06T19:05:14",
+    "updated_at": "2026-05-06T19:05:14",
+    "quarantine_reason": "raw_wechat_source_not_directly_retrievable"
+  },
+  "chunks": [
+    {
+      "chunk_id": "chunk_3b48e357dd9dd559",
+      "source_id": "source_3f31686a10ff6e43",
+      "tenant_id": "chejin",
+      "layer": "tenant",
+      "source_type": "wechat_raw_message",
+      "category": "private",
+      "product_id": "",
+      "source_path": "D:\\AI\\omniauto\\runtime\\apps\\wechat_ai_customer_service\\tenants\\chejin\\raw_messages\\learning_batches\\raw_batch_092a48b367b05a7588be.txt",
+      "chunk_index": 0,
+      "text": "[2026-05-06T19:05:14] self: [车金AI] 许哥，您问的那台2.0T自动挡是我们库里一台12.80万的一手车源，具体车型信息我手头没有完整的资料，怕说错了误导您。我让销售同事直接跟您联系，把车况、年份、型号都讲清楚，方便留个电话吗？",
+      "char_count": 129,
+      "status": "quarantined",
+      "created_at": "2026-05-06T19:05:14",
+      "quarantine_reason": "raw_wechat_source_not_directly_retrievable",
+      "quarantined_at": "2026-05-19T01:47:03"
+    }
+  ]
+}

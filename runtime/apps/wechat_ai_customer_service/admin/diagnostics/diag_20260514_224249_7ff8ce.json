@@ -1,0 +1,719 @@
+{
+  "ok": true,
+  "run_id": "diag_20260514_224249_7ff8ce",
+  "mode": "full",
+  "status": "warning",
+  "created_at": "2026-05-14T22:44:52",
+  "checks": [
+    {
+      "name": "quick_knowledge_validation",
+      "ok": false,
+      "issues": [
+        {
+          "code": "llm_logic_error",
+          "severity": "error",
+          "title": "LLM：逻辑错误",
+          "detail": "价格阶梯存在逻辑错误：10件以上单价80元，20件以上单价24元，价格骤降不合理且库存仅20件，20件以上价格无实际意义。",
+          "target": "products/products_3403e129ba_eb9de7",
+          "target_label": "products/products_3403e129ba_eb9de7",
+          "repairable": false,
+          "action_type": "review",
+          "involved_targets": [
+            "products/products_3403e129ba_eb9de7"
+          ],
+          "llm_reasoning": "价格阶梯存在逻辑错误：10件以上单价80元，20件以上单价24元，价格骤降不合理且库存仅20件，20件以上价格无实际意义。",
+          "suggestions": [
+            {
+              "title": "建议人工复核",
+              "detail": "LLM认为该条目可能存在问题，请人工确认后决定处理方式。",
+              "level": "warning"
+            }
+          ]
+        },
+        {
+          "code": "llm_inappropriate",
+          "severity": "error",
+          "title": "LLM：场景不适用",
+          "detail": "这些条目来自二手车行业（industry_id: used_car），内容涉及看车预约、金融审批等，与当前知识库的办公设备/商用设备业务场景完全不匹配，会导致客服回答不相关。",
+          "target": "chats/wf_tpl_a",
+          "target_label": "chats/wf_tpl_a, chats/wf_tpl_b, chats/wf_tpl_c, chats/wfr_20260514_131956_r1_a, chats/wfr_20260514_131956_r1_b, chats/wfr_20260514_131956_r1_c",
+          "repairable": false,
+          "action_type": "delete",
+          "involved_targets": [
+            "chats/wf_tpl_a",
+            "chats/wf_tpl_b",
+            "chats/wf_tpl_c",
+            "chats/wfr_20260514_131956_r1_a",
+            "chats/wfr_20260514_131956_r1_b",
+            "chats/wfr_20260514_131956_r1_c"
+          ],
+          "llm_reasoning": "这些条目来自二手车行业（industry_id: used_car），内容涉及看车预约、金融审批等，与当前知识库的办公设备/商用设备业务场景完全不匹配，会导致客服回答不相关。",
+          "suggestions": [
+            {
+              "title": "建议删除",
+              "detail": "该条目存在明显错误或不适用，建议归档或废弃。",
+              "level": "danger"
+            }
+          ]
+        },
+        {
+          "code": "llm_duplicate_semantic",
+          "severity": "warning",
+          "title": "LLM：语义重复",
+          "detail": "两个条目都描述公司信息，但公司名称不一致（杭州云桥办公设备有限公司 vs 杭州星澜供应链科技有限公司），存在语义重复和冲突，应统一或保留一个。",
+          "target": "policies/company_profile",
+          "target_label": "policies/company_profile, policies/company_profile_details",
+          "repairable": false,
+          "action_type": "review",
+          "involved_targets": [
+            "policies/company_profile",
+            "policies/company_profile_details"
+          ],
+          "llm_reasoning": "两个条目都描述公司信息，但公司名称不一致（杭州云桥办公设备有限公司 vs 杭州星澜供应链科技有限公司），存在语义重复和冲突，应统一或保留一个。",
+          "suggestions": [
+            {
+              "title": "建议人工复核",
+              "detail": "LLM认为该条目可能存在问题，请人工确认后决定处理方式。",
+              "level": "warning"
+            }
+          ]
+        },
+        {
+          "code": "llm_duplicate_semantic",
+          "severity": "warning",
+          "title": "LLM：语义重复",
+          "detail": "两个条目都涉及合同、账期、月结、赊账等需要转人工处理的政策，语义重复，可合并为一个通用合同/账期政策。",
+          "target": "policies/contract",
+          "target_label": "policies/contract, policies/credit-term-policy",
+          "repairable": false,
+          "action_type": "merge",
+          "involved_targets": [
+            "policies/contract",
+            "policies/credit-term-policy"
+          ],
+          "llm_reasoning": "两个条目都涉及合同、账期、月结、赊账等需要转人工处理的政策，语义重复，可合并为一个通用合同/账期政策。",
+          "suggestions": [
+            {
+              "title": "建议合并",
+              "detail": "多条知识表达同一含义，建议保留信息最完整的一条，将其余归档。",
+              "level": "warning"
+            }
+          ]
+        },
+        {
+          "code": "llm_duplicate_semantic",
+          "severity": "warning",
+          "title": "LLM：语义重复",
+          "detail": "两个条目都关于发票开票政策，内容基本一致，invoice_policy_details是invoice的详细JSON版本，建议合并。",
+          "target": "policies/invoice",
+          "target_label": "policies/invoice, policies/invoice_policy_details",
+          "repairable": false,
+          "action_type": "merge",
+          "involved_targets": [
+            "policies/invoice",
+            "policies/invoice_policy_details"
+          ],
+          "llm_reasoning": "两个条目都关于发票开票政策，内容基本一致，invoice_policy_details是invoice的详细JSON版本，建议合并。",
+          "suggestions": [
+            {
+              "title": "建议合并",
+              "detail": "多条知识表达同一含义，建议保留信息最完整的一条，将其余归档。",
+              "level": "warning"
+            }
+          ]
+        },
+        {
+          "code": "llm_duplicate_semantic",
+          "severity": "warning",
+          "title": "LLM：语义重复",
+          "detail": "两个条目都关于物流政策，内容一致，logistics_policy_details是logistics的详细版本，建议合并。",
+          "target": "policies/logistics",
+          "target_label": "policies/logistics, policies/logistics_policy_details",
+          "repairable": false,
+          "action_type": "merge",
+          "involved_targets": [
+            "policies/logistics",
+            "policies/logistics_policy_details"
+          ],
+          "llm_reasoning": "两个条目都关于物流政策，内容一致，logistics_policy_details是logistics的详细版本，建议合并。",
+          "suggestions": [
+            {
+              "title": "建议合并",
+              "detail": "多条知识表达同一含义，建议保留信息最完整的一条，将其余归档。",
+              "level": "warning"
+            }
+          ]
+        },
+        {
+          "code": "llm_duplicate_semantic",
+          "severity": "warning",
+          "title": "LLM：语义重复",
+          "detail": "两个条目都关于付款政策，payment_policy_details是payment的详细版本，包含额外月结信息，建议合并。",
+          "target": "policies/payment",
+          "target_label": "policies/payment, policies/payment_policy_details",
+          "repairable": false,
+          "action_type": "merge",
+          "involved_targets": [
+            "policies/payment",
+            "policies/payment_policy_details"
+          ],
+          "llm_reasoning": "两个条目都关于付款政策，payment_policy_details是payment的详细版本，包含额外月结信息，建议合并。",
+          "suggestions": [
+            {
+              "title": "建议合并",
+              "detail": "多条知识表达同一含义，建议保留信息最完整的一条，将其余归档。",
+              "level": "warning"
+            }
+          ]
+        },
+        {
+          "code": "llm_duplicate_semantic",
+          "severity": "warning",
+          "title": "LLM：语义重复",
+          "detail": "两个条目都涉及安装服务，门锁安装是安装的一种，内容上均需要转人工确认，可合并为统一的安装政策。",
+          "target": "policies/door-lock-installation",
+          "target_label": "policies/door-lock-installation, policies/installation",
+          "repairable": false,
+          "action_type": "merge",
+          "involved_targets": [
+            "policies/door-lock-installation",
+            "policies/installation"
+          ],
+          "llm_reasoning": "两个条目都涉及安装服务，门锁安装是安装的一种，内容上均需要转人工确认，可合并为统一的安装政策。",
+          "suggestions": [
+            {
+              "title": "建议合并",
+              "detail": "多条知识表达同一含义，建议保留信息最完整的一条，将其余归档。",
+              "level": "warning"
+            }
+          ]
+        },
+        {
+          "code": "llm_logic_error",
+          "severity": "error",
+          "title": "LLM：逻辑错误",
+          "detail": "批量价格中'50起：24元'严重矛盾，基础价1999元，10台起1899元，50台起应为更低价格而非24元，明显错误。",
+          "target": "rag_exp_dc7163349fc10f2388fb",
+          "target_label": "rag_exp_dc7163349fc10f2388fb",
+          "repairable": false,
+          "action_type": "delete",
+          "involved_targets": [
+            "rag_exp_dc7163349fc10f2388fb"
+          ],
+          "llm_reasoning": "批量价格中'50起：24元'严重矛盾，基础价1999元，10台起1899元，50台起应为更低价格而非24元，明显错误。",
+          "suggestions": [
+            {
+              "title": "建议删除",
+              "detail": "该条目存在明显错误或不适用，建议归档或废弃。",
+              "level": "danger"
+            }
+          ]
+        },
+        {
+          "code": "llm_inappropriate",
+          "severity": "error",
+          "title": "LLM：场景不适用",
+          "detail": "这些RAG经验内容涉及汽车推荐、置换、GL8等，与当前办公设备业务场景完全不匹配，属于不同业务线的数据。",
+          "target": "rag_exp_4876b6fe7892109410cc",
+          "target_label": "rag_exp_4876b6fe7892109410cc, rag_exp_b9c001572f647056cdf5, rag_exp_e1e85986b99a4ed9d06c, rag_exp_e2d619cecd90156795f0",
+          "repairable": false,
+          "action_type": "delete",
+          "involved_targets": [
+            "rag_exp_4876b6fe7892109410cc",
+            "rag_exp_b9c001572f647056cdf5",
+            "rag_exp_e1e85986b99a4ed9d06c",
+            "rag_exp_e2d619cecd90156795f0"
+          ],
+          "llm_reasoning": "这些RAG经验内容涉及汽车推荐、置换、GL8等，与当前办公设备业务场景完全不匹配，属于不同业务线的数据。",
+          "suggestions": [
+            {
+              "title": "建议删除",
+              "detail": "该条目存在明显错误或不适用，建议归档或废弃。",
+              "level": "danger"
+            }
+          ]
+        },
+        {
+          "code": "llm_rag_quality_low",
+          "severity": "warning",
+          "title": "LLM：RAG经验质量低",
+          "detail": "内容为同一句话重复三次，无实际知识价值，质量极低。",
+          "target": "rag_exp_4876b6fe7892109410cc",
+          "target_label": "rag_exp_4876b6fe7892109410cc",
+          "repairable": false,
+          "action_type": "delete",
+          "involved_targets": [
+            "rag_exp_4876b6fe7892109410cc"
+          ],
+          "llm_reasoning": "内容为同一句话重复三次，无实际知识价值，质量极低。",
+          "suggestions": [
+            {
+              "title": "建议删除",
+              "detail": "该条目存在明显错误或不适用，建议归档或废弃。",
+              "level": "danger"
+            }
+          ]
+        },
+        {
+          "code": "llm_rag_quality_low",
+          "severity": "warning",
+          "title": "LLM：RAG经验质量低",
+          "detail": "条目内容中存在完全相同的数据重复（商品表及价格表重复出现两次），属于信息冗余，影响检索质量。",
+          "target": "rag_exp_89d634d4bdf63881b18b",
+          "target_label": "rag_exp_89d634d4bdf63881b18b",
+          "repairable": false,
+          "action_type": "review",
+          "involved_targets": [
+            "rag_exp_89d634d4bdf63881b18b"
+          ],
+          "llm_reasoning": "条目内容中存在完全相同的数据重复（商品表及价格表重复出现两次），属于信息冗余，影响检索质量。",
+          "suggestions": [
+            {
+              "title": "建议人工复核",
+              "detail": "LLM认为该条目可能存在问题，请人工确认后决定处理方式。",
+              "level": "warning"
+            }
+          ]
+        },
+        {
+          "code": "llm_rag_quality_low",
+          "severity": "warning",
+          "title": "LLM：RAG经验质量低",
+          "detail": "条目内容中多次重复相同的发票开具说明文本，属于冗余数据，降低RAG经验质量。",
+          "target": "rag_exp_9151bc188e5982efba1c",
+          "target_label": "rag_exp_9151bc188e5982efba1c",
+          "repairable": false,
+          "action_type": "review",
+          "involved_targets": [
+            "rag_exp_9151bc188e5982efba1c"
+          ],
+          "llm_reasoning": "条目内容中多次重复相同的发票开具说明文本，属于冗余数据，降低RAG经验质量。",
+          "suggestions": [
+            {
+              "title": "建议人工复核",
+              "detail": "LLM认为该条目可能存在问题，请人工确认后决定处理方式。",
+              "level": "warning"
+            }
+          ]
+        },
+        {
+          "code": "knowledge_token_budget_large",
+          "severity": "info",
+          "title": "知识体积较大",
+          "detail": "当前分类知识库总量估算约 64708 token。这不是知识格式故障，也没有某条知识需要立即删除；它提醒后续继续按客户问题检索相关知识，避免一次性加载全部知识。",
+          "target_label": "全局知识库",
+          "details": [
+            {
+              "label": "问题性质",
+              "value": "容量提示，不是知识格式故障",
+              "level": "normal"
+            },
+            {
+              "label": "估算总量",
+              "value": "约 64708 token",
+              "level": "warning"
+            },
+            {
+              "label": "检测阈值",
+              "value": "超过 7000 token 时提示",
+              "level": "normal"
+            },
+            {
+              "label": "文件数量",
+              "value": "102 个 JSON 文件",
+              "level": "normal"
+            },
+            {
+              "label": "chats",
+              "value": "约 30065 token / 49 个文件",
+              "level": "normal"
+            },
+            {
+              "label": "erp_exports",
+              "value": "约 860 token / 2 个文件",
+              "level": "normal"
+            },
+            {
+              "label": "policies",
+              "value": "约 24980 token / 39 个文件",
+              "level": "normal"
+            },
+            {
+              "label": "products",
+              "value": "约 8111 token / 12 个文件",
+              "level": "normal"
+            }
+          ],
+          "suggestions": [
+            {
+              "title": "不建议自动删除知识",
+              "detail": "当前没有发现哪一条知识错误，系统不能为了降低体积擅自删内容。",
+              "level": "danger"
+            },
+            {
+              "title": "继续保持按门类和问题范围检索",
+              "detail": "客服运行时应只取相关商品、政策、话术和上下文证据，不要把全库一次性塞给大模型。",
+              "level": "normal"
+            },
+            {
+              "title": "如果后续继续变大",
+              "detail": "优先拆分过长政策、归档过期商品、把重复话术合并为模板，再重新检测。",
+              "level": "warning"
+            }
+          ],
+          "repairable": false
+        }
+      ],
+      "token_budget_estimate": 64708,
+      "recent_only": false
+    },
+    {
+      "name": "knowledge_runtime",
+      "ok": true,
+      "returncode": 0,
+      "stdout_tail": "rue\n    },\n    {\n      \"name\": \"check_invoice_hits_policies\",\n      \"ok\": true\n    },\n    {\n      \"name\": \"check_public_bank_account_can_auto_reply\",\n      \"ok\": true\n    },\n    {\n      \"name\": \"check_context_product_shipping\",\n      \"ok\": true\n    },\n    {\n      \"name\": \"check_chat_style_hits_chats\",\n      \"ok\": true\n    },\n    {\n      \"name\": \"check_global_guidelines_are_layered_style_context\",\n      \"ok\": true\n    },\n    {\n      \"name\": \"check_tenant_visible_catalog_policy_drives_used_car_catalog\",\n      \"ok\": true\n    },\n    {\n      \"name\": \"check_tenant_formal_overrides_conflicting_shared_public\",\n      \"ok\": true\n    },\n    {\n      \"name\": \"check_product_scoped_rule_requires_product_context\",\n      \"ok\": true\n    },\n    {\n      \"name\": \"check_general_knowledge_applicability_scope\",\n      \"ok\": true\n    },\n    {\n      \"name\": \"check_manual_boundary_requires_handoff\",\n      \"ok\": true\n    },\n    {\n      \"name\": \"check_unknown_business_question_handoffs\",\n      \"ok\": true\n    },\n    {\n      \"name\": \"check_custom_category_can_return_evidence\",\n      \"ok\": true\n    },\n    {\n      \"name\": \"check_unread_formal_product_is_visible_but_not_runtime_usable\",\n      \"ok\": true\n    }\n  ]\n}\n",
+      "stderr_tail": "",
+      "issues": []
+    },
+    {
+      "name": "knowledge_compiler",
+      "ok": true,
+      "returncode": 0,
+      "stdout_tail": "{\n  \"ok\": true,\n  \"count\": 3,\n  \"failures\": [],\n  \"results\": [\n    {\n      \"name\": \"check_compile_to_disk_writes_expected_files\",\n      \"ok\": true\n    },\n    {\n      \"name\": \"check_compiled_counts_match_category_source\",\n      \"ok\": true\n    },\n    {\n      \"name\": \"check_compiled_product_knowledge_is_legacy_compatible\",\n      \"ok\": true\n    }\n  ]\n}\n",
+      "stderr_tail": "",
+      "issues": []
+    },
+    {
+      "name": "offline_regression",
+      "ok": true,
+      "returncode": 0,
+      "stdout_tail": "{\n  \"ok\": true,\n  \"scenario_path\": \"D:\\\\AI\\\\omniauto\\\\apps\\\\wechat_ai_customer_service\\\\tests\\\\scenarios\\\\offline_regression.json\",\n  \"count\": 11,\n  \"failures\": [],\n  \"results\": [\n    {\n      \"name\": \"catalog_request\",\n      \"ok\": true\n    },\n    {\n      \"name\": \"product_quote\",\n      \"ok\": true\n    },\n    {\n      \"name\": \"below_tier_discount_handoff\",\n      \"ok\": true\n    },\n    {\n      \"name\": \"invoice_policy\",\n      \"ok\": true\n    },\n    {\n      \"name\": \"warranty_policy\",\n      \"ok\": true\n    },\n    {\n      \"name\": \"context_shipping\",\n      \"ok\": true\n    },\n    {\n      \"name\": \"evidence_discount_handoff\",\n      \"ok\": true\n    },\n    {\n      \"name\": \"customer_data_complete\",\n      \"ok\": true\n    },\n    {\n      \"name\": \"greeting_not_customer_data\",\n      \"ok\": true\n    },\n    {\n      \"name\": \"manual_handoff_contract\",\n      \"ok\": true\n    },\n    {\n      \"name\": \"no_relevant_business_evidence\",\n      \"ok\": true\n    }\n  ]\n}\n",
+      "stderr_tail": "",
+      "issues": []
+    },
+    {
+      "name": "workflow_logic",
+      "ok": true,
+      "returncode": 0,
+      "stdout_tail": "s\": [],\n  \"results\": [\n    {\n      \"name\": \"check_configured_bot_prefix_is_skipped\",\n      \"ok\": true\n    },\n    {\n      \"name\": \"check_mixed_safety_batch_forces_handoff\",\n      \"ok\": true\n    },\n    {\n      \"name\": \"check_incomplete_customer_data_is_completed_and_written\",\n      \"ok\": true\n    },\n    {\n      \"name\": \"check_rate_limit_notice_and_backoff\",\n      \"ok\": true\n    },\n    {\n      \"name\": \"check_auto_reply_disabled_blocks_runtime_send\",\n      \"ok\": true\n    },\n    {\n      \"name\": \"check_customer_service_console_switches_take_effect\",\n      \"ok\": true\n    },\n    {\n      \"name\": \"check_deepseek_flash_is_default\",\n      \"ok\": true\n    },\n    {\n      \"name\": \"check_llm_reply_application_guards\",\n      \"ok\": true\n    },\n    {\n      \"name\": \"check_llm_boundary_fallback_on_invalid_model_output\",\n      \"ok\": true\n    },\n    {\n      \"name\": \"check_review_queue_reports_pending_and_handoff_items\",\n      \"ok\": true\n    },\n    {\n      \"name\": \"check_evidence_boundary_cases\",\n      \"ok\": true\n    },\n    {\n      \"name\": \"check_after_sales_intent_preempts_duration_logistics\",\n      \"ok\": true\n    },\n    {\n      \"name\": \"check_wechat_main_window_recognition\",\n      \"ok\": true\n    }\n  ]\n}\n",
+      "stderr_tail": "",
+      "issues": []
+    }
+  ],
+  "issues": [
+    {
+      "code": "llm_logic_error",
+      "severity": "warning",
+      "title": "LLM：逻辑错误",
+      "detail": "价格阶梯存在逻辑错误：10件以上单价80元，20件以上单价24元，价格骤降不合理且库存仅20件，20件以上价格无实际意义。",
+      "target": "products/products_3403e129ba_eb9de7",
+      "target_label": "products/products_3403e129ba_eb9de7",
+      "repairable": false,
+      "action_type": "review",
+      "involved_targets": [
+        "products/products_3403e129ba_eb9de7"
+      ],
+      "llm_reasoning": "价格阶梯存在逻辑错误：10件以上单价80元，20件以上单价24元，价格骤降不合理且库存仅20件，20件以上价格无实际意义。",
+      "suggestions": [
+        {
+          "title": "建议人工复核",
+          "detail": "LLM认为该条目可能存在问题，请人工确认后决定处理方式。",
+          "level": "warning"
+        }
+      ],
+      "fingerprint": "ccb42fb1a444ff8edf789ab2"
+    },
+    {
+      "code": "llm_inappropriate",
+      "severity": "warning",
+      "title": "LLM：场景不适用",
+      "detail": "这些条目来自二手车行业（industry_id: used_car），内容涉及看车预约、金融审批等，与当前知识库的办公设备/商用设备业务场景完全不匹配，会导致客服回答不相关。",
+      "target": "chats/wf_tpl_a",
+      "target_label": "chats/wf_tpl_a, chats/wf_tpl_b, chats/wf_tpl_c, chats/wfr_20260514_131956_r1_a, chats/wfr_20260514_131956_r1_b, chats/wfr_20260514_131956_r1_c",
+      "repairable": false,
+      "action_type": "delete",
+      "involved_targets": [
+        "chats/wf_tpl_a",
+        "chats/wf_tpl_b",
+        "chats/wf_tpl_c",
+        "chats/wfr_20260514_131956_r1_a",
+        "chats/wfr_20260514_131956_r1_b",
+        "chats/wfr_20260514_131956_r1_c"
+      ],
+      "llm_reasoning": "这些条目来自二手车行业（industry_id: used_car），内容涉及看车预约、金融审批等，与当前知识库的办公设备/商用设备业务场景完全不匹配，会导致客服回答不相关。",
+      "suggestions": [
+        {
+          "title": "建议删除",
+          "detail": "该条目存在明显错误或不适用，建议归档或废弃。",
+          "level": "danger"
+        }
+      ],
+      "fingerprint": "e9edecb239ea59b30ad04a97"
+    },
+    {
+      "code": "llm_duplicate_semantic",
+      "severity": "info",
+      "title": "LLM：语义重复",
+      "detail": "两个条目都描述公司信息，但公司名称不一致（杭州云桥办公设备有限公司 vs 杭州星澜供应链科技有限公司），存在语义重复和冲突，应统一或保留一个。",
+      "target": "policies/company_profile",
+      "target_label": "policies/company_profile, policies/company_profile_details",
+      "repairable": false,
+      "action_type": "review",
+      "involved_targets": [
+        "policies/company_profile",
+        "policies/company_profile_details"
+      ],
+      "llm_reasoning": "两个条目都描述公司信息，但公司名称不一致（杭州云桥办公设备有限公司 vs 杭州星澜供应链科技有限公司），存在语义重复和冲突，应统一或保留一个。",
+      "suggestions": [
+        {
+          "title": "建议人工复核",
+          "detail": "LLM认为该条目可能存在问题，请人工确认后决定处理方式。",
+          "level": "warning"
+        }
+      ],
+      "fingerprint": "17913ef50bd72384a8ef438b"
+    },
+    {
+      "code": "llm_duplicate_semantic",
+      "severity": "info",
+      "title": "LLM：语义重复",
+      "detail": "两个条目都涉及合同、账期、月结、赊账等需要转人工处理的政策，语义重复，可合并为一个通用合同/账期政策。",
+      "target": "policies/contract",
+      "target_label": "policies/contract, policies/credit-term-policy",
+      "repairable": false,
+      "action_type": "merge",
+      "involved_targets": [
+        "policies/contract",
+        "policies/credit-term-policy"
+      ],
+      "llm_reasoning": "两个条目都涉及合同、账期、月结、赊账等需要转人工处理的政策，语义重复，可合并为一个通用合同/账期政策。",
+      "suggestions": [
+        {
+          "title": "建议合并",
+          "detail": "多条知识表达同一含义，建议保留信息最完整的一条，将其余归档。",
+          "level": "warning"
+        }
+      ],
+      "fingerprint": "eeeb75fca3c1f0bfbeb45b10"
+    },
+    {
+      "code": "llm_duplicate_semantic",
+      "severity": "info",
+      "title": "LLM：语义重复",
+      "detail": "两个条目都关于发票开票政策，内容基本一致，invoice_policy_details是invoice的详细JSON版本，建议合并。",
+      "target": "policies/invoice",
+      "target_label": "policies/invoice, policies/invoice_policy_details",
+      "repairable": false,
+      "action_type": "merge",
+      "involved_targets": [
+        "policies/invoice",
+        "policies/invoice_policy_details"
+      ],
+      "llm_reasoning": "两个条目都关于发票开票政策，内容基本一致，invoice_policy_details是invoice的详细JSON版本，建议合并。",
+      "suggestions": [
+        {
+          "title": "建议合并",
+          "detail": "多条知识表达同一含义，建议保留信息最完整的一条，将其余归档。",
+          "level": "warning"
+        }
+      ],
+      "fingerprint": "86d0c530b9a6f1ab83ff36b7"
+    },
+    {
+      "code": "llm_duplicate_semantic",
+      "severity": "info",
+      "title": "LLM：语义重复",
+      "detail": "两个条目都关于物流政策，内容一致，logistics_policy_details是logistics的详细版本，建议合并。",
+      "target": "policies/logistics",
+      "target_label": "policies/logistics, policies/logistics_policy_details",
+      "repairable": false,
+      "action_type": "merge",
+      "involved_targets": [
+        "policies/logistics",
+        "policies/logistics_policy_details"
+      ],
+      "llm_reasoning": "两个条目都关于物流政策，内容一致，logistics_policy_details是logistics的详细版本，建议合并。",
+      "suggestions": [
+        {
+          "title": "建议合并",
+          "detail": "多条知识表达同一含义，建议保留信息最完整的一条，将其余归档。",
+          "level": "warning"
+        }
+      ],
+      "fingerprint": "78a5aea229ff1abe3686cdfd"
+    },
+    {
+      "code": "llm_duplicate_semantic",
+      "severity": "info",
+      "title": "LLM：语义重复",
+      "detail": "两个条目都关于付款政策，payment_policy_details是payment的详细版本，包含额外月结信息，建议合并。",
+      "target": "policies/payment",
+      "target_label": "policies/payment, policies/payment_policy_details",
+      "repairable": false,
+      "action_type": "merge",
+      "involved_targets": [
+        "policies/payment",
+        "policies/payment_policy_details"
+      ],
+      "llm_reasoning": "两个条目都关于付款政策，payment_policy_details是payment的详细版本，包含额外月结信息，建议合并。",
+      "suggestions": [
+        {
+          "title": "建议合并",
+          "detail": "多条知识表达同一含义，建议保留信息最完整的一条，将其余归档。",
+          "level": "warning"
+        }
+      ],
+      "fingerprint": "5b61a2693e9c95fd8f5258a9"
+    },
+    {
+      "code": "llm_duplicate_semantic",
+      "severity": "info",
+      "title": "LLM：语义重复",
+      "detail": "两个条目都涉及安装服务，门锁安装是安装的一种，内容上均需要转人工确认，可合并为统一的安装政策。",
+      "target": "policies/door-lock-installation",
+      "target_label": "policies/door-lock-installation, policies/installation",
+      "repairable": false,
+      "action_type": "merge",
+      "involved_targets": [
+        "policies/door-lock-installation",
+        "policies/installation"
+      ],
+      "llm_reasoning": "两个条目都涉及安装服务，门锁安装是安装的一种，内容上均需要转人工确认，可合并为统一的安装政策。",
+      "suggestions": [
+        {
+          "title": "建议合并",
+          "detail": "多条知识表达同一含义，建议保留信息最完整的一条，将其余归档。",
+          "level": "warning"
+        }
+      ],
+      "fingerprint": "fcebbac6b428253103499749"
+    },
+    {
+      "code": "llm_logic_error",
+      "severity": "warning",
+      "title": "LLM：逻辑错误",
+      "detail": "批量价格中'50起：24元'严重矛盾，基础价1999元，10台起1899元，50台起应为更低价格而非24元，明显错误。",
+      "target": "rag_exp_dc7163349fc10f2388fb",
+      "target_label": "rag_exp_dc7163349fc10f2388fb",
+      "repairable": false,
+      "action_type": "delete",
+      "involved_targets": [
+        "rag_exp_dc7163349fc10f2388fb"
+      ],
+      "llm_reasoning": "批量价格中'50起：24元'严重矛盾，基础价1999元，10台起1899元，50台起应为更低价格而非24元，明显错误。",
+      "suggestions": [
+        {
+          "title": "建议删除",
+          "detail": "该条目存在明显错误或不适用，建议归档或废弃。",
+          "level": "danger"
+        }
+      ],
+      "fingerprint": "4b0563dad0311bf8a9491dd9"
+    },
+    {
+      "code": "llm_inappropriate",
+      "severity": "warning",
+      "title": "LLM：场景不适用",
+      "detail": "这些RAG经验内容涉及汽车推荐、置换、GL8等，与当前办公设备业务场景完全不匹配，属于不同业务线的数据。",
+      "target": "rag_exp_4876b6fe7892109410cc",
+      "target_label": "rag_exp_4876b6fe7892109410cc, rag_exp_b9c001572f647056cdf5, rag_exp_e1e85986b99a4ed9d06c, rag_exp_e2d619cecd90156795f0",
+      "repairable": false,
+      "action_type": "delete",
+      "involved_targets": [
+        "rag_exp_4876b6fe7892109410cc",
+        "rag_exp_b9c001572f647056cdf5",
+        "rag_exp_e1e85986b99a4ed9d06c",
+        "rag_exp_e2d619cecd90156795f0"
+      ],
+      "llm_reasoning": "这些RAG经验内容涉及汽车推荐、置换、GL8等，与当前办公设备业务场景完全不匹配，属于不同业务线的数据。",
+      "suggestions": [
+        {
+          "title": "建议删除",
+          "detail": "该条目存在明显错误或不适用，建议归档或废弃。",
+          "level": "danger"
+        }
+      ],
+      "fingerprint": "c003bc925127872ca51c3fa5"
+    },
+    {
+      "code": "llm_rag_quality_low",
+      "severity": "info",
+      "title": "LLM：RAG经验质量低",
+      "detail": "内容为同一句话重复三次，无实际知识价值，质量极低。",
+      "target": "rag_exp_4876b6fe7892109410cc",
+      "target_label": "rag_exp_4876b6fe7892109410cc",
+      "repairable": false,
+      "action_type": "delete",
+      "involved_targets": [
+        "rag_exp_4876b6fe7892109410cc"
+      ],
+      "llm_reasoning": "内容为同一句话重复三次，无实际知识价值，质量极低。",
+      "suggestions": [
+        {
+          "title": "建议删除",
+          "detail": "该条目存在明显错误或不适用，建议归档或废弃。",
+          "level": "danger"
+        }
+      ],
+      "fingerprint": "b0b1d56b473b26ae2edb4f8a"
+    },
+    {
+      "code": "llm_rag_quality_low",
+      "severity": "info",
+      "title": "LLM：RAG经验质量低",
+      "detail": "条目内容中存在完全相同的数据重复（商品表及价格表重复出现两次），属于信息冗余，影响检索质量。",
+      "target": "rag_exp_89d634d4bdf63881b18b",
+      "target_label": "rag_exp_89d634d4bdf63881b18b",
+      "repairable": false,
+      "action_type": "review",
+      "involved_targets": [
+        "rag_exp_89d634d4bdf63881b18b"
+      ],
+      "llm_reasoning": "条目内容中存在完全相同的数据重复（商品表及价格表重复出现两次），属于信息冗余，影响检索质量。",
+      "suggestions": [
+        {
+          "title": "建议人工复核",
+          "detail": "LLM认为该条目可能存在问题，请人工确认后决定处理方式。",
+          "level": "warning"
+        }
+      ],
+      "fingerprint": "08e56621fb8fc80c2bc89ef5"
+    },
+    {
+      "code": "llm_rag_quality_low",
+      "severity": "info",
+      "title": "LLM：RAG经验质量低",
+      "detail": "条目内容中多次重复相同的发票开具说明文本，属于冗余数据，降低RAG经验质量。",
+      "target": "rag_exp_9151bc188e5982efba1c",
+      "target_label": "rag_exp_9151bc188e5982efba1c",
+      "repairable": false,
+      "action_type": "review",
+      "involved_targets": [
+        "rag_exp_9151bc188e5982efba1c"
+      ],
+      "llm_reasoning": "条目内容中多次重复相同的发票开具说明文本，属于冗余数据，降低RAG经验质量。",
+      "suggestions": [
+        {
+          "title": "建议人工复核",
+          "detail": "LLM认为该条目可能存在问题，请人工确认后决定处理方式。",
+          "level": "warning"
+        }
+      ],
+      "fingerprint": "1826809b7d96f3ec47c61417"
+    }
+  ],
+  "ignored_count": 0,
+  "summary": {
+    "error_count": 0,
+    "warning_count": 4,
+    "info_count": 9,
+    "ignored_count": 0,
+    "hidden_notice_count": 1
+  },
+  "auto_dedup_rag": {
+    "ok": true,
+    "message": "Auto-dedup discarded 0 RAG experience(s)",
+    "discarded": [],
+    "duplicate_groups": []
+  }
+}

@@ -1,0 +1,35 @@
+{
+  "source": {
+    "source_id": "source_4e988a81f7b00008",
+    "tenant_id": "chejin",
+    "layer": "tenant",
+    "source_type": "wechat_raw_message",
+    "category": "private",
+    "product_id": "",
+    "source_path": "D:\\AI\\omniauto\\runtime\\apps\\wechat_ai_customer_service\\tenants\\chejin\\raw_messages\\learning_batches\\raw_batch_0d512f9952484bb0df58.txt",
+    "content_hash": "ff1427de54615a89d1502184cb385d44",
+    "status": "quarantined",
+    "created_at": "2026-05-16T14:00:33",
+    "updated_at": "2026-05-16T14:00:33",
+    "quarantine_reason": "raw_wechat_source_not_directly_retrievable"
+  },
+  "chunks": [
+    {
+      "chunk_id": "chunk_64c4d55878e7548b",
+      "source_id": "source_4e988a81f7b00008",
+      "tenant_id": "chejin",
+      "layer": "tenant",
+      "source_type": "wechat_raw_message",
+      "category": "private",
+      "product_id": "",
+      "source_path": "D:\\AI\\omniauto\\runtime\\apps\\wechat_ai_customer_service\\tenants\\chejin\\raw_messages\\learning_batches\\raw_batch_0d512f9952484bb0df58.txt",
+      "chunk_index": 0,
+      "text": "[2026-05-16T12:30:44] self: 8万预算，自动挡省油，通勤代步 CHEJIN_20260516_123014",
+      "char_count": 66,
+      "status": "quarantined",
+      "created_at": "2026-05-16T14:00:33",
+      "quarantine_reason": "raw_wechat_source_not_directly_retrievable",
+      "quarantined_at": "2026-05-19T01:47:03"
+    }
+  ]
+}

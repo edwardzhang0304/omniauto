@@ -1,0 +1,35 @@
+{
+  "source": {
+    "source_id": "source_7b9e2f35fe00b8fb",
+    "tenant_id": "chejin",
+    "layer": "tenant",
+    "source_type": "wechat_raw_message",
+    "category": "private",
+    "product_id": "",
+    "source_path": "D:\\AI\\omniauto\\runtime\\apps\\wechat_ai_customer_service\\tenants\\chejin\\raw_messages\\learning_batches\\raw_batch_e371472513eba390fb83.txt",
+    "content_hash": "2abe701fea7520d61a44cfe72484d794",
+    "status": "quarantined",
+    "created_at": "2026-05-06T18:56:56",
+    "updated_at": "2026-05-06T18:56:56",
+    "quarantine_reason": "raw_wechat_source_not_directly_retrievable"
+  },
+  "chunks": [
+    {
+      "chunk_id": "chunk_e2594b3d8b0ba307",
+      "source_id": "source_7b9e2f35fe00b8fb",
+      "tenant_id": "chejin",
+      "layer": "tenant",
+      "source_type": "wechat_raw_message",
+      "category": "private",
+      "product_id": "",
+      "source_path": "D:\\AI\\omniauto\\runtime\\apps\\wechat_ai_customer_service\\tenants\\chejin\\raw_messages\\learning_batches\\raw_batch_e371472513eba390fb83.txt",
+      "chunk_index": 0,
+      "text": "[2026-05-06 18:56:00] system: 18:56\n[2026-05-06T18:56:56] self: [车金AI] 在的，许哥。之前给您推荐过凯美瑞、思域和秦PLUS DM-i，您对哪款更感兴趣？要不留个电话，让销售同事跟您具体聊聊价格和试驾？",
+      "char_count": 135,
+      "status": "quarantined",
+      "created_at": "2026-05-06T18:56:56",
+      "quarantine_reason": "raw_wechat_source_not_directly_retrievable",
+      "quarantined_at": "2026-05-19T01:47:03"
+    }
+  ]
+}

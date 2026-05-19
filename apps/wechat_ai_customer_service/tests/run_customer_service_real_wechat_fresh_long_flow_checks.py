@@ -342,7 +342,7 @@ def build_context_bridge_turns(token: str) -> list[dict[str, Any]]:
             f"那就按刚才说的，直接挑两台，别再问预算了。({token}-C2)",
             expect="sent",
             must_include_any=["9万", "老婆", "爱人", "自动挡", "倒车", "影像", "检测", "车况"],
-            must_not_include=["您把预算", "说下预算", "预算大概", "确认一下预算", "预算上限"],
+            must_not_include=["您把预算", "说下预算", "预算大概", "确认一下预算", "预算上限", "9.58万", "马自达3"],
             expect_used_products=True,
         ),
         turn(

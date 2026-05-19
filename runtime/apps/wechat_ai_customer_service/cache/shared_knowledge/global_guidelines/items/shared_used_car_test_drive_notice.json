@@ -1,0 +1,42 @@
+{
+  "title": "二手车试驾安全提示",
+  "guideline_text": "试驾沟通需明确有效证件、保险覆盖、试驾路线与责任边界；涉及高风险路况或改装车辆必须人工确认。",
+  "schema_version": 1,
+  "id": "shared_used_car_test_drive_notice",
+  "item_id": "shared_used_car_test_drive_notice",
+  "industry_id": "used_car",
+  "category_id": "global_guidelines",
+  "status": "active",
+  "content": "试驾沟通需明确有效证件、保险覆盖、试驾路线与责任边界；涉及高风险路况或改装车辆必须人工确认。",
+  "keywords": [
+    "试驾",
+    "保险",
+    "证件",
+    "改装车",
+    "责任"
+  ],
+  "applies_to": "二手车试驾预约与沟通",
+  "data": {
+    "title": "二手车试驾安全提示",
+    "guideline_text": "试驾沟通需明确有效证件、保险覆盖、试驾路线与责任边界；涉及高风险路况或改装车辆必须人工确认。",
+    "keywords": [
+      "试驾",
+      "保险",
+      "证件",
+      "改装车",
+      "责任"
+    ],
+    "applies_to": "二手车试驾预约与沟通"
+  },
+  "runtime": {},
+  "source": {
+    "type": "cloud_official_shared_library",
+    "item_id": "shared_used_car_test_drive_notice",
+    "version": ""
+  },
+  "metadata": {
+    "knowledge_layer": "shared",
+    "cloud_item_id": "shared_used_car_test_drive_notice",
+    "cloud_updated_at": "2026-05-07T21:57:53+00:00"
+  }
+}

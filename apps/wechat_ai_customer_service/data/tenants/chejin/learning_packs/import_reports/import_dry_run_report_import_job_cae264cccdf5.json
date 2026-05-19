@@ -1,0 +1,32 @@
+{
+  "ok": true,
+  "job_id": "import_job_cae264cccdf5",
+  "tenant_id": "chejin",
+  "industry_id": "used_car",
+  "mode": "dry_run",
+  "status": "completed",
+  "input_file": "D:\\AI\\omniauto\\runtime\\apps\\wechat_ai_customer_service\\test_artifacts\\real_chat_rag_first\\real_chat_formal_block.jsonl",
+  "ready_items_file": "D:\\AI\\omniauto\\apps\\wechat_ai_customer_service\\data\\tenants\\chejin\\learning_packs\\import_jobs\\import_job_cae264cccdf5_ready_items.jsonl",
+  "summary": {
+    "total": 1,
+    "new_items": 0,
+    "updated_items": 0,
+    "skipped_items": 0,
+    "blocked_items": 1
+  },
+  "new_items": [],
+  "updated_items": [],
+  "skipped_items": [],
+  "blocked_items": [
+    {
+      "line": 1,
+      "id": "chejin_real_test_block",
+      "reason": "real_chat_requires_rag_first",
+      "message": "检测到实盘/微信聊天来源 cleaned_real_chat_pack；这类材料只能进入RAG经验层和实盘话术风格层，不能直接写入正式知识库。",
+      "source_type": "cleaned_real_chat_pack",
+      "recommended_target": "rag_experience_and_style_memory"
+    }
+  ],
+  "conflicts": [],
+  "created_at": "2026-05-19T05:06:42"
+}

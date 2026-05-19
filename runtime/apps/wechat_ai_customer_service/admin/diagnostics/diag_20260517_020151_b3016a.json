@@ -1,0 +1,307 @@
+{
+  "ok": true,
+  "run_id": "diag_20260517_020151_b3016a",
+  "mode": "quick",
+  "status": "warning",
+  "created_at": "2026-05-17T02:03:00",
+  "checks": [
+    {
+      "name": "quick_knowledge_validation",
+      "ok": false,
+      "issues": [
+        {
+          "code": "llm_logic_error",
+          "severity": "error",
+          "title": "LLM：逻辑错误",
+          "detail": "自动回复声称'已转人工客服'但requires_handoff为False，实际并未触发转人工，可能误导用户等待客服。",
+          "target": "policies/manual_handoff_reply",
+          "target_label": "policies/manual_handoff_reply",
+          "repairable": false,
+          "action_type": "review",
+          "involved_targets": [
+            "policies/manual_handoff_reply"
+          ],
+          "llm_reasoning": "自动回复声称'已转人工客服'但requires_handoff为False，实际并未触发转人工，可能误导用户等待客服。",
+          "suggestions": [
+            {
+              "title": "建议人工复核",
+              "detail": "LLM认为该条目可能存在问题，请人工确认后决定处理方式。",
+              "level": "warning"
+            }
+          ]
+        },
+        {
+          "code": "llm_logic_error",
+          "severity": "error",
+          "title": "LLM：逻辑错误",
+          "detail": "样品规则中'sample'回复'样品价格和运费需要按具体产品确认'，而'sample-policy-standard'回复'样品费按页面价格收取'，若同时命中可能给出矛盾回答。",
+          "target": "policies/sample",
+          "target_label": "policies/sample, policies/sample-policy-standard",
+          "repairable": false,
+          "action_type": "review",
+          "involved_targets": [
+            "policies/sample",
+            "policies/sample-policy-standard"
+          ],
+          "llm_reasoning": "样品规则中'sample'回复'样品价格和运费需要按具体产品确认'，而'sample-policy-standard'回复'样品费按页面价格收取'，若同时命中可能给出矛盾回答。",
+          "suggestions": [
+            {
+              "title": "建议人工复核",
+              "detail": "LLM认为该条目可能存在问题，请人工确认后决定处理方式。",
+              "level": "warning"
+            }
+          ]
+        },
+        {
+          "code": "llm_rag_quality_low",
+          "severity": "warning",
+          "title": "LLM：RAG经验质量低",
+          "detail": "内容为自测对话，无实际业务信息，且提及月结需人工处理，可能误导模型。",
+          "target": "rag_exp_5528e1e9e45d675b064a",
+          "target_label": "rag_exp_5528e1e9e45d675b064a",
+          "repairable": false,
+          "action_type": "delete",
+          "involved_targets": [
+            "rag_exp_5528e1e9e45d675b064a"
+          ],
+          "llm_reasoning": "内容为自测对话，无实际业务信息，且提及月结需人工处理，可能误导模型。",
+          "suggestions": [
+            {
+              "title": "建议删除",
+              "detail": "该条目存在明显错误或不适用，建议归档或废弃。",
+              "level": "danger"
+            }
+          ]
+        },
+        {
+          "code": "llm_rag_quality_low",
+          "severity": "warning",
+          "title": "LLM：RAG经验质量低",
+          "detail": "回复仅为引用自测对话，未提供有效商品信息，质量极低。",
+          "target": "rag_exp_b91acdcb32d2eaea0197",
+          "target_label": "rag_exp_b91acdcb32d2eaea0197",
+          "repairable": false,
+          "action_type": "delete",
+          "involved_targets": [
+            "rag_exp_b91acdcb32d2eaea0197"
+          ],
+          "llm_reasoning": "回复仅为引用自测对话，未提供有效商品信息，质量极低。",
+          "suggestions": [
+            {
+              "title": "建议删除",
+              "detail": "该条目存在明显错误或不适用，建议归档或废弃。",
+              "level": "danger"
+            }
+          ]
+        },
+        {
+          "code": "llm_inappropriate",
+          "severity": "error",
+          "title": "LLM：场景不适用",
+          "detail": "内容为汽车推荐（预算20万省油SUV），与当前办公用品/商用设备业务场景明显不匹配。",
+          "target": "rag_exp_e2d619cecd90156795f0",
+          "target_label": "rag_exp_e2d619cecd90156795f0",
+          "repairable": false,
+          "action_type": "delete",
+          "involved_targets": [
+            "rag_exp_e2d619cecd90156795f0"
+          ],
+          "llm_reasoning": "内容为汽车推荐（预算20万省油SUV），与当前办公用品/商用设备业务场景明显不匹配。",
+          "suggestions": [
+            {
+              "title": "建议删除",
+              "detail": "该条目存在明显错误或不适用，建议归档或废弃。",
+              "level": "danger"
+            }
+          ]
+        },
+        {
+          "code": "knowledge_token_budget_large",
+          "severity": "info",
+          "title": "知识体积较大",
+          "detail": "当前分类知识库总量估算约 56493 token。这不是知识格式故障，也没有某条知识需要立即删除；它提醒后续继续按客户问题检索相关知识，避免一次性加载全部知识。",
+          "target_label": "全局知识库",
+          "details": [
+            {
+              "label": "问题性质",
+              "value": "容量提示，不是知识格式故障",
+              "level": "normal"
+            },
+            {
+              "label": "估算总量",
+              "value": "约 56493 token",
+              "level": "warning"
+            },
+            {
+              "label": "检测阈值",
+              "value": "超过 7000 token 时提示",
+              "level": "normal"
+            },
+            {
+              "label": "文件数量",
+              "value": "90 个 JSON 文件",
+              "level": "normal"
+            },
+            {
+              "label": "chats",
+              "value": "约 30068 token / 49 个文件",
+              "level": "normal"
+            },
+            {
+              "label": "erp_exports",
+              "value": "约 860 token / 2 个文件",
+              "level": "normal"
+            },
+            {
+              "label": "policies",
+              "value": "约 24980 token / 39 个文件",
+              "level": "normal"
+            }
+          ],
+          "suggestions": [
+            {
+              "title": "不建议自动删除知识",
+              "detail": "当前没有发现哪一条知识错误，系统不能为了降低体积擅自删内容。",
+              "level": "danger"
+            },
+            {
+              "title": "继续保持按门类和问题范围检索",
+              "detail": "客服运行时应只取相关商品、政策、话术和上下文证据，不要把全库一次性塞给大模型。",
+              "level": "normal"
+            },
+            {
+              "title": "如果后续继续变大",
+              "detail": "优先拆分过长政策、归档过期商品、把重复话术合并为模板，再重新检测。",
+              "level": "warning"
+            }
+          ],
+          "repairable": false
+        }
+      ],
+      "token_budget_estimate": 56493,
+      "recent_only": true
+    }
+  ],
+  "issues": [
+    {
+      "code": "llm_logic_error",
+      "severity": "warning",
+      "title": "LLM：逻辑错误",
+      "detail": "自动回复声称'已转人工客服'但requires_handoff为False，实际并未触发转人工，可能误导用户等待客服。",
+      "target": "policies/manual_handoff_reply",
+      "target_label": "policies/manual_handoff_reply",
+      "repairable": false,
+      "action_type": "review",
+      "involved_targets": [
+        "policies/manual_handoff_reply"
+      ],
+      "llm_reasoning": "自动回复声称'已转人工客服'但requires_handoff为False，实际并未触发转人工，可能误导用户等待客服。",
+      "suggestions": [
+        {
+          "title": "建议人工复核",
+          "detail": "LLM认为该条目可能存在问题，请人工确认后决定处理方式。",
+          "level": "warning"
+        }
+      ],
+      "fingerprint": "48eebf44b323618173920584"
+    },
+    {
+      "code": "llm_logic_error",
+      "severity": "warning",
+      "title": "LLM：逻辑错误",
+      "detail": "样品规则中'sample'回复'样品价格和运费需要按具体产品确认'，而'sample-policy-standard'回复'样品费按页面价格收取'，若同时命中可能给出矛盾回答。",
+      "target": "policies/sample",
+      "target_label": "policies/sample, policies/sample-policy-standard",
+      "repairable": false,
+      "action_type": "review",
+      "involved_targets": [
+        "policies/sample",
+        "policies/sample-policy-standard"
+      ],
+      "llm_reasoning": "样品规则中'sample'回复'样品价格和运费需要按具体产品确认'，而'sample-policy-standard'回复'样品费按页面价格收取'，若同时命中可能给出矛盾回答。",
+      "suggestions": [
+        {
+          "title": "建议人工复核",
+          "detail": "LLM认为该条目可能存在问题，请人工确认后决定处理方式。",
+          "level": "warning"
+        }
+      ],
+      "fingerprint": "db761e66c9abf190863c5081"
+    },
+    {
+      "code": "llm_rag_quality_low",
+      "severity": "info",
+      "title": "LLM：RAG经验质量低",
+      "detail": "内容为自测对话，无实际业务信息，且提及月结需人工处理，可能误导模型。",
+      "target": "rag_exp_5528e1e9e45d675b064a",
+      "target_label": "rag_exp_5528e1e9e45d675b064a",
+      "repairable": false,
+      "action_type": "delete",
+      "involved_targets": [
+        "rag_exp_5528e1e9e45d675b064a"
+      ],
+      "llm_reasoning": "内容为自测对话，无实际业务信息，且提及月结需人工处理，可能误导模型。",
+      "suggestions": [
+        {
+          "title": "建议删除",
+          "detail": "该条目存在明显错误或不适用，建议归档或废弃。",
+          "level": "danger"
+        }
+      ],
+      "fingerprint": "edda71b2549c6f4e467c551b"
+    },
+    {
+      "code": "llm_rag_quality_low",
+      "severity": "info",
+      "title": "LLM：RAG经验质量低",
+      "detail": "回复仅为引用自测对话，未提供有效商品信息，质量极低。",
+      "target": "rag_exp_b91acdcb32d2eaea0197",
+      "target_label": "rag_exp_b91acdcb32d2eaea0197",
+      "repairable": false,
+      "action_type": "delete",
+      "involved_targets": [
+        "rag_exp_b91acdcb32d2eaea0197"
+      ],
+      "llm_reasoning": "回复仅为引用自测对话，未提供有效商品信息，质量极低。",
+      "suggestions": [
+        {
+          "title": "建议删除",
+          "detail": "该条目存在明显错误或不适用，建议归档或废弃。",
+          "level": "danger"
+        }
+      ],
+      "fingerprint": "a0eb91cd5b765aef01093157"
+    },
+    {
+      "code": "llm_inappropriate",
+      "severity": "warning",
+      "title": "LLM：场景不适用",
+      "detail": "内容为汽车推荐（预算20万省油SUV），与当前办公用品/商用设备业务场景明显不匹配。",
+      "target": "rag_exp_e2d619cecd90156795f0",
+      "target_label": "rag_exp_e2d619cecd90156795f0",
+      "repairable": false,
+      "action_type": "delete",
+      "involved_targets": [
+        "rag_exp_e2d619cecd90156795f0"
+      ],
+      "llm_reasoning": "内容为汽车推荐（预算20万省油SUV），与当前办公用品/商用设备业务场景明显不匹配。",
+      "suggestions": [
+        {
+          "title": "建议删除",
+          "detail": "该条目存在明显错误或不适用，建议归档或废弃。",
+          "level": "danger"
+        }
+      ],
+      "fingerprint": "179d02732b510b15863f41dd"
+    }
+  ],
+  "ignored_count": 0,
+  "summary": {
+    "error_count": 0,
+    "warning_count": 3,
+    "info_count": 2,
+    "ignored_count": 0,
+    "hidden_notice_count": 1
+  },
+  "auto_dedup_rag": null
+}

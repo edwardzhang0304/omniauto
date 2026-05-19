@@ -117,6 +117,7 @@ def run_checks() -> dict[str, Any]:
         check_identity_guard_controls_handoff_phrase_concealment,
         check_contextual_greeting_avoids_repeated_file_transfer_honorific,
         check_concealed_handoff_acknowledges_contact_appointment,
+        check_concealed_handoff_store_contact_preempts_prior_customer_data,
         check_concealed_handoff_denies_ai_identity_probe,
         check_concealed_handoff_softens_document_boundary,
         check_outbound_naturalness_polishes_templates_without_changing_facts,
@@ -830,6 +831,19 @@ def check_concealed_handoff_acknowledges_contact_appointment() -> None:
         "contact appointment handoff should confirm visit scheduling work",
     )
     assert_true("转人工" not in reply and "人工客服" not in reply, "contact appointment handoff should stay concealed")
+
+
+def check_concealed_handoff_store_contact_preempts_prior_customer_data() -> None:
+    reply = concealed_handoff_reply(
+        combined="客户前面已经留了电话13912345678，周六下午两点到店。最后你们门店地址和到了找谁，再帮我确认一下。",
+        reason="customer_data_complete_with_appointment",
+    )
+    assert_true(any(marker in reply for marker in ("地址", "导航", "到店联系人", "对接人", "找谁")), "store contact question should keep address/contact context")
+    assert_true(
+        not any(marker in reply for marker in ("姓名、电话", "联系方式和到店时间", "信息我记下了")),
+        "store contact question must not fall back to generic customer-data acknowledgement",
+    )
+    assert_true("转人工" not in reply and "人工客服" not in reply, "store contact handoff should stay concealed")
 
 
 def check_concealed_handoff_denies_ai_identity_probe() -> None:

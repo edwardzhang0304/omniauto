@@ -1,0 +1,35 @@
+{
+  "source": {
+    "source_id": "source_3075de5714b85b8f",
+    "tenant_id": "chejin",
+    "layer": "tenant",
+    "source_type": "wechat_raw_message",
+    "category": "file_transfer",
+    "product_id": "",
+    "source_path": "D:\\AI\\omniauto\\runtime\\apps\\wechat_ai_customer_service\\tenants\\chejin\\raw_messages\\learning_batches\\raw_batch_104177121c0349789316.txt",
+    "content_hash": "61dbfbde3920650645a9fbf364c883aa",
+    "status": "quarantined",
+    "created_at": "2026-05-06T23:33:55",
+    "updated_at": "2026-05-06T23:33:55",
+    "quarantine_reason": "raw_wechat_source_not_directly_retrievable"
+  },
+  "chunks": [
+    {
+      "chunk_id": "chunk_4ecf2ef3333c7dfb",
+      "source_id": "source_3075de5714b85b8f",
+      "tenant_id": "chejin",
+      "layer": "tenant",
+      "source_type": "wechat_raw_message",
+      "category": "file_transfer",
+      "product_id": "",
+      "source_path": "D:\\AI\\omniauto\\runtime\\apps\\wechat_ai_customer_service\\tenants\\chejin\\raw_messages\\learning_batches\\raw_batch_104177121c0349789316.txt",
+      "chunk_index": 0,
+      "text": "[2026-05-06T23:33:55] self: 我叫张三，电话13812345678",
+      "char_count": 46,
+      "status": "quarantined",
+      "created_at": "2026-05-06T23:33:55",
+      "quarantine_reason": "raw_wechat_source_not_directly_retrievable",
+      "quarantined_at": "2026-05-19T01:47:03"
+    }
+  ]
+}

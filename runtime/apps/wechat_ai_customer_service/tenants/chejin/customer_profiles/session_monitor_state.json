@@ -1,0 +1,14 @@
+{
+  "tenant_id": "chejin",
+  "last_poll_at": "2026-05-17T23:40:48",
+  "sessions": {
+    "许聪": {
+      "last_content_digest": "a71f445d35779eded53cea1e54f9bbf2",
+      "last_message_time": "2026-05-17 09:57:00",
+      "unread_detected": false,
+      "priority_score": 0,
+      "first_seen_at": "2026-05-08T05:20:57",
+      "last_seen_at": "2026-05-17T23:40:46"
+    }
+  }
+}

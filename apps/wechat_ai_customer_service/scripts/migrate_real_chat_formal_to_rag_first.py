@@ -29,7 +29,7 @@ from apps.wechat_ai_customer_service.workflows.real_chat_learning import (
 )
 
 
-DEFAULT_TENANT_ID = "jiangsu_chejin_usedcar_customer_20260501"
+DEFAULT_TENANT_ID = "chejin"
 
 
 def main() -> int:

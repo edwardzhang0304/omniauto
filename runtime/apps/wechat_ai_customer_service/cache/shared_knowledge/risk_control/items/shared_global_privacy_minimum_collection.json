@@ -1,0 +1,48 @@
+{
+  "title": "隐私信息最小化采集",
+  "guideline_text": "仅在履约必要时采集姓名、电话、地址等信息，避免索取与交易无关的身份证件、银行卡、验证码等敏感信息。",
+  "schema_version": 1,
+  "id": "shared_global_privacy_minimum_collection",
+  "item_id": "shared_global_privacy_minimum_collection",
+  "industry_id": "global",
+  "category_id": "risk_control",
+  "status": "active",
+  "content": "仅在履约必要时采集姓名、电话、地址等信息，避免索取与交易无关的身份证件、银行卡、验证码等敏感信息。",
+  "keywords": [
+    "隐私",
+    "个人信息",
+    "手机号",
+    "地址",
+    "最小化"
+  ],
+  "applies_to": "所有行业的信息收集场景",
+  "data": {
+    "title": "隐私信息最小化采集",
+    "guideline_text": "仅在履约必要时采集姓名、电话、地址等信息，避免索取与交易无关的身份证件、银行卡、验证码等敏感信息。",
+    "keywords": [
+      "隐私",
+      "个人信息",
+      "手机号",
+      "地址",
+      "最小化"
+    ],
+    "applies_to": "所有行业的信息收集场景",
+    "allow_auto_reply": false,
+    "requires_handoff": true
+  },
+  "runtime": {
+    "allow_auto_reply": false,
+    "requires_handoff": true,
+    "risk_level": "high"
+  },
+  "source": {
+    "type": "cloud_official_shared_library",
+    "item_id": "shared_global_privacy_minimum_collection",
+    "version": ""
+  },
+  "metadata": {
+    "knowledge_layer": "shared",
+    "cloud_item_id": "shared_global_privacy_minimum_collection",
+    "cloud_updated_at": "2026-05-07T21:57:53+00:00"
+  }
+}

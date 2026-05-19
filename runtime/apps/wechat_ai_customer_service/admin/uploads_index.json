@@ -101,5 +101,20 @@
     "stored_suffix": ".txt",
     "normalized_from": "",
     "original_suffix": ".txt"
+  },
+  {
+    "upload_id": "upload_a3a4a14694e654cc",
+    "filename": "wechat_usedcar_chat_templates_strict.jsonl",
+    "kind": "chats",
+    "requested_kind": "auto",
+    "kind_detect_reason": "文件名命中聊天模板关键词",
+    "path": "D:\\AI\\omniauto\\apps\\wechat_ai_customer_service\\data\\raw_inbox\\chats\\upload_a3a4a14694e654cc_wechat_usedcar_chat_templates_strict.jsonl",
+    "original_suffix": ".jsonl",
+    "stored_suffix": ".jsonl",
+    "normalized_from": "",
+    "sha256": "a3a4a14694e654ccacf31839db04afc359c19a01472c90d5cd34ea76d9610e2a",
+    "size": 232,
+    "uploaded_at": "2026-05-19T11:55:10",
+    "learned": false
   }
 ]

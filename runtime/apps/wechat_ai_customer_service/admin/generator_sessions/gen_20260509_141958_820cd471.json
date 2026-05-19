@@ -1,0 +1,121 @@
+{
+  "session_id": "gen_20260509_141958_820cd471",
+  "status": "ready",
+  "created_at": "2026-05-09T14:19:58",
+  "updated_at": "2026-05-09T14:20:24",
+  "history": [
+    {
+      "role": "user",
+      "content": "录入一个测试商品，名称 Codex 自动化测试冷柜，型号 CODX-1778307598，售价 2999 元，库存 1 台。",
+      "created_at": "2026-05-09T14:19:58"
+    },
+    {
+      "role": "user",
+      "content": "补充：类目是商用冷柜，单位台，别名 商用展示冷柜。",
+      "created_at": "2026-05-09T14:20:14"
+    }
+  ],
+  "category_id": "products",
+  "category_name": "商品资料",
+  "confidence": 1.0,
+  "provider": "deepseek",
+  "draft_item": {
+    "schema_version": 1,
+    "category_id": "products",
+    "id": "codx-1778307598",
+    "status": "active",
+    "source": {
+      "type": "ai_generator",
+      "session_id": "gen_20260509_141958_820cd471"
+    },
+    "data": {
+      "name": "Codex 自动化测试冷柜",
+      "sku": "CODX-1778307598",
+      "category": "商用冷柜",
+      "aliases": [
+        "商用展示冷柜"
+      ],
+      "specs": "",
+      "price": 2999.0,
+      "unit": "台",
+      "price_tiers": [],
+      "inventory": 1.0,
+      "shipping_policy": "",
+      "warranty_policy": "",
+      "reply_templates": {},
+      "risk_rules": [],
+      "additional_details": {
+        "用户原始描述": "录入一个测试商品，名称 Codex 自动化测试冷柜，型号 CODX-1778307598，售价 2999 元，库存 1 台。"
+      }
+    },
+    "runtime": {
+      "allow_auto_reply": true,
+      "requires_handoff": false,
+      "risk_level": "normal"
+    },
+    "metadata": {}
+  },
+  "missing_fields": [],
+  "question": "",
+  "warnings": [],
+  "summary_rows": [
+    {
+      "label": "知识 ID",
+      "value": "codx-1778307598"
+    },
+    {
+      "label": "商品名称",
+      "value": "Codex 自动化测试冷柜"
+    },
+    {
+      "label": "型号/SKU",
+      "value": "CODX-1778307598"
+    },
+    {
+      "label": "商品类目",
+      "value": "商用冷柜"
+    },
+    {
+      "label": "客户常用叫法",
+      "value": "商用展示冷柜"
+    },
+    {
+      "label": "基础价格",
+      "value": "2999.0"
+    },
+    {
+      "label": "计价单位",
+      "value": "台"
+    },
+    {
+      "label": "库存",
+      "value": "1.0"
+    },
+    {
+      "label": "补充信息",
+      "value": "用户原始描述: 录入一个测试商品，名称 Codex 自动化测试冷柜，型号 CODX-1778307598，售价 2999 元，库存 1 台。"
+    }
+  ],
+  "intake": {
+    "status": "ready",
+    "ok": true,
+    "confidence": 1.0,
+    "missing_fields": [],
+    "missing_labels": [],
+    "question": "",
+    "warnings": [],
+    "preserved_detail_keys": [
+      "用户原始描述"
+    ]
+  },
+  "llm_assist": {
+    "policy_version": "knowledge_llm_assist_v1",
+    "stage": "manual_description_to_draft_knowledge",
+    "attempted": true,
+    "provider": "deepseek",
+    "status": "model_generated",
+    "reason": "deepseek_returned_structured_candidate",
+    "fallback_allowed": true,
+    "human_approval_required": true
+  }
+}

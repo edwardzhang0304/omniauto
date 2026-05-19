@@ -1,0 +1,27 @@
+{
+  "ok": true,
+  "job_id": "import_job_29fe6b1607dc",
+  "tenant_id": "chejin",
+  "industry_id": "used_car",
+  "mode": "dry_run",
+  "status": "completed",
+  "input_file": "runtime\\apps\\wechat_ai_customer_service\\test_artifacts\\workflow_tenant_path_probe.jsonl",
+  "ready_items_file": "D:\\AI\\omniauto\\apps\\wechat_ai_customer_service\\data\\tenants\\chejin\\learning_packs\\import_jobs\\import_job_29fe6b1607dc_ready_items.jsonl",
+  "summary": {
+    "total": 1,
+    "new_items": 1,
+    "updated_items": 0,
+    "skipped_items": 0,
+    "blocked_items": 0
+  },
+  "new_items": [
+    {
+      "id": "chejin_probe_one"
+    }
+  ],
+  "updated_items": [],
+  "skipped_items": [],
+  "blocked_items": [],
+  "conflicts": [],
+  "created_at": "2026-05-14T17:53:32"
+}

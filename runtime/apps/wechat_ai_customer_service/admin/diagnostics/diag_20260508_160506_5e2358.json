@@ -1,0 +1,578 @@
+{
+  "ok": false,
+  "run_id": "diag_20260508_160506_5e2358",
+  "mode": "full",
+  "status": "error",
+  "created_at": "2026-05-08T16:07:04",
+  "checks": [
+    {
+      "name": "quick_knowledge_validation",
+      "ok": false,
+      "issues": [
+        {
+          "code": "llm_duplicate_semantic",
+          "severity": "warning",
+          "title": "LLM：语义重复",
+          "detail": "两个条目都涉及账期、月结的转人工处理规则，内容高度重复，应合并为一份完整政策。",
+          "target": "policies/credit-term-policy",
+          "target_label": "policies/credit-term-policy, policies/contract",
+          "repairable": false,
+          "action_type": "merge",
+          "involved_targets": [
+            "policies/credit-term-policy",
+            "policies/contract"
+          ],
+          "llm_reasoning": "两个条目都涉及账期、月结的转人工处理规则，内容高度重复，应合并为一份完整政策。",
+          "suggestions": [
+            {
+              "title": "建议合并",
+              "detail": "多条知识表达同一含义，建议保留信息最完整的一条，将其余归档。",
+              "level": "warning"
+            }
+          ]
+        },
+        {
+          "code": "llm_duplicate_semantic",
+          "severity": "warning",
+          "title": "LLM：语义重复",
+          "detail": "两个条目都描述开票政策，内容重叠，应合并以避免冲突和冗余。",
+          "target": "policies/invoice",
+          "target_label": "policies/invoice, policies/invoice_policy_details",
+          "repairable": false,
+          "action_type": "merge",
+          "involved_targets": [
+            "policies/invoice",
+            "policies/invoice_policy_details"
+          ],
+          "llm_reasoning": "两个条目都描述开票政策，内容重叠，应合并以避免冲突和冗余。",
+          "suggestions": [
+            {
+              "title": "建议合并",
+              "detail": "多条知识表达同一含义，建议保留信息最完整的一条，将其余归档。",
+              "level": "warning"
+            }
+          ]
+        },
+        {
+          "code": "llm_logic_error",
+          "severity": "error",
+          "title": "LLM：逻辑错误",
+          "detail": "当用户要求转人工时，两个条目的回答不一致（'已转人工客服' vs '已收到，转人工处理'），可能造成客户困惑，需要明确优先级或统一话术。",
+          "target": "policies/manual_required",
+          "target_label": "policies/manual_required, policies/manual_handoff_reply",
+          "repairable": false,
+          "action_type": "review",
+          "involved_targets": [
+            "policies/manual_required",
+            "policies/manual_handoff_reply"
+          ],
+          "llm_reasoning": "当用户要求转人工时，两个条目的回答不一致（'已转人工客服' vs '已收到，转人工处理'），可能造成客户困惑，需要明确优先级或统一话术。",
+          "suggestions": [
+            {
+              "title": "建议人工复核",
+              "detail": "LLM认为该条目可能存在问题，请人工确认后决定处理方式。",
+              "level": "warning"
+            }
+          ]
+        },
+        {
+          "code": "llm_duplicate_semantic",
+          "severity": "warning",
+          "title": "LLM：语义重复",
+          "detail": "两个条目均描述支付方式与定金政策，内容高度重叠，建议合并为一个统一的付款政策条目。",
+          "target": "policies/payment",
+          "target_label": "policies/payment, policies/payment_policy_details",
+          "repairable": false,
+          "action_type": "merge",
+          "involved_targets": [
+            "policies/payment",
+            "policies/payment_policy_details"
+          ],
+          "llm_reasoning": "两个条目均描述支付方式与定金政策，内容高度重叠，建议合并为一个统一的付款政策条目。",
+          "suggestions": [
+            {
+              "title": "建议合并",
+              "detail": "多条知识表达同一含义，建议保留信息最完整的一条，将其余归档。",
+              "level": "warning"
+            }
+          ]
+        },
+        {
+          "code": "llm_duplicate_semantic",
+          "severity": "warning",
+          "title": "LLM：语义重复",
+          "detail": "public_account_payment_rule 主要关于对公付款确认，其中部分内容（支持对公转账）与 payment 重复，且 payment 已包含对公转账说明，建议合并或明确分工。",
+          "target": "policies/payment",
+          "target_label": "policies/payment, policies/public_account_payment_rule",
+          "repairable": false,
+          "action_type": "merge",
+          "involved_targets": [
+            "policies/payment",
+            "policies/public_account_payment_rule"
+          ],
+          "llm_reasoning": "public_account_payment_rule 主要关于对公付款确认，其中部分内容（支持对公转账）与 payment 重复，且 payment 已包含对公转账说明，建议合并或明确分工。",
+          "suggestions": [
+            {
+              "title": "建议合并",
+              "detail": "多条知识表达同一含义，建议保留信息最完整的一条，将其余归档。",
+              "level": "warning"
+            }
+          ]
+        },
+        {
+          "code": "llm_rag_quality_low",
+          "severity": "warning",
+          "title": "LLM：RAG经验质量低",
+          "detail": "内容为三次重复的测试数据，无实际业务价值，且可能干扰RAG检索。",
+          "target": "rag_exp_9a6790ce2d781ce0a11e",
+          "target_label": "rag_exp_9a6790ce2d781ce0a11e",
+          "repairable": false,
+          "action_type": "delete",
+          "involved_targets": [
+            "rag_exp_9a6790ce2d781ce0a11e"
+          ],
+          "llm_reasoning": "内容为三次重复的测试数据，无实际业务价值，且可能干扰RAG检索。",
+          "suggestions": [
+            {
+              "title": "建议删除",
+              "detail": "该条目存在明显错误或不适用，建议归档或废弃。",
+              "level": "danger"
+            }
+          ]
+        },
+        {
+          "code": "llm_rag_quality_low",
+          "severity": "warning",
+          "title": "LLM：RAG经验质量低",
+          "detail": "内容为三次重复的'duplicate candidate probe'，明显是测试或垃圾数据，应删除。",
+          "target": "rag_exp_5a574e8d242fc86a1b3d",
+          "target_label": "rag_exp_5a574e8d242fc86a1b3d",
+          "repairable": false,
+          "action_type": "delete",
+          "involved_targets": [
+            "rag_exp_5a574e8d242fc86a1b3d"
+          ],
+          "llm_reasoning": "内容为三次重复的'duplicate candidate probe'，明显是测试或垃圾数据，应删除。",
+          "suggestions": [
+            {
+              "title": "建议删除",
+              "detail": "该条目存在明显错误或不适用，建议归档或废弃。",
+              "level": "danger"
+            }
+          ]
+        },
+        {
+          "code": "llm_rag_quality_low",
+          "severity": "warning",
+          "title": "LLM：RAG经验质量低",
+          "detail": "内容为重复三次的对话记录，信息虽正确但冗余，建议保留唯一版本。",
+          "target": "rag_exp_89af65a4428a33bb5815",
+          "target_label": "rag_exp_89af65a4428a33bb5815",
+          "repairable": false,
+          "action_type": "delete",
+          "involved_targets": [
+            "rag_exp_89af65a4428a33bb5815"
+          ],
+          "llm_reasoning": "内容为重复三次的对话记录，信息虽正确但冗余，建议保留唯一版本。",
+          "suggestions": [
+            {
+              "title": "建议删除",
+              "detail": "该条目存在明显错误或不适用，建议归档或废弃。",
+              "level": "danger"
+            }
+          ]
+        },
+        {
+          "code": "llm_rag_quality_low",
+          "severity": "warning",
+          "title": "LLM：RAG经验质量低",
+          "detail": "内容为重复三次的开票规则，信息正确但冗余，建议去重。",
+          "target": "rag_exp_3a14a2970b3c90d11fc5",
+          "target_label": "rag_exp_3a14a2970b3c90d11fc5",
+          "repairable": false,
+          "action_type": "delete",
+          "involved_targets": [
+            "rag_exp_3a14a2970b3c90d11fc5"
+          ],
+          "llm_reasoning": "内容为重复三次的开票规则，信息正确但冗余，建议去重。",
+          "suggestions": [
+            {
+              "title": "建议删除",
+              "detail": "该条目存在明显错误或不适用，建议归档或废弃。",
+              "level": "danger"
+            }
+          ]
+        },
+        {
+          "code": "knowledge_token_budget_large",
+          "severity": "info",
+          "title": "知识体积较大",
+          "detail": "当前分类知识库总量估算约 42842 token。这不是知识格式故障，也没有某条知识需要立即删除；它提醒后续继续按客户问题检索相关知识，避免一次性加载全部知识。",
+          "target_label": "全局知识库",
+          "details": [
+            {
+              "label": "问题性质",
+              "value": "容量提示，不是知识格式故障",
+              "level": "normal"
+            },
+            {
+              "label": "估算总量",
+              "value": "约 42842 token",
+              "level": "warning"
+            },
+            {
+              "label": "检测阈值",
+              "value": "超过 7000 token 时提示",
+              "level": "normal"
+            },
+            {
+              "label": "文件数量",
+              "value": "68 个 JSON 文件",
+              "level": "normal"
+            },
+            {
+              "label": "chats",
+              "value": "约 8793 token / 16 个文件",
+              "level": "normal"
+            },
+            {
+              "label": "erp_exports",
+              "value": "约 860 token / 2 个文件",
+              "level": "normal"
+            },
+            {
+              "label": "policies",
+              "value": "约 24980 token / 39 个文件",
+              "level": "normal"
+            },
+            {
+              "label": "products",
+              "value": "约 7517 token / 11 个文件",
+              "level": "normal"
+            }
+          ],
+          "suggestions": [
+            {
+              "title": "不建议自动删除知识",
+              "detail": "当前没有发现哪一条知识错误，系统不能为了降低体积擅自删内容。",
+              "level": "danger"
+            },
+            {
+              "title": "继续保持按门类和问题范围检索",
+              "detail": "客服运行时应只取相关商品、政策、话术和上下文证据，不要把全库一次性塞给大模型。",
+              "level": "normal"
+            },
+            {
+              "title": "如果后续继续变大",
+              "detail": "优先拆分过长政策、归档过期商品、把重复话术合并为模板，再重新检测。",
+              "level": "warning"
+            }
+          ],
+          "repairable": false
+        }
+      ],
+      "token_budget_estimate": 42842,
+      "recent_only": false
+    },
+    {
+      "name": "knowledge_runtime",
+      "ok": false,
+      "returncode": 1,
+      "stdout_tail": "owledge_layer': 'tenant', 'reply_excerpt': '关于包邮政策，新增统一的优惠活动规则：在2026.4.25-2026.6.25之间，单笔消费满1000元包邮（偏远地区除外）', 'allow_auto_reply': True, 'requires_handoff': False, 'risk_level': 'normal', 'handoff_reason': ''}, {'category_id': 'chats', 'item_id': 'unknown_handoff', 'title': 'unknown_handoff', 'matched_fields': ['intent_tags'], 'match_reason': 'chat_style_or_intent', 'confidence': 0.55, 'knowledge_layer': 'tenant', 'reply_excerpt': '这个问题我当前没有足够依据直接确认，我先帮您记录并转人工处理。', 'allow_auto_reply': False, 'requires_handoff': True, 'risk_level': 'high', 'handoff_reason': 'auto_reply_disabled'}, {'category_id': 'global_guidelines', 'item_id': 'customer_service_style_guidelines', 'title': '客服通用表达与边界原则', 'matched_fields': ['always_include'], 'match_reason': 'global_style_guideline', 'confidence': 0.51, 'knowledge_layer': 'shared', 'reply_excerpt': '回复要自然，先接住客户使用场景，再问关键参数。对功率、续航、最低价等不确定内容，不能凭空承诺。适合自动回复的内容：参数收集、常规质保说明、使用场景推荐。需要转人工的内容：最低价、特殊补偿、先发货后付款。', 'allow_auto_reply': True, 'requires_handoff': False, 'risk_level': 'normal', 'handoff_reason': ''}], 'safety': {'allowed_auto_reply': True, 'must_handoff': False, 'reasons': []}, 'context': {'last_product_id': 'commercial_fridge_bx_200'}}\\\")\"\n    }\n  ]\n}\n",
+      "stderr_tail": "",
+      "issues": [
+        {
+          "severity": "error",
+          "title": "knowledge_runtime 未通过",
+          "detail": "true\n    },\n    {\n      \"name\": \"check_public_product_discount_not_blocked_by_chat_template\",\n      \"ok\": true\n    },\n    {\n      \"name\": \"check_invoice_hits_policies\",\n      \"ok\": true\n    },\n    {\n      \"name\": \"check_public_bank_account_can_auto_reply\",\n      \"ok\": true\n    },\n    {\n      \"name\": \"check_context_product_shipping\",\n      \"ok\": false,\n      \"error\": \"AssertionError(\\\"missing evidence item: products/commercial_fridge_bx_200; pack={'schema_version': 1, 'input_text': '发江苏南京，包邮吗？', 'intent_tags': ['unknown'], 'matched_categories': ['policies', 'chats', 'global_guidelines'], 'evidence_items': [{'category_id': 'policies', 'item_id': 'free_shipping_promo_2026_spring', 'title': '优惠政策', 'matched_fields': ['keywords'], 'match_reason': 'resolver_match_fields', 'confidence': 0.6, 'knowledge_layer': 'tenant', 'reply_excerpt': '关于包邮政策，新增统一的优惠活动规则：在2026.4.25-2026.6.25之间，单笔消费满1000元包邮（偏远地区除外）', 'allow_auto_reply': True, 'requires_handoff': False, 'risk_level': 'normal', 'handoff_reason': ''}, {'category_id': 'chats', 'item_id': 'unknown_handoff', 'title': 'unknown_handoff', 'matched_fields': ['intent_tags'], 'match_reason': 'chat_style_or_intent', 'confidence': 0.55, 'knowledge_layer': 'tenant', 'reply_excerpt': '这个问题我当前没有足够依据直接确认，我先帮您记录并转人工处理。', 'allow_auto_reply': False, 'requires_handoff': True, 'risk_level': 'high', 'handoff_reason': 'auto_reply_disabled'}, {'category_id': 'global_guidelines', 'item_id': 'customer_service_style_guidelines', 'title': '客服通用表达与边界原则', 'matched_fields': ['always_include'], 'match_reason': 'global_style_guideline', 'confidence': 0.51, 'knowledge_layer': 'shared', 'reply_excerpt': '回复要自然，先接住客户使用场景，再问关键参数。对功率、续航、最低价等不确定内容，不能凭空承诺。适合自动回复的内容：参数收集、常规质保说明、使用场景推荐。需要转人工的内容：最低价、特殊补偿、先发货后付款。', 'allow_auto_reply': True, 'requires_handoff': False, 'risk_level': 'normal', 'handoff_reason': ''}], 'safety': {'allowed_auto_reply': True, 'must_handoff': False, 'reasons': []}, 'context': {'last_product_id': 'commercial_fridge_bx_200'}}\\\")\"\n    }\n  ]\n}\n\n"
+        }
+      ]
+    },
+    {
+      "name": "knowledge_compiler",
+      "ok": true,
+      "returncode": 0,
+      "stdout_tail": "{\n  \"ok\": true,\n  \"count\": 3,\n  \"failures\": [],\n  \"results\": [\n    {\n      \"name\": \"check_compile_to_disk_writes_expected_files\",\n      \"ok\": true\n    },\n    {\n      \"name\": \"check_compiled_counts_match_category_source\",\n      \"ok\": true\n    },\n    {\n      \"name\": \"check_compiled_product_knowledge_is_legacy_compatible\",\n      \"ok\": true\n    }\n  ]\n}\n",
+      "stderr_tail": "",
+      "issues": []
+    },
+    {
+      "name": "offline_regression",
+      "ok": false,
+      "returncode": 1,
+      "stdout_tail": "l_handoff_contract\",\n      \"ok\": false,\n      \"error\": \"AssertionError(\\\"intent_tags: expected item 'handoff' in ['contract', 'payment']\\\")\"\n    }\n  ],\n  \"results\": [\n    {\n      \"name\": \"catalog_request\",\n      \"ok\": false,\n      \"error\": \"AssertionError('matched: expected True, got False')\"\n    },\n    {\n      \"name\": \"product_quote\",\n      \"ok\": true\n    },\n    {\n      \"name\": \"below_tier_discount_handoff\",\n      \"ok\": true\n    },\n    {\n      \"name\": \"invoice_policy\",\n      \"ok\": true\n    },\n    {\n      \"name\": \"warranty_policy\",\n      \"ok\": true\n    },\n    {\n      \"name\": \"context_shipping\",\n      \"ok\": true\n    },\n    {\n      \"name\": \"evidence_discount_handoff\",\n      \"ok\": false,\n      \"error\": \"AssertionError(\\\"intent_tags: expected item 'discount' in ['product', 'quote']\\\")\"\n    },\n    {\n      \"name\": \"customer_data_complete\",\n      \"ok\": true\n    },\n    {\n      \"name\": \"greeting_not_customer_data\",\n      \"ok\": true\n    },\n    {\n      \"name\": \"manual_handoff_contract\",\n      \"ok\": false,\n      \"error\": \"AssertionError(\\\"intent_tags: expected item 'handoff' in ['contract', 'payment']\\\")\"\n    },\n    {\n      \"name\": \"no_relevant_business_evidence\",\n      \"ok\": true\n    }\n  ]\n}\n",
+      "stderr_tail": "",
+      "issues": [
+        {
+          "severity": "error",
+          "title": "offline_regression 未通过",
+          "detail": "{\n  \"ok\": false,\n  \"scenario_path\": \"D:\\\\AI\\\\omniauto\\\\apps\\\\wechat_ai_customer_service\\\\tests\\\\scenarios\\\\offline_regression.json\",\n  \"count\": 11,\n  \"failures\": [\n    {\n      \"name\": \"catalog_request\",\n      \"ok\": false,\n      \"error\": \"AssertionError('matched: expected True, got False')\"\n    },\n    {\n      \"name\": \"evidence_discount_handoff\",\n      \"ok\": false,\n      \"error\": \"AssertionError(\\\"intent_tags: expected item 'discount' in ['product', 'quote']\\\")\"\n    },\n    {\n      \"name\": \"manual_handoff_contract\",\n      \"ok\": false,\n      \"error\": \"AssertionError(\\\"intent_tags: expected item 'handoff' in ['contract', 'payment']\\\")\"\n    }\n  ],\n  \"results\": [\n    {\n      \"name\": \"catalog_request\",\n      \"ok\": false,\n      \"error\": \"AssertionError('matched: expected True, got False')\"\n    },\n    {\n      \"name\": \"product_quote\",\n      \"ok\": true\n    },\n    {\n      \"name\": \"below_tier_discount_handoff\",\n      \"ok\": true\n    },\n    {\n      \"name\": \"invoice_policy\",\n      \"ok\": true\n    },\n    {\n      \"name\": \"warranty_policy\",\n      \"ok\": true\n    },\n    {\n      \"name\": \"context_shipping\",\n      \"ok\": true\n    },\n    {\n      \"name\": \"evidence_discount_handoff\",\n      \"ok\": false,\n      \"error\": \"AssertionError(\\\"intent_tags: expected item 'discount' in ['product', 'quote']\\\")\"\n    },\n    {\n      \"name\": \"customer_data_complete\",\n      \"ok\": true\n    },\n    {\n      \"name\": \"greeting_not_customer_data\",\n      \"ok\": true\n    },\n    {\n      \"name\": \"manual_handoff_contract\",\n      \"ok\": false,\n      \"error\": \"AssertionError(\\\"intent_tags: expected item 'handoff' in ['contract', 'payment']\\\")\"\n    },\n    {\n      \"name\": \"no_relevant_business_evidence\",\n      \"ok\": true\n    }\n  ]\n}\n\n"
+        }
+      ]
+    },
+    {
+      "name": "workflow_logic",
+      "ok": true,
+      "returncode": 0,
+      "stdout_tail": "s\": [],\n  \"results\": [\n    {\n      \"name\": \"check_configured_bot_prefix_is_skipped\",\n      \"ok\": true\n    },\n    {\n      \"name\": \"check_mixed_safety_batch_forces_handoff\",\n      \"ok\": true\n    },\n    {\n      \"name\": \"check_incomplete_customer_data_is_completed_and_written\",\n      \"ok\": true\n    },\n    {\n      \"name\": \"check_rate_limit_notice_and_backoff\",\n      \"ok\": true\n    },\n    {\n      \"name\": \"check_auto_reply_disabled_blocks_runtime_send\",\n      \"ok\": true\n    },\n    {\n      \"name\": \"check_customer_service_console_switches_take_effect\",\n      \"ok\": true\n    },\n    {\n      \"name\": \"check_deepseek_flash_is_default\",\n      \"ok\": true\n    },\n    {\n      \"name\": \"check_llm_reply_application_guards\",\n      \"ok\": true\n    },\n    {\n      \"name\": \"check_llm_boundary_fallback_on_invalid_model_output\",\n      \"ok\": true\n    },\n    {\n      \"name\": \"check_review_queue_reports_pending_and_handoff_items\",\n      \"ok\": true\n    },\n    {\n      \"name\": \"check_evidence_boundary_cases\",\n      \"ok\": true\n    },\n    {\n      \"name\": \"check_after_sales_intent_preempts_duration_logistics\",\n      \"ok\": true\n    },\n    {\n      \"name\": \"check_wechat_main_window_recognition\",\n      \"ok\": true\n    }\n  ]\n}\n",
+      "stderr_tail": "",
+      "issues": []
+    }
+  ],
+  "issues": [
+    {
+      "code": "llm_duplicate_semantic",
+      "severity": "info",
+      "title": "LLM：语义重复",
+      "detail": "两个条目都涉及账期、月结的转人工处理规则，内容高度重复，应合并为一份完整政策。",
+      "target": "policies/credit-term-policy",
+      "target_label": "policies/credit-term-policy, policies/contract",
+      "repairable": false,
+      "action_type": "merge",
+      "involved_targets": [
+        "policies/credit-term-policy",
+        "policies/contract"
+      ],
+      "llm_reasoning": "两个条目都涉及账期、月结的转人工处理规则，内容高度重复，应合并为一份完整政策。",
+      "suggestions": [
+        {
+          "title": "建议合并",
+          "detail": "多条知识表达同一含义，建议保留信息最完整的一条，将其余归档。",
+          "level": "warning"
+        }
+      ],
+      "fingerprint": "3715b29184623f473447e458"
+    },
+    {
+      "code": "llm_duplicate_semantic",
+      "severity": "info",
+      "title": "LLM：语义重复",
+      "detail": "两个条目都描述开票政策，内容重叠，应合并以避免冲突和冗余。",
+      "target": "policies/invoice",
+      "target_label": "policies/invoice, policies/invoice_policy_details",
+      "repairable": false,
+      "action_type": "merge",
+      "involved_targets": [
+        "policies/invoice",
+        "policies/invoice_policy_details"
+      ],
+      "llm_reasoning": "两个条目都描述开票政策，内容重叠，应合并以避免冲突和冗余。",
+      "suggestions": [
+        {
+          "title": "建议合并",
+          "detail": "多条知识表达同一含义，建议保留信息最完整的一条，将其余归档。",
+          "level": "warning"
+        }
+      ],
+      "fingerprint": "0c461a677da5c937b2793142"
+    },
+    {
+      "code": "llm_logic_error",
+      "severity": "warning",
+      "title": "LLM：逻辑错误",
+      "detail": "当用户要求转人工时，两个条目的回答不一致（'已转人工客服' vs '已收到，转人工处理'），可能造成客户困惑，需要明确优先级或统一话术。",
+      "target": "policies/manual_required",
+      "target_label": "policies/manual_required, policies/manual_handoff_reply",
+      "repairable": false,
+      "action_type": "review",
+      "involved_targets": [
+        "policies/manual_required",
+        "policies/manual_handoff_reply"
+      ],
+      "llm_reasoning": "当用户要求转人工时，两个条目的回答不一致（'已转人工客服' vs '已收到，转人工处理'），可能造成客户困惑，需要明确优先级或统一话术。",
+      "suggestions": [
+        {
+          "title": "建议人工复核",
+          "detail": "LLM认为该条目可能存在问题，请人工确认后决定处理方式。",
+          "level": "warning"
+        }
+      ],
+      "fingerprint": "d2bb2f36a3f70787b58a30b9"
+    },
+    {
+      "code": "llm_duplicate_semantic",
+      "severity": "info",
+      "title": "LLM：语义重复",
+      "detail": "两个条目均描述支付方式与定金政策，内容高度重叠，建议合并为一个统一的付款政策条目。",
+      "target": "policies/payment",
+      "target_label": "policies/payment, policies/payment_policy_details",
+      "repairable": false,
+      "action_type": "merge",
+      "involved_targets": [
+        "policies/payment",
+        "policies/payment_policy_details"
+      ],
+      "llm_reasoning": "两个条目均描述支付方式与定金政策，内容高度重叠，建议合并为一个统一的付款政策条目。",
+      "suggestions": [
+        {
+          "title": "建议合并",
+          "detail": "多条知识表达同一含义，建议保留信息最完整的一条，将其余归档。",
+          "level": "warning"
+        }
+      ],
+      "fingerprint": "0c6b086b5432e3cd909edf13"
+    },
+    {
+      "code": "llm_duplicate_semantic",
+      "severity": "info",
+      "title": "LLM：语义重复",
+      "detail": "public_account_payment_rule 主要关于对公付款确认，其中部分内容（支持对公转账）与 payment 重复，且 payment 已包含对公转账说明，建议合并或明确分工。",
+      "target": "policies/payment",
+      "target_label": "policies/payment, policies/public_account_payment_rule",
+      "repairable": false,
+      "action_type": "merge",
+      "involved_targets": [
+        "policies/payment",
+        "policies/public_account_payment_rule"
+      ],
+      "llm_reasoning": "public_account_payment_rule 主要关于对公付款确认，其中部分内容（支持对公转账）与 payment 重复，且 payment 已包含对公转账说明，建议合并或明确分工。",
+      "suggestions": [
+        {
+          "title": "建议合并",
+          "detail": "多条知识表达同一含义，建议保留信息最完整的一条，将其余归档。",
+          "level": "warning"
+        }
+      ],
+      "fingerprint": "a24848b9410553464feea559"
+    },
+    {
+      "code": "llm_rag_quality_low",
+      "severity": "info",
+      "title": "LLM：RAG经验质量低",
+      "detail": "内容为三次重复的测试数据，无实际业务价值，且可能干扰RAG检索。",
+      "target": "rag_exp_9a6790ce2d781ce0a11e",
+      "target_label": "rag_exp_9a6790ce2d781ce0a11e",
+      "repairable": false,
+      "action_type": "delete",
+      "involved_targets": [
+        "rag_exp_9a6790ce2d781ce0a11e"
+      ],
+      "llm_reasoning": "内容为三次重复的测试数据，无实际业务价值，且可能干扰RAG检索。",
+      "suggestions": [
+        {
+          "title": "建议删除",
+          "detail": "该条目存在明显错误或不适用，建议归档或废弃。",
+          "level": "danger"
+        }
+      ],
+      "fingerprint": "1b5d7072e577e8d14baf5a69"
+    },
+    {
+      "code": "llm_rag_quality_low",
+      "severity": "info",
+      "title": "LLM：RAG经验质量低",
+      "detail": "内容为三次重复的'duplicate candidate probe'，明显是测试或垃圾数据，应删除。",
+      "target": "rag_exp_5a574e8d242fc86a1b3d",
+      "target_label": "rag_exp_5a574e8d242fc86a1b3d",
+      "repairable": false,
+      "action_type": "delete",
+      "involved_targets": [
+        "rag_exp_5a574e8d242fc86a1b3d"
+      ],
+      "llm_reasoning": "内容为三次重复的'duplicate candidate probe'，明显是测试或垃圾数据，应删除。",
+      "suggestions": [
+        {
+          "title": "建议删除",
+          "detail": "该条目存在明显错误或不适用，建议归档或废弃。",
+          "level": "danger"
+        }
+      ],
+      "fingerprint": "af0268bdb9c7620abac33356"
+    },
+    {
+      "code": "llm_rag_quality_low",
+      "severity": "info",
+      "title": "LLM：RAG经验质量低",
+      "detail": "内容为重复三次的对话记录，信息虽正确但冗余，建议保留唯一版本。",
+      "target": "rag_exp_89af65a4428a33bb5815",
+      "target_label": "rag_exp_89af65a4428a33bb5815",
+      "repairable": false,
+      "action_type": "delete",
+      "involved_targets": [
+        "rag_exp_89af65a4428a33bb5815"
+      ],
+      "llm_reasoning": "内容为重复三次的对话记录，信息虽正确但冗余，建议保留唯一版本。",
+      "suggestions": [
+        {
+          "title": "建议删除",
+          "detail": "该条目存在明显错误或不适用，建议归档或废弃。",
+          "level": "danger"
+        }
+      ],
+      "fingerprint": "c7c2ecad8d9890c93a26c320"
+    },
+    {
+      "code": "llm_rag_quality_low",
+      "severity": "info",
+      "title": "LLM：RAG经验质量低",
+      "detail": "内容为重复三次的开票规则，信息正确但冗余，建议去重。",
+      "target": "rag_exp_3a14a2970b3c90d11fc5",
+      "target_label": "rag_exp_3a14a2970b3c90d11fc5",
+      "repairable": false,
+      "action_type": "delete",
+      "involved_targets": [
+        "rag_exp_3a14a2970b3c90d11fc5"
+      ],
+      "llm_reasoning": "内容为重复三次的开票规则，信息正确但冗余，建议去重。",
+      "suggestions": [
+        {
+          "title": "建议删除",
+          "detail": "该条目存在明显错误或不适用，建议归档或废弃。",
+          "level": "danger"
+        }
+      ],
+      "fingerprint": "6a29796349383f5e86c2ed55"
+    },
+    {
+      "severity": "error",
+      "title": "knowledge_runtime 未通过",
+      "detail": "true\n    },\n    {\n      \"name\": \"check_public_product_discount_not_blocked_by_chat_template\",\n      \"ok\": true\n    },\n    {\n      \"name\": \"check_invoice_hits_policies\",\n      \"ok\": true\n    },\n    {\n      \"name\": \"check_public_bank_account_can_auto_reply\",\n      \"ok\": true\n    },\n    {\n      \"name\": \"check_context_product_shipping\",\n      \"ok\": false,\n      \"error\": \"AssertionError(\\\"missing evidence item: products/commercial_fridge_bx_200; pack={'schema_version': 1, 'input_text': '发江苏南京，包邮吗？', 'intent_tags': ['unknown'], 'matched_categories': ['policies', 'chats', 'global_guidelines'], 'evidence_items': [{'category_id': 'policies', 'item_id': 'free_shipping_promo_2026_spring', 'title': '优惠政策', 'matched_fields': ['keywords'], 'match_reason': 'resolver_match_fields', 'confidence': 0.6, 'knowledge_layer': 'tenant', 'reply_excerpt': '关于包邮政策，新增统一的优惠活动规则：在2026.4.25-2026.6.25之间，单笔消费满1000元包邮（偏远地区除外）', 'allow_auto_reply': True, 'requires_handoff': False, 'risk_level': 'normal', 'handoff_reason': ''}, {'category_id': 'chats', 'item_id': 'unknown_handoff', 'title': 'unknown_handoff', 'matched_fields': ['intent_tags'], 'match_reason': 'chat_style_or_intent', 'confidence': 0.55, 'knowledge_layer': 'tenant', 'reply_excerpt': '这个问题我当前没有足够依据直接确认，我先帮您记录并转人工处理。', 'allow_auto_reply': False, 'requires_handoff': True, 'risk_level': 'high', 'handoff_reason': 'auto_reply_disabled'}, {'category_id': 'global_guidelines', 'item_id': 'customer_service_style_guidelines', 'title': '客服通用表达与边界原则', 'matched_fields': ['always_include'], 'match_reason': 'global_style_guideline', 'confidence': 0.51, 'knowledge_layer': 'shared', 'reply_excerpt': '回复要自然，先接住客户使用场景，再问关键参数。对功率、续航、最低价等不确定内容，不能凭空承诺。适合自动回复的内容：参数收集、常规质保说明、使用场景推荐。需要转人工的内容：最低价、特殊补偿、先发货后付款。', 'allow_auto_reply': True, 'requires_handoff': False, 'risk_level': 'normal', 'handoff_reason': ''}], 'safety': {'allowed_auto_reply': True, 'must_handoff': False, 'reasons': []}, 'context': {'last_product_id': 'commercial_fridge_bx_200'}}\\\")\"\n    }\n  ]\n}\n\n",
+      "target_label": "未指定位置",
+      "repairable": false,
+      "fingerprint": "575a15bd9ee619273d69eaa0",
+      "suggestions": [
+        {
+          "title": "建议优先修复",
+          "detail": "该问题可能影响知识入库、检索或客服回答。请点击查看位置进入对应知识，按提示补齐或修正字段。",
+          "level": "danger"
+        }
+      ]
+    },
+    {
+      "severity": "error",
+      "title": "offline_regression 未通过",
+      "detail": "{\n  \"ok\": false,\n  \"scenario_path\": \"D:\\\\AI\\\\omniauto\\\\apps\\\\wechat_ai_customer_service\\\\tests\\\\scenarios\\\\offline_regression.json\",\n  \"count\": 11,\n  \"failures\": [\n    {\n      \"name\": \"catalog_request\",\n      \"ok\": false,\n      \"error\": \"AssertionError('matched: expected True, got False')\"\n    },\n    {\n      \"name\": \"evidence_discount_handoff\",\n      \"ok\": false,\n      \"error\": \"AssertionError(\\\"intent_tags: expected item 'discount' in ['product', 'quote']\\\")\"\n    },\n    {\n      \"name\": \"manual_handoff_contract\",\n      \"ok\": false,\n      \"error\": \"AssertionError(\\\"intent_tags: expected item 'handoff' in ['contract', 'payment']\\\")\"\n    }\n  ],\n  \"results\": [\n    {\n      \"name\": \"catalog_request\",\n      \"ok\": false,\n      \"error\": \"AssertionError('matched: expected True, got False')\"\n    },\n    {\n      \"name\": \"product_quote\",\n      \"ok\": true\n    },\n    {\n      \"name\": \"below_tier_discount_handoff\",\n      \"ok\": true\n    },\n    {\n      \"name\": \"invoice_policy\",\n      \"ok\": true\n    },\n    {\n      \"name\": \"warranty_policy\",\n      \"ok\": true\n    },\n    {\n      \"name\": \"context_shipping\",\n      \"ok\": true\n    },\n    {\n      \"name\": \"evidence_discount_handoff\",\n      \"ok\": false,\n      \"error\": \"AssertionError(\\\"intent_tags: expected item 'discount' in ['product', 'quote']\\\")\"\n    },\n    {\n      \"name\": \"customer_data_complete\",\n      \"ok\": true\n    },\n    {\n      \"name\": \"greeting_not_customer_data\",\n      \"ok\": true\n    },\n    {\n      \"name\": \"manual_handoff_contract\",\n      \"ok\": false,\n      \"error\": \"AssertionError(\\\"intent_tags: expected item 'handoff' in ['contract', 'payment']\\\")\"\n    },\n    {\n      \"name\": \"no_relevant_business_evidence\",\n      \"ok\": true\n    }\n  ]\n}\n\n",
+      "target_label": "未指定位置",
+      "repairable": false,
+      "fingerprint": "5507672e7aab89f3a5b4bfb7",
+      "suggestions": [
+        {
+          "title": "建议优先修复",
+          "detail": "该问题可能影响知识入库、检索或客服回答。请点击查看位置进入对应知识，按提示补齐或修正字段。",
+          "level": "danger"
+        }
+      ]
+    }
+  ],
+  "ignored_count": 0,
+  "summary": {
+    "error_count": 2,
+    "warning_count": 1,
+    "info_count": 8,
+    "ignored_count": 0,
+    "hidden_notice_count": 1
+  },
+  "auto_dedup_rag": {
+    "ok": true,
+    "message": "Auto-dedup discarded 1 RAG experience(s)",
+    "discarded": [
+      "rag_exp_84d256dd4b146062effa"
+    ],
+    "duplicate_groups": [
+      [
+        "rag_exp_84d256dd4b146062effa",
+        "rag_exp_794f04141b28161c0a3e"
+      ]
+    ]
+  }
+}

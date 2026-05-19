@@ -98,7 +98,9 @@ EXPLICIT_HANDOFF_PATTERNS = (
 )
 PRICE_HARD_BOUNDARY_TERMS = ("价格", "报价", "最低", "底价", "优惠", "折扣", "少点", "便宜", "贷款", "金融", "包过", "首付", "月供")
 APPOINTMENT_TERMS = ("试驾", "到店", "看车", "订金", "定金", "留车", "锁车", "预约", "周末", "周六", "周日", "上午", "下午", "几点", "安排", "过去", "来店", "门店")
-LOCATION_CONTACT_TERMS = ("门店地址", "店地址", "地址", "导航", "位置", "在哪", "哪里", "找谁", "联系人", "到了找")
+LOCATION_CONTACT_TERMS = ("门店地址", "店地址", "地址", "导航", "位置", "在哪", "哪里", "找谁", "联系人", "对接人", "到了找")
+LOCATION_CONTACT_STRONG_TERMS = ("门店地址", "店地址", "地址", "导航", "位置", "在哪", "哪里", "找谁", "对接人", "到了找", "到店找", "跑错")
+LOCATION_VISIT_CONTEXT_TERMS = ("门店", "店里", "到店", "到了", "过去", "看车", "试驾", "来店", "导航", "地址")
 CONTACT_DATA_TERMS = ("电话", "手机号", "联系方式", "我叫", "联系人", "姓名", "先生", "女士")
 AFTER_SALES_TERMS = ("赔偿", "退款", "纠纷", "投诉", "事故", "水泡", "火烧", "过户", "上牌")
 TRADE_IN_TERMS = ("置换", "抵车款", "抵多少", "抵扣", "抵一点", "卖车", "收车", "旧车", "估价", "估个", "估一下", "估一", "怎么估")
@@ -1293,7 +1295,7 @@ def recent_customer_visible_reply_texts(target_state: dict[str, Any], *, limit: 
         if not isinstance(item, dict):
             continue
         text = str(item.get("reply_text") or "").strip()
-        if text and state_context_item_is_usable(item, text=text):
+        if text and state_context_item_is_usable(item, text=text, allow_polluted_message_contents=True):
             replies.append((str(item.get("processed_at") or ""), text))
     for item in target_state.get("handoff_events", []) or []:
         if not isinstance(item, dict):
@@ -1319,12 +1321,20 @@ def recent_customer_message_texts(target_state: dict[str, Any], *, limit: int = 
     return messages[-max(1, limit) :]
 
 
-def state_context_item_is_usable(item: dict[str, Any], *, text: str = "", timestamp_key: str = "processed_at") -> bool:
+def state_context_item_is_usable(
+    item: dict[str, Any],
+    *,
+    text: str = "",
+    timestamp_key: str = "processed_at",
+    allow_polluted_message_contents: bool = False,
+) -> bool:
     timestamp = parse_datetime(str(item.get(timestamp_key) or item.get("processed_at") or item.get("created_at") or ""))
     if timestamp is not None and datetime.now() - timestamp > timedelta(hours=6):
         return False
     if text and state_context_text_is_polluted(text):
         return False
+    if allow_polluted_message_contents:
+        return True
     for content in item.get("message_contents", []) or []:
         if state_context_text_is_polluted(str(content or "")):
             return False
@@ -1471,8 +1481,25 @@ def new_energy_usage_detail(context: str) -> str:
     return "您这个顾虑我先记下"
 
 
+def is_location_contact_context(context: str) -> bool:
+    text = str(context or "")
+    return any(term in text for term in LOCATION_CONTACT_STRONG_TERMS) and any(
+        term in text for term in LOCATION_VISIT_CONTEXT_TERMS
+    )
+
+
 def concealed_handoff_reply(*, combined: str = "", reason: str = "", recent_reply_texts: list[str] | None = None) -> str:
     context = f"{combined} {reason}".strip()
+    if is_location_contact_context(context):
+        return choose_customer_visible_variant(
+            [
+                "门店地址和到了找谁我先确认一下，确认好后发您，避免您导航错或到店没人对接。",
+                "这个我给您核清楚再发，地址、导航和到店联系人都一起确认好，省得您白跑。",
+                "可以，我先确认门店地址和到店对接人，核好后回您，您过去会更稳一点。",
+            ],
+            context=context,
+            recent_reply_texts=recent_reply_texts,
+        )
     if any(term in context for term in CONTACT_DATA_TERMS) and any(term in context for term in APPOINTMENT_TERMS):
         return choose_customer_visible_variant(
             [
@@ -1509,16 +1536,6 @@ def concealed_handoff_reply(*, combined: str = "", reason: str = "", recent_repl
                 "您想今天定，我理解，价格和金融这块我不能为了促成就随口保证。我先把车源、付款方式和负责人意见确认好，再给您明确答复。",
                 "价格我肯定帮您争取，但最低价和贷款结果不能直接口头保证。我核实一下具体车源、成交方式和负责人意见，再回复您。",
                 "这个我先帮您往下问，争取归争取，但价格、库存和金融结果都要确认过才稳。我核清楚后再给您准话。",
-            ],
-            context=context,
-            recent_reply_texts=recent_reply_texts,
-        )
-    if any(term in context for term in LOCATION_CONTACT_TERMS):
-        return choose_customer_visible_variant(
-            [
-                "门店地址和到了找谁我先确认一下，确认好后发您，避免您导航错或到店没人对接。",
-                "这个我给您核清楚再发，地址、导航和到店联系人都一起确认好，省得您白跑。",
-                "可以，我先确认门店地址和到店对接人，核好后回您，您过去会更稳一点。",
             ],
             context=context,
             recent_reply_texts=recent_reply_texts,

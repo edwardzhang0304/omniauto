@@ -1,0 +1,45 @@
+{
+  "title": "个性化回复风格指南",
+  "industry_id": "global",
+  "keywords": [
+    "模拟人类语气",
+    "客户资料",
+    "标签",
+    "称呼",
+    "回复风格"
+  ],
+  "applies_to": "客服对话场景",
+  "guideline_text": "在对话时，尽量模拟真实人类的语气。先读取数据库中的客户资料，然后根据资料的标签，给出符合印象的称呼和回复风格。",
+  "notes": "",
+  "schema_version": 1,
+  "id": "shared_item_ITvhhZJ51LCp",
+  "item_id": "shared_item_ITvhhZJ51LCp",
+  "category_id": "reply_style",
+  "status": "active",
+  "content": "在对话时，尽量模拟真实人类的语气。先读取数据库中的客户资料，然后根据资料的标签，给出符合印象的称呼和回复风格。",
+  "data": {
+    "title": "个性化回复风格指南",
+    "industry_id": "global",
+    "keywords": [
+      "模拟人类语气",
+      "客户资料",
+      "标签",
+      "称呼",
+      "回复风格"
+    ],
+    "applies_to": "客服对话场景",
+    "guideline_text": "在对话时，尽量模拟真实人类的语气。先读取数据库中的客户资料，然后根据资料的标签，给出符合印象的称呼和回复风格。",
+    "notes": ""
+  },
+  "runtime": {},
+  "source": {
+    "type": "cloud_official_shared_library",
+    "item_id": "shared_item_ITvhhZJ51LCp",
+    "version": ""
+  },
+  "metadata": {
+    "knowledge_layer": "shared",
+    "cloud_item_id": "shared_item_ITvhhZJ51LCp",
+    "cloud_updated_at": "2026-05-09T13:37:03+00:00"
+  }
+}

@@ -27,7 +27,7 @@ from reply_style_adapter import adapt_reply_style, guard_adapted_reply, infer_so
 from style_memory_store import retrieve_style_examples  # noqa: E402
 
 
-TENANT_ID = "jiangsu_chejin_usedcar_customer_20260501"
+TENANT_ID = "chejin"
 
 
 def main() -> int:
@@ -36,6 +36,7 @@ def main() -> int:
         check_retrieves_inline_style_examples,
         check_retrieves_rag_style_hits,
         check_fast_adapter_blends_real_service_style,
+        check_style_adapter_uses_recent_context_before_asking_budget_again,
         check_style_adapter_suppresses_repeated_honorific_mid_chat,
         check_style_adapter_avoids_followup_honorific_without_recent_state,
         check_identity_probe_denies_ai_when_guard_enabled,
@@ -123,6 +124,34 @@ def check_fast_adapter_blends_real_service_style() -> bool:
     )
     text = str(result.get("reply_text") or "")
     return result.get("applied") is True and "不乱推" not in text and "哥" in text and "9.8万" not in text
+
+
+def check_style_adapter_uses_recent_context_before_asking_budget_again() -> bool:
+    config = style_config()
+    pack = {
+        "evidence": {
+            "style_examples": [
+                {
+                    "id": "style_reco_no_reask_budget",
+                    "customer_message": "预算十万，推荐几台",
+                    "service_reply": "哥，您先说下预算、用途和有没有置换，我再按实际情况帮您筛。",
+                    "source_type": "cleaned_real_chat_pack",
+                    "score": 0.9,
+                }
+            ]
+        }
+    }
+    result = adapt_reply_style(
+        config=config,
+        customer_message="那就按刚才说的，直接挑两台，别再问预算了。",
+        reply_text="按您现在这个方向，我建议先从Polo和领动里挑。别只看年份，先看公里数、车况记录和检测报告；后面我再帮您把优先级排清楚。",
+        source_channel="realtime",
+        evidence_pack=pack,
+        recent_reply_texts=["从9万以内、主要给您爱人开、自动挡、倒车影像优先这个条件看，可以先筛两台。"],
+    )
+    text = str(result.get("reply_text") or "")
+    forbidden = ("您把预算", "说下预算", "预算大概", "确认一下预算", "预算上限", "您先说下预算", "后面后面")
+    return result.get("applied") is True and not any(marker in text for marker in forbidden)
 
 
 def check_style_adapter_suppresses_repeated_honorific_mid_chat() -> bool:

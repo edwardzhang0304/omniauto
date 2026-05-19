@@ -1,0 +1,35 @@
+{
+  "source": {
+    "source_id": "source_59c4d2b6dd4b63d0",
+    "tenant_id": "chejin",
+    "layer": "tenant",
+    "source_type": "wechat_raw_message",
+    "category": "file_transfer",
+    "product_id": "",
+    "source_path": "D:\\AI\\omniauto\\runtime\\apps\\wechat_ai_customer_service\\tenants\\chejin\\raw_messages\\learning_batches\\raw_batch_3c7324a2b4ca21ac46f3.txt",
+    "content_hash": "bcdb93065c3a60efd0010630bde8aed9",
+    "status": "quarantined",
+    "created_at": "2026-05-06T23:19:44",
+    "updated_at": "2026-05-06T23:19:44",
+    "quarantine_reason": "raw_wechat_source_not_directly_retrievable"
+  },
+  "chunks": [
+    {
+      "chunk_id": "chunk_e9529bd5ca602205",
+      "source_id": "source_59c4d2b6dd4b63d0",
+      "tenant_id": "chejin",
+      "layer": "tenant",
+      "source_type": "wechat_raw_message",
+      "category": "file_transfer",
+      "product_id": "",
+      "source_path": "D:\\AI\\omniauto\\runtime\\apps\\wechat_ai_customer_service\\tenants\\chejin\\raw_messages\\learning_batches\\raw_batch_3c7324a2b4ca21ac46f3.txt",
+      "chunk_index": 0,
+      "text": "[2026-05-06 23:14:00] system: 23:14\n[2026-05-06T23:19:44] self: [车金AI] 8万预算代步省油的话，可以看看凯美瑞、思域和秦PLUS DM-i，这几款口碑都不错，秦PLUS DM-i尤其省油。您是在哪个城市看车？是否考虑贷款或者置换呢？\n[2026-05-06T23:19:44] self: 凯美瑞，3年内的一般多少钱",
+      "char_count": 192,
+      "status": "quarantined",
+      "created_at": "2026-05-06T23:19:44",
+      "quarantine_reason": "raw_wechat_source_not_directly_retrievable",
+      "quarantined_at": "2026-05-19T01:47:03"
+    }
+  ]
+}

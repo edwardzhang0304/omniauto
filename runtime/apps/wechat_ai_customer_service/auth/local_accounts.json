@@ -1,21 +1,29 @@
 {
   "accounts": {
-    "jiangsu_chejin_usedcar_customer_20260501": {
-      "user_id": "jiangsu_chejin_usedcar_customer_20260501",
-      "username": "jiangsu_chejin_usedcar_customer_20260501",
+    "test01": {
+      "username": "test01",
+      "email": "test01@example.local",
+      "password_hash": "pbkdf2_sha256$120000$f3360eb9aa7e867a28a0420d26823e2e$EptBVtr1h7jDXtWf+IVNvqHR3aGYWRORbxhcA0RS+YA=",
+      "initialized_at": "2026-05-16T05:20:28+00:00",
+      "updated_at": "2026-05-16T05:20:28+00:00"
+    },
+    "chejin": {
+      "user_id": "chejin",
+      "username": "chejin",
       "display_name": "江苏车金二手车测试客户 2026-05-01",
       "role": "customer",
-      "email": "jiangsu-chejin-usedcar@example.local",
-      "password_hash": "pbkdf2_sha256$120000$8a1f5fc46d61f742aa9f486a5ee7cdb6$Vjy8TInOxEEzzqPs0dbwVhNYD80mqtlheeJS6b5LzA4=",
+      "email": "xu__cong@126.com",
+      "password_hash": "pbkdf2_sha256$120000$eb0caeea0c6550710f22977c8a910287$dWW9uT0nmaLdns0v9Sa8WtPnmlzumFnID0f0zTQniZc=",
       "tenant_ids": [
-        "jiangsu_chejin_usedcar_customer_20260501"
+        "chejin"
       ],
-      "active_tenant_id": "jiangsu_chejin_usedcar_customer_20260501",
+      "active_tenant_id": "chejin",
       "resource_scopes": [
         "*"
       ],
-      "initialized_at": "2026-05-01T08:09:49+00:00",
-      "updated_at": "2026-05-09T20:05:09+00:00"
+      "status": "active",
+      "initialized_at": "2026-05-18T08:34:37+00:00",
+      "updated_at": "2026-05-18T21:21:06+00:00"
     }
   }
 }

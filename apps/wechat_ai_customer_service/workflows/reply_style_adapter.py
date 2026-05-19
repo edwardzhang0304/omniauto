@@ -32,11 +32,14 @@ SOURCE_SETTING_KEYS = {
 IDENTITY_PROBE_TERMS = ("是不是ai", "是不是AI", "ai吗", "AI吗", "机器人", "自动回复", "机器客服")
 RECOMMEND_TERMS = ("推荐", "车源", "预算", "通勤", "家用", "省油", "看看", "哪台", "哪款", "挑")
 PRICE_TERMS = ("价格", "报价", "优惠", "便宜", "贵", "低点", "少点", "预算", "最低", "底价", "贷款", "金融", "包过", "首付", "月供")
+BUDGET_REASK_REJECT_TERMS = ("别再问预算", "不要再问预算", "不用再问预算", "别问预算", "按刚才说", "刚才说的", "前面说了", "上面说了")
 HANDOFF_MARKERS = ("转人工", "人工客服", "真人客服", "同事联系", "专员联系", "销售联系")
 AI_EXPOSURE_MARKERS = ("我是AI", "我是ai", "我是机器人", "智能客服", "自动回复", "机器客服")
 CONTACT_DATA_TERMS = ("电话", "手机号", "联系方式", "我叫", "联系人", "姓名", "先生", "女士")
 APPOINTMENT_TERMS = ("试驾", "到店", "看车", "订金", "定金", "留车", "预约", "周末", "周六", "周日", "上午", "下午", "几点", "安排", "过去", "来店")
-LOCATION_CONTACT_TERMS = ("门店地址", "店地址", "地址", "导航", "位置", "在哪", "哪里", "找谁", "联系人", "到了找")
+LOCATION_CONTACT_TERMS = ("门店地址", "店地址", "地址", "导航", "位置", "在哪", "哪里", "找谁", "联系人", "对接人", "到了找")
+LOCATION_CONTACT_STRONG_TERMS = ("门店地址", "店地址", "地址", "导航", "位置", "在哪", "哪里", "找谁", "对接人", "到了找", "到店找", "跑错")
+LOCATION_VISIT_CONTEXT_TERMS = ("门店", "店里", "到店", "到了", "过去", "看车", "试驾", "来店", "导航", "地址")
 TRADE_IN_TERMS = ("置换", "抵车款", "抵多少", "抵扣", "卖车", "收车", "旧车", "估价", "估个", "估一下")
 NEW_ENERGY_TERMS = ("新能源", "电池", "三电", "续航", "充电", "混动", "dm-i", "dmi")
 DOCUMENT_TERMS = ("合同", "发票", "开票", "抬头", "税号", "少开", "低开")
@@ -201,8 +204,9 @@ def apply_fast_local_style(
         selected_honorific = select_style_honorific(honorific, customer_message, recent_reply_texts)
         if selected_honorific:
             adapted = f"{selected_honorific}，{adapted}"
-    customer_has_budget = has_budget_signal(customer_message)
-    customer_has_use = has_use_signal(customer_message)
+    dialogue_context = " ".join([customer_message, *recent_reply_texts[-4:]])
+    customer_has_budget = has_budget_signal(dialogue_context) or rejects_budget_reask(customer_message)
+    customer_has_use = has_use_signal(dialogue_context)
     if (
         is_price_scene(customer_message)
         and "预算" in profile.get("keywords", set())
@@ -223,6 +227,7 @@ def apply_fast_local_style(
         is_recommendation_scene(customer_message)
         and not asks_use_or_budget(adapted)
         and not (customer_has_budget and customer_has_use)
+        and not rejects_budget_reask(customer_message)
     ):
         followup, _ = choose_reply_variant(
             [
@@ -235,7 +240,7 @@ def apply_fast_local_style(
         )
         adapted = append_sentence(adapted, followup)
 
-    adapted = de_template_reply_text(adapted, key_text=context, recent_reply_texts=recent_reply_texts)
+    adapted = normalize_duplicate_fragments(de_template_reply_text(adapted, key_text=context, recent_reply_texts=recent_reply_texts))
     if too_similar_to_recent(adapted, recent_reply_texts):
         adapted = rotate_repetition(adapted, customer_message, recent_reply_texts)
     return adapted, "style_example_blend"
@@ -258,6 +263,16 @@ def infer_style_profile(examples: list[dict[str, Any]]) -> dict[str, Any]:
 
 def handoff_specific_reply(context: str, recent_reply_texts: list[str]) -> str:
     clean = normalize_text(context)
+    if is_location_contact_context(clean):
+        return choose_reply_variant(
+            [
+                "门店地址和到了找谁我先确认一下，确认好后发您，避免您导航错或到店没人对接。",
+                "这个我给您核清楚再发，地址、导航和到店联系人都一起确认好，省得您白跑。",
+                "可以，我先确认门店地址和到店对接人，核好后回您，您过去会更稳一点。",
+            ],
+            key_text=context,
+            recent_reply_texts=recent_reply_texts,
+        )[0]
     if contains_any(clean, CONTACT_DATA_TERMS) and contains_any(clean, APPOINTMENT_TERMS):
         return choose_reply_variant(
             [
@@ -284,16 +299,6 @@ def handoff_specific_reply(context: str, recent_reply_texts: list[str]) -> str:
                 "可以，这块我帮您问清楚。合同和发票需要按门店流程来，我把开票抬头、税号和合同资料要求核清楚后回您，避免后面填错。",
                 "这个提前问是对的，我帮您确认合同流程和开票资料要求后再回复您，省得后面资料来回补。",
                 "合同和发票这块我先确认一下门店流程。您稍等，我核实好抬头、税号和需要准备的资料后回复您。",
-            ],
-            key_text=context,
-            recent_reply_texts=recent_reply_texts,
-        )[0]
-    if contains_any(clean, LOCATION_CONTACT_TERMS):
-        return choose_reply_variant(
-            [
-                "门店地址和到了找谁我先确认一下，确认好后发您，避免您导航错或到店没人对接。",
-                "这个我给您核清楚再发，地址、导航和到店联系人都一起确认好，省得您白跑。",
-                "可以，我先确认门店地址和到店对接人，核好后回您，您过去会更稳一点。",
             ],
             key_text=context,
             recent_reply_texts=recent_reply_texts,
@@ -350,6 +355,11 @@ def handoff_specific_reply(context: str, recent_reply_texts: list[str]) -> str:
             recent_reply_texts=recent_reply_texts,
         )[0]
     return ""
+
+
+def is_location_contact_context(text: str) -> bool:
+    clean = normalize_text(text)
+    return contains_any(clean, LOCATION_CONTACT_STRONG_TERMS) and contains_any(clean, LOCATION_VISIT_CONTEXT_TERMS)
 
 
 def normalize_formulaic_opening(reply: str) -> str:
@@ -523,6 +533,20 @@ def has_budget_signal(text: str) -> bool:
             "十五六万",
         )
     )
+
+
+def rejects_budget_reask(text: str) -> bool:
+    clean = normalize_text(text)
+    return any(normalize_text(term) in clean for term in BUDGET_REASK_REJECT_TERMS)
+
+
+def normalize_duplicate_fragments(text: str) -> str:
+    clean = str(text or "")
+    clean = re.sub(r"(后面)[，,。；;\s]*\1", r"\1", clean)
+    clean = re.sub(r"(前面)[，,。；;\s]*\1", r"\1", clean)
+    clean = re.sub(r"(确认)[，,。；;\s]*\1", r"\1", clean)
+    clean = re.sub(r"(核实)[，,。；;\s]*\1", r"\1", clean)
+    return clean
 
 
 def has_use_signal(text: str) -> bool:

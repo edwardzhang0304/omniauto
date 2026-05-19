@@ -1,0 +1,451 @@
+{
+  "ok": false,
+  "run_id": "diag_20260508_054545_a34b88",
+  "mode": "quick",
+  "status": "error",
+  "created_at": "2026-05-08T05:46:46",
+  "checks": [
+    {
+      "name": "quick_knowledge_validation",
+      "ok": false,
+      "issues": [
+        {
+          "code": "llm_logic_error",
+          "severity": "error",
+          "title": "LLM：逻辑错误",
+          "detail": "warranty_policy字段内容与shipping_policy相同，错误地复制了发货政策，实际应为质保期限和范围信息。",
+          "target": "products/wooden-rocking-chair",
+          "target_label": "products/wooden-rocking-chair",
+          "repairable": false,
+          "action_type": "review",
+          "involved_targets": [
+            "products/wooden-rocking-chair"
+          ],
+          "llm_reasoning": "warranty_policy字段内容与shipping_policy相同，错误地复制了发货政策，实际应为质保期限和范围信息。",
+          "suggestions": [
+            {
+              "title": "建议人工复核",
+              "detail": "LLM认为该条目可能存在问题，请人工确认后决定处理方式。",
+              "level": "warning"
+            }
+          ]
+        },
+        {
+          "code": "llm_logic_error",
+          "severity": "error",
+          "title": "LLM：逻辑错误",
+          "detail": "answer仅为'合并内容测试'，缺乏完整发票政策，属于未完成的占位符内容，不应存在于正式知识库中。",
+          "target": "policies/invoice",
+          "target_label": "policies/invoice",
+          "repairable": false,
+          "action_type": "delete",
+          "involved_targets": [
+            "policies/invoice"
+          ],
+          "llm_reasoning": "answer仅为'合并内容测试'，缺乏完整发票政策，属于未完成的占位符内容，不应存在于正式知识库中。",
+          "suggestions": [
+            {
+              "title": "建议删除",
+              "detail": "该条目存在明显错误或不适用，建议归档或废弃。",
+              "level": "danger"
+            }
+          ]
+        },
+        {
+          "code": "llm_logic_error",
+          "severity": "error",
+          "title": "LLM：逻辑错误",
+          "detail": "两个条目均包含关键词'转人工'，但回复内容矛盾：manual_handoff_reply自动回复'已转人工'，而manual_required表示需要人工处理并要求转接，可能导致用户混淆或系统冲突。",
+          "target": "policies/manual_handoff_reply",
+          "target_label": "policies/manual_handoff_reply, policies/manual_required",
+          "repairable": false,
+          "action_type": "review",
+          "involved_targets": [
+            "policies/manual_handoff_reply",
+            "policies/manual_required"
+          ],
+          "llm_reasoning": "两个条目均包含关键词'转人工'，但回复内容矛盾：manual_handoff_reply自动回复'已转人工'，而manual_required表示需要人工处理并要求转接，可能导致用户混淆或系统冲突。",
+          "suggestions": [
+            {
+              "title": "建议人工复核",
+              "detail": "LLM认为该条目可能存在问题，请人工确认后决定处理方式。",
+              "level": "warning"
+            }
+          ]
+        },
+        {
+          "code": "llm_duplicate_semantic",
+          "severity": "warning",
+          "title": "LLM：语义重复",
+          "detail": "两个条目均包含相同的定金政策（常规订单付款后发货，定制大额订单30%定金，尾款发货前结清），内容重复，建议合并。",
+          "target": "policies/payment",
+          "target_label": "policies/payment, policies/payment_policy_details",
+          "repairable": false,
+          "action_type": "merge",
+          "involved_targets": [
+            "policies/payment",
+            "policies/payment_policy_details"
+          ],
+          "llm_reasoning": "两个条目均包含相同的定金政策（常规订单付款后发货，定制大额订单30%定金，尾款发货前结清），内容重复，建议合并。",
+          "suggestions": [
+            {
+              "title": "建议合并",
+              "detail": "多条知识表达同一含义，建议保留信息最完整的一条，将其余归档。",
+              "level": "warning"
+            }
+          ]
+        },
+        {
+          "code": "llm_duplicate_semantic",
+          "severity": "warning",
+          "title": "LLM：语义重复",
+          "detail": "remote_area_shipping_rule中的偏远地区运费规则与logistics_policy_details中的remote_area_note内容重复，建议合并至物流政策。",
+          "target": "policies/logistics_policy_details",
+          "target_label": "policies/logistics_policy_details, policies/remote_area_shipping_rule",
+          "repairable": false,
+          "action_type": "merge",
+          "involved_targets": [
+            "policies/logistics_policy_details",
+            "policies/remote_area_shipping_rule"
+          ],
+          "llm_reasoning": "remote_area_shipping_rule中的偏远地区运费规则与logistics_policy_details中的remote_area_note内容重复，建议合并至物流政策。",
+          "suggestions": [
+            {
+              "title": "建议合并",
+              "detail": "多条知识表达同一含义，建议保留信息最完整的一条，将其余归档。",
+              "level": "warning"
+            }
+          ]
+        },
+        {
+          "code": "llm_duplicate_semantic",
+          "severity": "warning",
+          "title": "LLM：语义重复",
+          "detail": "三个RAG经验内容完全相同（均为自动化测试折叠床/椅的产品表格），属于重复上传，建议只保留一个。",
+          "target": "rag_exp_43a05e77c0d9e4a23333",
+          "target_label": "rag_exp_43a05e77c0d9e4a23333, rag_exp_02e6ade13bdafe809eb6, rag_exp_142f33f56c90065a2689",
+          "repairable": false,
+          "action_type": "delete",
+          "involved_targets": [
+            "rag_exp_43a05e77c0d9e4a23333",
+            "rag_exp_02e6ade13bdafe809eb6",
+            "rag_exp_142f33f56c90065a2689"
+          ],
+          "llm_reasoning": "三个RAG经验内容完全相同（均为自动化测试折叠床/椅的产品表格），属于重复上传，建议只保留一个。",
+          "suggestions": [
+            {
+              "title": "建议删除",
+              "detail": "该条目存在明显错误或不适用，建议归档或废弃。",
+              "level": "danger"
+            }
+          ]
+        },
+        {
+          "code": "llm_inappropriate",
+          "severity": "error",
+          "title": "LLM：场景不适用",
+          "detail": "这两个RAG经验涉及汽车行业（凯美瑞、OmniAuto客服），与当前办公设备业务场景不匹配，无法正确用于客服回复。",
+          "target": "rag_exp_909b6276ce4fcc7030f6",
+          "target_label": "rag_exp_909b6276ce4fcc7030f6, rag_exp_f223fa9ade5369d7ba94",
+          "repairable": false,
+          "action_type": "delete",
+          "involved_targets": [
+            "rag_exp_909b6276ce4fcc7030f6",
+            "rag_exp_f223fa9ade5369d7ba94"
+          ],
+          "llm_reasoning": "这两个RAG经验涉及汽车行业（凯美瑞、OmniAuto客服），与当前办公设备业务场景不匹配，无法正确用于客服回复。",
+          "suggestions": [
+            {
+              "title": "建议删除",
+              "detail": "该条目存在明显错误或不适用，建议归档或废弃。",
+              "level": "danger"
+            }
+          ]
+        },
+        {
+          "code": "llm_rag_quality_low",
+          "severity": "warning",
+          "title": "LLM：RAG经验质量低",
+          "detail": "该RAG经验内容为无意义的重复文本'duplicate candidate probe'，是测试或无效数据，无实际价值。",
+          "target": "rag_exp_5a574e8d242fc86a1b3d",
+          "target_label": "rag_exp_5a574e8d242fc86a1b3d",
+          "repairable": false,
+          "action_type": "delete",
+          "involved_targets": [
+            "rag_exp_5a574e8d242fc86a1b3d"
+          ],
+          "llm_reasoning": "该RAG经验内容为无意义的重复文本'duplicate candidate probe'，是测试或无效数据，无实际价值。",
+          "suggestions": [
+            {
+              "title": "建议删除",
+              "detail": "该条目存在明显错误或不适用，建议归档或废弃。",
+              "level": "danger"
+            }
+          ]
+        },
+        {
+          "code": "knowledge_token_budget_large",
+          "severity": "info",
+          "title": "知识体积较大",
+          "detail": "当前分类知识库总量估算约 42826 token。这不是知识格式故障，也没有某条知识需要立即删除；它提醒后续继续按客户问题检索相关知识，避免一次性加载全部知识。",
+          "target_label": "全局知识库",
+          "details": [
+            {
+              "label": "问题性质",
+              "value": "容量提示，不是知识格式故障",
+              "level": "normal"
+            },
+            {
+              "label": "估算总量",
+              "value": "约 42826 token",
+              "level": "warning"
+            },
+            {
+              "label": "检测阈值",
+              "value": "超过 7000 token 时提示",
+              "level": "normal"
+            },
+            {
+              "label": "文件数量",
+              "value": "68 个 JSON 文件",
+              "level": "normal"
+            },
+            {
+              "label": "chats",
+              "value": "约 8788 token / 16 个文件",
+              "level": "normal"
+            },
+            {
+              "label": "erp_exports",
+              "value": "约 860 token / 2 个文件",
+              "level": "normal"
+            },
+            {
+              "label": "policies",
+              "value": "约 24976 token / 39 个文件",
+              "level": "normal"
+            },
+            {
+              "label": "products",
+              "value": "约 7508 token / 11 个文件",
+              "level": "normal"
+            }
+          ],
+          "suggestions": [
+            {
+              "title": "不建议自动删除知识",
+              "detail": "当前没有发现哪一条知识错误，系统不能为了降低体积擅自删内容。",
+              "level": "danger"
+            },
+            {
+              "title": "继续保持按门类和问题范围检索",
+              "detail": "客服运行时应只取相关商品、政策、话术和上下文证据，不要把全库一次性塞给大模型。",
+              "level": "normal"
+            },
+            {
+              "title": "如果后续继续变大",
+              "detail": "优先拆分过长政策、归档过期商品、把重复话术合并为模板，再重新检测。",
+              "level": "warning"
+            }
+          ],
+          "repairable": false
+        }
+      ],
+      "token_budget_estimate": 42826,
+      "recent_only": true
+    }
+  ],
+  "issues": [
+    {
+      "code": "llm_logic_error",
+      "severity": "error",
+      "title": "LLM：逻辑错误",
+      "detail": "warranty_policy字段内容与shipping_policy相同，错误地复制了发货政策，实际应为质保期限和范围信息。",
+      "target": "products/wooden-rocking-chair",
+      "target_label": "products/wooden-rocking-chair",
+      "repairable": false,
+      "action_type": "review",
+      "involved_targets": [
+        "products/wooden-rocking-chair"
+      ],
+      "llm_reasoning": "warranty_policy字段内容与shipping_policy相同，错误地复制了发货政策，实际应为质保期限和范围信息。",
+      "suggestions": [
+        {
+          "title": "建议人工复核",
+          "detail": "LLM认为该条目可能存在问题，请人工确认后决定处理方式。",
+          "level": "warning"
+        }
+      ],
+      "fingerprint": "2d836e752e03b105fb8ef41d"
+    },
+    {
+      "code": "llm_logic_error",
+      "severity": "error",
+      "title": "LLM：逻辑错误",
+      "detail": "answer仅为'合并内容测试'，缺乏完整发票政策，属于未完成的占位符内容，不应存在于正式知识库中。",
+      "target": "policies/invoice",
+      "target_label": "policies/invoice",
+      "repairable": false,
+      "action_type": "delete",
+      "involved_targets": [
+        "policies/invoice"
+      ],
+      "llm_reasoning": "answer仅为'合并内容测试'，缺乏完整发票政策，属于未完成的占位符内容，不应存在于正式知识库中。",
+      "suggestions": [
+        {
+          "title": "建议删除",
+          "detail": "该条目存在明显错误或不适用，建议归档或废弃。",
+          "level": "danger"
+        }
+      ],
+      "fingerprint": "d2711c69cc333043e157ff61"
+    },
+    {
+      "code": "llm_logic_error",
+      "severity": "error",
+      "title": "LLM：逻辑错误",
+      "detail": "两个条目均包含关键词'转人工'，但回复内容矛盾：manual_handoff_reply自动回复'已转人工'，而manual_required表示需要人工处理并要求转接，可能导致用户混淆或系统冲突。",
+      "target": "policies/manual_handoff_reply",
+      "target_label": "policies/manual_handoff_reply, policies/manual_required",
+      "repairable": false,
+      "action_type": "review",
+      "involved_targets": [
+        "policies/manual_handoff_reply",
+        "policies/manual_required"
+      ],
+      "llm_reasoning": "两个条目均包含关键词'转人工'，但回复内容矛盾：manual_handoff_reply自动回复'已转人工'，而manual_required表示需要人工处理并要求转接，可能导致用户混淆或系统冲突。",
+      "suggestions": [
+        {
+          "title": "建议人工复核",
+          "detail": "LLM认为该条目可能存在问题，请人工确认后决定处理方式。",
+          "level": "warning"
+        }
+      ],
+      "fingerprint": "c70de2ad5d553bea4cf53d4c"
+    },
+    {
+      "code": "llm_duplicate_semantic",
+      "severity": "warning",
+      "title": "LLM：语义重复",
+      "detail": "两个条目均包含相同的定金政策（常规订单付款后发货，定制大额订单30%定金，尾款发货前结清），内容重复，建议合并。",
+      "target": "policies/payment",
+      "target_label": "policies/payment, policies/payment_policy_details",
+      "repairable": false,
+      "action_type": "merge",
+      "involved_targets": [
+        "policies/payment",
+        "policies/payment_policy_details"
+      ],
+      "llm_reasoning": "两个条目均包含相同的定金政策（常规订单付款后发货，定制大额订单30%定金，尾款发货前结清），内容重复，建议合并。",
+      "suggestions": [
+        {
+          "title": "建议合并",
+          "detail": "多条知识表达同一含义，建议保留信息最完整的一条，将其余归档。",
+          "level": "warning"
+        }
+      ],
+      "fingerprint": "b02e9585f2b006de5e39c0ab"
+    },
+    {
+      "code": "llm_duplicate_semantic",
+      "severity": "warning",
+      "title": "LLM：语义重复",
+      "detail": "remote_area_shipping_rule中的偏远地区运费规则与logistics_policy_details中的remote_area_note内容重复，建议合并至物流政策。",
+      "target": "policies/logistics_policy_details",
+      "target_label": "policies/logistics_policy_details, policies/remote_area_shipping_rule",
+      "repairable": false,
+      "action_type": "merge",
+      "involved_targets": [
+        "policies/logistics_policy_details",
+        "policies/remote_area_shipping_rule"
+      ],
+      "llm_reasoning": "remote_area_shipping_rule中的偏远地区运费规则与logistics_policy_details中的remote_area_note内容重复，建议合并至物流政策。",
+      "suggestions": [
+        {
+          "title": "建议合并",
+          "detail": "多条知识表达同一含义，建议保留信息最完整的一条，将其余归档。",
+          "level": "warning"
+        }
+      ],
+      "fingerprint": "6479388c2b9d3e942a02c211"
+    },
+    {
+      "code": "llm_duplicate_semantic",
+      "severity": "warning",
+      "title": "LLM：语义重复",
+      "detail": "三个RAG经验内容完全相同（均为自动化测试折叠床/椅的产品表格），属于重复上传，建议只保留一个。",
+      "target": "rag_exp_43a05e77c0d9e4a23333",
+      "target_label": "rag_exp_43a05e77c0d9e4a23333, rag_exp_02e6ade13bdafe809eb6, rag_exp_142f33f56c90065a2689",
+      "repairable": false,
+      "action_type": "delete",
+      "involved_targets": [
+        "rag_exp_43a05e77c0d9e4a23333",
+        "rag_exp_02e6ade13bdafe809eb6",
+        "rag_exp_142f33f56c90065a2689"
+      ],
+      "llm_reasoning": "三个RAG经验内容完全相同（均为自动化测试折叠床/椅的产品表格），属于重复上传，建议只保留一个。",
+      "suggestions": [
+        {
+          "title": "建议删除",
+          "detail": "该条目存在明显错误或不适用，建议归档或废弃。",
+          "level": "danger"
+        }
+      ],
+      "fingerprint": "5a139911ca19caee3ffc883e"
+    },
+    {
+      "code": "llm_inappropriate",
+      "severity": "error",
+      "title": "LLM：场景不适用",
+      "detail": "这两个RAG经验涉及汽车行业（凯美瑞、OmniAuto客服），与当前办公设备业务场景不匹配，无法正确用于客服回复。",
+      "target": "rag_exp_909b6276ce4fcc7030f6",
+      "target_label": "rag_exp_909b6276ce4fcc7030f6, rag_exp_f223fa9ade5369d7ba94",
+      "repairable": false,
+      "action_type": "delete",
+      "involved_targets": [
+        "rag_exp_909b6276ce4fcc7030f6",
+        "rag_exp_f223fa9ade5369d7ba94"
+      ],
+      "llm_reasoning": "这两个RAG经验涉及汽车行业（凯美瑞、OmniAuto客服），与当前办公设备业务场景不匹配，无法正确用于客服回复。",
+      "suggestions": [
+        {
+          "title": "建议删除",
+          "detail": "该条目存在明显错误或不适用，建议归档或废弃。",
+          "level": "danger"
+        }
+      ],
+      "fingerprint": "5d9249ad2beb4302b1ff7566"
+    },
+    {
+      "code": "llm_rag_quality_low",
+      "severity": "warning",
+      "title": "LLM：RAG经验质量低",
+      "detail": "该RAG经验内容为无意义的重复文本'duplicate candidate probe'，是测试或无效数据，无实际价值。",
+      "target": "rag_exp_5a574e8d242fc86a1b3d",
+      "target_label": "rag_exp_5a574e8d242fc86a1b3d",
+      "repairable": false,
+      "action_type": "delete",
+      "involved_targets": [
+        "rag_exp_5a574e8d242fc86a1b3d"
+      ],
+      "llm_reasoning": "该RAG经验内容为无意义的重复文本'duplicate candidate probe'，是测试或无效数据，无实际价值。",
+      "suggestions": [
+        {
+          "title": "建议删除",
+          "detail": "该条目存在明显错误或不适用，建议归档或废弃。",
+          "level": "danger"
+        }
+      ],
+      "fingerprint": "97b7fa83ef3cc40b5ee5f90e"
+    }
+  ],
+  "ignored_count": 0,
+  "summary": {
+    "error_count": 4,
+    "warning_count": 4,
+    "info_count": 0,
+    "ignored_count": 0,
+    "hidden_notice_count": 1
+  },
+  "auto_dedup_rag": null
+}

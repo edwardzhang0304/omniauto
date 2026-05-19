@@ -3,16 +3,16 @@
     "guest": {
       "username": "guest",
       "email": "guest@example.local",
-      "password_hash": "pbkdf2_sha256$120000$038723ada30510200d29bcd7b772219f$2UfXkeH2jQd2tPg6ET+uFX4DvkTEr8uNctjN6Fdhqqc=",
-      "initialized_at": "2026-05-09T19:57:23+00:00",
-      "updated_at": "2026-05-09T19:57:23+00:00"
+      "password_hash": "pbkdf2_sha256$120000$f881369718355b7168b597c74a24b806$sI+CnNeybgTK81HvhTEMwMAfO8bIQhJR9oG9OwpBgdo=",
+      "initialized_at": "2026-05-16T13:28:55+00:00",
+      "updated_at": "2026-05-16T13:28:55+00:00"
     },
     "customer": {
       "username": "customer",
       "email": "customer@example.local",
-      "password_hash": "pbkdf2_sha256$120000$88d522dd8d29db4888b1dc9e034bd585$jQVG/+YKp1mEgyEf5Iun8HNnFhSqZITw75f6g014B6w=",
-      "initialized_at": "2026-05-09T19:57:23+00:00",
-      "updated_at": "2026-05-09T19:57:23+00:00"
+      "password_hash": "pbkdf2_sha256$120000$04673df1028ff752891e3e8283d2808b$MWOlM80a7qL0Io2RGGRXtJ6m9wTquV56mAoYHWyOyIY=",
+      "initialized_at": "2026-05-16T13:28:56+00:00",
+      "updated_at": "2026-05-16T13:28:56+00:00"
     }
   }
 }

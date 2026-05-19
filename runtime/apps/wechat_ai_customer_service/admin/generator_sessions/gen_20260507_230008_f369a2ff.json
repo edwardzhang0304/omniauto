@@ -1,0 +1,127 @@
+{
+  "session_id": "gen_20260507_230008_f369a2ff",
+  "status": "ready",
+  "created_at": "2026-05-07T23:00:08",
+  "updated_at": "2026-05-07T23:00:08",
+  "history": [
+    {
+      "role": "user",
+      "content": "新增商品：管理台生成器测试商品，单价88元/件，10件以上80元，库存20件，24小时发货",
+      "created_at": "2026-05-07T23:00:08"
+    }
+  ],
+  "category_id": "policies",
+  "category_name": "政策规则",
+  "confidence": 0.62,
+  "provider": "heuristic",
+  "draft_item": {
+    "schema_version": 1,
+    "category_id": "policies",
+    "id": "policies_aae81b5521",
+    "status": "active",
+    "source": {
+      "type": "ai_generator",
+      "session_id": "gen_20260507_230008_f369a2ff"
+    },
+    "data": {
+      "title": "物流政策",
+      "policy_type": "logistics",
+      "keywords": [
+        "发货",
+        "单价",
+        "库存"
+      ],
+      "applicability_scope": "global",
+      "product_id": "",
+      "product_category": "",
+      "answer": "新增商品：管理台生成器测试商品，单价88元/件，10件以上80元，库存20件，24小时发货",
+      "allow_auto_reply": true,
+      "requires_handoff": false,
+      "handoff_reason": "",
+      "operator_alert": false,
+      "risk_level": "normal",
+      "additional_details": {
+        "user_original_description": "新增商品：管理台生成器测试商品，单价88元/件，10件以上80元，库存20件，24小时发货",
+        "用户原始描述": "新增商品：管理台生成器测试商品，单价88元/件，10件以上80元，库存20件，24小时发货"
+      }
+    },
+    "runtime": {
+      "allow_auto_reply": true,
+      "requires_handoff": false,
+      "risk_level": "normal"
+    },
+    "metadata": {}
+  },
+  "missing_fields": [],
+  "question": "",
+  "warnings": [],
+  "summary_rows": [
+    {
+      "label": "知识 ID",
+      "value": "policies_aae81b5521"
+    },
+    {
+      "label": "规则名称",
+      "value": "物流政策"
+    },
+    {
+      "label": "规则类别",
+      "value": "logistics"
+    },
+    {
+      "label": "触发关键词",
+      "value": "发货、单价、库存"
+    },
+    {
+      "label": "适用范围",
+      "value": "global"
+    },
+    {
+      "label": "标准回复",
+      "value": "新增商品：管理台生成器测试商品，单价88元/件，10件以上80元，库存20件，24小时发货"
+    },
+    {
+      "label": "允许自动回复",
+      "value": "True"
+    },
+    {
+      "label": "需要人工确认",
+      "value": "False"
+    },
+    {
+      "label": "提醒人工客服",
+      "value": "False"
+    },
+    {
+      "label": "风险等级",
+      "value": "normal"
+    },
+    {
+      "label": "补充信息",
+      "value": "user_original_description: 新增商品：管理台生成器测试商品，单价88元/件，10件以上80元，库存20件，24小时发货；用户原始描述: 新增商品：管理台生成器测试商品，单价88元/件，10件以上80元，库存20件，24小时发货"
+    }
+  ],
+  "intake": {
+    "status": "ready",
+    "ok": true,
+    "confidence": 0.62,
+    "missing_fields": [],
+    "missing_labels": [],
+    "question": "",
+    "warnings": [],
+    "preserved_detail_keys": [
+      "user_original_description",
+      "用户原始描述"
+    ]
+  },
+  "llm_assist": {
+    "policy_version": "knowledge_llm_assist_v1",
+    "stage": "manual_description_to_draft_knowledge",
+    "attempted": false,
+    "provider": "",
+    "status": "rule_only_disabled_by_request",
+    "reason": "llm_disabled_by_caller",
+    "fallback_allowed": true,
+    "human_approval_required": true
+  }
+}

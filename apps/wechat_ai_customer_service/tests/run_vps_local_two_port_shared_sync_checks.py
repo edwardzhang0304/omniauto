@@ -117,12 +117,12 @@ def main() -> int:
             "POST",
             f"{local_base}/api/sync/shared/cloud-snapshot",
             {"force": True},
-            headers={"X-Tenant-ID": "jiangsu_chejin_usedcar_customer_20260501"},
+            headers={"X-Tenant-ID": "chejin"},
         )
         assert_true(usedcar_sync.get("ok") is True, "used-car tenant cloud snapshot sync should succeed")
         assert_true((shared_runtime_cache_root() / "risk_control" / "items" / "cloud_usedcar_transfer_boundary.json").exists(), "used-car item should be included for used-car tenant snapshot")
         assert_true(not (shared_runtime_cache_root() / "reply_style" / "items" / "cloud_home_appliance_install_style.json").exists(), "home appliance item should not leak into used-car tenant snapshot")
-        assert_true(shared_runtime_cache_root() in runtime_knowledge_roots("jiangsu_chejin_usedcar_customer_20260501"), "shared root should participate for matched tenant")
+        assert_true(shared_runtime_cache_root() in runtime_knowledge_roots("chejin"), "shared root should participate for matched tenant")
         assert_true(shared_runtime_cache_root() not in runtime_knowledge_roots("default"), "shared root should not participate when snapshot tenant mismatches active tenant")
 
         result = {
@@ -174,8 +174,8 @@ def seed_vps_state(path: Path) -> None:
                 "created_at": now,
                 "updated_at": now,
             },
-            "jiangsu_chejin_usedcar_customer_20260501": {
-                "tenant_id": "jiangsu_chejin_usedcar_customer_20260501",
+            "chejin": {
+                "tenant_id": "chejin",
                 "display_name": "Used Car Tenant",
                 "industry_id": "used_car",
                 "status": "active",

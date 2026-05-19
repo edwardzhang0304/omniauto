@@ -3,7 +3,7 @@
   "authority": "product_master",
   "category_id": "products",
   "tenant_id": "chejin",
-  "updated_at": "2026-05-19T04:29:39",
+  "updated_at": "2026-05-19T13:06:01",
   "items_path": "items",
   "compatibility": {
     "legacy_read_fallback": "knowledge_bases/products",

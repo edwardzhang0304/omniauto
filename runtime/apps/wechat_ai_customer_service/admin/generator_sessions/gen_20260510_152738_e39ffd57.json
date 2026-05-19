@@ -1,0 +1,135 @@
+{
+  "session_id": "gen_20260510_152738_e39ffd57",
+  "status": "sent_to_rag_experience",
+  "created_at": "2026-05-10T15:27:38",
+  "updated_at": "2026-05-10T15:28:57",
+  "history": [
+    {
+      "role": "user",
+      "content": "包邮政策，江浙沪满500包邮，其他非偏远地区满1000包邮，新疆、西藏、内蒙等偏远地区不包邮",
+      "created_at": "2026-05-10T15:27:38"
+    }
+  ],
+  "category_id": "policies",
+  "category_name": "政策规则",
+  "confidence": 1.0,
+  "provider": "deepseek",
+  "draft_item": {
+    "schema_version": 1,
+    "category_id": "policies",
+    "id": "shipping-policy-free-shipping",
+    "status": "active",
+    "source": {
+      "type": "ai_generator",
+      "session_id": "gen_20260510_152738_e39ffd57"
+    },
+    "data": {
+      "title": "物流政策",
+      "policy_type": "logistics",
+      "keywords": [
+        "包邮",
+        "运费",
+        "满额包邮",
+        "偏远地区"
+      ],
+      "applicability_scope": "global",
+      "product_id": "",
+      "product_category": "",
+      "answer": "包邮政策，江浙沪满500包邮，其他非偏远地区满1000包邮，新疆、西藏、内蒙等偏远地区不包邮",
+      "allow_auto_reply": true,
+      "requires_handoff": false,
+      "handoff_reason": "",
+      "operator_alert": false,
+      "risk_level": "normal",
+      "additional_details": {
+        "原始描述": "包邮政策，江浙沪满500包邮，其他非偏远地区满1000包邮，新疆、西藏、内蒙等偏远地区不包邮",
+        "适用场景": "当客户询问包邮条件或满减运费时，可直接使用此标准回复。",
+        "触发条件": "客户询问包邮、运费、满额包邮等关键词",
+        "user_original_description": "包邮政策，江浙沪满500包邮，其他非偏远地区满1000包邮，新疆、西藏、内蒙等偏远地区不包邮",
+        "用户原始描述": "包邮政策，江浙沪满500包邮，其他非偏远地区满1000包邮，新疆、西藏、内蒙等偏远地区不包邮"
+      }
+    },
+    "runtime": {
+      "allow_auto_reply": true,
+      "requires_handoff": false,
+      "risk_level": "normal"
+    },
+    "metadata": {}
+  },
+  "missing_fields": [],
+  "question": "",
+  "warnings": [],
+  "summary_rows": [
+    {
+      "label": "知识 ID",
+      "value": "shipping-policy-free-shipping"
+    },
+    {
+      "label": "规则名称",
+      "value": "物流政策"
+    },
+    {
+      "label": "规则类别",
+      "value": "logistics"
+    },
+    {
+      "label": "触发关键词",
+      "value": "包邮、运费、满额包邮、偏远地区"
+    },
+    {
+      "label": "适用范围",
+      "value": "global"
+    },
+    {
+      "label": "标准回复",
+      "value": "包邮政策，江浙沪满500包邮，其他非偏远地区满1000包邮，新疆、西藏、内蒙等偏远地区不包邮"
+    },
+    {
+      "label": "允许自动回复",
+      "value": "True"
+    },
+    {
+      "label": "需要人工确认",
+      "value": "False"
+    },
+    {
+      "label": "提醒人工客服",
+      "value": "False"
+    },
+    {
+      "label": "风险等级",
+      "value": "normal"
+    },
+    {
+      "label": "补充信息",
+      "value": "原始描述: 包邮政策，江浙沪满500包邮，其他非偏远地区满1000包邮，新疆、西藏、内蒙等偏远地区不包邮；适用场景: 当客户询问包邮条件或满减运费时，可直接使用此标准回复。；触发条件: 客户询问包邮、运费、满额包邮等关键词；user_original_description: 包邮政策，江浙沪满500包邮，其他非偏远地区满1000包邮，新疆、西藏、内蒙等偏远地区不包邮；用户原始描述: 包邮政策，江浙沪满500包邮，其他非偏远地区满1000包邮，新疆、西藏、内蒙等偏远地区不包邮"
+    }
+  ],
+  "intake": {
+    "status": "ready",
+    "ok": true,
+    "confidence": 1.0,
+    "missing_fields": [],
+    "missing_labels": [],
+    "question": "",
+    "warnings": [],
+    "preserved_detail_keys": [
+      "user_original_description",
+      "原始描述",
+      "用户原始描述",
+      "触发条件",
+      "适用场景"
+    ]
+  },
+  "llm_assist": {
+    "policy_version": "knowledge_llm_assist_v1",
+    "stage": "manual_description_to_draft_knowledge",
+    "attempted": true,
+    "provider": "deepseek",
+    "status": "model_generated",
+    "reason": "deepseek_returned_structured_candidate",
+    "fallback_allowed": true,
+    "human_approval_required": true
+  },
+  "rag_experience_id": "rag_exp_d6ce2c08409de8615e55"
+}

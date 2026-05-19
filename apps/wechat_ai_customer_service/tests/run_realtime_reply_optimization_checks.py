@@ -30,7 +30,7 @@ from realtime_reply_router import (  # noqa: E402
     maybe_build_realtime_reply,
     reply_similarity,
 )
-from listen_and_reply import build_realtime_context_combined  # noqa: E402
+from listen_and_reply import build_realtime_context_combined, recent_customer_visible_reply_texts  # noqa: E402
 from run_customer_service_listener import run_once  # noqa: E402
 
 
@@ -71,6 +71,7 @@ def main() -> int:
         check_short_strict_budget_cap_keeps_within_wording(),
         check_chinese_budget_range_prefers_longest_match(),
         check_realtime_context_bridge_uses_prior_need_for_followup_candidates(),
+        check_recent_reply_requirement_context_keeps_strict_budget_when_marked_history_is_skipped(),
         check_context_bridge_current_visit_question_preempts_old_recommendation_need(),
         check_context_bridge_current_compare_question_preempts_candidate_refresh(),
         check_realtime_context_bridge_skips_unrelated_or_test_marked_history(),
@@ -655,6 +656,67 @@ def check_realtime_context_bridge_uses_prior_need_for_followup_candidates() -> d
         and not any(marker in text for marker in ("您把预算", "说下预算", "预算大概", "确认一下预算", "预算上限"))
     )
     return {"name": "realtime_context_bridge_uses_prior_need_for_followup_candidates", "ok": ok, "combined": combined, "route": route, "reply": reply}
+
+
+def check_recent_reply_requirement_context_keeps_strict_budget_when_marked_history_is_skipped() -> dict[str, Any]:
+    config = {"realtime_reply": {"enabled": True}, "llm_reply_synthesis": {"enabled": True}}
+    current = "那就按刚才说的，直接挑两台，别再问预算了"
+    state = {
+        "sent_replies": [
+            {
+                "processed_at": datetime.now().isoformat(),
+                "message_contents": ["我老婆开，预算9万以内，自动挡带影像。(LIVEFLOW_20260519_CTX)"],
+                "reply_text": "老板，需求这块已经不算泛了：9万以内、主要给您爱人开、自动挡、倒车/影像配置优先、日常家用代步。先把车况透明、好停车的放前面看。",
+            }
+        ]
+    }
+    combined = build_realtime_context_combined(current, state)
+    recent = recent_customer_visible_reply_texts(state)
+    with tenant_context(TENANT_ID):
+        evidence_pack = build_evidence_pack(combined, context={})
+        route = decide_realtime_reply_route(
+            config=config,
+            combined=combined,
+            decision=Decision(),
+            intent_result=Intent(),
+            intent_assist={"intent": "product_inquiry", "evidence": {"safety": {"must_handoff": False}}},
+            rag_reply={},
+            llm_reply={},
+            product_knowledge={},
+            data_capture={},
+            evidence_pack=evidence_pack,
+            recent_reply_texts=recent,
+        )
+        reply = maybe_build_realtime_reply(
+            config=config,
+            route=route,
+            combined=combined,
+            evidence_pack=evidence_pack,
+            current_reply_text="",
+            recent_reply_texts=recent,
+        )
+    text = str(reply.get("reply_text") or "")
+    used_ids = set(reply.get("used_product_ids") or [])
+    ok = (
+        combined == current
+        and recent == [state["sent_replies"][0]["reply_text"]]
+        and route.get("level") == "L1"
+        and route.get("reason") in {"followup_ready_for_vehicle_candidates", "explicit_vehicle_candidates_requested"}
+        and reply.get("applied") is True
+        and bool(used_ids)
+        and "chejin_mazda3_2020_20l" not in used_ids
+        and "9.58万" not in text
+        and any(marker in text for marker in ("9万以内", "停车", "倒车", "影像", "自动挡", "爱人", "老婆"))
+        and not any(marker in text for marker in ("您把预算", "说下预算", "预算大概", "确认一下预算", "预算上限", "您先说下预算"))
+    )
+    return {
+        "name": "recent_reply_requirement_context_keeps_strict_budget_when_marked_history_is_skipped",
+        "ok": ok,
+        "combined": combined,
+        "recent": recent,
+        "route": route,
+        "reply": reply,
+    }
 
 
 def check_context_bridge_current_visit_question_preempts_old_recommendation_need() -> dict[str, Any]:

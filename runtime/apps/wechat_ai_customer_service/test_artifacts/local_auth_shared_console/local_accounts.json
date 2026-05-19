@@ -3,9 +3,9 @@
     "test01": {
       "username": "test01",
       "email": "test01@example.local",
-      "password_hash": "pbkdf2_sha256$120000$a313c48e88da0df82e6e18380089a46a$7ygKB3cxz0fHMsF62USuVOsOSplbVHSL2P8NekZONSY=",
-      "initialized_at": "2026-05-09T19:57:25+00:00",
-      "updated_at": "2026-05-09T19:57:25+00:00"
+      "password_hash": "pbkdf2_sha256$120000$e19cb782d7fc43173866f7d2640c2ca9$dVtxgoy00wk7BamXHjj7dMZDqkUWHtdn2cNknyYj8IY=",
+      "initialized_at": "2026-05-18T21:24:32+00:00",
+      "updated_at": "2026-05-18T21:24:32+00:00"
     }
   }
 }

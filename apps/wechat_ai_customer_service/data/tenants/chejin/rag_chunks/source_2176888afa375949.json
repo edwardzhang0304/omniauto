@@ -1,0 +1,35 @@
+{
+  "source": {
+    "source_id": "source_2176888afa375949",
+    "tenant_id": "chejin",
+    "layer": "tenant",
+    "source_type": "wechat_raw_message",
+    "category": "private",
+    "product_id": "",
+    "source_path": "D:\\AI\\omniauto\\runtime\\apps\\wechat_ai_customer_service\\tenants\\chejin\\raw_messages\\learning_batches\\raw_batch_0825581cbec1276f902f.txt",
+    "content_hash": "5c25622e6953f47b07e6868d0177f157",
+    "status": "quarantined",
+    "created_at": "2026-05-16T01:58:42",
+    "updated_at": "2026-05-16T01:58:42",
+    "quarantine_reason": "raw_wechat_source_not_directly_retrievable"
+  },
+  "chunks": [
+    {
+      "chunk_id": "chunk_4d6e0ac3aacbc965",
+      "source_id": "source_2176888afa375949",
+      "tenant_id": "chejin",
+      "layer": "tenant",
+      "source_type": "wechat_raw_message",
+      "category": "private",
+      "product_id": "",
+      "source_path": "D:\\AI\\omniauto\\runtime\\apps\\wechat_ai_customer_service\\tenants\\chejin\\raw_messages\\learning_batches\\raw_batch_0825581cbec1276f902f.txt",
+      "chunk_index": 0,
+      "text": "[2026-05-16 01:58:00] system: 01:58\n[2026-05-16T01:58:18] 许聪: 你好，在吗？",
+      "char_count": 68,
+      "status": "quarantined",
+      "created_at": "2026-05-16T01:58:42",
+      "quarantine_reason": "raw_wechat_source_not_directly_retrievable",
+      "quarantined_at": "2026-05-19T01:47:03"
+    }
+  ]
+}

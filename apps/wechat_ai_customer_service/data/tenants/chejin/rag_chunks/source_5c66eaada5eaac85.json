@@ -1,0 +1,35 @@
+{
+  "source": {
+    "source_id": "source_5c66eaada5eaac85",
+    "tenant_id": "chejin",
+    "layer": "tenant",
+    "source_type": "wechat_raw_message",
+    "category": "private",
+    "product_id": "",
+    "source_path": "D:\\AI\\omniauto\\runtime\\apps\\wechat_ai_customer_service\\tenants\\chejin\\raw_messages\\learning_batches\\raw_batch_359d2801314448dffed1.txt",
+    "content_hash": "70838c5916efdc6d622a30b7f6541fef",
+    "status": "quarantined",
+    "created_at": "2026-05-06T23:20:40",
+    "updated_at": "2026-05-06T23:20:40",
+    "quarantine_reason": "raw_wechat_source_not_directly_retrievable"
+  },
+  "chunks": [
+    {
+      "chunk_id": "chunk_073920141b8ca59a",
+      "source_id": "source_5c66eaada5eaac85",
+      "tenant_id": "chejin",
+      "layer": "tenant",
+      "source_type": "wechat_raw_message",
+      "category": "private",
+      "product_id": "",
+      "source_path": "D:\\AI\\omniauto\\runtime\\apps\\wechat_ai_customer_service\\tenants\\chejin\\raw_messages\\learning_batches\\raw_batch_359d2801314448dffed1.txt",
+      "chunk_index": 0,
+      "text": "[2026-05-06 23:14:00] system: 23:14\n[2026-05-06T23:20:40] self: [车金AI] 好的，混动版凯美瑞确实省油，3年内的车况差价不小，我这边没有实时车源和报价，让销售同事帮您查一下现车和具体价格吧。方便留个电话？他查到后直接跟您联系。",
+      "char_count": 146,
+      "status": "quarantined",
+      "created_at": "2026-05-06T23:20:40",
+      "quarantine_reason": "raw_wechat_source_not_directly_retrievable",
+      "quarantined_at": "2026-05-19T01:47:03"
+    }
+  ]
+}

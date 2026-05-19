@@ -1304,8 +1304,9 @@ def maybe_build_realtime_reply(
             "used_product_ids": [],
             "saved_reason": "foreground_llm_skipped_for_first_broad_recommendation",
         }
+    recommendation_query = query_with_recent_requirement_context(combined, recent_reply_texts)
     candidates = rank_product_candidates(
-        combined,
+        recommendation_query,
         evidence_pack,
         allow_catalog_fallback=followup_source_request or explicit_source_request or detailed_source_request,
         allow_broad_fallback=followup_source_request or explicit_source_request or detailed_source_request,
@@ -1322,7 +1323,7 @@ def maybe_build_realtime_reply(
             "used_product_ids": [],
             "saved_reason": "foreground_llm_skipped_for_common_recommendation",
         }
-    reply, variant_index = build_recommendation_reply(combined, candidates[:2], recent_reply_texts=recent_reply_texts)
+    reply, variant_index = build_recommendation_reply(recommendation_query, candidates[:2], recent_reply_texts=recent_reply_texts)
     if not reply:
         return {"applied": False, "reason": "empty_realtime_reply"}
     return {
@@ -1335,6 +1336,33 @@ def maybe_build_realtime_reply(
         "used_product_ids": [str(item.get("id") or "") for item in candidates[:2] if item.get("id")],
         "saved_reason": "foreground_llm_skipped_for_common_recommendation",
     }
+
+
+def query_with_recent_requirement_context(query: str, recent_reply_texts: list[str] | None = None) -> str:
+    current = str(query or "").strip()
+    if extract_budget_wan(current) > 0:
+        return current
+    context = recent_requirement_context(recent_reply_texts or [])
+    if not context:
+        return current
+    return f"近期已确认需求：{context}\n当前客户问题：{current}"
+
+
+def recent_requirement_context(recent_reply_texts: list[str]) -> str:
+    for reply in reversed(recent_reply_texts[-4:]):
+        text = re.sub(r"\s+", " ", str(reply or "")).strip()
+        if not text or extract_budget_wan(text) <= 0:
+            continue
+        for pattern in (
+            r"需求这块[^。；;]*",
+            r"从\d+(?:\.\d+)?万(?:以内|以下|内|左右)?[^。；;]*",
+            r"按您说的\d+(?:\.\d+)?万(?:以内|以下|内|左右)?[^。；;]*",
+            r"\d+(?:\.\d+)?万(?:以内|以下|内|左右)[^。；;]*",
+        ):
+            match = re.search(pattern, text)
+            if match:
+                return match.group(0)[:180]
+    return ""
 
 
 def build_generic_recommendation_reply(query: str, *, recent_reply_texts: list[str] | None = None) -> tuple[str, int]:
@@ -2644,7 +2672,7 @@ def build_next_info_prompt(query: str, *, recent_reply_texts: list[str] | None =
         reply, _ = choose_reply_variant(
             [
                 "贷款/置换情况、看车城市或大概到店时间，您方便时一起补一下，我再把优先级排细一点。",
-                "后面您把贷款置换情况、看车城市或大概到店时间发我，我好把顺序排清楚。",
+                "您把贷款/置换情况、看车城市或大概到店时间发我，我好把顺序排清楚。",
                 "这两点方便的话补一下：贷款/置换、看车城市或到店时间，我再往下细筛。",
             ],
             key_text=f"{query}|next-info-both",
@@ -2656,7 +2684,7 @@ def build_next_info_prompt(query: str, *, recent_reply_texts: list[str] | None =
             [
                 "如果有贷款或置换，也可以顺手告诉我，我再把优先级排细一点。",
                 "贷款/置换这块您方便时补一下，我好按总成本继续筛。",
-                "后面把全款、贷款或置换情况说一下，我再帮您把范围收窄。",
+                "全款、贷款或置换情况您说一下，我再帮您把范围收窄。",
             ],
             key_text=f"{query}|next-info-finance",
             recent_reply_texts=recent_reply_texts,

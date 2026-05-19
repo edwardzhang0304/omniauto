@@ -1,0 +1,502 @@
+{
+  "ok": true,
+  "run_id": "diag_20260514_025310_204374",
+  "mode": "quick",
+  "status": "warning",
+  "created_at": "2026-05-14T02:53:47",
+  "checks": [
+    {
+      "name": "quick_knowledge_validation",
+      "ok": false,
+      "issues": [
+        {
+          "code": "llm_inappropriate",
+          "severity": "error",
+          "title": "LLM：场景不适用",
+          "detail": "该条目明确标注为测试话术，仅用于管理台回归，不应出现在面向客户的知识库中，可能导致AI客服回复测试内容。",
+          "target": "chats/admin_check_style_example",
+          "target_label": "chats/admin_check_style_example",
+          "repairable": false,
+          "action_type": "delete",
+          "involved_targets": [
+            "chats/admin_check_style_example"
+          ],
+          "llm_reasoning": "该条目明确标注为测试话术，仅用于管理台回归，不应出现在面向客户的知识库中，可能导致AI客服回复测试内容。",
+          "suggestions": [
+            {
+              "title": "建议删除",
+              "detail": "该条目存在明显错误或不适用，建议归档或废弃。",
+              "level": "danger"
+            }
+          ]
+        },
+        {
+          "code": "llm_duplicate_semantic",
+          "severity": "warning",
+          "title": "LLM：语义重复",
+          "detail": "两者均表示公司信息，company_profile回答包含名称、地址、电话等，company_profile_details提供更详细的信息且注明为测试数据。同时存在可能导致回答不一致或冗余，建议合并为单一来源。",
+          "target": "policies/company_profile",
+          "target_label": "policies/company_profile, policies/company_profile_details",
+          "repairable": false,
+          "action_type": "merge",
+          "involved_targets": [
+            "policies/company_profile",
+            "policies/company_profile_details"
+          ],
+          "llm_reasoning": "两者均表示公司信息，company_profile回答包含名称、地址、电话等，company_profile_details提供更详细的信息且注明为测试数据。同时存在可能导致回答不一致或冗余，建议合并为单一来源。",
+          "suggestions": [
+            {
+              "title": "建议合并",
+              "detail": "多条知识表达同一含义，建议保留信息最完整的一条，将其余归档。",
+              "level": "warning"
+            }
+          ]
+        },
+        {
+          "code": "llm_logic_error",
+          "severity": "error",
+          "title": "LLM：逻辑错误",
+          "detail": "促销政策规定2026.4.25-2026.6.25期间单笔满1000元包邮（偏远地区除外），但产品自带的shipping_policy（如AP-88江浙沪包邮、办公椅满10把包邮）与促销政策存在冲突，客户在非江浙沪地区购买AP-88（1299元）按促销应包邮，但按产品政策需按件核算，AI可能回复矛盾。需统一处理。",
+          "target": "policies/free_shipping_promo_2026_spring",
+          "target_label": "policies/free_shipping_promo_2026_spring, products/ap-88, products/office_chair_oc_300",
+          "repairable": false,
+          "action_type": "review",
+          "involved_targets": [
+            "policies/free_shipping_promo_2026_spring",
+            "products/ap-88",
+            "products/office_chair_oc_300"
+          ],
+          "llm_reasoning": "促销政策规定2026.4.25-2026.6.25期间单笔满1000元包邮（偏远地区除外），但产品自带的shipping_policy（如AP-88江浙沪包邮、办公椅满10把包邮）与促销政策存在冲突，客户在非江浙沪地区购买AP-88（1299元）按促销应包邮，但按产品政策需按件核算，AI可能回复矛盾。需统一处理。",
+          "suggestions": [
+            {
+              "title": "建议人工复核",
+              "detail": "LLM认为该条目可能存在问题，请人工确认后决定处理方式。",
+              "level": "warning"
+            }
+          ]
+        },
+        {
+          "code": "llm_duplicate_semantic",
+          "severity": "warning",
+          "title": "LLM：语义重复",
+          "detail": "两个条目都是物流政策，内容高度重复，建议合并为一个结构化条目。",
+          "target": "policies/logistics",
+          "target_label": "policies/logistics, policies/logistics_policy_details",
+          "repairable": false,
+          "action_type": "merge",
+          "involved_targets": [
+            "policies/logistics",
+            "policies/logistics_policy_details"
+          ],
+          "llm_reasoning": "两个条目都是物流政策，内容高度重复，建议合并为一个结构化条目。",
+          "suggestions": [
+            {
+              "title": "建议合并",
+              "detail": "多条知识表达同一含义，建议保留信息最完整的一条，将其余归档。",
+              "level": "warning"
+            }
+          ]
+        },
+        {
+          "code": "llm_logic_error",
+          "severity": "error",
+          "title": "LLM：逻辑错误",
+          "detail": "当用户提及'转人工'时，两个条目都可能触发。manual_handoff_reply回复'已转人工'但不转人工，而manual_required要求转人工，导致逻辑冲突。",
+          "target": "policies/manual_handoff_reply",
+          "target_label": "policies/manual_handoff_reply, policies/manual_required",
+          "repairable": false,
+          "action_type": "review",
+          "involved_targets": [
+            "policies/manual_handoff_reply",
+            "policies/manual_required"
+          ],
+          "llm_reasoning": "当用户提及'转人工'时，两个条目都可能触发。manual_handoff_reply回复'已转人工'但不转人工，而manual_required要求转人工，导致逻辑冲突。",
+          "suggestions": [
+            {
+              "title": "建议人工复核",
+              "detail": "LLM认为该条目可能存在问题，请人工确认后决定处理方式。",
+              "level": "warning"
+            }
+          ]
+        },
+        {
+          "code": "llm_duplicate_semantic",
+          "severity": "warning",
+          "title": "LLM：语义重复",
+          "detail": "两个条目都是付款政策，内容重复，建议合并。",
+          "target": "policies/payment",
+          "target_label": "policies/payment, policies/payment_policy_details",
+          "repairable": false,
+          "action_type": "merge",
+          "involved_targets": [
+            "policies/payment",
+            "policies/payment_policy_details"
+          ],
+          "llm_reasoning": "两个条目都是付款政策，内容重复，建议合并。",
+          "suggestions": [
+            {
+              "title": "建议合并",
+              "detail": "多条知识表达同一含义，建议保留信息最完整的一条，将其余归档。",
+              "level": "warning"
+            }
+          ]
+        },
+        {
+          "code": "llm_duplicate_semantic",
+          "severity": "warning",
+          "title": "LLM：语义重复",
+          "detail": "两个条目都涉及对公转账，内容重叠且细节不完全一致，建议合并到统一付款政策。",
+          "target": "policies/payment",
+          "target_label": "policies/payment, policies/public_account_payment_rule",
+          "repairable": false,
+          "action_type": "merge",
+          "involved_targets": [
+            "policies/payment",
+            "policies/public_account_payment_rule"
+          ],
+          "llm_reasoning": "两个条目都涉及对公转账，内容重叠且细节不完全一致，建议合并到统一付款政策。",
+          "suggestions": [
+            {
+              "title": "建议合并",
+              "detail": "多条知识表达同一含义，建议保留信息最完整的一条，将其余归档。",
+              "level": "warning"
+            }
+          ]
+        },
+        {
+          "code": "llm_duplicate_semantic",
+          "severity": "warning",
+          "title": "LLM：语义重复",
+          "detail": "偏远地区运费规则与物流政策内容重复，建议合并到物流政策中。",
+          "target": "policies/remote_area_shipping_rule",
+          "target_label": "policies/remote_area_shipping_rule, policies/logistics, policies/logistics_policy_details",
+          "repairable": false,
+          "action_type": "merge",
+          "involved_targets": [
+            "policies/remote_area_shipping_rule",
+            "policies/logistics",
+            "policies/logistics_policy_details"
+          ],
+          "llm_reasoning": "偏远地区运费规则与物流政策内容重复，建议合并到物流政策中。",
+          "suggestions": [
+            {
+              "title": "建议合并",
+              "detail": "多条知识表达同一含义，建议保留信息最完整的一条，将其余归档。",
+              "level": "warning"
+            }
+          ]
+        },
+        {
+          "code": "llm_logic_error",
+          "severity": "error",
+          "title": "LLM：逻辑错误",
+          "detail": "sample政策说样品价格需要按具体产品确认，而sample-policy-standard说样品费按页面价格收取，两者矛盾。",
+          "target": "policies/sample",
+          "target_label": "policies/sample, policies/sample-policy-standard",
+          "repairable": false,
+          "action_type": "review",
+          "involved_targets": [
+            "policies/sample",
+            "policies/sample-policy-standard"
+          ],
+          "llm_reasoning": "sample政策说样品价格需要按具体产品确认，而sample-policy-standard说样品费按页面价格收取，两者矛盾。",
+          "suggestions": [
+            {
+              "title": "建议人工复核",
+              "detail": "LLM认为该条目可能存在问题，请人工确认后决定处理方式。",
+              "level": "warning"
+            }
+          ]
+        },
+        {
+          "code": "knowledge_token_budget_large",
+          "severity": "info",
+          "title": "知识体积较大",
+          "detail": "当前分类知识库总量估算约 62180 token。这不是知识格式故障，也没有某条知识需要立即删除；它提醒后续继续按客户问题检索相关知识，避免一次性加载全部知识。",
+          "target_label": "全局知识库",
+          "details": [
+            {
+              "label": "问题性质",
+              "value": "容量提示，不是知识格式故障",
+              "level": "normal"
+            },
+            {
+              "label": "估算总量",
+              "value": "约 62180 token",
+              "level": "warning"
+            },
+            {
+              "label": "检测阈值",
+              "value": "超过 7000 token 时提示",
+              "level": "normal"
+            },
+            {
+              "label": "文件数量",
+              "value": "98 个 JSON 文件",
+              "level": "normal"
+            },
+            {
+              "label": "chats",
+              "value": "约 28130 token / 46 个文件",
+              "level": "normal"
+            },
+            {
+              "label": "erp_exports",
+              "value": "约 860 token / 2 个文件",
+              "level": "normal"
+            },
+            {
+              "label": "policies",
+              "value": "约 24980 token / 39 个文件",
+              "level": "normal"
+            },
+            {
+              "label": "products",
+              "value": "约 7517 token / 11 个文件",
+              "level": "normal"
+            }
+          ],
+          "suggestions": [
+            {
+              "title": "不建议自动删除知识",
+              "detail": "当前没有发现哪一条知识错误，系统不能为了降低体积擅自删内容。",
+              "level": "danger"
+            },
+            {
+              "title": "继续保持按门类和问题范围检索",
+              "detail": "客服运行时应只取相关商品、政策、话术和上下文证据，不要把全库一次性塞给大模型。",
+              "level": "normal"
+            },
+            {
+              "title": "如果后续继续变大",
+              "detail": "优先拆分过长政策、归档过期商品、把重复话术合并为模板，再重新检测。",
+              "level": "warning"
+            }
+          ],
+          "repairable": false
+        }
+      ],
+      "token_budget_estimate": 62180,
+      "recent_only": true
+    }
+  ],
+  "issues": [
+    {
+      "code": "llm_inappropriate",
+      "severity": "warning",
+      "title": "LLM：场景不适用",
+      "detail": "该条目明确标注为测试话术，仅用于管理台回归，不应出现在面向客户的知识库中，可能导致AI客服回复测试内容。",
+      "target": "chats/admin_check_style_example",
+      "target_label": "chats/admin_check_style_example",
+      "repairable": false,
+      "action_type": "delete",
+      "involved_targets": [
+        "chats/admin_check_style_example"
+      ],
+      "llm_reasoning": "该条目明确标注为测试话术，仅用于管理台回归，不应出现在面向客户的知识库中，可能导致AI客服回复测试内容。",
+      "suggestions": [
+        {
+          "title": "建议删除",
+          "detail": "该条目存在明显错误或不适用，建议归档或废弃。",
+          "level": "danger"
+        }
+      ],
+      "fingerprint": "de321f611c4c367274b6e4a2"
+    },
+    {
+      "code": "llm_duplicate_semantic",
+      "severity": "info",
+      "title": "LLM：语义重复",
+      "detail": "两者均表示公司信息，company_profile回答包含名称、地址、电话等，company_profile_details提供更详细的信息且注明为测试数据。同时存在可能导致回答不一致或冗余，建议合并为单一来源。",
+      "target": "policies/company_profile",
+      "target_label": "policies/company_profile, policies/company_profile_details",
+      "repairable": false,
+      "action_type": "merge",
+      "involved_targets": [
+        "policies/company_profile",
+        "policies/company_profile_details"
+      ],
+      "llm_reasoning": "两者均表示公司信息，company_profile回答包含名称、地址、电话等，company_profile_details提供更详细的信息且注明为测试数据。同时存在可能导致回答不一致或冗余，建议合并为单一来源。",
+      "suggestions": [
+        {
+          "title": "建议合并",
+          "detail": "多条知识表达同一含义，建议保留信息最完整的一条，将其余归档。",
+          "level": "warning"
+        }
+      ],
+      "fingerprint": "0ad8f2e1a2786a38a70f34da"
+    },
+    {
+      "code": "llm_logic_error",
+      "severity": "warning",
+      "title": "LLM：逻辑错误",
+      "detail": "促销政策规定2026.4.25-2026.6.25期间单笔满1000元包邮（偏远地区除外），但产品自带的shipping_policy（如AP-88江浙沪包邮、办公椅满10把包邮）与促销政策存在冲突，客户在非江浙沪地区购买AP-88（1299元）按促销应包邮，但按产品政策需按件核算，AI可能回复矛盾。需统一处理。",
+      "target": "policies/free_shipping_promo_2026_spring",
+      "target_label": "policies/free_shipping_promo_2026_spring, products/ap-88, products/office_chair_oc_300",
+      "repairable": false,
+      "action_type": "review",
+      "involved_targets": [
+        "policies/free_shipping_promo_2026_spring",
+        "products/ap-88",
+        "products/office_chair_oc_300"
+      ],
+      "llm_reasoning": "促销政策规定2026.4.25-2026.6.25期间单笔满1000元包邮（偏远地区除外），但产品自带的shipping_policy（如AP-88江浙沪包邮、办公椅满10把包邮）与促销政策存在冲突，客户在非江浙沪地区购买AP-88（1299元）按促销应包邮，但按产品政策需按件核算，AI可能回复矛盾。需统一处理。",
+      "suggestions": [
+        {
+          "title": "建议人工复核",
+          "detail": "LLM认为该条目可能存在问题，请人工确认后决定处理方式。",
+          "level": "warning"
+        }
+      ],
+      "fingerprint": "b3fd97e747e23338c70786e5"
+    },
+    {
+      "code": "llm_duplicate_semantic",
+      "severity": "info",
+      "title": "LLM：语义重复",
+      "detail": "两个条目都是物流政策，内容高度重复，建议合并为一个结构化条目。",
+      "target": "policies/logistics",
+      "target_label": "policies/logistics, policies/logistics_policy_details",
+      "repairable": false,
+      "action_type": "merge",
+      "involved_targets": [
+        "policies/logistics",
+        "policies/logistics_policy_details"
+      ],
+      "llm_reasoning": "两个条目都是物流政策，内容高度重复，建议合并为一个结构化条目。",
+      "suggestions": [
+        {
+          "title": "建议合并",
+          "detail": "多条知识表达同一含义，建议保留信息最完整的一条，将其余归档。",
+          "level": "warning"
+        }
+      ],
+      "fingerprint": "ca54619d9393a3f452200528"
+    },
+    {
+      "code": "llm_logic_error",
+      "severity": "warning",
+      "title": "LLM：逻辑错误",
+      "detail": "当用户提及'转人工'时，两个条目都可能触发。manual_handoff_reply回复'已转人工'但不转人工，而manual_required要求转人工，导致逻辑冲突。",
+      "target": "policies/manual_handoff_reply",
+      "target_label": "policies/manual_handoff_reply, policies/manual_required",
+      "repairable": false,
+      "action_type": "review",
+      "involved_targets": [
+        "policies/manual_handoff_reply",
+        "policies/manual_required"
+      ],
+      "llm_reasoning": "当用户提及'转人工'时，两个条目都可能触发。manual_handoff_reply回复'已转人工'但不转人工，而manual_required要求转人工，导致逻辑冲突。",
+      "suggestions": [
+        {
+          "title": "建议人工复核",
+          "detail": "LLM认为该条目可能存在问题，请人工确认后决定处理方式。",
+          "level": "warning"
+        }
+      ],
+      "fingerprint": "306928bf59dc0807cc52899b"
+    },
+    {
+      "code": "llm_duplicate_semantic",
+      "severity": "info",
+      "title": "LLM：语义重复",
+      "detail": "两个条目都是付款政策，内容重复，建议合并。",
+      "target": "policies/payment",
+      "target_label": "policies/payment, policies/payment_policy_details",
+      "repairable": false,
+      "action_type": "merge",
+      "involved_targets": [
+        "policies/payment",
+        "policies/payment_policy_details"
+      ],
+      "llm_reasoning": "两个条目都是付款政策，内容重复，建议合并。",
+      "suggestions": [
+        {
+          "title": "建议合并",
+          "detail": "多条知识表达同一含义，建议保留信息最完整的一条，将其余归档。",
+          "level": "warning"
+        }
+      ],
+      "fingerprint": "f8e572c4ae7ded683436173f"
+    },
+    {
+      "code": "llm_duplicate_semantic",
+      "severity": "info",
+      "title": "LLM：语义重复",
+      "detail": "两个条目都涉及对公转账，内容重叠且细节不完全一致，建议合并到统一付款政策。",
+      "target": "policies/payment",
+      "target_label": "policies/payment, policies/public_account_payment_rule",
+      "repairable": false,
+      "action_type": "merge",
+      "involved_targets": [
+        "policies/payment",
+        "policies/public_account_payment_rule"
+      ],
+      "llm_reasoning": "两个条目都涉及对公转账，内容重叠且细节不完全一致，建议合并到统一付款政策。",
+      "suggestions": [
+        {
+          "title": "建议合并",
+          "detail": "多条知识表达同一含义，建议保留信息最完整的一条，将其余归档。",
+          "level": "warning"
+        }
+      ],
+      "fingerprint": "40c61eaa2ae03e2bde8c6fd4"
+    },
+    {
+      "code": "llm_duplicate_semantic",
+      "severity": "info",
+      "title": "LLM：语义重复",
+      "detail": "偏远地区运费规则与物流政策内容重复，建议合并到物流政策中。",
+      "target": "policies/remote_area_shipping_rule",
+      "target_label": "policies/remote_area_shipping_rule, policies/logistics, policies/logistics_policy_details",
+      "repairable": false,
+      "action_type": "merge",
+      "involved_targets": [
+        "policies/remote_area_shipping_rule",
+        "policies/logistics",
+        "policies/logistics_policy_details"
+      ],
+      "llm_reasoning": "偏远地区运费规则与物流政策内容重复，建议合并到物流政策中。",
+      "suggestions": [
+        {
+          "title": "建议合并",
+          "detail": "多条知识表达同一含义，建议保留信息最完整的一条，将其余归档。",
+          "level": "warning"
+        }
+      ],
+      "fingerprint": "9108b982411c1519d068f5e7"
+    },
+    {
+      "code": "llm_logic_error",
+      "severity": "warning",
+      "title": "LLM：逻辑错误",
+      "detail": "sample政策说样品价格需要按具体产品确认，而sample-policy-standard说样品费按页面价格收取，两者矛盾。",
+      "target": "policies/sample",
+      "target_label": "policies/sample, policies/sample-policy-standard",
+      "repairable": false,
+      "action_type": "review",
+      "involved_targets": [
+        "policies/sample",
+        "policies/sample-policy-standard"
+      ],
+      "llm_reasoning": "sample政策说样品价格需要按具体产品确认，而sample-policy-standard说样品费按页面价格收取，两者矛盾。",
+      "suggestions": [
+        {
+          "title": "建议人工复核",
+          "detail": "LLM认为该条目可能存在问题，请人工确认后决定处理方式。",
+          "level": "warning"
+        }
+      ],
+      "fingerprint": "56f6e0e68579b1bc926d853e"
+    }
+  ],
+  "ignored_count": 0,
+  "summary": {
+    "error_count": 0,
+    "warning_count": 4,
+    "info_count": 5,
+    "ignored_count": 0,
+    "hidden_notice_count": 1
+  },
+  "auto_dedup_rag": null
+}

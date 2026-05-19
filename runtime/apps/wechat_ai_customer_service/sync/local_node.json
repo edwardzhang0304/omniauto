@@ -1,8 +1,8 @@
 {
   "node_id": "local_ab4dd8a99b8cbf21",
-  "display_name": "test02 客户端",
+  "display_name": "江苏车金二手车测试客户 2026-05-01 客户端",
   "tenant_ids": [
-    "test02"
+    "chejin"
   ],
   "status": "online",
   "version": "local-dev",
@@ -14,9 +14,9 @@
     "restore_backup",
     "push_update"
   ],
-  "node_token": "node_eK21Xb1E7xh6szlDEOIZ6mzKwZWNFDJV",
-  "registered_at": "2026-05-11T05:16:11+00:00",
-  "last_seen_at": "2026-05-11T05:16:11+00:00",
+  "node_token": "node_mL6SierscqEVD_7_dItwevskJsriENKZ",
+  "registered_at": "2026-05-19T05:05:13+00:00",
+  "last_seen_at": "2026-05-19T05:05:13+00:00",
   "metadata": {
     "hostname": "LAPTOP-HJGDTB1M",
     "platform": "Windows-11-10.0.26200-SP0",

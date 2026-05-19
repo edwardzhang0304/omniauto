@@ -1,0 +1,35 @@
+{
+  "source": {
+    "source_id": "source_5b4399ad53594e94",
+    "tenant_id": "chejin",
+    "layer": "tenant",
+    "source_type": "wechat_raw_message",
+    "category": "private",
+    "product_id": "",
+    "source_path": "D:\\AI\\omniauto\\runtime\\apps\\wechat_ai_customer_service\\tenants\\chejin\\raw_messages\\learning_batches\\raw_batch_1ddb8d5b0345c9f2c674.txt",
+    "content_hash": "d70f4eeb12b64c167b0b461c9ccec7ff",
+    "status": "quarantined",
+    "created_at": "2026-05-16T02:16:46",
+    "updated_at": "2026-05-16T02:16:46",
+    "quarantine_reason": "raw_wechat_source_not_directly_retrievable"
+  },
+  "chunks": [
+    {
+      "chunk_id": "chunk_c6455fb7d29c4fd1",
+      "source_id": "source_5b4399ad53594e94",
+      "tenant_id": "chejin",
+      "layer": "tenant",
+      "source_type": "wechat_raw_message",
+      "category": "private",
+      "product_id": "",
+      "source_path": "D:\\AI\\omniauto\\runtime\\apps\\wechat_ai_customer_service\\tenants\\chejin\\raw_messages\\learning_batches\\raw_batch_1ddb8d5b0345c9f2c674.txt",
+      "chunk_index": 0,
+      "text": "[2026-05-16T01:59:51] 许聪: 我预算10万左右，主要上下班通勤，有什么推荐？",
+      "char_count": 49,
+      "status": "quarantined",
+      "created_at": "2026-05-16T02:16:46",
+      "quarantine_reason": "raw_wechat_source_not_directly_retrievable",
+      "quarantined_at": "2026-05-19T01:47:03"
+    }
+  ]
+}

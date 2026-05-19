@@ -2,11 +2,14 @@
   "schema_version": 1,
   "category_id": "chats",
   "id": "chejin_budget_chat_commuter",
-  "status": "active",
+  "status": "archived",
   "source": {
     "type": "manual_seed",
     "normalized_by": "knowledge_contamination_guard",
-    "normalized_at": "2026-05-19T01:53:49"
+    "normalized_at": "2026-05-19T01:53:49",
+    "archived_by": "codex",
+    "archived_at": "2026-05-19T11:45:28+08:00",
+    "archive_reason": "dynamic_product_recommendation_stays_rag_only"
   },
   "data": {
     "customer_message": "8万预算自动挡省油代步",
@@ -28,22 +31,27 @@
     "risk_level": "normal"
   },
   "review_state": {
-    "is_new": true,
+    "is_new": false,
     "new_reason": "newly_added_formal_knowledge",
     "marked_at": "2026-05-18T15:07:12",
-    "updated_at": "2026-05-18T15:07:12",
-    "read_at": "",
-    "read_by": "",
+    "updated_at": "2026-05-19T11:45:28+08:00",
+    "read_at": "2026-05-19T11:45:28+08:00",
+    "read_by": "codex",
     "source": {
       "source_module": "manual_seed",
       "target_category": "chats",
       "item_id": "chejin_budget_chat_commuter"
-    }
+    },
+    "processed_reason": "archived_to_rag_experience"
   },
   "metadata": {
     "created_at": "2026-05-18T15:07:12",
-    "updated_at": "2026-05-18T15:07:12",
+    "updated_at": "2026-05-19T11:45:28+08:00",
     "created_by": "admin",
-    "updated_by": "admin"
+    "updated_by": "admin",
+    "archived_at": "2026-05-19T11:45:28+08:00",
+    "archived_by": "codex",
+    "archive_reason": "dynamic_product_recommendation_stays_rag_only",
+    "migrated_to_rag_experience_id": "rag_exp_96d3f37bff9ec671c0ae"
   }
 }

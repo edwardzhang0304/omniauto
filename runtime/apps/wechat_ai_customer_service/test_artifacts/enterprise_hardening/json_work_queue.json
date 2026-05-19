@@ -2,7 +2,7 @@
   "jobs": [
     {
       "tenant_id": "hardening_json_test",
-      "job_id": "job_a5e39ed4e8f87ed5de4e",
+      "job_id": "job_846e8c0c377000bcb4a2",
       "queue": "default",
       "kind": "rag_rebuild",
       "status": "succeeded",
@@ -10,7 +10,7 @@
       "dedupe_key": "rag:unit",
       "attempts": 1,
       "max_attempts": 3,
-      "available_at": "2026-05-10T04:10:40",
+      "available_at": "2026-05-16T21:24:31",
       "locked_until": null,
       "locked_by": "",
       "payload": {
@@ -20,13 +20,13 @@
         "ok": true
       },
       "error": "",
-      "created_at": "2026-05-10T04:10:40",
-      "updated_at": "2026-05-10T04:10:40",
-      "finished_at": "2026-05-10T04:10:40"
+      "created_at": "2026-05-16T21:24:31",
+      "updated_at": "2026-05-16T21:24:31",
+      "finished_at": "2026-05-16T21:24:31"
     },
     {
       "tenant_id": "hardening_json_test",
-      "job_id": "job_7489e471606911d2e3bf",
+      "job_id": "job_d2a75231a79021abf5b0",
       "queue": "default",
       "kind": "diagnostics",
       "status": "succeeded",
@@ -34,7 +34,7 @@
       "dedupe_key": "diag:stale",
       "attempts": 2,
       "max_attempts": 3,
-      "available_at": "2026-05-10T04:10:40",
+      "available_at": "2026-05-16T21:24:31",
       "locked_until": null,
       "locked_by": "",
       "payload": {
@@ -44,9 +44,9 @@
         "recovered": true
       },
       "error": "",
-      "created_at": "2026-05-10T04:10:40",
-      "updated_at": "2026-05-10T04:10:40",
-      "finished_at": "2026-05-10T04:10:40"
+      "created_at": "2026-05-16T21:24:31",
+      "updated_at": "2026-05-16T21:24:31",
+      "finished_at": "2026-05-16T21:24:31"
     }
   ]
 }

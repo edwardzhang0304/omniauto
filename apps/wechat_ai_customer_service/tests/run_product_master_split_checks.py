@@ -39,6 +39,7 @@ def main() -> int:
         with tenant_context(TENANT_ID):
             setup_legacy_product_category()
             results = [
+                check_read_only_product_master_does_not_rewrite_manifest(),
                 check_migration_copies_legacy_product_master(),
                 check_store_writes_new_products_to_product_master_only(),
                 check_runtime_reads_product_master_but_excludes_formal_reply_iteration(),
@@ -127,6 +128,18 @@ def setup_legacy_product_category() -> None:
             "data": {"customer_message": "预算十万", "service_reply": "先看车况透明的。"},
         },
     )
+
+
+def check_read_only_product_master_does_not_rewrite_manifest() -> dict[str, Any]:
+    store = ProductMasterStore(tenant_id=TENANT_ID)
+    manifest_path = tenant_product_master_root(TENANT_ID) / "manifest.json"
+    before = manifest_path.read_text(encoding="utf-8")
+    store.load_schema()
+    store.load_resolver()
+    store.list_items(include_archived=True)
+    after = manifest_path.read_text(encoding="utf-8")
+    assert_equal(after, before, "read-only product master calls must not refresh manifest timestamps")
+    return {"name": "read_only_product_master_does_not_rewrite_manifest", "ok": True}
 
 
 def check_migration_copies_legacy_product_master() -> dict[str, Any]:

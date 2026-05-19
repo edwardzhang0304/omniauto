@@ -1,0 +1,35 @@
+{
+  "source": {
+    "source_id": "source_9ba83fc2ea598134",
+    "tenant_id": "chejin",
+    "layer": "tenant",
+    "source_type": "wechat_raw_message",
+    "category": "private",
+    "product_id": "",
+    "source_path": "D:\\AI\\omniauto\\runtime\\apps\\wechat_ai_customer_service\\tenants\\chejin\\raw_messages\\learning_batches\\raw_batch_7d3a516437491aadff92.txt",
+    "content_hash": "806ec173ff4899b45e2a7678da648508",
+    "status": "quarantined",
+    "created_at": "2026-05-16T03:48:55",
+    "updated_at": "2026-05-16T03:48:55",
+    "quarantine_reason": "raw_wechat_source_not_directly_retrievable"
+  },
+  "chunks": [
+    {
+      "chunk_id": "chunk_ae1e56b39564a92c",
+      "source_id": "source_9ba83fc2ea598134",
+      "tenant_id": "chejin",
+      "layer": "tenant",
+      "source_type": "wechat_raw_message",
+      "category": "private",
+      "product_id": "",
+      "source_path": "D:\\AI\\omniauto\\runtime\\apps\\wechat_ai_customer_service\\tenants\\chejin\\raw_messages\\learning_batches\\raw_batch_7d3a516437491aadff92.txt",
+      "chunk_index": 0,
+      "text": "[2026-05-16T03:20:09] self: [车金客服] 上一轮客服回复，不应重复处理",
+      "char_count": 49,
+      "status": "quarantined",
+      "created_at": "2026-05-16T03:48:55",
+      "quarantine_reason": "raw_wechat_source_not_directly_retrievable",
+      "quarantined_at": "2026-05-19T01:47:03"
+    }
+  ]
+}

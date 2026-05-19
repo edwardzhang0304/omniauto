@@ -1,0 +1,312 @@
+{
+  "ok": true,
+  "run_id": "diag_20260508_161803_ce8f04",
+  "mode": "quick",
+  "status": "ok",
+  "created_at": "2026-05-08T16:19:47",
+  "checks": [
+    {
+      "name": "quick_knowledge_validation",
+      "ok": true,
+      "issues": [
+        {
+          "code": "llm_duplicate_semantic",
+          "severity": "warning",
+          "title": "LLM：语义重复",
+          "detail": "两条RAG经验内容完全相同，均为自动化测试折叠床和折叠椅的数据，属于重复上传，导致冗余。",
+          "target": "rag_exp_1b020f75ffae9e2610e7",
+          "target_label": "rag_exp_1b020f75ffae9e2610e7, rag_exp_794f04141b28161c0a3e",
+          "repairable": false,
+          "action_type": "delete",
+          "involved_targets": [
+            "rag_exp_1b020f75ffae9e2610e7",
+            "rag_exp_794f04141b28161c0a3e"
+          ],
+          "llm_reasoning": "两条RAG经验内容完全相同，均为自动化测试折叠床和折叠椅的数据，属于重复上传，导致冗余。",
+          "suggestions": [
+            {
+              "title": "建议删除",
+              "detail": "该条目存在明显错误或不适用，建议归档或废弃。",
+              "level": "danger"
+            }
+          ]
+        },
+        {
+          "code": "llm_rag_quality_low",
+          "severity": "warning",
+          "title": "LLM：RAG经验质量低",
+          "detail": "该RAG经验内容重复三次（暂存缺价测试商品），且为测试数据，无实际价值，质量极低。",
+          "target": "rag_exp_9a6790ce2d781ce0a11e",
+          "target_label": "rag_exp_9a6790ce2d781ce0a11e",
+          "repairable": false,
+          "action_type": "delete",
+          "involved_targets": [
+            "rag_exp_9a6790ce2d781ce0a11e"
+          ],
+          "llm_reasoning": "该RAG经验内容重复三次（暂存缺价测试商品），且为测试数据，无实际价值，质量极低。",
+          "suggestions": [
+            {
+              "title": "建议删除",
+              "detail": "该条目存在明显错误或不适用，建议归档或废弃。",
+              "level": "danger"
+            }
+          ]
+        },
+        {
+          "code": "llm_rag_quality_low",
+          "severity": "warning",
+          "title": "LLM：RAG经验质量低",
+          "detail": "该RAG经验内容为无意义的重复文本'duplicate candidate probe'，属于测试或垃圾数据。",
+          "target": "rag_exp_5a574e8d242fc86a1b3d",
+          "target_label": "rag_exp_5a574e8d242fc86a1b3d",
+          "repairable": false,
+          "action_type": "delete",
+          "involved_targets": [
+            "rag_exp_5a574e8d242fc86a1b3d"
+          ],
+          "llm_reasoning": "该RAG经验内容为无意义的重复文本'duplicate candidate probe'，属于测试或垃圾数据。",
+          "suggestions": [
+            {
+              "title": "建议删除",
+              "detail": "该条目存在明显错误或不适用，建议归档或废弃。",
+              "level": "danger"
+            }
+          ]
+        },
+        {
+          "code": "llm_duplicate_semantic",
+          "severity": "warning",
+          "title": "LLM：语义重复",
+          "detail": "该RAG经验内容重复三次（账期需人工审核），虽然内容合理，但大量重复导致冗余，建议保留一条。",
+          "target": "rag_exp_89af65a4428a33bb5815",
+          "target_label": "rag_exp_89af65a4428a33bb5815",
+          "repairable": false,
+          "action_type": "delete",
+          "involved_targets": [
+            "rag_exp_89af65a4428a33bb5815"
+          ],
+          "llm_reasoning": "该RAG经验内容重复三次（账期需人工审核），虽然内容合理，但大量重复导致冗余，建议保留一条。",
+          "suggestions": [
+            {
+              "title": "建议删除",
+              "detail": "该条目存在明显错误或不适用，建议归档或废弃。",
+              "level": "danger"
+            }
+          ]
+        },
+        {
+          "code": "llm_duplicate_semantic",
+          "severity": "warning",
+          "title": "LLM：语义重复",
+          "detail": "该RAG经验内容重复三次（开票规则），虽与知识库一致，但重复无益，建议保留一条。",
+          "target": "rag_exp_3a14a2970b3c90d11fc5",
+          "target_label": "rag_exp_3a14a2970b3c90d11fc5",
+          "repairable": false,
+          "action_type": "delete",
+          "involved_targets": [
+            "rag_exp_3a14a2970b3c90d11fc5"
+          ],
+          "llm_reasoning": "该RAG经验内容重复三次（开票规则），虽与知识库一致，但重复无益，建议保留一条。",
+          "suggestions": [
+            {
+              "title": "建议删除",
+              "detail": "该条目存在明显错误或不适用，建议归档或废弃。",
+              "level": "danger"
+            }
+          ]
+        },
+        {
+          "code": "knowledge_token_budget_large",
+          "severity": "info",
+          "title": "知识体积较大",
+          "detail": "当前分类知识库总量估算约 42842 token。这不是知识格式故障，也没有某条知识需要立即删除；它提醒后续继续按客户问题检索相关知识，避免一次性加载全部知识。",
+          "target_label": "全局知识库",
+          "details": [
+            {
+              "label": "问题性质",
+              "value": "容量提示，不是知识格式故障",
+              "level": "normal"
+            },
+            {
+              "label": "估算总量",
+              "value": "约 42842 token",
+              "level": "warning"
+            },
+            {
+              "label": "检测阈值",
+              "value": "超过 7000 token 时提示",
+              "level": "normal"
+            },
+            {
+              "label": "文件数量",
+              "value": "68 个 JSON 文件",
+              "level": "normal"
+            },
+            {
+              "label": "chats",
+              "value": "约 8793 token / 16 个文件",
+              "level": "normal"
+            },
+            {
+              "label": "erp_exports",
+              "value": "约 860 token / 2 个文件",
+              "level": "normal"
+            },
+            {
+              "label": "policies",
+              "value": "约 24980 token / 39 个文件",
+              "level": "normal"
+            },
+            {
+              "label": "products",
+              "value": "约 7517 token / 11 个文件",
+              "level": "normal"
+            }
+          ],
+          "suggestions": [
+            {
+              "title": "不建议自动删除知识",
+              "detail": "当前没有发现哪一条知识错误，系统不能为了降低体积擅自删内容。",
+              "level": "danger"
+            },
+            {
+              "title": "继续保持按门类和问题范围检索",
+              "detail": "客服运行时应只取相关商品、政策、话术和上下文证据，不要把全库一次性塞给大模型。",
+              "level": "normal"
+            },
+            {
+              "title": "如果后续继续变大",
+              "detail": "优先拆分过长政策、归档过期商品、把重复话术合并为模板，再重新检测。",
+              "level": "warning"
+            }
+          ],
+          "repairable": false
+        }
+      ],
+      "token_budget_estimate": 42842,
+      "recent_only": true
+    }
+  ],
+  "issues": [
+    {
+      "code": "llm_duplicate_semantic",
+      "severity": "info",
+      "title": "LLM：语义重复",
+      "detail": "两条RAG经验内容完全相同，均为自动化测试折叠床和折叠椅的数据，属于重复上传，导致冗余。",
+      "target": "rag_exp_1b020f75ffae9e2610e7",
+      "target_label": "rag_exp_1b020f75ffae9e2610e7, rag_exp_794f04141b28161c0a3e",
+      "repairable": false,
+      "action_type": "delete",
+      "involved_targets": [
+        "rag_exp_1b020f75ffae9e2610e7",
+        "rag_exp_794f04141b28161c0a3e"
+      ],
+      "llm_reasoning": "两条RAG经验内容完全相同，均为自动化测试折叠床和折叠椅的数据，属于重复上传，导致冗余。",
+      "suggestions": [
+        {
+          "title": "建议删除",
+          "detail": "该条目存在明显错误或不适用，建议归档或废弃。",
+          "level": "danger"
+        }
+      ],
+      "fingerprint": "b6d5864e8323d7db38a227db"
+    },
+    {
+      "code": "llm_rag_quality_low",
+      "severity": "info",
+      "title": "LLM：RAG经验质量低",
+      "detail": "该RAG经验内容重复三次（暂存缺价测试商品），且为测试数据，无实际价值，质量极低。",
+      "target": "rag_exp_9a6790ce2d781ce0a11e",
+      "target_label": "rag_exp_9a6790ce2d781ce0a11e",
+      "repairable": false,
+      "action_type": "delete",
+      "involved_targets": [
+        "rag_exp_9a6790ce2d781ce0a11e"
+      ],
+      "llm_reasoning": "该RAG经验内容重复三次（暂存缺价测试商品），且为测试数据，无实际价值，质量极低。",
+      "suggestions": [
+        {
+          "title": "建议删除",
+          "detail": "该条目存在明显错误或不适用，建议归档或废弃。",
+          "level": "danger"
+        }
+      ],
+      "fingerprint": "f493f33101cc47ea52b7fd74"
+    },
+    {
+      "code": "llm_rag_quality_low",
+      "severity": "info",
+      "title": "LLM：RAG经验质量低",
+      "detail": "该RAG经验内容为无意义的重复文本'duplicate candidate probe'，属于测试或垃圾数据。",
+      "target": "rag_exp_5a574e8d242fc86a1b3d",
+      "target_label": "rag_exp_5a574e8d242fc86a1b3d",
+      "repairable": false,
+      "action_type": "delete",
+      "involved_targets": [
+        "rag_exp_5a574e8d242fc86a1b3d"
+      ],
+      "llm_reasoning": "该RAG经验内容为无意义的重复文本'duplicate candidate probe'，属于测试或垃圾数据。",
+      "suggestions": [
+        {
+          "title": "建议删除",
+          "detail": "该条目存在明显错误或不适用，建议归档或废弃。",
+          "level": "danger"
+        }
+      ],
+      "fingerprint": "caf5f215d9ea2bac59fa9aec"
+    },
+    {
+      "code": "llm_duplicate_semantic",
+      "severity": "info",
+      "title": "LLM：语义重复",
+      "detail": "该RAG经验内容重复三次（账期需人工审核），虽然内容合理，但大量重复导致冗余，建议保留一条。",
+      "target": "rag_exp_89af65a4428a33bb5815",
+      "target_label": "rag_exp_89af65a4428a33bb5815",
+      "repairable": false,
+      "action_type": "delete",
+      "involved_targets": [
+        "rag_exp_89af65a4428a33bb5815"
+      ],
+      "llm_reasoning": "该RAG经验内容重复三次（账期需人工审核），虽然内容合理，但大量重复导致冗余，建议保留一条。",
+      "suggestions": [
+        {
+          "title": "建议删除",
+          "detail": "该条目存在明显错误或不适用，建议归档或废弃。",
+          "level": "danger"
+        }
+      ],
+      "fingerprint": "1259715fc7581a35a3b722e7"
+    },
+    {
+      "code": "llm_duplicate_semantic",
+      "severity": "info",
+      "title": "LLM：语义重复",
+      "detail": "该RAG经验内容重复三次（开票规则），虽与知识库一致，但重复无益，建议保留一条。",
+      "target": "rag_exp_3a14a2970b3c90d11fc5",
+      "target_label": "rag_exp_3a14a2970b3c90d11fc5",
+      "repairable": false,
+      "action_type": "delete",
+      "involved_targets": [
+        "rag_exp_3a14a2970b3c90d11fc5"
+      ],
+      "llm_reasoning": "该RAG经验内容重复三次（开票规则），虽与知识库一致，但重复无益，建议保留一条。",
+      "suggestions": [
+        {
+          "title": "建议删除",
+          "detail": "该条目存在明显错误或不适用，建议归档或废弃。",
+          "level": "danger"
+        }
+      ],
+      "fingerprint": "0e663854fa52ce5358f6b905"
+    }
+  ],
+  "ignored_count": 0,
+  "summary": {
+    "error_count": 0,
+    "warning_count": 0,
+    "info_count": 5,
+    "ignored_count": 0,
+    "hidden_notice_count": 1
+  },
+  "auto_dedup_rag": null
+}

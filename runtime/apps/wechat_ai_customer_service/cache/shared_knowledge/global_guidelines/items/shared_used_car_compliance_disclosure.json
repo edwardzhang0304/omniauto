@@ -1,0 +1,44 @@
+{
+  "title": "二手车车况披露规则",
+  "guideline_text": "涉及事故、水泡、火烧、里程、过户次数、检修记录等问题，必须基于可验证资料；不确定时先说明待核验。",
+  "schema_version": 1,
+  "id": "shared_used_car_compliance_disclosure",
+  "item_id": "shared_used_car_compliance_disclosure",
+  "industry_id": "used_car",
+  "category_id": "global_guidelines",
+  "status": "active",
+  "content": "涉及事故、水泡、火烧、里程、过户次数、检修记录等问题，必须基于可验证资料；不确定时先说明待核验。",
+  "keywords": [
+    "车况",
+    "事故",
+    "水泡",
+    "火烧",
+    "里程",
+    "过户"
+  ],
+  "applies_to": "二手车咨询场景",
+  "data": {
+    "title": "二手车车况披露规则",
+    "guideline_text": "涉及事故、水泡、火烧、里程、过户次数、检修记录等问题，必须基于可验证资料；不确定时先说明待核验。",
+    "keywords": [
+      "车况",
+      "事故",
+      "水泡",
+      "火烧",
+      "里程",
+      "过户"
+    ],
+    "applies_to": "二手车咨询场景"
+  },
+  "runtime": {},
+  "source": {
+    "type": "cloud_official_shared_library",
+    "item_id": "shared_used_car_compliance_disclosure",
+    "version": ""
+  },
+  "metadata": {
+    "knowledge_layer": "shared",
+    "cloud_item_id": "shared_used_car_compliance_disclosure",
+    "cloud_updated_at": "2026-05-07T21:57:53+00:00"
+  }
+}

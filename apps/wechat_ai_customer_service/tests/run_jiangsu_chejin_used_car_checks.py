@@ -60,11 +60,11 @@ from listen_and_reply import TargetConfig, configured_reply_prefix, process_targ
 from wechat_connector import FILE_TRANSFER_ASSISTANT, WeChatConnector  # noqa: E402
 
 
-TENANT_ID = "jiangsu_chejin_usedcar_customer_20260501"
-PASSWORD = "chejin.20260501"
-EMAIL = "jiangsu-chejin-usedcar@example.local"
+TENANT_ID = os.getenv("WECHAT_CHEJIN_TEST_TENANT_ID", "chejin_usedcar_regression")
+PASSWORD = os.getenv("WECHAT_CHEJIN_TEST_PASSWORD", "1234.abcd")
+EMAIL = os.getenv("WECHAT_CHEJIN_TEST_EMAIL", "xu__cong@126.com")
 DISPLAY_NAME = "江苏车金二手车测试客户 2026-05-01"
-BASE_ARTIFACT_ROOT = PROJECT_ROOT / "runtime" / "apps" / "wechat_ai_customer_service" / "test_artifacts" / "jiangsu_chejin_used_car"
+BASE_ARTIFACT_ROOT = PROJECT_ROOT / "runtime" / "apps" / "wechat_ai_customer_service" / "test_artifacts" / "chejin_used_car"
 
 
 @dataclass

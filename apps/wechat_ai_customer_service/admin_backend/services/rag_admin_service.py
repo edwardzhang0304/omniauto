@@ -1738,6 +1738,9 @@ def candidate_data_for_category(category_id: str, item: dict[str, Any]) -> dict[
             "service_reply": normalize_chat_candidate_reply(reply or hit_text, item),
             "intent_tags": keyword_list(str(item.get("intent") or ""), fallback=["rag_experience"]),
             "tone_tags": ["rag_reference"],
+            "applicability_scope": str(structured.get("applicability_scope") or "global"),
+            "product_id": str(structured.get("product_id") or hit.get("product_id") or ""),
+            "product_category": str(structured.get("product_category") or structured.get("category") or ""),
             "linked_categories": [str(hit.get("category") or "")] if hit.get("category") else [],
             "additional_details": additional_details,
         }

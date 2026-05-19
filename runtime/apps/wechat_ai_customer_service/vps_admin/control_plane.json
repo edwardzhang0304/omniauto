@@ -42,33 +42,6 @@
       "updated_at": "2026-05-01T07:32:21+00:00",
       "industry_id": "home_appliance"
     },
-    "jiangsu_chejin_usedcar_customer_20260501": {
-      "tenant_id": "jiangsu_chejin_usedcar_customer_20260501",
-      "display_name": "江苏车金二手车测试客户 2026-05-01",
-      "status": "active",
-      "sync_enabled": true,
-      "metadata": {
-        "source": "local_client_account",
-        "account_username": "jiangsu_chejin_usedcar_customer_20260501",
-        "schema_version": 1,
-        "tenant_id": "jiangsu_chejin_usedcar_customer_20260501",
-        "display_name": "江苏车金二手车测试客户 2026-05-01",
-        "knowledge_base_root": "knowledge_bases",
-        "product_item_knowledge_root": "product_item_knowledge",
-        "created_at": "2026-05-01T20:22:26+00:00",
-        "sync": {
-          "private_backup": {
-            "enabled": false,
-            "schedule": "manual"
-          }
-        },
-        "updated_at": "2026-05-01T20:22:26+00:00",
-        "industry_id": "used_car"
-      },
-      "created_at": "2026-05-01T08:09:49+00:00",
-      "updated_at": "2026-05-01T20:22:26+00:00",
-      "industry_id": "used_car"
-    },
     "smart_recorder_test": {
       "tenant_id": "smart_recorder_test",
       "display_name": "smart_recorder_test",
@@ -124,6 +97,174 @@
       },
       "created_at": "2026-05-10T17:31:27+00:00",
       "updated_at": "2026-05-10T17:31:27+00:00"
+    },
+    "wf_iso_20260514_014721": {
+      "tenant_id": "wf_iso_20260514_014721",
+      "display_name": "wf_iso_20260514_014721",
+      "status": "active",
+      "sync_enabled": true,
+      "industry_id": "home_appliance",
+      "metadata": {
+        "source": "local_client_account",
+        "account_username": "wf_iso_20260514_014721",
+        "industry_id": "home_appliance"
+      },
+      "created_at": "2026-05-14T02:08:10+00:00",
+      "updated_at": "2026-05-14T02:08:10+00:00"
+    },
+    "wf_iso_20260514_014812": {
+      "tenant_id": "wf_iso_20260514_014812",
+      "display_name": "wf_iso_20260514_014812",
+      "status": "active",
+      "sync_enabled": true,
+      "industry_id": "home_appliance",
+      "metadata": {
+        "source": "local_client_account",
+        "account_username": "wf_iso_20260514_014812",
+        "industry_id": "home_appliance"
+      },
+      "created_at": "2026-05-14T02:08:10+00:00",
+      "updated_at": "2026-05-14T02:08:10+00:00"
+    },
+    "wf_iso_20260514_014912": {
+      "tenant_id": "wf_iso_20260514_014912",
+      "display_name": "wf_iso_20260514_014912",
+      "status": "active",
+      "sync_enabled": true,
+      "industry_id": "home_appliance",
+      "metadata": {
+        "source": "local_client_account",
+        "account_username": "wf_iso_20260514_014912",
+        "industry_id": "home_appliance"
+      },
+      "created_at": "2026-05-14T02:08:10+00:00",
+      "updated_at": "2026-05-14T02:08:10+00:00"
+    },
+    "wf_iso_20260514_015014": {
+      "tenant_id": "wf_iso_20260514_015014",
+      "display_name": "wf_iso_20260514_015014",
+      "status": "active",
+      "sync_enabled": true,
+      "industry_id": "home_appliance",
+      "metadata": {
+        "source": "local_client_account",
+        "account_username": "wf_iso_20260514_015014",
+        "industry_id": "home_appliance"
+      },
+      "created_at": "2026-05-14T02:08:10+00:00",
+      "updated_at": "2026-05-14T02:08:10+00:00"
+    },
+    "upload_flow_probe_20260514_csv": {
+      "tenant_id": "upload_flow_probe_20260514_csv",
+      "display_name": "upload_flow_probe_20260514_csv",
+      "status": "active",
+      "sync_enabled": true,
+      "industry_id": "home_appliance",
+      "metadata": {
+        "source": "local_client_account",
+        "account_username": "upload_flow_probe_20260514_csv",
+        "industry_id": "home_appliance"
+      },
+      "created_at": "2026-05-14T06:50:13+00:00",
+      "updated_at": "2026-05-14T06:50:13+00:00"
+    },
+    "upload_flow_probe_20260514_csv_sample": {
+      "tenant_id": "upload_flow_probe_20260514_csv_sample",
+      "display_name": "upload_flow_probe_20260514_csv_sample",
+      "status": "active",
+      "sync_enabled": true,
+      "industry_id": "home_appliance",
+      "metadata": {
+        "source": "local_client_account",
+        "account_username": "upload_flow_probe_20260514_csv_sample",
+        "industry_id": "home_appliance"
+      },
+      "created_at": "2026-05-14T07:10:13+00:00",
+      "updated_at": "2026-05-14T07:10:13+00:00"
+    },
+    "upload_flow_probe_20260514_json": {
+      "tenant_id": "upload_flow_probe_20260514_json",
+      "display_name": "upload_flow_probe_20260514_json",
+      "status": "active",
+      "sync_enabled": true,
+      "industry_id": "home_appliance",
+      "metadata": {
+        "source": "local_client_account",
+        "account_username": "upload_flow_probe_20260514_json",
+        "industry_id": "home_appliance"
+      },
+      "created_at": "2026-05-14T07:10:13+00:00",
+      "updated_at": "2026-05-14T07:10:13+00:00"
+    },
+    "upload_flow_probe_20260514_real_jsonl": {
+      "tenant_id": "upload_flow_probe_20260514_real_jsonl",
+      "display_name": "upload_flow_probe_20260514_real_jsonl",
+      "status": "active",
+      "sync_enabled": true,
+      "industry_id": "home_appliance",
+      "metadata": {
+        "source": "local_client_account",
+        "account_username": "upload_flow_probe_20260514_real_jsonl",
+        "industry_id": "home_appliance"
+      },
+      "created_at": "2026-05-14T07:20:13+00:00",
+      "updated_at": "2026-05-14T07:20:13+00:00"
+    },
+    "workflow_switch_probe": {
+      "tenant_id": "workflow_switch_probe",
+      "display_name": "workflow_switch_probe",
+      "status": "active",
+      "sync_enabled": true,
+      "industry_id": "home_appliance",
+      "metadata": {
+        "source": "local_client_account",
+        "account_username": "workflow_switch_probe",
+        "industry_id": "home_appliance"
+      },
+      "created_at": "2026-05-16T15:15:58+00:00",
+      "updated_at": "2026-05-16T15:15:58+00:00"
+    },
+    "chejin": {
+      "tenant_id": "chejin",
+      "display_name": "江苏车金二手车测试客户 2026-05-01",
+      "status": "active",
+      "sync_enabled": true,
+      "industry_id": "used_car",
+      "metadata": {
+        "source": "local_client_account",
+        "account_username": "chejin",
+        "industry_id": "used_car"
+      },
+      "created_at": "2026-05-18T08:34:37+00:00",
+      "updated_at": "2026-05-18T21:21:06+00:00"
+    },
+    "rag_reply_auto_discard_probe": {
+      "tenant_id": "rag_reply_auto_discard_probe",
+      "display_name": "rag_reply_auto_discard_probe",
+      "status": "active",
+      "sync_enabled": true,
+      "industry_id": "home_appliance",
+      "metadata": {
+        "source": "local_client_account",
+        "account_username": "rag_reply_auto_discard_probe",
+        "industry_id": "home_appliance"
+      },
+      "created_at": "2026-05-18T17:57:30+00:00",
+      "updated_at": "2026-05-18T17:57:30+00:00"
+    },
+    "knowledge_contamination_guard_test": {
+      "tenant_id": "knowledge_contamination_guard_test",
+      "display_name": "knowledge_contamination_guard_test",
+      "status": "active",
+      "sync_enabled": true,
+      "industry_id": "home_appliance",
+      "metadata": {
+        "source": "local_client_account",
+        "account_username": "knowledge_contamination_guard_test",
+        "industry_id": "home_appliance"
+      },
+      "created_at": "2026-05-18T19:32:30+00:00",
+      "updated_at": "2026-05-18T19:32:30+00:00"
     }
   },
   "users": {
@@ -145,24 +286,6 @@
       "email": "xu__cong@126.com",
       "initialized_at": "2026-04-30T18:08:34+00:00"
     },
-    "jiangsu_chejin_usedcar_customer_20260501": {
-      "user_id": "jiangsu_chejin_usedcar_customer_20260501",
-      "username": "jiangsu_chejin_usedcar_customer_20260501",
-      "display_name": "江苏车金二手车测试客户 2026-05-01",
-      "email": "jiangsu-chejin-usedcar@example.local",
-      "role": "customer",
-      "tenant_ids": [
-        "jiangsu_chejin_usedcar_customer_20260501"
-      ],
-      "resource_scopes": [
-        "*"
-      ],
-      "status": "active",
-      "source": "local_client_account",
-      "created_at": "2026-05-01T08:09:49+00:00",
-      "updated_at": "2026-05-09T20:05:09+00:00",
-      "password_hash": "pbkdf2_sha256$120000$8a1f5fc46d61f742aa9f486a5ee7cdb6$Vjy8TInOxEEzzqPs0dbwVhNYD80mqtlheeJS6b5LzA4="
-    },
     "user_YTE2rdUWFGqX": {
       "user_id": "user_YTE2rdUWFGqX",
       "username": "test02",
@@ -181,6 +304,25 @@
       "updated_at": "2026-05-10T18:33:48+00:00",
       "password_hash": "pbkdf2_sha256$120000$6ec729d68aaefe852fd7d056ecdbff66$wRhcYCootNq7DA/c3aR8YPKnOZCQ38JwblnQ1rDXu60=",
       "initialized_at": "2026-05-10T18:33:48+00:00"
+    },
+    "chejin": {
+      "user_id": "chejin",
+      "username": "chejin",
+      "display_name": "江苏车金二手车测试客户 2026-05-01",
+      "email": "xu__cong@126.com",
+      "role": "customer",
+      "tenant_ids": [
+        "chejin"
+      ],
+      "resource_scopes": [
+        "*"
+      ],
+      "status": "active",
+      "source": "local_client_account",
+      "created_at": "2026-05-18T08:34:37+00:00",
+      "updated_at": "2026-05-18T21:21:06+00:00",
+      "password_hash": "pbkdf2_sha256$120000$eb0caeea0c6550710f22977c8a910287$dWW9uT0nmaLdns0v9Sa8WtPnmlzumFnID0f0zTQniZc=",
+      "initialized_at": "2026-05-18T08:34:37+00:00"
     }
   },
   "sessions": {
@@ -843,6 +985,1146 @@
       "expires_at": "2026-05-11T17:16:10+00:00",
       "source": "vps",
       "token": "vps_coMXXVoEwMsIVTKyxv5ae2y0aH22stwyFc77m3ZJ2IY"
+    },
+    "vps_XGaLk7f2p7ET4Wv6nMksA3WKsXk8xNSUfEjaCuNrDfE": {
+      "session_id": "vps_XGaLk7f2p7ET4Wv6nMksA3WKsXk8xNSUfEjaCuNrDfE",
+      "user": {
+        "user_id": "user_YTE2rdUWFGqX",
+        "role": "customer",
+        "tenant_ids": [
+          "test02"
+        ],
+        "display_name": "test02",
+        "username": "test02",
+        "resource_scopes": [
+          "*"
+        ]
+      },
+      "active_tenant_id": "test02",
+      "issued_at": "2026-05-11T14:56:45+00:00",
+      "expires_at": "2026-05-12T02:56:45+00:00",
+      "source": "vps",
+      "token": "vps_XGaLk7f2p7ET4Wv6nMksA3WKsXk8xNSUfEjaCuNrDfE"
+    },
+    "vps_VKZdVLPWlnoCiQH8edFIFR84U7iQqujP3BjG1U_W1n8": {
+      "session_id": "vps_VKZdVLPWlnoCiQH8edFIFR84U7iQqujP3BjG1U_W1n8",
+      "user": {
+        "user_id": "user_YTE2rdUWFGqX",
+        "role": "customer",
+        "tenant_ids": [
+          "test02"
+        ],
+        "display_name": "test02",
+        "username": "test02",
+        "resource_scopes": [
+          "*"
+        ]
+      },
+      "active_tenant_id": "test02",
+      "issued_at": "2026-05-12T01:11:33+00:00",
+      "expires_at": "2026-05-12T13:11:33+00:00",
+      "source": "vps",
+      "token": "vps_VKZdVLPWlnoCiQH8edFIFR84U7iQqujP3BjG1U_W1n8"
+    },
+    "vps_qq5fPpb1xFNUJRjvrpFvHnBIGsDNsvsHYvxgWzfgg4o": {
+      "session_id": "vps_qq5fPpb1xFNUJRjvrpFvHnBIGsDNsvsHYvxgWzfgg4o",
+      "user": {
+        "user_id": "platform-admin",
+        "role": "admin",
+        "tenant_ids": [
+          "*"
+        ],
+        "display_name": "Platform Admin",
+        "username": "admin",
+        "resource_scopes": [
+          "*"
+        ]
+      },
+      "active_tenant_id": "default",
+      "issued_at": "2026-05-12T14:04:47+00:00",
+      "expires_at": "2026-05-13T02:04:47+00:00",
+      "source": "vps",
+      "token": "vps_qq5fPpb1xFNUJRjvrpFvHnBIGsDNsvsHYvxgWzfgg4o"
+    },
+    "vps_Dh7TjO6VDXd_ZDy8pHz1sgXiWn17jjck9-4nssZD9yo": {
+      "session_id": "vps_Dh7TjO6VDXd_ZDy8pHz1sgXiWn17jjck9-4nssZD9yo",
+      "user": {
+        "user_id": "user_YTE2rdUWFGqX",
+        "role": "customer",
+        "tenant_ids": [
+          "test02"
+        ],
+        "display_name": "test02",
+        "username": "test02",
+        "resource_scopes": [
+          "*"
+        ]
+      },
+      "active_tenant_id": "test02",
+      "issued_at": "2026-05-12T16:05:00+00:00",
+      "expires_at": "2026-05-13T04:05:00+00:00",
+      "source": "vps",
+      "token": "vps_Dh7TjO6VDXd_ZDy8pHz1sgXiWn17jjck9-4nssZD9yo"
+    },
+    "vps_AOYlfjMRW1CcMs4ytuOEAmCQWwlLldBFPStiQ7R0-ng": {
+      "session_id": "vps_AOYlfjMRW1CcMs4ytuOEAmCQWwlLldBFPStiQ7R0-ng",
+      "user": {
+        "user_id": "user_YTE2rdUWFGqX",
+        "role": "customer",
+        "tenant_ids": [
+          "test02"
+        ],
+        "display_name": "test02",
+        "username": "test02",
+        "resource_scopes": [
+          "*"
+        ]
+      },
+      "active_tenant_id": "test02",
+      "issued_at": "2026-05-12T17:44:21+00:00",
+      "expires_at": "2026-05-13T05:44:21+00:00",
+      "source": "vps",
+      "token": "vps_AOYlfjMRW1CcMs4ytuOEAmCQWwlLldBFPStiQ7R0-ng"
+    },
+    "vps_RJqsHSAFKssKV16ljJKlXXVXxxpLs4gS4YoMcwUs93E": {
+      "session_id": "vps_RJqsHSAFKssKV16ljJKlXXVXxxpLs4gS4YoMcwUs93E",
+      "user": {
+        "user_id": "user_YTE2rdUWFGqX",
+        "role": "customer",
+        "tenant_ids": [
+          "test02"
+        ],
+        "display_name": "test02",
+        "username": "test02",
+        "resource_scopes": [
+          "*"
+        ]
+      },
+      "active_tenant_id": "test02",
+      "issued_at": "2026-05-12T18:26:18+00:00",
+      "expires_at": "2026-05-13T06:26:18+00:00",
+      "source": "vps",
+      "token": "vps_RJqsHSAFKssKV16ljJKlXXVXxxpLs4gS4YoMcwUs93E"
+    },
+    "vps_GT2oT-L_XR0IexA7u_joS3EbTFOgRBXh1IulT8hzkaQ": {
+      "session_id": "vps_GT2oT-L_XR0IexA7u_joS3EbTFOgRBXh1IulT8hzkaQ",
+      "user": {
+        "user_id": "user_YTE2rdUWFGqX",
+        "role": "customer",
+        "tenant_ids": [
+          "test02"
+        ],
+        "display_name": "test02",
+        "username": "test02",
+        "resource_scopes": [
+          "*"
+        ]
+      },
+      "active_tenant_id": "test02",
+      "issued_at": "2026-05-13T05:14:44+00:00",
+      "expires_at": "2026-05-13T17:14:44+00:00",
+      "source": "vps",
+      "token": "vps_GT2oT-L_XR0IexA7u_joS3EbTFOgRBXh1IulT8hzkaQ"
+    },
+    "vps_CmVqyWd4pkEdTpU1UALxy1ddYRrL96KyEQAIloX0y5c": {
+      "session_id": "vps_CmVqyWd4pkEdTpU1UALxy1ddYRrL96KyEQAIloX0y5c",
+      "user": {
+        "user_id": "user_YTE2rdUWFGqX",
+        "role": "customer",
+        "tenant_ids": [
+          "test02"
+        ],
+        "display_name": "test02",
+        "username": "test02",
+        "resource_scopes": [
+          "*"
+        ]
+      },
+      "active_tenant_id": "test02",
+      "issued_at": "2026-05-13T07:18:55+00:00",
+      "expires_at": "2026-05-13T19:18:55+00:00",
+      "source": "vps",
+      "token": "vps_CmVqyWd4pkEdTpU1UALxy1ddYRrL96KyEQAIloX0y5c"
+    },
+    "vps_ScmeXkVnCqRmjYaYGENBKLeMLssolHK9WGPKz_kFGlA": {
+      "session_id": "vps_ScmeXkVnCqRmjYaYGENBKLeMLssolHK9WGPKz_kFGlA",
+      "user": {
+        "user_id": "platform-admin",
+        "role": "admin",
+        "tenant_ids": [
+          "*"
+        ],
+        "display_name": "Platform Admin",
+        "username": "admin",
+        "resource_scopes": [
+          "*"
+        ]
+      },
+      "active_tenant_id": "default",
+      "issued_at": "2026-05-14T02:28:01+00:00",
+      "expires_at": "2026-05-14T14:28:01+00:00",
+      "source": "vps",
+      "token": "vps_ScmeXkVnCqRmjYaYGENBKLeMLssolHK9WGPKz_kFGlA"
+    },
+    "vps_Eshq5hBrA9FOp8qrFwCmuwWs3AaVVJGxDk46zslBBD8": {
+      "session_id": "vps_Eshq5hBrA9FOp8qrFwCmuwWs3AaVVJGxDk46zslBBD8",
+      "user": {
+        "user_id": "platform-admin",
+        "role": "admin",
+        "tenant_ids": [
+          "*"
+        ],
+        "display_name": "Platform Admin",
+        "username": "admin",
+        "resource_scopes": [
+          "*"
+        ]
+      },
+      "active_tenant_id": "default",
+      "issued_at": "2026-05-15T02:08:13+00:00",
+      "expires_at": "2026-05-15T14:08:13+00:00",
+      "source": "vps",
+      "token": "vps_Eshq5hBrA9FOp8qrFwCmuwWs3AaVVJGxDk46zslBBD8"
+    },
+    "vps_pvNnNC2_l7ncSbHVy5o6c1SFGqmPmN-kuk2f2FLFQ0g": {
+      "session_id": "vps_pvNnNC2_l7ncSbHVy5o6c1SFGqmPmN-kuk2f2FLFQ0g",
+      "user": {
+        "user_id": "platform-admin",
+        "role": "admin",
+        "tenant_ids": [
+          "*"
+        ],
+        "display_name": "Platform Admin",
+        "username": "admin",
+        "resource_scopes": [
+          "*"
+        ]
+      },
+      "active_tenant_id": "default",
+      "issued_at": "2026-05-15T17:06:26+00:00",
+      "expires_at": "2026-05-16T05:06:26+00:00",
+      "source": "vps",
+      "token": "vps_pvNnNC2_l7ncSbHVy5o6c1SFGqmPmN-kuk2f2FLFQ0g"
+    },
+    "vps_d49t13V0TwLG0Z6tBSY7U3-fguJmqvSSZvgzgFl5TPk": {
+      "session_id": "vps_d49t13V0TwLG0Z6tBSY7U3-fguJmqvSSZvgzgFl5TPk",
+      "user": {
+        "user_id": "platform-admin",
+        "role": "admin",
+        "tenant_ids": [
+          "*"
+        ],
+        "display_name": "Platform Admin",
+        "username": "admin",
+        "resource_scopes": [
+          "*"
+        ]
+      },
+      "active_tenant_id": "default",
+      "issued_at": "2026-05-16T15:16:06+00:00",
+      "expires_at": "2026-05-17T03:16:06+00:00",
+      "source": "vps",
+      "token": "vps_d49t13V0TwLG0Z6tBSY7U3-fguJmqvSSZvgzgFl5TPk"
+    },
+    "vps_GxCJkMFZpFF0d9Kk5WNhV58ReaBlbCbulsb5tnSv85k": {
+      "session_id": "vps_GxCJkMFZpFF0d9Kk5WNhV58ReaBlbCbulsb5tnSv85k",
+      "user": {
+        "user_id": "platform-admin",
+        "role": "admin",
+        "tenant_ids": [
+          "*"
+        ],
+        "display_name": "Platform Admin",
+        "username": "admin",
+        "resource_scopes": [
+          "*"
+        ]
+      },
+      "active_tenant_id": "default",
+      "issued_at": "2026-05-17T16:51:53+00:00",
+      "expires_at": "2026-05-18T04:51:53+00:00",
+      "source": "vps",
+      "token": "vps_GxCJkMFZpFF0d9Kk5WNhV58ReaBlbCbulsb5tnSv85k"
+    },
+    "vps_MQ_-t2d1vHTdpzwR3VCI0h6TgOuFDBB603uz8C5xIO4": {
+      "session_id": "vps_MQ_-t2d1vHTdpzwR3VCI0h6TgOuFDBB603uz8C5xIO4",
+      "user": {
+        "user_id": "platform-admin",
+        "role": "admin",
+        "tenant_ids": [
+          "*"
+        ],
+        "display_name": "Platform Admin",
+        "username": "admin",
+        "resource_scopes": [
+          "*"
+        ]
+      },
+      "active_tenant_id": "default",
+      "issued_at": "2026-05-18T08:23:30+00:00",
+      "expires_at": "2026-05-18T20:23:30+00:00",
+      "source": "vps",
+      "token": "vps_MQ_-t2d1vHTdpzwR3VCI0h6TgOuFDBB603uz8C5xIO4"
+    },
+    "vps_xuqUYdp_W7QpEjFimLY1s_egsVsMPPB9JfTHC9FL2QE": {
+      "session_id": "vps_xuqUYdp_W7QpEjFimLY1s_egsVsMPPB9JfTHC9FL2QE",
+      "user": {
+        "user_id": "chejin",
+        "role": "customer",
+        "tenant_ids": [
+          "chejin"
+        ],
+        "display_name": "江苏车金二手车测试客户 2026-05-01",
+        "username": "chejin",
+        "resource_scopes": [
+          "*"
+        ]
+      },
+      "active_tenant_id": "chejin",
+      "issued_at": "2026-05-18T08:35:32+00:00",
+      "expires_at": "2026-05-18T20:35:32+00:00",
+      "source": "vps",
+      "token": "vps_xuqUYdp_W7QpEjFimLY1s_egsVsMPPB9JfTHC9FL2QE"
+    },
+    "vps_MOhuxbN6t1b1roa1VQ7vbSUooel8ccWa2lXo9UDzD8k": {
+      "session_id": "vps_MOhuxbN6t1b1roa1VQ7vbSUooel8ccWa2lXo9UDzD8k",
+      "user": {
+        "user_id": "chejin",
+        "role": "customer",
+        "tenant_ids": [
+          "chejin"
+        ],
+        "display_name": "江苏车金二手车测试客户 2026-05-01",
+        "username": "chejin",
+        "resource_scopes": [
+          "*"
+        ]
+      },
+      "active_tenant_id": "chejin",
+      "issued_at": "2026-05-18T08:35:32+00:00",
+      "expires_at": "2026-05-18T20:35:32+00:00",
+      "source": "vps",
+      "token": "vps_MOhuxbN6t1b1roa1VQ7vbSUooel8ccWa2lXo9UDzD8k"
+    },
+    "vps_oi2UBwL4JHGNUrO6fWfqZuD8uv4XcG5MX0umeF8rp6c": {
+      "session_id": "vps_oi2UBwL4JHGNUrO6fWfqZuD8uv4XcG5MX0umeF8rp6c",
+      "user": {
+        "user_id": "chejin",
+        "role": "customer",
+        "tenant_ids": [
+          "chejin"
+        ],
+        "display_name": "江苏车金二手车测试客户 2026-05-01",
+        "username": "chejin",
+        "resource_scopes": [
+          "*"
+        ]
+      },
+      "active_tenant_id": "chejin",
+      "issued_at": "2026-05-18T08:35:53+00:00",
+      "expires_at": "2026-05-18T20:35:53+00:00",
+      "source": "vps",
+      "token": "vps_oi2UBwL4JHGNUrO6fWfqZuD8uv4XcG5MX0umeF8rp6c"
+    },
+    "vps_QXs6IkL9xEsc3e748wsomx3OWMCaa2FA4ec1fvb2i50": {
+      "session_id": "vps_QXs6IkL9xEsc3e748wsomx3OWMCaa2FA4ec1fvb2i50",
+      "user": {
+        "user_id": "chejin",
+        "role": "customer",
+        "tenant_ids": [
+          "chejin"
+        ],
+        "display_name": "江苏车金二手车测试客户 2026-05-01",
+        "username": "chejin",
+        "resource_scopes": [
+          "*"
+        ]
+      },
+      "active_tenant_id": "chejin",
+      "issued_at": "2026-05-18T08:37:52+00:00",
+      "expires_at": "2026-05-18T20:37:52+00:00",
+      "source": "vps",
+      "token": "vps_QXs6IkL9xEsc3e748wsomx3OWMCaa2FA4ec1fvb2i50"
+    },
+    "vps_oV8tuD1gGPPi3ePGTqVK7HENoV7xd1u9qrhgH5GXhdc": {
+      "session_id": "vps_oV8tuD1gGPPi3ePGTqVK7HENoV7xd1u9qrhgH5GXhdc",
+      "user": {
+        "user_id": "chejin",
+        "role": "customer",
+        "tenant_ids": [
+          "chejin"
+        ],
+        "display_name": "江苏车金二手车测试客户 2026-05-01",
+        "username": "chejin",
+        "resource_scopes": [
+          "*"
+        ]
+      },
+      "active_tenant_id": "chejin",
+      "issued_at": "2026-05-18T08:37:53+00:00",
+      "expires_at": "2026-05-18T20:37:53+00:00",
+      "source": "vps",
+      "token": "vps_oV8tuD1gGPPi3ePGTqVK7HENoV7xd1u9qrhgH5GXhdc"
+    },
+    "vps_-uOFllFhoe5iqBGy15Eyw0sbxuHSbR-woeMRTSAhBmE": {
+      "session_id": "vps_-uOFllFhoe5iqBGy15Eyw0sbxuHSbR-woeMRTSAhBmE",
+      "user": {
+        "user_id": "chejin",
+        "role": "customer",
+        "tenant_ids": [
+          "chejin"
+        ],
+        "display_name": "江苏车金二手车测试客户 2026-05-01",
+        "username": "chejin",
+        "resource_scopes": [
+          "*"
+        ]
+      },
+      "active_tenant_id": "chejin",
+      "issued_at": "2026-05-18T08:37:53+00:00",
+      "expires_at": "2026-05-18T20:37:53+00:00",
+      "source": "vps",
+      "token": "vps_-uOFllFhoe5iqBGy15Eyw0sbxuHSbR-woeMRTSAhBmE"
+    },
+    "vps_nN1BMjNE5cBG63xGqYP8IUqDy33-2V8j1VS8qSCYE8g": {
+      "session_id": "vps_nN1BMjNE5cBG63xGqYP8IUqDy33-2V8j1VS8qSCYE8g",
+      "user": {
+        "user_id": "chejin",
+        "role": "customer",
+        "tenant_ids": [
+          "chejin"
+        ],
+        "display_name": "江苏车金二手车测试客户 2026-05-01",
+        "username": "chejin",
+        "resource_scopes": [
+          "*"
+        ]
+      },
+      "active_tenant_id": "chejin",
+      "issued_at": "2026-05-18T08:38:25+00:00",
+      "expires_at": "2026-05-18T20:38:25+00:00",
+      "source": "vps",
+      "token": "vps_nN1BMjNE5cBG63xGqYP8IUqDy33-2V8j1VS8qSCYE8g"
+    },
+    "vps_D2I1-GV-PLdQdrhgyvN5_gxkaeagzIdQBc-D0eY7Lr4": {
+      "session_id": "vps_D2I1-GV-PLdQdrhgyvN5_gxkaeagzIdQBc-D0eY7Lr4",
+      "user": {
+        "user_id": "chejin",
+        "role": "customer",
+        "tenant_ids": [
+          "chejin"
+        ],
+        "display_name": "江苏车金二手车测试客户 2026-05-01",
+        "username": "chejin",
+        "resource_scopes": [
+          "*"
+        ]
+      },
+      "active_tenant_id": "chejin",
+      "issued_at": "2026-05-18T08:38:43+00:00",
+      "expires_at": "2026-05-18T20:38:43+00:00",
+      "source": "vps",
+      "token": "vps_D2I1-GV-PLdQdrhgyvN5_gxkaeagzIdQBc-D0eY7Lr4"
+    },
+    "vps_xi-3I6DOdYONhCESgmeZqpn7zdzX-nFjR0UQJzXKjUI": {
+      "session_id": "vps_xi-3I6DOdYONhCESgmeZqpn7zdzX-nFjR0UQJzXKjUI",
+      "user": {
+        "user_id": "chejin",
+        "role": "customer",
+        "tenant_ids": [
+          "chejin"
+        ],
+        "display_name": "江苏车金二手车测试客户 2026-05-01",
+        "username": "chejin",
+        "resource_scopes": [
+          "*"
+        ]
+      },
+      "active_tenant_id": "chejin",
+      "issued_at": "2026-05-18T08:38:43+00:00",
+      "expires_at": "2026-05-18T20:38:43+00:00",
+      "source": "vps",
+      "token": "vps_xi-3I6DOdYONhCESgmeZqpn7zdzX-nFjR0UQJzXKjUI"
+    },
+    "vps_VnMwhUYmr2bvpkseE-dyOCMmVBoh6Y75cIProTTqiFo": {
+      "session_id": "vps_VnMwhUYmr2bvpkseE-dyOCMmVBoh6Y75cIProTTqiFo",
+      "user": {
+        "user_id": "chejin",
+        "role": "customer",
+        "tenant_ids": [
+          "chejin"
+        ],
+        "display_name": "江苏车金二手车测试客户 2026-05-01",
+        "username": "chejin",
+        "resource_scopes": [
+          "*"
+        ]
+      },
+      "active_tenant_id": "chejin",
+      "issued_at": "2026-05-18T08:38:43+00:00",
+      "expires_at": "2026-05-18T20:38:43+00:00",
+      "source": "vps",
+      "token": "vps_VnMwhUYmr2bvpkseE-dyOCMmVBoh6Y75cIProTTqiFo"
+    },
+    "vps_mKhnu5rSyRQY3XEbo4M4SymWLvuEuUBlO0ykKnvVXP0": {
+      "session_id": "vps_mKhnu5rSyRQY3XEbo4M4SymWLvuEuUBlO0ykKnvVXP0",
+      "user": {
+        "user_id": "chejin",
+        "role": "customer",
+        "tenant_ids": [
+          "chejin"
+        ],
+        "display_name": "江苏车金二手车测试客户 2026-05-01",
+        "username": "chejin",
+        "resource_scopes": [
+          "*"
+        ]
+      },
+      "active_tenant_id": "chejin",
+      "issued_at": "2026-05-18T08:44:26+00:00",
+      "expires_at": "2026-05-18T20:44:26+00:00",
+      "source": "vps",
+      "token": "vps_mKhnu5rSyRQY3XEbo4M4SymWLvuEuUBlO0ykKnvVXP0"
+    },
+    "vps_vhpQy43_lQKEeG8uZxHCLvDv9ao-hYtHsuP10HDISVk": {
+      "session_id": "vps_vhpQy43_lQKEeG8uZxHCLvDv9ao-hYtHsuP10HDISVk",
+      "user": {
+        "user_id": "chejin",
+        "role": "customer",
+        "tenant_ids": [
+          "chejin"
+        ],
+        "display_name": "江苏车金二手车测试客户 2026-05-01",
+        "username": "chejin",
+        "resource_scopes": [
+          "*"
+        ]
+      },
+      "active_tenant_id": "chejin",
+      "issued_at": "2026-05-18T08:44:26+00:00",
+      "expires_at": "2026-05-18T20:44:26+00:00",
+      "source": "vps",
+      "token": "vps_vhpQy43_lQKEeG8uZxHCLvDv9ao-hYtHsuP10HDISVk"
+    },
+    "vps_Ry_Y35kRiCZFWLyDrhVP9ffSsONxlGAysi0m7v6ATes": {
+      "session_id": "vps_Ry_Y35kRiCZFWLyDrhVP9ffSsONxlGAysi0m7v6ATes",
+      "user": {
+        "user_id": "chejin",
+        "role": "customer",
+        "tenant_ids": [
+          "chejin"
+        ],
+        "display_name": "江苏车金二手车测试客户 2026-05-01",
+        "username": "chejin",
+        "resource_scopes": [
+          "*"
+        ]
+      },
+      "active_tenant_id": "chejin",
+      "issued_at": "2026-05-18T08:44:26+00:00",
+      "expires_at": "2026-05-18T20:44:26+00:00",
+      "source": "vps",
+      "token": "vps_Ry_Y35kRiCZFWLyDrhVP9ffSsONxlGAysi0m7v6ATes"
+    },
+    "vps_vzMJh3gs25OfA8gIg2I4jgbapGpxoP7rtBArkFXnZyk": {
+      "session_id": "vps_vzMJh3gs25OfA8gIg2I4jgbapGpxoP7rtBArkFXnZyk",
+      "user": {
+        "user_id": "chejin",
+        "role": "customer",
+        "tenant_ids": [
+          "chejin"
+        ],
+        "display_name": "江苏车金二手车测试客户 2026-05-01",
+        "username": "chejin",
+        "resource_scopes": [
+          "*"
+        ]
+      },
+      "active_tenant_id": "chejin",
+      "issued_at": "2026-05-18T08:44:26+00:00",
+      "expires_at": "2026-05-18T20:44:26+00:00",
+      "source": "vps",
+      "token": "vps_vzMJh3gs25OfA8gIg2I4jgbapGpxoP7rtBArkFXnZyk"
+    },
+    "vps_Nv46Mtp7VsMlwHAkcPnimaqZJYeLfEwgp1vp4DcG9Z4": {
+      "session_id": "vps_Nv46Mtp7VsMlwHAkcPnimaqZJYeLfEwgp1vp4DcG9Z4",
+      "user": {
+        "user_id": "chejin",
+        "role": "customer",
+        "tenant_ids": [
+          "chejin"
+        ],
+        "display_name": "江苏车金二手车测试客户 2026-05-01",
+        "username": "chejin",
+        "resource_scopes": [
+          "*"
+        ]
+      },
+      "active_tenant_id": "chejin",
+      "issued_at": "2026-05-18T08:44:26+00:00",
+      "expires_at": "2026-05-18T20:44:26+00:00",
+      "source": "vps",
+      "token": "vps_Nv46Mtp7VsMlwHAkcPnimaqZJYeLfEwgp1vp4DcG9Z4"
+    },
+    "vps_XaXxeaMhDawrlmDpYOM_Sw-8ytB7cZ_1iXsUN8yEjh0": {
+      "session_id": "vps_XaXxeaMhDawrlmDpYOM_Sw-8ytB7cZ_1iXsUN8yEjh0",
+      "user": {
+        "user_id": "chejin",
+        "role": "customer",
+        "tenant_ids": [
+          "chejin"
+        ],
+        "display_name": "江苏车金二手车测试客户 2026-05-01",
+        "username": "chejin",
+        "resource_scopes": [
+          "*"
+        ]
+      },
+      "active_tenant_id": "chejin",
+      "issued_at": "2026-05-18T08:45:16+00:00",
+      "expires_at": "2026-05-18T20:45:16+00:00",
+      "source": "vps",
+      "token": "vps_XaXxeaMhDawrlmDpYOM_Sw-8ytB7cZ_1iXsUN8yEjh0"
+    },
+    "vps_Sco1hS7WjCO2nqjDDkbhzLspmr8lhp2YF_PBJ6AfCEs": {
+      "session_id": "vps_Sco1hS7WjCO2nqjDDkbhzLspmr8lhp2YF_PBJ6AfCEs",
+      "user": {
+        "user_id": "chejin",
+        "role": "customer",
+        "tenant_ids": [
+          "chejin"
+        ],
+        "display_name": "江苏车金二手车测试客户 2026-05-01",
+        "username": "chejin",
+        "resource_scopes": [
+          "*"
+        ]
+      },
+      "active_tenant_id": "chejin",
+      "issued_at": "2026-05-18T08:45:59+00:00",
+      "expires_at": "2026-05-18T20:45:59+00:00",
+      "source": "vps",
+      "token": "vps_Sco1hS7WjCO2nqjDDkbhzLspmr8lhp2YF_PBJ6AfCEs"
+    },
+    "vps_wvCHPIYfII3eJasKKkTsJ04EjnG1_UoXmyj1Y6CM4eM": {
+      "session_id": "vps_wvCHPIYfII3eJasKKkTsJ04EjnG1_UoXmyj1Y6CM4eM",
+      "user": {
+        "user_id": "chejin",
+        "role": "customer",
+        "tenant_ids": [
+          "chejin"
+        ],
+        "display_name": "江苏车金二手车测试客户 2026-05-01",
+        "username": "chejin",
+        "resource_scopes": [
+          "*"
+        ]
+      },
+      "active_tenant_id": "chejin",
+      "issued_at": "2026-05-18T08:46:23+00:00",
+      "expires_at": "2026-05-18T20:46:23+00:00",
+      "source": "vps",
+      "token": "vps_wvCHPIYfII3eJasKKkTsJ04EjnG1_UoXmyj1Y6CM4eM"
+    },
+    "vps_UhZzCEWx9YMYH9LynKIeF602oc-or69Bt6Uk1g_WkOI": {
+      "session_id": "vps_UhZzCEWx9YMYH9LynKIeF602oc-or69Bt6Uk1g_WkOI",
+      "user": {
+        "user_id": "chejin",
+        "role": "customer",
+        "tenant_ids": [
+          "chejin"
+        ],
+        "display_name": "江苏车金二手车测试客户 2026-05-01",
+        "username": "chejin",
+        "resource_scopes": [
+          "*"
+        ]
+      },
+      "active_tenant_id": "chejin",
+      "issued_at": "2026-05-18T08:48:06+00:00",
+      "expires_at": "2026-05-18T20:48:06+00:00",
+      "source": "vps",
+      "token": "vps_UhZzCEWx9YMYH9LynKIeF602oc-or69Bt6Uk1g_WkOI"
+    },
+    "vps_3fqMxrfSboGpg2DB7YuOLHWgn81e9iCpgPQDYEc1v48": {
+      "session_id": "vps_3fqMxrfSboGpg2DB7YuOLHWgn81e9iCpgPQDYEc1v48",
+      "user": {
+        "user_id": "chejin",
+        "role": "customer",
+        "tenant_ids": [
+          "chejin"
+        ],
+        "display_name": "江苏车金二手车测试客户 2026-05-01",
+        "username": "chejin",
+        "resource_scopes": [
+          "*"
+        ]
+      },
+      "active_tenant_id": "chejin",
+      "issued_at": "2026-05-18T08:48:23+00:00",
+      "expires_at": "2026-05-18T20:48:23+00:00",
+      "source": "vps",
+      "token": "vps_3fqMxrfSboGpg2DB7YuOLHWgn81e9iCpgPQDYEc1v48"
+    },
+    "vps_9usUG-g3afk578maF99IUXiYBicGEaFexLiD1TRygQw": {
+      "session_id": "vps_9usUG-g3afk578maF99IUXiYBicGEaFexLiD1TRygQw",
+      "user": {
+        "user_id": "chejin",
+        "role": "customer",
+        "tenant_ids": [
+          "chejin"
+        ],
+        "display_name": "江苏车金二手车测试客户 2026-05-01",
+        "username": "chejin",
+        "resource_scopes": [
+          "*"
+        ]
+      },
+      "active_tenant_id": "chejin",
+      "issued_at": "2026-05-18T13:37:28+00:00",
+      "expires_at": "2026-05-19T01:37:28+00:00",
+      "source": "vps",
+      "token": "vps_9usUG-g3afk578maF99IUXiYBicGEaFexLiD1TRygQw"
+    },
+    "vps_Dorz6lPZZGwy8IO6sCIwAaPRevwq8ePp84nfyWgzxBI": {
+      "session_id": "vps_Dorz6lPZZGwy8IO6sCIwAaPRevwq8ePp84nfyWgzxBI",
+      "user": {
+        "user_id": "chejin",
+        "role": "customer",
+        "tenant_ids": [
+          "chejin"
+        ],
+        "display_name": "江苏车金二手车测试客户 2026-05-01",
+        "username": "chejin",
+        "resource_scopes": [
+          "*"
+        ]
+      },
+      "active_tenant_id": "chejin",
+      "issued_at": "2026-05-18T13:45:54+00:00",
+      "expires_at": "2026-05-19T01:45:54+00:00",
+      "source": "vps",
+      "token": "vps_Dorz6lPZZGwy8IO6sCIwAaPRevwq8ePp84nfyWgzxBI"
+    },
+    "vps_W3b1pQ4ysCDxu9ZHBkA2cxDjoRXVsaqLSinxGnyFgEc": {
+      "session_id": "vps_W3b1pQ4ysCDxu9ZHBkA2cxDjoRXVsaqLSinxGnyFgEc",
+      "user": {
+        "user_id": "chejin",
+        "role": "customer",
+        "tenant_ids": [
+          "chejin"
+        ],
+        "display_name": "江苏车金二手车测试客户 2026-05-01",
+        "username": "chejin",
+        "resource_scopes": [
+          "*"
+        ]
+      },
+      "active_tenant_id": "chejin",
+      "issued_at": "2026-05-18T13:47:05+00:00",
+      "expires_at": "2026-05-19T01:47:05+00:00",
+      "source": "vps",
+      "token": "vps_W3b1pQ4ysCDxu9ZHBkA2cxDjoRXVsaqLSinxGnyFgEc"
+    },
+    "vps_C0wCrbSwmI8FF1IFwfOUz24L8U5hhg_fWAjgb35Sxks": {
+      "session_id": "vps_C0wCrbSwmI8FF1IFwfOUz24L8U5hhg_fWAjgb35Sxks",
+      "user": {
+        "user_id": "chejin",
+        "role": "customer",
+        "tenant_ids": [
+          "chejin"
+        ],
+        "display_name": "江苏车金二手车测试客户 2026-05-01",
+        "username": "chejin",
+        "resource_scopes": [
+          "*"
+        ]
+      },
+      "active_tenant_id": "chejin",
+      "issued_at": "2026-05-18T13:48:31+00:00",
+      "expires_at": "2026-05-19T01:48:31+00:00",
+      "source": "vps",
+      "token": "vps_C0wCrbSwmI8FF1IFwfOUz24L8U5hhg_fWAjgb35Sxks"
+    },
+    "vps_GVo1zf1uBn5a30N336xeVNyaG7xR0P21pPCPfkNfsho": {
+      "session_id": "vps_GVo1zf1uBn5a30N336xeVNyaG7xR0P21pPCPfkNfsho",
+      "user": {
+        "user_id": "chejin",
+        "role": "customer",
+        "tenant_ids": [
+          "chejin"
+        ],
+        "display_name": "江苏车金二手车测试客户 2026-05-01",
+        "username": "chejin",
+        "resource_scopes": [
+          "*"
+        ]
+      },
+      "active_tenant_id": "chejin",
+      "issued_at": "2026-05-18T13:50:00+00:00",
+      "expires_at": "2026-05-19T01:50:00+00:00",
+      "source": "vps",
+      "token": "vps_GVo1zf1uBn5a30N336xeVNyaG7xR0P21pPCPfkNfsho"
+    },
+    "vps_58L-CjAAHHpYuALzlrA5rJk-flnDuOjJ8PG-E7wYiMU": {
+      "session_id": "vps_58L-CjAAHHpYuALzlrA5rJk-flnDuOjJ8PG-E7wYiMU",
+      "user": {
+        "user_id": "chejin",
+        "role": "customer",
+        "tenant_ids": [
+          "chejin"
+        ],
+        "display_name": "江苏车金二手车测试客户 2026-05-01",
+        "username": "chejin",
+        "resource_scopes": [
+          "*"
+        ]
+      },
+      "active_tenant_id": "chejin",
+      "issued_at": "2026-05-18T19:42:17+00:00",
+      "expires_at": "2026-05-19T07:42:17+00:00",
+      "source": "vps",
+      "token": "vps_58L-CjAAHHpYuALzlrA5rJk-flnDuOjJ8PG-E7wYiMU"
+    },
+    "vps_F3SRAeoX5OuzEqU6Mf0P3Fr0NdmJna0edxIdSKXQLzw": {
+      "session_id": "vps_F3SRAeoX5OuzEqU6Mf0P3Fr0NdmJna0edxIdSKXQLzw",
+      "user": {
+        "user_id": "chejin",
+        "role": "customer",
+        "tenant_ids": [
+          "chejin"
+        ],
+        "display_name": "江苏车金二手车测试客户 2026-05-01",
+        "username": "chejin",
+        "resource_scopes": [
+          "*"
+        ]
+      },
+      "active_tenant_id": "chejin",
+      "issued_at": "2026-05-18T21:23:41+00:00",
+      "expires_at": "2026-05-19T09:23:41+00:00",
+      "source": "vps",
+      "token": "vps_F3SRAeoX5OuzEqU6Mf0P3Fr0NdmJna0edxIdSKXQLzw"
+    },
+    "vps_IXOfGwuTx37kiyQpOsYg0wdzV8imBhcEyx8uDY6EB78": {
+      "session_id": "vps_IXOfGwuTx37kiyQpOsYg0wdzV8imBhcEyx8uDY6EB78",
+      "user": {
+        "user_id": "platform-admin",
+        "role": "admin",
+        "tenant_ids": [
+          "*"
+        ],
+        "display_name": "Platform Admin",
+        "username": "admin",
+        "resource_scopes": [
+          "*"
+        ]
+      },
+      "active_tenant_id": "default",
+      "issued_at": "2026-05-19T03:11:45+00:00",
+      "expires_at": "2026-05-19T15:11:45+00:00",
+      "source": "vps",
+      "token": "vps_IXOfGwuTx37kiyQpOsYg0wdzV8imBhcEyx8uDY6EB78"
+    },
+    "vps_bpPgtHsmeshq1tTyym4IWnaaBKuXWW9064kQtNR-3DU": {
+      "session_id": "vps_bpPgtHsmeshq1tTyym4IWnaaBKuXWW9064kQtNR-3DU",
+      "user": {
+        "user_id": "chejin",
+        "role": "customer",
+        "tenant_ids": [
+          "chejin"
+        ],
+        "display_name": "江苏车金二手车测试客户 2026-05-01",
+        "username": "chejin",
+        "resource_scopes": [
+          "*"
+        ]
+      },
+      "active_tenant_id": "chejin",
+      "issued_at": "2026-05-19T03:11:59+00:00",
+      "expires_at": "2026-05-19T15:11:59+00:00",
+      "source": "vps",
+      "token": "vps_bpPgtHsmeshq1tTyym4IWnaaBKuXWW9064kQtNR-3DU"
+    },
+    "vps_xek6q9jk1Zgevt4sazt_n8uCDlINjDtUpbKXYHD-W6Q": {
+      "session_id": "vps_xek6q9jk1Zgevt4sazt_n8uCDlINjDtUpbKXYHD-W6Q",
+      "user": {
+        "user_id": "chejin",
+        "role": "customer",
+        "tenant_ids": [
+          "chejin"
+        ],
+        "display_name": "江苏车金二手车测试客户 2026-05-01",
+        "username": "chejin",
+        "resource_scopes": [
+          "*"
+        ]
+      },
+      "active_tenant_id": "chejin",
+      "issued_at": "2026-05-19T03:16:35+00:00",
+      "expires_at": "2026-05-19T15:16:35+00:00",
+      "source": "vps",
+      "token": "vps_xek6q9jk1Zgevt4sazt_n8uCDlINjDtUpbKXYHD-W6Q"
+    },
+    "vps_NBoCsKbZsGL0IWbp34q8UELcPiL_KiL7rJ33qb_JiGc": {
+      "session_id": "vps_NBoCsKbZsGL0IWbp34q8UELcPiL_KiL7rJ33qb_JiGc",
+      "user": {
+        "user_id": "chejin",
+        "role": "customer",
+        "tenant_ids": [
+          "chejin"
+        ],
+        "display_name": "江苏车金二手车测试客户 2026-05-01",
+        "username": "chejin",
+        "resource_scopes": [
+          "*"
+        ]
+      },
+      "active_tenant_id": "chejin",
+      "issued_at": "2026-05-19T03:17:19+00:00",
+      "expires_at": "2026-05-19T15:17:19+00:00",
+      "source": "vps",
+      "token": "vps_NBoCsKbZsGL0IWbp34q8UELcPiL_KiL7rJ33qb_JiGc"
+    },
+    "vps_gB5cDmjTlFat4T99qFW9vbfyHxKQofrU2kP2K26lfv8": {
+      "session_id": "vps_gB5cDmjTlFat4T99qFW9vbfyHxKQofrU2kP2K26lfv8",
+      "user": {
+        "user_id": "chejin",
+        "role": "customer",
+        "tenant_ids": [
+          "chejin"
+        ],
+        "display_name": "江苏车金二手车测试客户 2026-05-01",
+        "username": "chejin",
+        "resource_scopes": [
+          "*"
+        ]
+      },
+      "active_tenant_id": "chejin",
+      "issued_at": "2026-05-19T03:17:37+00:00",
+      "expires_at": "2026-05-19T15:17:37+00:00",
+      "source": "vps",
+      "token": "vps_gB5cDmjTlFat4T99qFW9vbfyHxKQofrU2kP2K26lfv8"
+    },
+    "vps_WPehkMcdFPthwA6pCBedzaPohtzGHWJGZNvtvUh4gcY": {
+      "session_id": "vps_WPehkMcdFPthwA6pCBedzaPohtzGHWJGZNvtvUh4gcY",
+      "user": {
+        "user_id": "chejin",
+        "role": "customer",
+        "tenant_ids": [
+          "chejin"
+        ],
+        "display_name": "江苏车金二手车测试客户 2026-05-01",
+        "username": "chejin",
+        "resource_scopes": [
+          "*"
+        ]
+      },
+      "active_tenant_id": "chejin",
+      "issued_at": "2026-05-19T03:18:58+00:00",
+      "expires_at": "2026-05-19T15:18:58+00:00",
+      "source": "vps",
+      "token": "vps_WPehkMcdFPthwA6pCBedzaPohtzGHWJGZNvtvUh4gcY"
+    },
+    "vps_G7B4X4ERlivxolRjBh_tbO9pX1sSHMszbArN2hpNWZo": {
+      "session_id": "vps_G7B4X4ERlivxolRjBh_tbO9pX1sSHMszbArN2hpNWZo",
+      "user": {
+        "user_id": "chejin",
+        "role": "customer",
+        "tenant_ids": [
+          "chejin"
+        ],
+        "display_name": "江苏车金二手车测试客户 2026-05-01",
+        "username": "chejin",
+        "resource_scopes": [
+          "*"
+        ]
+      },
+      "active_tenant_id": "chejin",
+      "issued_at": "2026-05-19T03:19:07+00:00",
+      "expires_at": "2026-05-19T15:19:07+00:00",
+      "source": "vps",
+      "token": "vps_G7B4X4ERlivxolRjBh_tbO9pX1sSHMszbArN2hpNWZo"
+    },
+    "vps_4qpHoryFAmXQncDuU5FApNQFp7jQSo8uilj_SFQHQBQ": {
+      "session_id": "vps_4qpHoryFAmXQncDuU5FApNQFp7jQSo8uilj_SFQHQBQ",
+      "user": {
+        "user_id": "chejin",
+        "role": "customer",
+        "tenant_ids": [
+          "chejin"
+        ],
+        "display_name": "江苏车金二手车测试客户 2026-05-01",
+        "username": "chejin",
+        "resource_scopes": [
+          "*"
+        ]
+      },
+      "active_tenant_id": "chejin",
+      "issued_at": "2026-05-19T03:19:21+00:00",
+      "expires_at": "2026-05-19T15:19:21+00:00",
+      "source": "vps",
+      "token": "vps_4qpHoryFAmXQncDuU5FApNQFp7jQSo8uilj_SFQHQBQ"
+    },
+    "vps_4FTcxsPtm1KHdIURVrXN1rl9VxiD60ltJfhceH4J1Bs": {
+      "session_id": "vps_4FTcxsPtm1KHdIURVrXN1rl9VxiD60ltJfhceH4J1Bs",
+      "user": {
+        "user_id": "chejin",
+        "role": "customer",
+        "tenant_ids": [
+          "chejin"
+        ],
+        "display_name": "江苏车金二手车测试客户 2026-05-01",
+        "username": "chejin",
+        "resource_scopes": [
+          "*"
+        ]
+      },
+      "active_tenant_id": "chejin",
+      "issued_at": "2026-05-19T03:19:41+00:00",
+      "expires_at": "2026-05-19T15:19:41+00:00",
+      "source": "vps",
+      "token": "vps_4FTcxsPtm1KHdIURVrXN1rl9VxiD60ltJfhceH4J1Bs"
+    },
+    "vps_IyJxqxwd5GTmkkFMFYPpFQaR3LA6KTLH-MrqdmSOCOU": {
+      "session_id": "vps_IyJxqxwd5GTmkkFMFYPpFQaR3LA6KTLH-MrqdmSOCOU",
+      "user": {
+        "user_id": "chejin",
+        "role": "customer",
+        "tenant_ids": [
+          "chejin"
+        ],
+        "display_name": "江苏车金二手车测试客户 2026-05-01",
+        "username": "chejin",
+        "resource_scopes": [
+          "*"
+        ]
+      },
+      "active_tenant_id": "chejin",
+      "issued_at": "2026-05-19T03:20:41+00:00",
+      "expires_at": "2026-05-19T15:20:41+00:00",
+      "source": "vps",
+      "token": "vps_IyJxqxwd5GTmkkFMFYPpFQaR3LA6KTLH-MrqdmSOCOU"
+    },
+    "vps_AyjtKHugHIPypSFpgOCrBOqKC77d9kMO68Jd96fK0u4": {
+      "session_id": "vps_AyjtKHugHIPypSFpgOCrBOqKC77d9kMO68Jd96fK0u4",
+      "user": {
+        "user_id": "chejin",
+        "role": "customer",
+        "tenant_ids": [
+          "chejin"
+        ],
+        "display_name": "江苏车金二手车测试客户 2026-05-01",
+        "username": "chejin",
+        "resource_scopes": [
+          "*"
+        ]
+      },
+      "active_tenant_id": "chejin",
+      "issued_at": "2026-05-19T03:22:24+00:00",
+      "expires_at": "2026-05-19T15:22:24+00:00",
+      "source": "vps",
+      "token": "vps_AyjtKHugHIPypSFpgOCrBOqKC77d9kMO68Jd96fK0u4"
+    },
+    "vps_ObJMuAuHtiFRPOMYZX52Dj_inDteZDLxp03UVKZPCfI": {
+      "session_id": "vps_ObJMuAuHtiFRPOMYZX52Dj_inDteZDLxp03UVKZPCfI",
+      "user": {
+        "user_id": "chejin",
+        "role": "customer",
+        "tenant_ids": [
+          "chejin"
+        ],
+        "display_name": "江苏车金二手车测试客户 2026-05-01",
+        "username": "chejin",
+        "resource_scopes": [
+          "*"
+        ]
+      },
+      "active_tenant_id": "chejin",
+      "issued_at": "2026-05-19T03:22:38+00:00",
+      "expires_at": "2026-05-19T15:22:38+00:00",
+      "source": "vps",
+      "token": "vps_ObJMuAuHtiFRPOMYZX52Dj_inDteZDLxp03UVKZPCfI"
+    },
+    "vps_m8Q5_IKoMNtc7HdY7id1uT9QFqSeDbbi4mkmXNQE0E0": {
+      "session_id": "vps_m8Q5_IKoMNtc7HdY7id1uT9QFqSeDbbi4mkmXNQE0E0",
+      "user": {
+        "user_id": "chejin",
+        "role": "customer",
+        "tenant_ids": [
+          "chejin"
+        ],
+        "display_name": "江苏车金二手车测试客户 2026-05-01",
+        "username": "chejin",
+        "resource_scopes": [
+          "*"
+        ]
+      },
+      "active_tenant_id": "chejin",
+      "issued_at": "2026-05-19T03:22:53+00:00",
+      "expires_at": "2026-05-19T15:22:53+00:00",
+      "source": "vps",
+      "token": "vps_m8Q5_IKoMNtc7HdY7id1uT9QFqSeDbbi4mkmXNQE0E0"
+    },
+    "vps_aSvh5vL0IVshIeHBVXSIqW83yozbCBvVAsh6m9834L0": {
+      "session_id": "vps_aSvh5vL0IVshIeHBVXSIqW83yozbCBvVAsh6m9834L0",
+      "user": {
+        "user_id": "chejin",
+        "role": "customer",
+        "tenant_ids": [
+          "chejin"
+        ],
+        "display_name": "江苏车金二手车测试客户 2026-05-01",
+        "username": "chejin",
+        "resource_scopes": [
+          "*"
+        ]
+      },
+      "active_tenant_id": "chejin",
+      "issued_at": "2026-05-19T03:22:53+00:00",
+      "expires_at": "2026-05-19T15:22:53+00:00",
+      "source": "vps",
+      "token": "vps_aSvh5vL0IVshIeHBVXSIqW83yozbCBvVAsh6m9834L0"
+    },
+    "vps_poOrASTQWsiaJ9uHLw-VUpIBCym8aA6WVTagp2TCRgo": {
+      "session_id": "vps_poOrASTQWsiaJ9uHLw-VUpIBCym8aA6WVTagp2TCRgo",
+      "user": {
+        "user_id": "chejin",
+        "role": "customer",
+        "tenant_ids": [
+          "chejin"
+        ],
+        "display_name": "江苏车金二手车测试客户 2026-05-01",
+        "username": "chejin",
+        "resource_scopes": [
+          "*"
+        ]
+      },
+      "active_tenant_id": "chejin",
+      "issued_at": "2026-05-19T03:24:18+00:00",
+      "expires_at": "2026-05-19T15:24:18+00:00",
+      "source": "vps",
+      "token": "vps_poOrASTQWsiaJ9uHLw-VUpIBCym8aA6WVTagp2TCRgo"
+    },
+    "vps_b1NY7kr2I4qYIk3npEQ0kCpB7as8FgUhtKNZPMMTh1Y": {
+      "session_id": "vps_b1NY7kr2I4qYIk3npEQ0kCpB7as8FgUhtKNZPMMTh1Y",
+      "user": {
+        "user_id": "chejin",
+        "role": "customer",
+        "tenant_ids": [
+          "chejin"
+        ],
+        "display_name": "江苏车金二手车测试客户 2026-05-01",
+        "username": "chejin",
+        "resource_scopes": [
+          "*"
+        ]
+      },
+      "active_tenant_id": "chejin",
+      "issued_at": "2026-05-19T05:05:12+00:00",
+      "expires_at": "2026-05-19T17:05:12+00:00",
+      "source": "vps",
+      "token": "vps_b1NY7kr2I4qYIk3npEQ0kCpB7as8FgUhtKNZPMMTh1Y"
     }
   },
   "local_nodes": {
@@ -850,7 +2132,7 @@
       "node_id": "local_8bcbb764d81d3f68",
       "display_name": "Local Admin 客户端",
       "tenant_ids": [
-        "jiangsu_chejin_usedcar_customer_20260501"
+        "chejin"
       ],
       "status": "online",
       "version": "local-dev",
@@ -869,13 +2151,14 @@
         "hostname": "LAPTOP-PT3DCHM7",
         "platform": "Windows-10-10.0.19045-SP0",
         "runtime_root": "D:\\AI\\AI_RPA\\runtime\\apps\\wechat_ai_customer_service"
-      }
+      },
+      "updated_at": "2026-05-18T08:34:37+00:00"
     },
     "local_ab4dd8a99b8cbf21": {
       "node_id": "local_ab4dd8a99b8cbf21",
-      "display_name": "test02 客户端",
+      "display_name": "江苏车金二手车测试客户 2026-05-01 客户端",
       "tenant_ids": [
-        "test02"
+        "chejin"
       ],
       "status": "online",
       "version": "local-dev",
@@ -887,9 +2170,9 @@
         "restore_backup",
         "push_update"
       ],
-      "node_token": "node_eK21Xb1E7xh6szlDEOIZ6mzKwZWNFDJV",
-      "registered_at": "2026-05-11T05:16:11+00:00",
-      "last_seen_at": "2026-05-11T06:26:12+00:00",
+      "node_token": "node_mL6SierscqEVD_7_dItwevskJsriENKZ",
+      "registered_at": "2026-05-19T05:05:13+00:00",
+      "last_seen_at": "2026-05-19T12:42:55+00:00",
       "metadata": {
         "hostname": "LAPTOP-HJGDTB1M",
         "platform": "Windows-11-10.0.26200-SP0",
@@ -919,7 +2202,8 @@
         "hostname": "LAPTOP-HJGDTB1M",
         "platform": "Windows-11-10.0.26200-SP0",
         "runtime_root": "D:\\AI\\omniauto\\runtime\\apps\\wechat_ai_customer_service"
-      }
+      },
+      "updated_at": "2026-05-18T08:34:37+00:00"
     }
   },
   "commands": {
@@ -2528,184 +3812,184 @@
   "releases": {},
   "audit_events": [
     {
-      "event_id": "audit_20260511030551590066_f9c169",
-      "actor_id": "user_YTE2rdUWFGqX",
-      "action": "register_node",
-      "target_type": "local_node",
-      "target_id": "local_ab4dd8a99b8cbf21",
-      "detail": {},
-      "created_at": "2026-05-11T03:05:51+00:00"
-    },
-    {
-      "event_id": "audit_20260511031646815685_93daca",
-      "actor_id": "local-node",
-      "action": "register_node",
-      "target_type": "local_node",
-      "target_id": "local_ab4dd8a99b8cbf21",
-      "detail": {},
-      "created_at": "2026-05-11T03:16:46+00:00"
-    },
-    {
-      "event_id": "audit_20260511031646839866_4a04a8",
-      "actor_id": "local-node",
-      "action": "register_node",
-      "target_type": "local_node",
-      "target_id": "local_ab4dd8a99b8cbf21",
-      "detail": {},
-      "created_at": "2026-05-11T03:16:46+00:00"
-    },
-    {
-      "event_id": "audit_20260511031647079000_b3f329",
-      "actor_id": "user_YTE2rdUWFGqX",
-      "action": "register_node",
-      "target_type": "local_node",
-      "target_id": "local_ab4dd8a99b8cbf21",
-      "detail": {},
-      "created_at": "2026-05-11T03:16:47+00:00"
-    },
-    {
-      "event_id": "audit_20260511032341701885_07ff1c",
-      "actor_id": "local-node",
-      "action": "register_node",
-      "target_type": "local_node",
-      "target_id": "local_ab4dd8a99b8cbf21",
-      "detail": {},
-      "created_at": "2026-05-11T03:23:41+00:00"
-    },
-    {
-      "event_id": "audit_20260511032341725893_529ae0",
-      "actor_id": "local-node",
-      "action": "register_node",
-      "target_type": "local_node",
-      "target_id": "local_ab4dd8a99b8cbf21",
-      "detail": {},
-      "created_at": "2026-05-11T03:23:41+00:00"
-    },
-    {
-      "event_id": "audit_20260511032341977467_6eb052",
-      "actor_id": "user_YTE2rdUWFGqX",
-      "action": "register_node",
-      "target_type": "local_node",
-      "target_id": "local_ab4dd8a99b8cbf21",
-      "detail": {},
-      "created_at": "2026-05-11T03:23:41+00:00"
-    },
-    {
-      "event_id": "audit_20260511050201185218_cf38f3",
-      "actor_id": "local-node",
-      "action": "register_node",
-      "target_type": "local_node",
-      "target_id": "local_ab4dd8a99b8cbf21",
-      "detail": {},
-      "created_at": "2026-05-11T05:02:01+00:00"
-    },
-    {
-      "event_id": "audit_20260511050201207737_d2278c",
-      "actor_id": "local-node",
-      "action": "register_node",
-      "target_type": "local_node",
-      "target_id": "local_ab4dd8a99b8cbf21",
-      "detail": {},
-      "created_at": "2026-05-11T05:02:01+00:00"
-    },
-    {
-      "event_id": "audit_20260511050211052616_e64265",
-      "actor_id": "local-node",
-      "action": "register_node",
-      "target_type": "local_node",
-      "target_id": "local_ab4dd8a99b8cbf21",
-      "detail": {},
-      "created_at": "2026-05-11T05:02:11+00:00"
-    },
-    {
-      "event_id": "audit_20260511050211226673_ad5e41",
-      "actor_id": "local-node",
-      "action": "register_node",
-      "target_type": "local_node",
-      "target_id": "local_ab4dd8a99b8cbf21",
-      "detail": {},
-      "created_at": "2026-05-11T05:02:11+00:00"
-    },
-    {
-      "event_id": "audit_20260511050211487820_8f5dea",
-      "actor_id": "user_YTE2rdUWFGqX",
+      "event_id": "audit_20260519031907331674_43d0ee",
+      "actor_id": "chejin",
       "action": "login",
       "target_type": "session",
-      "target_id": "vps_6Jn2uwlr5ozQnhfxNOUZavr7D4WA-sY-E9Eibh9voBw",
+      "target_id": "vps_G7B4X4ERlivxolRjBh_tbO9pX1sSHMszbArN2hpNWZo",
       "detail": {},
-      "created_at": "2026-05-11T05:02:11+00:00"
+      "created_at": "2026-05-19T03:19:07+00:00"
     },
     {
-      "event_id": "audit_20260511050211616311_6c2fee",
-      "actor_id": "user_YTE2rdUWFGqX",
-      "action": "register_node",
-      "target_type": "local_node",
-      "target_id": "local_ab4dd8a99b8cbf21",
-      "detail": {},
-      "created_at": "2026-05-11T05:02:11+00:00"
-    },
-    {
-      "event_id": "audit_20260511051546975065_7531d7",
-      "actor_id": "local-node",
-      "action": "register_node",
-      "target_type": "local_node",
-      "target_id": "local_ab4dd8a99b8cbf21",
-      "detail": {},
-      "created_at": "2026-05-11T05:15:46+00:00"
-    },
-    {
-      "event_id": "audit_20260511051547000072_72bd49",
-      "actor_id": "local-node",
-      "action": "register_node",
-      "target_type": "local_node",
-      "target_id": "local_ab4dd8a99b8cbf21",
-      "detail": {},
-      "created_at": "2026-05-11T05:15:47+00:00"
-    },
-    {
-      "event_id": "audit_20260511051602121650_fab74b",
-      "actor_id": "local-node",
-      "action": "register_node",
-      "target_type": "local_node",
-      "target_id": "local_ab4dd8a99b8cbf21",
-      "detail": {},
-      "created_at": "2026-05-11T05:16:02+00:00"
-    },
-    {
-      "event_id": "audit_20260511051610484095_d871f7",
-      "actor_id": "local-node",
-      "action": "register_node",
-      "target_type": "local_node",
-      "target_id": "local_ab4dd8a99b8cbf21",
-      "detail": {},
-      "created_at": "2026-05-11T05:16:10+00:00"
-    },
-    {
-      "event_id": "audit_20260511051610649308_7dbed7",
-      "actor_id": "local-node",
-      "action": "register_node",
-      "target_type": "local_node",
-      "target_id": "local_ab4dd8a99b8cbf21",
-      "detail": {},
-      "created_at": "2026-05-11T05:16:10+00:00"
-    },
-    {
-      "event_id": "audit_20260511051610930048_ff7f59",
-      "actor_id": "user_YTE2rdUWFGqX",
+      "event_id": "audit_20260519031921031113_ead6aa",
+      "actor_id": "chejin",
       "action": "login",
       "target_type": "session",
-      "target_id": "vps_coMXXVoEwMsIVTKyxv5ae2y0aH22stwyFc77m3ZJ2IY",
+      "target_id": "vps_4qpHoryFAmXQncDuU5FApNQFp7jQSo8uilj_SFQHQBQ",
       "detail": {},
-      "created_at": "2026-05-11T05:16:10+00:00"
+      "created_at": "2026-05-19T03:19:21+00:00"
     },
     {
-      "event_id": "audit_20260511051611036093_cd062c",
-      "actor_id": "user_YTE2rdUWFGqX",
+      "event_id": "audit_20260519031941353846_f0a62e",
+      "actor_id": "chejin",
+      "action": "login",
+      "target_type": "session",
+      "target_id": "vps_4FTcxsPtm1KHdIURVrXN1rl9VxiD60ltJfhceH4J1Bs",
+      "detail": {},
+      "created_at": "2026-05-19T03:19:41+00:00"
+    },
+    {
+      "event_id": "audit_20260519032041603093_c30edc",
+      "actor_id": "chejin",
+      "action": "login",
+      "target_type": "session",
+      "target_id": "vps_IyJxqxwd5GTmkkFMFYPpFQaR3LA6KTLH-MrqdmSOCOU",
+      "detail": {},
+      "created_at": "2026-05-19T03:20:41+00:00"
+    },
+    {
+      "event_id": "audit_20260519032224087703_ca8c4f",
+      "actor_id": "chejin",
+      "action": "login",
+      "target_type": "session",
+      "target_id": "vps_AyjtKHugHIPypSFpgOCrBOqKC77d9kMO68Jd96fK0u4",
+      "detail": {},
+      "created_at": "2026-05-19T03:22:24+00:00"
+    },
+    {
+      "event_id": "audit_20260519032238718148_b2900f",
+      "actor_id": "chejin",
+      "action": "login",
+      "target_type": "session",
+      "target_id": "vps_ObJMuAuHtiFRPOMYZX52Dj_inDteZDLxp03UVKZPCfI",
+      "detail": {},
+      "created_at": "2026-05-19T03:22:38+00:00"
+    },
+    {
+      "event_id": "audit_20260519032253266283_40c80c",
+      "actor_id": "chejin",
+      "action": "login",
+      "target_type": "session",
+      "target_id": "vps_m8Q5_IKoMNtc7HdY7id1uT9QFqSeDbbi4mkmXNQE0E0",
+      "detail": {},
+      "created_at": "2026-05-19T03:22:53+00:00"
+    },
+    {
+      "event_id": "audit_20260519032253406373_046a66",
+      "actor_id": "chejin",
+      "action": "login",
+      "target_type": "session",
+      "target_id": "vps_aSvh5vL0IVshIeHBVXSIqW83yozbCBvVAsh6m9834L0",
+      "detail": {},
+      "created_at": "2026-05-19T03:22:53+00:00"
+    },
+    {
+      "event_id": "audit_20260519032418435858_658457",
+      "actor_id": "local-node",
       "action": "register_node",
       "target_type": "local_node",
       "target_id": "local_ab4dd8a99b8cbf21",
       "detail": {},
-      "created_at": "2026-05-11T05:16:11+00:00"
+      "created_at": "2026-05-19T03:24:18+00:00"
+    },
+    {
+      "event_id": "audit_20260519032418729771_201bd4",
+      "actor_id": "chejin",
+      "action": "login",
+      "target_type": "session",
+      "target_id": "vps_poOrASTQWsiaJ9uHLw-VUpIBCym8aA6WVTagp2TCRgo",
+      "detail": {},
+      "created_at": "2026-05-19T03:24:18+00:00"
+    },
+    {
+      "event_id": "audit_20260519032453710535_72286c",
+      "actor_id": "local-node",
+      "action": "register_node",
+      "target_type": "local_node",
+      "target_id": "local_ab4dd8a99b8cbf21",
+      "detail": {},
+      "created_at": "2026-05-19T03:24:53+00:00"
+    },
+    {
+      "event_id": "audit_20260519032453764410_391462",
+      "actor_id": "local-node",
+      "action": "register_node",
+      "target_type": "local_node",
+      "target_id": "local_ab4dd8a99b8cbf21",
+      "detail": {},
+      "created_at": "2026-05-19T03:24:53+00:00"
+    },
+    {
+      "event_id": "audit_20260519032454252781_00aa24",
+      "actor_id": "chejin",
+      "action": "register_node",
+      "target_type": "local_node",
+      "target_id": "local_ab4dd8a99b8cbf21",
+      "detail": {},
+      "created_at": "2026-05-19T03:24:54+00:00"
+    },
+    {
+      "event_id": "audit_20260519050457954466_9a365b",
+      "actor_id": "local-node",
+      "action": "register_node",
+      "target_type": "local_node",
+      "target_id": "local_ab4dd8a99b8cbf21",
+      "detail": {},
+      "created_at": "2026-05-19T05:04:57+00:00"
+    },
+    {
+      "event_id": "audit_20260519050457996275_8be1bb",
+      "actor_id": "local-node",
+      "action": "register_node",
+      "target_type": "local_node",
+      "target_id": "local_ab4dd8a99b8cbf21",
+      "detail": {},
+      "created_at": "2026-05-19T05:04:57+00:00"
+    },
+    {
+      "event_id": "audit_20260519050506421871_6cf034",
+      "actor_id": "local-node",
+      "action": "register_node",
+      "target_type": "local_node",
+      "target_id": "local_ab4dd8a99b8cbf21",
+      "detail": {},
+      "created_at": "2026-05-19T05:05:06+00:00"
+    },
+    {
+      "event_id": "audit_20260519050512216986_ad5524",
+      "actor_id": "local-node",
+      "action": "register_node",
+      "target_type": "local_node",
+      "target_id": "local_ab4dd8a99b8cbf21",
+      "detail": {},
+      "created_at": "2026-05-19T05:05:12+00:00"
+    },
+    {
+      "event_id": "audit_20260519050512563087_5a560a",
+      "actor_id": "local-node",
+      "action": "register_node",
+      "target_type": "local_node",
+      "target_id": "local_ab4dd8a99b8cbf21",
+      "detail": {},
+      "created_at": "2026-05-19T05:05:12+00:00"
+    },
+    {
+      "event_id": "audit_20260519050512995710_6a350b",
+      "actor_id": "chejin",
+      "action": "login",
+      "target_type": "session",
+      "target_id": "vps_b1NY7kr2I4qYIk3npEQ0kCpB7as8FgUhtKNZPMMTh1Y",
+      "detail": {},
+      "created_at": "2026-05-19T05:05:12+00:00"
+    },
+    {
+      "event_id": "audit_20260519050513239733_c3602b",
+      "actor_id": "chejin",
+      "action": "register_node",
+      "target_type": "local_node",
+      "target_id": "local_ab4dd8a99b8cbf21",
+      "detail": {},
+      "created_at": "2026-05-19T05:05:13+00:00"
     }
   ],
   "customer_data_packages": {
@@ -5844,27 +7128,27 @@
       "created_by": "platform-admin",
       "created_at": "2026-05-02T08:33:27+00:00"
     },
-    "data_pkg_jiangsu_chejin_usedcar_customer_20260501_backup_f854c59732f95a5d5cda": {
-      "package_id": "data_pkg_jiangsu_chejin_usedcar_customer_20260501_backup_f854c59732f95a5d5cda",
-      "account_username": "jiangsu_chejin_usedcar_customer_20260501",
-      "tenant_id": "jiangsu_chejin_usedcar_customer_20260501",
+    "data_pkg_chejin_backup_f854c59732f95a5d5cda": {
+      "package_id": "data_pkg_chejin_backup_f854c59732f95a5d5cda",
+      "account_username": "chejin",
+      "tenant_id": "chejin",
       "scope": "tenant",
       "backup_id": "backup_f854c59732f95a5d5cda",
       "package_path": "D:\\AI\\AI_RPA\\runtime\\apps\\wechat_ai_customer_service\\vps_admin\\customer_packages\\backup_f854c59732f95a5d5cda.zip",
       "bytes": 142566,
       "summary": {
-        "tenant_id": "jiangsu_chejin_usedcar_customer_20260501",
-        "root": "D:\\AI\\AI_RPA\\apps\\wechat_ai_customer_service\\data\\tenants\\jiangsu_chejin_usedcar_customer_20260501",
+        "tenant_id": "chejin",
+        "root": "D:\\AI\\AI_RPA\\apps\\wechat_ai_customer_service\\data\\tenants\\chejin",
         "exists": true,
         "files": {
-          "root": "D:\\AI\\AI_RPA\\apps\\wechat_ai_customer_service\\data\\tenants\\jiangsu_chejin_usedcar_customer_20260501",
+          "root": "D:\\AI\\AI_RPA\\apps\\wechat_ai_customer_service\\data\\tenants\\chejin",
           "exists": true,
           "file_count": 38,
           "json_file_count": 34,
           "bytes": 121878
         },
         "formal_knowledge": {
-          "root": "D:\\AI\\AI_RPA\\apps\\wechat_ai_customer_service\\data\\tenants\\jiangsu_chejin_usedcar_customer_20260501\\knowledge_bases",
+          "root": "D:\\AI\\AI_RPA\\apps\\wechat_ai_customer_service\\data\\tenants\\chejin\\knowledge_bases",
           "exists": true,
           "category_count": 4,
           "item_count": 11,
@@ -5895,7 +7179,7 @@
             }
           ],
           "files": {
-            "root": "D:\\AI\\AI_RPA\\apps\\wechat_ai_customer_service\\data\\tenants\\jiangsu_chejin_usedcar_customer_20260501\\knowledge_bases",
+            "root": "D:\\AI\\AI_RPA\\apps\\wechat_ai_customer_service\\data\\tenants\\chejin\\knowledge_bases",
             "exists": true,
             "file_count": 24,
             "json_file_count": 20,
@@ -5903,27 +7187,27 @@
           }
         },
         "product_item_knowledge": {
-          "root": "D:\\AI\\AI_RPA\\apps\\wechat_ai_customer_service\\data\\tenants\\jiangsu_chejin_usedcar_customer_20260501\\product_item_knowledge",
+          "root": "D:\\AI\\AI_RPA\\apps\\wechat_ai_customer_service\\data\\tenants\\chejin\\product_item_knowledge",
           "product_count": 3,
           "file_count": 3
         },
         "rag": {
           "sources": {
-            "root": "D:\\AI\\AI_RPA\\apps\\wechat_ai_customer_service\\data\\tenants\\jiangsu_chejin_usedcar_customer_20260501\\rag_sources",
+            "root": "D:\\AI\\AI_RPA\\apps\\wechat_ai_customer_service\\data\\tenants\\chejin\\rag_sources",
             "exists": true,
             "file_count": 1,
             "json_file_count": 1,
             "bytes": 2403
           },
           "chunks": {
-            "root": "D:\\AI\\AI_RPA\\apps\\wechat_ai_customer_service\\data\\tenants\\jiangsu_chejin_usedcar_customer_20260501\\rag_chunks",
+            "root": "D:\\AI\\AI_RPA\\apps\\wechat_ai_customer_service\\data\\tenants\\chejin\\rag_chunks",
             "exists": true,
             "file_count": 4,
             "json_file_count": 4,
             "bytes": 6466
           },
           "index": {
-            "root": "D:\\AI\\AI_RPA\\apps\\wechat_ai_customer_service\\data\\tenants\\jiangsu_chejin_usedcar_customer_20260501\\rag_index",
+            "root": "D:\\AI\\AI_RPA\\apps\\wechat_ai_customer_service\\data\\tenants\\chejin\\rag_index",
             "exists": true,
             "file_count": 1,
             "json_file_count": 1,
@@ -5931,12 +7215,12 @@
           }
         },
         "raw_messages": {
-          "root": "D:\\AI\\AI_RPA\\runtime\\apps\\wechat_ai_customer_service\\tenants\\jiangsu_chejin_usedcar_customer_20260501\\raw_messages",
+          "root": "D:\\AI\\AI_RPA\\runtime\\apps\\wechat_ai_customer_service\\tenants\\chejin\\raw_messages",
           "message_count": 15,
           "conversation_count": 6,
           "batch_count": 4,
           "files": {
-            "root": "D:\\AI\\AI_RPA\\runtime\\apps\\wechat_ai_customer_service\\tenants\\jiangsu_chejin_usedcar_customer_20260501\\raw_messages",
+            "root": "D:\\AI\\AI_RPA\\runtime\\apps\\wechat_ai_customer_service\\tenants\\chejin\\raw_messages",
             "exists": true,
             "file_count": 81,
             "json_file_count": 3,
@@ -5944,12 +7228,12 @@
           }
         },
         "review_candidates": {
-          "root": "D:\\AI\\AI_RPA\\apps\\wechat_ai_customer_service\\data\\tenants\\jiangsu_chejin_usedcar_customer_20260501\\review_candidates",
+          "root": "D:\\AI\\AI_RPA\\apps\\wechat_ai_customer_service\\data\\tenants\\chejin\\review_candidates",
           "pending_count": 3,
           "accepted_count": 0,
           "rejected_count": 0,
           "files": {
-            "root": "D:\\AI\\AI_RPA\\apps\\wechat_ai_customer_service\\data\\tenants\\jiangsu_chejin_usedcar_customer_20260501\\review_candidates",
+            "root": "D:\\AI\\AI_RPA\\apps\\wechat_ai_customer_service\\data\\tenants\\chejin\\review_candidates",
             "exists": true,
             "file_count": 3,
             "json_file_count": 3,
@@ -5957,7 +7241,7 @@
           }
         },
         "uploads": {
-          "root": "D:\\AI\\AI_RPA\\runtime\\apps\\wechat_ai_customer_service\\tenants\\jiangsu_chejin_usedcar_customer_20260501\\admin\\uploads_index.json",
+          "root": "D:\\AI\\AI_RPA\\runtime\\apps\\wechat_ai_customer_service\\tenants\\chejin\\admin\\uploads_index.json",
           "item_count": 0
         }
       },
@@ -5965,904 +7249,904 @@
         "schema_version": 1,
         "backup_id": "backup_f854c59732f95a5d5cda",
         "scope": "tenant",
-        "tenant_id": "jiangsu_chejin_usedcar_customer_20260501",
+        "tenant_id": "chejin",
         "created_at": "2026-05-02T21:57:02",
         "include_derived": true,
         "include_runtime": true,
         "file_count": 179,
         "files": [
           {
-            "path": "payload/runtime/tenants/jiangsu_chejin_usedcar_customer_20260501/admin/jobs/job_0123c94f8475.json",
+            "path": "payload/runtime/tenants/chejin/admin/jobs/job_0123c94f8475.json",
             "sha256": "61e06129f7db3e3e0612d21312965518656eab0d86e38efaf37746bac52f64b8",
             "bytes": 449
           },
           {
-            "path": "payload/runtime/tenants/jiangsu_chejin_usedcar_customer_20260501/admin/jobs/job_031d2b805482.json",
+            "path": "payload/runtime/tenants/chejin/admin/jobs/job_031d2b805482.json",
             "sha256": "18655628e153decebaa292e871cb544e651f31515c3da43cabd5c184e2cb3327",
             "bytes": 1619
           },
           {
-            "path": "payload/runtime/tenants/jiangsu_chejin_usedcar_customer_20260501/admin/jobs/job_06a0121ae2a4.json",
+            "path": "payload/runtime/tenants/chejin/admin/jobs/job_06a0121ae2a4.json",
             "sha256": "bf344f32ddd08d2f9cad2a7f5f60555c0f4613e5d559947ab293cb58d054fee9",
             "bytes": 1776
           },
           {
-            "path": "payload/runtime/tenants/jiangsu_chejin_usedcar_customer_20260501/admin/jobs/job_08ef2236ef64.json",
+            "path": "payload/runtime/tenants/chejin/admin/jobs/job_08ef2236ef64.json",
             "sha256": "cda073f8e120c71dba6fa460efde75b25762ca67007f32bbf22b46298452dda7",
             "bytes": 1648
           },
           {
-            "path": "payload/runtime/tenants/jiangsu_chejin_usedcar_customer_20260501/admin/jobs/job_13f949a78dc3.json",
+            "path": "payload/runtime/tenants/chejin/admin/jobs/job_13f949a78dc3.json",
             "sha256": "c4eb6a6e08adb97c381d9e9615ab6a07f7009be40412e557614a5bfcb46e9f84",
             "bytes": 1619
           },
           {
-            "path": "payload/runtime/tenants/jiangsu_chejin_usedcar_customer_20260501/admin/jobs/job_2052d273bdfd.json",
+            "path": "payload/runtime/tenants/chejin/admin/jobs/job_2052d273bdfd.json",
             "sha256": "664bba2f0a697a84c3874a4053b82c4e90c43af120797a229e9bbd8cce1fa087",
             "bytes": 1601
           },
           {
-            "path": "payload/runtime/tenants/jiangsu_chejin_usedcar_customer_20260501/admin/jobs/job_211bed4254f7.json",
+            "path": "payload/runtime/tenants/chejin/admin/jobs/job_211bed4254f7.json",
             "sha256": "ddd9cc498d68ade8c2b43c8c9d4be65aa804494ce1139a92aecba1245387da64",
             "bytes": 1601
           },
           {
-            "path": "payload/runtime/tenants/jiangsu_chejin_usedcar_customer_20260501/admin/jobs/job_2a6dfa64410f.json",
+            "path": "payload/runtime/tenants/chejin/admin/jobs/job_2a6dfa64410f.json",
             "sha256": "e87ac552a88ea5b06b0e0bdb38ebc84c9bf3cd87ab0f7ffd569f26afd37db3e2",
             "bytes": 380
           },
           {
-            "path": "payload/runtime/tenants/jiangsu_chejin_usedcar_customer_20260501/admin/jobs/job_2be973896d2a.json",
+            "path": "payload/runtime/tenants/chejin/admin/jobs/job_2be973896d2a.json",
             "sha256": "2e883fc2da5fe7765b53267437260db43d8c27bb1e034658a7539c8aa0eae89a",
             "bytes": 449
           },
           {
-            "path": "payload/runtime/tenants/jiangsu_chejin_usedcar_customer_20260501/admin/jobs/job_2da20582e981.json",
+            "path": "payload/runtime/tenants/chejin/admin/jobs/job_2da20582e981.json",
             "sha256": "bea6e3cdc177e639763141bec5ecfb2018cf22fb025102a89192f9dd2d7f3960",
             "bytes": 1648
           },
           {
-            "path": "payload/runtime/tenants/jiangsu_chejin_usedcar_customer_20260501/admin/jobs/job_335fe75b53b4.json",
+            "path": "payload/runtime/tenants/chejin/admin/jobs/job_335fe75b53b4.json",
             "sha256": "71d45b2d5aba788ed1749852fad42301ab99f72b18e42eaa2bb97cc8dbb56338",
             "bytes": 1630
           },
           {
-            "path": "payload/runtime/tenants/jiangsu_chejin_usedcar_customer_20260501/admin/jobs/job_36f6ecd42bda.json",
+            "path": "payload/runtime/tenants/chejin/admin/jobs/job_36f6ecd42bda.json",
             "sha256": "1836292e701f3d61b94614fe7b8a3df6a8592c586cf4ed4ff65976de55dec8f7",
             "bytes": 1708
           },
           {
-            "path": "payload/runtime/tenants/jiangsu_chejin_usedcar_customer_20260501/admin/jobs/job_38ae36734de9.json",
+            "path": "payload/runtime/tenants/chejin/admin/jobs/job_38ae36734de9.json",
             "sha256": "52f9970f693364b22ebc50bc12fd6652515dc2fbe3b10d6208ea8067632f7f4a",
             "bytes": 409
           },
           {
-            "path": "payload/runtime/tenants/jiangsu_chejin_usedcar_customer_20260501/admin/jobs/job_39d13163b9ab.json",
+            "path": "payload/runtime/tenants/chejin/admin/jobs/job_39d13163b9ab.json",
             "sha256": "44407264d8e11240595b68effde903d805acf522d5a74aa4b5043f4c96662bbf",
             "bytes": 1777
           },
           {
-            "path": "payload/runtime/tenants/jiangsu_chejin_usedcar_customer_20260501/admin/jobs/job_498e547826da.json",
+            "path": "payload/runtime/tenants/chejin/admin/jobs/job_498e547826da.json",
             "sha256": "fdd31d4628a4acebcf0ffb7c3eee6a34687ecae9203cd3fb0976bdc5ebdc58e2",
             "bytes": 1619
           },
           {
-            "path": "payload/runtime/tenants/jiangsu_chejin_usedcar_customer_20260501/admin/jobs/job_4f3bcbeae24d.json",
+            "path": "payload/runtime/tenants/chejin/admin/jobs/job_4f3bcbeae24d.json",
             "sha256": "29ed01eb1982eafe25b8a52b68b16101431a18de9b0655d28ed28dcab14a00fd",
             "bytes": 1601
           },
           {
-            "path": "payload/runtime/tenants/jiangsu_chejin_usedcar_customer_20260501/admin/jobs/job_50f6b92d69ba.json",
+            "path": "payload/runtime/tenants/chejin/admin/jobs/job_50f6b92d69ba.json",
             "sha256": "fc2b17f2e8e610f9c416d19429df548c93ecf6691c6b137f8c7960a6d89f0384",
             "bytes": 1777
           },
           {
-            "path": "payload/runtime/tenants/jiangsu_chejin_usedcar_customer_20260501/admin/jobs/job_586d4825a4e3.json",
+            "path": "payload/runtime/tenants/chejin/admin/jobs/job_586d4825a4e3.json",
             "sha256": "8f66674ab25f1012b1d5bdc1d9fb5de4ce54de1882cc2e9fa1e2571296307370",
             "bytes": 449
           },
           {
-            "path": "payload/runtime/tenants/jiangsu_chejin_usedcar_customer_20260501/admin/jobs/job_597c99de6e7a.json",
+            "path": "payload/runtime/tenants/chejin/admin/jobs/job_597c99de6e7a.json",
             "sha256": "0c38119ecdd4899ac93a2527edb8c129c3564e896bf7ed6c7f35c2aadc5c7c44",
             "bytes": 1648
           },
           {
-            "path": "payload/runtime/tenants/jiangsu_chejin_usedcar_customer_20260501/admin/jobs/job_5b6ebcab22a2.json",
+            "path": "payload/runtime/tenants/chejin/admin/jobs/job_5b6ebcab22a2.json",
             "sha256": "019a19229f03c51b34f9deea4c822a02518f8e79aed294ddf0f2bf567e4ee089",
             "bytes": 1630
           },
           {
-            "path": "payload/runtime/tenants/jiangsu_chejin_usedcar_customer_20260501/admin/jobs/job_5c2143eeed7c.json",
+            "path": "payload/runtime/tenants/chejin/admin/jobs/job_5c2143eeed7c.json",
             "sha256": "d9ddf7d369d1365b5b50f7f72afff36ca63419fe5e6fd9ead5d7261f56b441d5",
             "bytes": 1708
           },
           {
-            "path": "payload/runtime/tenants/jiangsu_chejin_usedcar_customer_20260501/admin/jobs/job_60a504cb3992.json",
+            "path": "payload/runtime/tenants/chejin/admin/jobs/job_60a504cb3992.json",
             "sha256": "ccdcd22c2e0ff5a9f6634902b7c55339cdc64f817ae8943ade929811f03cbf2c",
             "bytes": 1601
           },
           {
-            "path": "payload/runtime/tenants/jiangsu_chejin_usedcar_customer_20260501/admin/jobs/job_65e81357e6c3.json",
+            "path": "payload/runtime/tenants/chejin/admin/jobs/job_65e81357e6c3.json",
             "sha256": "620369f7eaa891e2a18dd94450c2df745405b4287d8880282f1da3d02724e3f1",
             "bytes": 1708
           },
           {
-            "path": "payload/runtime/tenants/jiangsu_chejin_usedcar_customer_20260501/admin/jobs/job_6695598cc610.json",
+            "path": "payload/runtime/tenants/chejin/admin/jobs/job_6695598cc610.json",
             "sha256": "5b1cef05cab1120bf59868491de8b4ec815dd9013ae1f074af8057be93497bd9",
             "bytes": 1619
           },
           {
-            "path": "payload/runtime/tenants/jiangsu_chejin_usedcar_customer_20260501/admin/jobs/job_6ebf14c8a3f0.json",
+            "path": "payload/runtime/tenants/chejin/admin/jobs/job_6ebf14c8a3f0.json",
             "sha256": "e7c5149584d867083d98cd811d5961a2a679eb45564fff6403cffe2e5519b4ef",
             "bytes": 409
           },
           {
-            "path": "payload/runtime/tenants/jiangsu_chejin_usedcar_customer_20260501/admin/jobs/job_6f324943587f.json",
+            "path": "payload/runtime/tenants/chejin/admin/jobs/job_6f324943587f.json",
             "sha256": "e9dca59f8ea0adaa9c9e590d61cda65d9354108c64cbd2cf7b1dd039fcce06b3",
             "bytes": 1708
           },
           {
-            "path": "payload/runtime/tenants/jiangsu_chejin_usedcar_customer_20260501/admin/jobs/job_7e45669a8ff6.json",
+            "path": "payload/runtime/tenants/chejin/admin/jobs/job_7e45669a8ff6.json",
             "sha256": "126e8b938007b4b891a9f3c408f2ac82a34664bc9962b26831e815d676730271",
             "bytes": 1619
           },
           {
-            "path": "payload/runtime/tenants/jiangsu_chejin_usedcar_customer_20260501/admin/jobs/job_861e2f9a1302.json",
+            "path": "payload/runtime/tenants/chejin/admin/jobs/job_861e2f9a1302.json",
             "sha256": "24d989420b9289077733dcb1e6e929c8c1a9a6bfcae151c954e3ca08761fa53e",
             "bytes": 449
           },
           {
-            "path": "payload/runtime/tenants/jiangsu_chejin_usedcar_customer_20260501/admin/jobs/job_938ce21823fc.json",
+            "path": "payload/runtime/tenants/chejin/admin/jobs/job_938ce21823fc.json",
             "sha256": "44970087cc8c5a6c5ed6cf60b2d995e6cfaee2a8f7bccf15a3083d0e461707d4",
             "bytes": 1601
           },
           {
-            "path": "payload/runtime/tenants/jiangsu_chejin_usedcar_customer_20260501/admin/jobs/job_a0c793a72a9c.json",
+            "path": "payload/runtime/tenants/chejin/admin/jobs/job_a0c793a72a9c.json",
             "sha256": "a4e89cca4468410e5af71417b49098ab8d3aacf356eca23cc4735fcf02f836d1",
             "bytes": 1601
           },
           {
-            "path": "payload/runtime/tenants/jiangsu_chejin_usedcar_customer_20260501/admin/jobs/job_a4108b478ab4.json",
+            "path": "payload/runtime/tenants/chejin/admin/jobs/job_a4108b478ab4.json",
             "sha256": "91b975e679ca28efcdfa54aa61f0d92fcd13d1fe2cb61113974328d43109ac5c",
             "bytes": 1601
           },
           {
-            "path": "payload/runtime/tenants/jiangsu_chejin_usedcar_customer_20260501/admin/jobs/job_a4d4e5c20f15.json",
+            "path": "payload/runtime/tenants/chejin/admin/jobs/job_a4d4e5c20f15.json",
             "sha256": "1e9f43e50754204865c409aca257325db4cd50be14188a7127e45d95debe70c9",
             "bytes": 1708
           },
           {
-            "path": "payload/runtime/tenants/jiangsu_chejin_usedcar_customer_20260501/admin/jobs/job_a6599b84f513.json",
+            "path": "payload/runtime/tenants/chejin/admin/jobs/job_a6599b84f513.json",
             "sha256": "2d3885e11e922ac7ac1c93e34a80434f909c133445a588612854e3a62b7b9ecc",
             "bytes": 449
           },
           {
-            "path": "payload/runtime/tenants/jiangsu_chejin_usedcar_customer_20260501/admin/jobs/job_aa62321f3c9e.json",
+            "path": "payload/runtime/tenants/chejin/admin/jobs/job_aa62321f3c9e.json",
             "sha256": "440f23dc7145963519f65be00ef111d1bc9d69f8d8205823ded7904cea47df77",
             "bytes": 1619
           },
           {
-            "path": "payload/runtime/tenants/jiangsu_chejin_usedcar_customer_20260501/admin/jobs/job_b2d70e1d447c.json",
+            "path": "payload/runtime/tenants/chejin/admin/jobs/job_b2d70e1d447c.json",
             "sha256": "0ebbc16ad8baeb650b5c14cfe570e7aa5a1eb6b93c2779a983553eea1ec991ab",
             "bytes": 1601
           },
           {
-            "path": "payload/runtime/tenants/jiangsu_chejin_usedcar_customer_20260501/admin/jobs/job_bc54c577e2c9.json",
+            "path": "payload/runtime/tenants/chejin/admin/jobs/job_bc54c577e2c9.json",
             "sha256": "c54d50e047585b56bd18b52d4176807b742ebdcb506bb7ecebbb6c18f95eaf9a",
             "bytes": 380
           },
           {
-            "path": "payload/runtime/tenants/jiangsu_chejin_usedcar_customer_20260501/admin/jobs/job_c081aa2597c5.json",
+            "path": "payload/runtime/tenants/chejin/admin/jobs/job_c081aa2597c5.json",
             "sha256": "ee6bea67f2439c069ea9d67eb0af4b1909a72f3493e9806fdf8317887eb1e63f",
             "bytes": 478
           },
           {
-            "path": "payload/runtime/tenants/jiangsu_chejin_usedcar_customer_20260501/admin/jobs/job_c0c8e1f20711.json",
+            "path": "payload/runtime/tenants/chejin/admin/jobs/job_c0c8e1f20711.json",
             "sha256": "2386634e10ad3cb0176222736eeee245e42386cc1d05edd3a940b553b55e003a",
             "bytes": 478
           },
           {
-            "path": "payload/runtime/tenants/jiangsu_chejin_usedcar_customer_20260501/admin/jobs/job_c28bcd1bb224.json",
+            "path": "payload/runtime/tenants/chejin/admin/jobs/job_c28bcd1bb224.json",
             "sha256": "57cdba8df37bf8e4a8f683c6dfcac43c42335f0c4b675d0aa9fa4399a171c8db",
             "bytes": 1619
           },
           {
-            "path": "payload/runtime/tenants/jiangsu_chejin_usedcar_customer_20260501/admin/jobs/job_ca47c459c06e.json",
+            "path": "payload/runtime/tenants/chejin/admin/jobs/job_ca47c459c06e.json",
             "sha256": "02749e12c29602ef167ec45c18849bcc9184bb84c22b3f1f8b8742d45a4d517f",
             "bytes": 1776
           },
           {
-            "path": "payload/runtime/tenants/jiangsu_chejin_usedcar_customer_20260501/admin/jobs/job_ce6918786e1b.json",
+            "path": "payload/runtime/tenants/chejin/admin/jobs/job_ce6918786e1b.json",
             "sha256": "9a2e42b41a2039044983e8d047ac1d3661dd712254355c7c664ba82097714b9f",
             "bytes": 1619
           },
           {
-            "path": "payload/runtime/tenants/jiangsu_chejin_usedcar_customer_20260501/admin/jobs/job_cea0f22c510f.json",
+            "path": "payload/runtime/tenants/chejin/admin/jobs/job_cea0f22c510f.json",
             "sha256": "a8dafcf46e9a0d1a8c12c981b15f785dcdee62542305de050e47fb3b6d3b6316",
             "bytes": 1648
           },
           {
-            "path": "payload/runtime/tenants/jiangsu_chejin_usedcar_customer_20260501/admin/jobs/job_d4f2eff86e7b.json",
+            "path": "payload/runtime/tenants/chejin/admin/jobs/job_d4f2eff86e7b.json",
             "sha256": "1bd2de02e1383562bfe1ca1ec41b040d564a41e19ee0d2f287338fcaf2b0a939",
             "bytes": 1601
           },
           {
-            "path": "payload/runtime/tenants/jiangsu_chejin_usedcar_customer_20260501/admin/jobs/job_d51062342dc1.json",
+            "path": "payload/runtime/tenants/chejin/admin/jobs/job_d51062342dc1.json",
             "sha256": "c0afbe774e58344f9b2475d93d1f112b938c2a7b4bfba50b98c1ca8c9555554d",
             "bytes": 1708
           },
           {
-            "path": "payload/runtime/tenants/jiangsu_chejin_usedcar_customer_20260501/admin/jobs/job_d86d9961b3f2.json",
+            "path": "payload/runtime/tenants/chejin/admin/jobs/job_d86d9961b3f2.json",
             "sha256": "18ad4f2743a8b217ec8647d6e8c9f5ca8544d90a0c4e85b3660f0ad26c22462a",
             "bytes": 380
           },
           {
-            "path": "payload/runtime/tenants/jiangsu_chejin_usedcar_customer_20260501/admin/jobs/job_d921c476eee5.json",
+            "path": "payload/runtime/tenants/chejin/admin/jobs/job_d921c476eee5.json",
             "sha256": "d3cc53f0c6700c4af197c7c16399b4f3fd9cf1652419785708eb24a5a7a05633",
             "bytes": 380
           },
           {
-            "path": "payload/runtime/tenants/jiangsu_chejin_usedcar_customer_20260501/admin/jobs/job_de0574ebc998.json",
+            "path": "payload/runtime/tenants/chejin/admin/jobs/job_de0574ebc998.json",
             "sha256": "0212e49df42236c07381deff02c1e1ec297b8aa2f702c63e85553e18949b4b9e",
             "bytes": 380
           },
           {
-            "path": "payload/runtime/tenants/jiangsu_chejin_usedcar_customer_20260501/admin/jobs/job_e0360b413624.json",
+            "path": "payload/runtime/tenants/chejin/admin/jobs/job_e0360b413624.json",
             "sha256": "8a58b3dee057be17d003d3160c7ed6b67fda81a575eb302935a2f311d6e4356c",
             "bytes": 478
           },
           {
-            "path": "payload/runtime/tenants/jiangsu_chejin_usedcar_customer_20260501/admin/jobs/job_e17551e3382a.json",
+            "path": "payload/runtime/tenants/chejin/admin/jobs/job_e17551e3382a.json",
             "sha256": "834b757afc9b0c07d4da0424bc7bbaa1fed820174756bfabda65061176eb9a26",
             "bytes": 1708
           },
           {
-            "path": "payload/runtime/tenants/jiangsu_chejin_usedcar_customer_20260501/admin/jobs/job_e2159c8a4c96.json",
+            "path": "payload/runtime/tenants/chejin/admin/jobs/job_e2159c8a4c96.json",
             "sha256": "373c6da7ca7955835297dcb3ed4ead07bea7ac5b8b48b2b7fae47c54e34f01df",
             "bytes": 409
           },
           {
-            "path": "payload/runtime/tenants/jiangsu_chejin_usedcar_customer_20260501/admin/jobs/job_eb37d4be8fb7.json",
+            "path": "payload/runtime/tenants/chejin/admin/jobs/job_eb37d4be8fb7.json",
             "sha256": "3284694c67a86ae9e08806068713496e0bb39ebfa9a193a1ffea70d1356a01fd",
             "bytes": 1708
           },
           {
-            "path": "payload/runtime/tenants/jiangsu_chejin_usedcar_customer_20260501/admin/jobs/job_ee0a1568f6ae.json",
+            "path": "payload/runtime/tenants/chejin/admin/jobs/job_ee0a1568f6ae.json",
             "sha256": "bb6ab62992485da82691b3a31b6e8604bd15b5927df91c7259fbde3c74e9afbb",
             "bytes": 1619
           },
           {
-            "path": "payload/runtime/tenants/jiangsu_chejin_usedcar_customer_20260501/admin/jobs/job_f0de43c3854d.json",
+            "path": "payload/runtime/tenants/chejin/admin/jobs/job_f0de43c3854d.json",
             "sha256": "11a2f6eb712c09d57c6a032c6428bf1abd00c4d85b4f1b8dce09320d02fff5e4",
             "bytes": 449
           },
           {
-            "path": "payload/runtime/tenants/jiangsu_chejin_usedcar_customer_20260501/admin/jobs/job_f17280090012.json",
+            "path": "payload/runtime/tenants/chejin/admin/jobs/job_f17280090012.json",
             "sha256": "8b3b75985f0af1a8d93b9f2c2789a50d1d52bfd908a64e9ff1e527abd736df3d",
             "bytes": 380
           },
           {
-            "path": "payload/runtime/tenants/jiangsu_chejin_usedcar_customer_20260501/admin/jobs/job_f4aeb699edae.json",
+            "path": "payload/runtime/tenants/chejin/admin/jobs/job_f4aeb699edae.json",
             "sha256": "92857584309f7143bd8644af7d556ec76930aacb4cefa8b2dea5dd0ae9654c08",
             "bytes": 1630
           },
           {
-            "path": "payload/runtime/tenants/jiangsu_chejin_usedcar_customer_20260501/admin/jobs/job_fc633de18fa0.json",
+            "path": "payload/runtime/tenants/chejin/admin/jobs/job_fc633de18fa0.json",
             "sha256": "5659c92d6c48627286dec886ee8af9469a33a794be578caa7078c3d29cddef4e",
             "bytes": 1630
           },
           {
-            "path": "payload/runtime/tenants/jiangsu_chejin_usedcar_customer_20260501/admin/jobs/job_fdb464c7bbf6.json",
+            "path": "payload/runtime/tenants/chejin/admin/jobs/job_fdb464c7bbf6.json",
             "sha256": "4b4c3a425e9b830a39e3a07d4e1fc9f75d48fd3e80708380bc09df0629eb9710",
             "bytes": 1708
           },
           {
-            "path": "payload/runtime/tenants/jiangsu_chejin_usedcar_customer_20260501/admin/uploads_index.json",
+            "path": "payload/runtime/tenants/chejin/admin/uploads_index.json",
             "sha256": "a5338d955b09046ec0b16f3a9625b7955c763aae07dc722e474e6078745f932f",
             "bytes": 4
           },
           {
-            "path": "payload/runtime/tenants/jiangsu_chejin_usedcar_customer_20260501/customer_service/settings.json",
+            "path": "payload/runtime/tenants/chejin/customer_service/settings.json",
             "sha256": "38f12e34f27c122f2f1ffafbfd106bcc800dcbc17d9f42a46614d375b6450276",
             "bytes": 224
           },
           {
-            "path": "payload/runtime/tenants/jiangsu_chejin_usedcar_customer_20260501/raw_messages/batches.json",
+            "path": "payload/runtime/tenants/chejin/raw_messages/batches.json",
             "sha256": "635efa03e586218d5072f354da8eb8360b7f974fc401a13d2b26fc48863b4d3a",
             "bytes": 8341
           },
           {
-            "path": "payload/runtime/tenants/jiangsu_chejin_usedcar_customer_20260501/raw_messages/conversations.json",
+            "path": "payload/runtime/tenants/chejin/raw_messages/conversations.json",
             "sha256": "9475021cb96a6d529c7d72d820ec66b1302002d8b38b44dd87dcc732492ac89e",
             "bytes": 5852
           },
           {
-            "path": "payload/runtime/tenants/jiangsu_chejin_usedcar_customer_20260501/raw_messages/learning_batches/raw_batch_022a1592ba4de629dc13.txt",
+            "path": "payload/runtime/tenants/chejin/raw_messages/learning_batches/raw_batch_022a1592ba4de629dc13.txt",
             "sha256": "469174b32d77691e80cc12b728a8e145e3b6815a5ef46d81f00f4884d5e1dc66",
             "bytes": 96
           },
           {
-            "path": "payload/runtime/tenants/jiangsu_chejin_usedcar_customer_20260501/raw_messages/learning_batches/raw_batch_055784b7dc9082faf951.txt",
+            "path": "payload/runtime/tenants/chejin/raw_messages/learning_batches/raw_batch_055784b7dc9082faf951.txt",
             "sha256": "048bfa82b654bfb3f7747be0dcbc78f6cb88b179d4f8e792970c681973e827d4",
             "bytes": 306
           },
           {
-            "path": "payload/runtime/tenants/jiangsu_chejin_usedcar_customer_20260501/raw_messages/learning_batches/raw_batch_08c1b76a5a7d9fdf8906.txt",
+            "path": "payload/runtime/tenants/chejin/raw_messages/learning_batches/raw_batch_08c1b76a5a7d9fdf8906.txt",
             "sha256": "83bc247cc180ca66808e3a47645118b457bb31e0903aa6b0d35abde15fa0d472",
             "bytes": 96
           },
           {
-            "path": "payload/runtime/tenants/jiangsu_chejin_usedcar_customer_20260501/raw_messages/learning_batches/raw_batch_0dab53699c61e693855c.txt",
+            "path": "payload/runtime/tenants/chejin/raw_messages/learning_batches/raw_batch_0dab53699c61e693855c.txt",
             "sha256": "0171b1640cfa7e785c3b8f765fa9d8b7e29420508a25fbfe326b545368758c6c",
             "bytes": 94
           },
           {
-            "path": "payload/runtime/tenants/jiangsu_chejin_usedcar_customer_20260501/raw_messages/learning_batches/raw_batch_11fef63a6f22f6a71071.txt",
+            "path": "payload/runtime/tenants/chejin/raw_messages/learning_batches/raw_batch_11fef63a6f22f6a71071.txt",
             "sha256": "dc9a0006f36b1f846a6c6be273571e86d7b09714868016b2e46ef0d97c049316",
             "bytes": 96
           },
           {
-            "path": "payload/runtime/tenants/jiangsu_chejin_usedcar_customer_20260501/raw_messages/learning_batches/raw_batch_13801f5ff9e56704ad69.txt",
+            "path": "payload/runtime/tenants/chejin/raw_messages/learning_batches/raw_batch_13801f5ff9e56704ad69.txt",
             "sha256": "dd3b7c7f0451f94805a180f907ba263a80416448fe1c7468258260633964e1da",
             "bytes": 94
           },
           {
-            "path": "payload/runtime/tenants/jiangsu_chejin_usedcar_customer_20260501/raw_messages/learning_batches/raw_batch_15d9f3bf17c554cd1673.txt",
+            "path": "payload/runtime/tenants/chejin/raw_messages/learning_batches/raw_batch_15d9f3bf17c554cd1673.txt",
             "sha256": "7b78c26b8f1e781f6490749dfcd462ef2f6f803c3526f6118d974cd9beddf810",
             "bytes": 583
           },
           {
-            "path": "payload/runtime/tenants/jiangsu_chejin_usedcar_customer_20260501/raw_messages/learning_batches/raw_batch_1641b4d7d3a5930a7e45.txt",
+            "path": "payload/runtime/tenants/chejin/raw_messages/learning_batches/raw_batch_1641b4d7d3a5930a7e45.txt",
             "sha256": "69bc8a65bad0ab0df8d09333fce6b935c1a09179dfd203d329facac5d452ac76",
             "bytes": 871
           },
           {
-            "path": "payload/runtime/tenants/jiangsu_chejin_usedcar_customer_20260501/raw_messages/learning_batches/raw_batch_1d63206f211c7f357ccf.txt",
+            "path": "payload/runtime/tenants/chejin/raw_messages/learning_batches/raw_batch_1d63206f211c7f357ccf.txt",
             "sha256": "cc821a10300d55d04a8f56d5274ffced374b3319156f653f4dd17990b2875021",
             "bytes": 96
           },
           {
-            "path": "payload/runtime/tenants/jiangsu_chejin_usedcar_customer_20260501/raw_messages/learning_batches/raw_batch_1e0de2fcc68649876f24.txt",
+            "path": "payload/runtime/tenants/chejin/raw_messages/learning_batches/raw_batch_1e0de2fcc68649876f24.txt",
             "sha256": "cd67e7fd4ecd3a4896852418945afb874cc50348ce495246227a23263d9f243f",
             "bytes": 94
           },
           {
-            "path": "payload/runtime/tenants/jiangsu_chejin_usedcar_customer_20260501/raw_messages/learning_batches/raw_batch_20e096a604e3ea167849.txt",
+            "path": "payload/runtime/tenants/chejin/raw_messages/learning_batches/raw_batch_20e096a604e3ea167849.txt",
             "sha256": "7dfb3586f78a593d189ce3e73d71719f096b17e33a16b0d5adbd89ef322250c9",
             "bytes": 96
           },
           {
-            "path": "payload/runtime/tenants/jiangsu_chejin_usedcar_customer_20260501/raw_messages/learning_batches/raw_batch_27c2af5d7166ac8e4fa7.txt",
+            "path": "payload/runtime/tenants/chejin/raw_messages/learning_batches/raw_batch_27c2af5d7166ac8e4fa7.txt",
             "sha256": "55443c51be7e72fe3c6cb8d711d2b7510ad34ad96a416e69708c701c14f70a0e",
             "bytes": 93
           },
           {
-            "path": "payload/runtime/tenants/jiangsu_chejin_usedcar_customer_20260501/raw_messages/learning_batches/raw_batch_29c293e3913bbfe576c1.txt",
+            "path": "payload/runtime/tenants/chejin/raw_messages/learning_batches/raw_batch_29c293e3913bbfe576c1.txt",
             "sha256": "33ca0fa03964567d5ae4379f9d53294f239fca5d0e897c94cbd8dc02dfb47bf9",
             "bytes": 96
           },
           {
-            "path": "payload/runtime/tenants/jiangsu_chejin_usedcar_customer_20260501/raw_messages/learning_batches/raw_batch_2b62cab3026302357552.txt",
+            "path": "payload/runtime/tenants/chejin/raw_messages/learning_batches/raw_batch_2b62cab3026302357552.txt",
             "sha256": "b1fb35346de33300b39d80951ac99304680dc5472b754358d9cfe6341a375c8e",
             "bytes": 280
           },
           {
-            "path": "payload/runtime/tenants/jiangsu_chejin_usedcar_customer_20260501/raw_messages/learning_batches/raw_batch_30ba7d7fdda5990cfea3.txt",
+            "path": "payload/runtime/tenants/chejin/raw_messages/learning_batches/raw_batch_30ba7d7fdda5990cfea3.txt",
             "sha256": "b8fca03619c8cd6109406cd9cf6bd397eb1e43b90a3f0241b82a41bde063f2de",
             "bytes": 96
           },
           {
-            "path": "payload/runtime/tenants/jiangsu_chejin_usedcar_customer_20260501/raw_messages/learning_batches/raw_batch_315396d7c70d79dbe948.txt",
+            "path": "payload/runtime/tenants/chejin/raw_messages/learning_batches/raw_batch_315396d7c70d79dbe948.txt",
             "sha256": "4ce11652293d627acb61d4243b1feaa4b2e81213202b56ccabbc05f6fbfa9c30",
             "bytes": 236
           },
           {
-            "path": "payload/runtime/tenants/jiangsu_chejin_usedcar_customer_20260501/raw_messages/learning_batches/raw_batch_3b5b56264d2d30a3c358.txt",
+            "path": "payload/runtime/tenants/chejin/raw_messages/learning_batches/raw_batch_3b5b56264d2d30a3c358.txt",
             "sha256": "5317865799d515d149731e681894a82ab97f1386b1eb000cd1e96493382c046c",
             "bytes": 424
           },
           {
-            "path": "payload/runtime/tenants/jiangsu_chejin_usedcar_customer_20260501/raw_messages/learning_batches/raw_batch_3f7e52a315c4dd720c12.txt",
+            "path": "payload/runtime/tenants/chejin/raw_messages/learning_batches/raw_batch_3f7e52a315c4dd720c12.txt",
             "sha256": "4192441788949458c479dc67ce92b886e054e5b81b3105bc2a6c33b1993f21a1",
             "bytes": 96
           },
           {
-            "path": "payload/runtime/tenants/jiangsu_chejin_usedcar_customer_20260501/raw_messages/learning_batches/raw_batch_3f8328428f5fee9d50cd.txt",
+            "path": "payload/runtime/tenants/chejin/raw_messages/learning_batches/raw_batch_3f8328428f5fee9d50cd.txt",
             "sha256": "7d48f5e0f08c044c3439cae8d6b0726ec59350970b367b33e628330b37142caf",
             "bytes": 583
           },
           {
-            "path": "payload/runtime/tenants/jiangsu_chejin_usedcar_customer_20260501/raw_messages/learning_batches/raw_batch_400d0fcfcda8acd48f1f.txt",
+            "path": "payload/runtime/tenants/chejin/raw_messages/learning_batches/raw_batch_400d0fcfcda8acd48f1f.txt",
             "sha256": "5dcc7b0767f6275724df31f9a6cfbc10bc8227c7cdab4c906025d95aa7555cd9",
             "bytes": 94
           },
           {
-            "path": "payload/runtime/tenants/jiangsu_chejin_usedcar_customer_20260501/raw_messages/learning_batches/raw_batch_43594db1b204767e4ca0.txt",
+            "path": "payload/runtime/tenants/chejin/raw_messages/learning_batches/raw_batch_43594db1b204767e4ca0.txt",
             "sha256": "1b8e816ebc217c7f2de5a8df975539fbbe36a2a1f037b725bacefc6a055361d3",
             "bytes": 672
           },
           {
-            "path": "payload/runtime/tenants/jiangsu_chejin_usedcar_customer_20260501/raw_messages/learning_batches/raw_batch_45ab3bcdd5c7e4fe4ccd.txt",
+            "path": "payload/runtime/tenants/chejin/raw_messages/learning_batches/raw_batch_45ab3bcdd5c7e4fe4ccd.txt",
             "sha256": "12f03980d6284fdc618bd529a5b8251b06c537ffe8203a00a4167f6d46f3f275",
             "bytes": 85
           },
           {
-            "path": "payload/runtime/tenants/jiangsu_chejin_usedcar_customer_20260501/raw_messages/learning_batches/raw_batch_466b67e23e22033d71bb.txt",
+            "path": "payload/runtime/tenants/chejin/raw_messages/learning_batches/raw_batch_466b67e23e22033d71bb.txt",
             "sha256": "9ba106615a6214d8979c76d5831413777c8e5cb541dce0f1e8579f3f5795c485",
             "bytes": 94
           },
           {
-            "path": "payload/runtime/tenants/jiangsu_chejin_usedcar_customer_20260501/raw_messages/learning_batches/raw_batch_4aa6a617c694b36b9cfa.txt",
+            "path": "payload/runtime/tenants/chejin/raw_messages/learning_batches/raw_batch_4aa6a617c694b36b9cfa.txt",
             "sha256": "3f3a0cd9666df6c3f0909b8ced1042bd9aa5866e836d3bf9ad696d20a62f0faa",
             "bytes": 280
           },
           {
-            "path": "payload/runtime/tenants/jiangsu_chejin_usedcar_customer_20260501/raw_messages/learning_batches/raw_batch_4d7bc1a7dcf4800c8b5e.txt",
+            "path": "payload/runtime/tenants/chejin/raw_messages/learning_batches/raw_batch_4d7bc1a7dcf4800c8b5e.txt",
             "sha256": "5cf4b7fbd21fc3ab95839054c34cb817fbaf0755783f3561703667e5759c614c",
             "bytes": 72
           },
           {
-            "path": "payload/runtime/tenants/jiangsu_chejin_usedcar_customer_20260501/raw_messages/learning_batches/raw_batch_4f88a5d5e83f627413cc.txt",
+            "path": "payload/runtime/tenants/chejin/raw_messages/learning_batches/raw_batch_4f88a5d5e83f627413cc.txt",
             "sha256": "4c20be328930bb896126ad3bd02bd1b9db4472715da15e2c9a2dacdcd6ae6f9d",
             "bytes": 280
           },
           {
-            "path": "payload/runtime/tenants/jiangsu_chejin_usedcar_customer_20260501/raw_messages/learning_batches/raw_batch_51732d270df42f5e3b15.txt",
+            "path": "payload/runtime/tenants/chejin/raw_messages/learning_batches/raw_batch_51732d270df42f5e3b15.txt",
             "sha256": "98856d8ba6de24cb78af0043a0fe01f1683d3a7008a8f2889864b520abd68b84",
             "bytes": 96
           },
           {
-            "path": "payload/runtime/tenants/jiangsu_chejin_usedcar_customer_20260501/raw_messages/learning_batches/raw_batch_57ec8e96b09e22bf05a0.txt",
+            "path": "payload/runtime/tenants/chejin/raw_messages/learning_batches/raw_batch_57ec8e96b09e22bf05a0.txt",
             "sha256": "b818470c25e27e98400065540cda1d8e5efc98b1a8c87ffe66af477e0b69567c",
             "bytes": 96
           },
           {
-            "path": "payload/runtime/tenants/jiangsu_chejin_usedcar_customer_20260501/raw_messages/learning_batches/raw_batch_5de09e0c91daf4365be2.txt",
+            "path": "payload/runtime/tenants/chejin/raw_messages/learning_batches/raw_batch_5de09e0c91daf4365be2.txt",
             "sha256": "cc4b4d0ca2410c98f999de3f2d0dee386896916b94d3c4159e82b5568d4d268f",
             "bytes": 72
           },
           {
-            "path": "payload/runtime/tenants/jiangsu_chejin_usedcar_customer_20260501/raw_messages/learning_batches/raw_batch_67996a827b284cf4f839.txt",
+            "path": "payload/runtime/tenants/chejin/raw_messages/learning_batches/raw_batch_67996a827b284cf4f839.txt",
             "sha256": "b197049e4e726a5f6b596f81881f27e8517c37e44394f4cbdc8694e78cdb677a",
             "bytes": 499
           },
           {
-            "path": "payload/runtime/tenants/jiangsu_chejin_usedcar_customer_20260501/raw_messages/learning_batches/raw_batch_6a4600b971778cc13ece.txt",
+            "path": "payload/runtime/tenants/chejin/raw_messages/learning_batches/raw_batch_6a4600b971778cc13ece.txt",
             "sha256": "51c0ec5787c89d15914084f1ef76e60650a11b559eebcac329837e5101a59e9a",
             "bytes": 93
           },
           {
-            "path": "payload/runtime/tenants/jiangsu_chejin_usedcar_customer_20260501/raw_messages/learning_batches/raw_batch_6cb0b6013aeb16dc7f70.txt",
+            "path": "payload/runtime/tenants/chejin/raw_messages/learning_batches/raw_batch_6cb0b6013aeb16dc7f70.txt",
             "sha256": "53886db2c26537b1498afc7201fd63831e6d19d881bca50a22fb1f2f9f373970",
             "bytes": 96
           },
           {
-            "path": "payload/runtime/tenants/jiangsu_chejin_usedcar_customer_20260501/raw_messages/learning_batches/raw_batch_725f1773b251ba83121b.txt",
+            "path": "payload/runtime/tenants/chejin/raw_messages/learning_batches/raw_batch_725f1773b251ba83121b.txt",
             "sha256": "f7111206f9391998480730f8530b42921dbcfbdb79765b74c4b80ba11675c60b",
             "bytes": 111
           },
           {
-            "path": "payload/runtime/tenants/jiangsu_chejin_usedcar_customer_20260501/raw_messages/learning_batches/raw_batch_7834d4e229094caabf49.txt",
+            "path": "payload/runtime/tenants/chejin/raw_messages/learning_batches/raw_batch_7834d4e229094caabf49.txt",
             "sha256": "f9836bc18304c751e790440ad73a0c544a408cb95f57930ed8c8f4ce78dee658",
             "bytes": 236
           },
           {
-            "path": "payload/runtime/tenants/jiangsu_chejin_usedcar_customer_20260501/raw_messages/learning_batches/raw_batch_7a40a74c8e25fd881616.txt",
+            "path": "payload/runtime/tenants/chejin/raw_messages/learning_batches/raw_batch_7a40a74c8e25fd881616.txt",
             "sha256": "032e4f77786aa23818ed7c206023233ce6801c1f0651efaba860631bbabf7f44",
             "bytes": 94
           },
           {
-            "path": "payload/runtime/tenants/jiangsu_chejin_usedcar_customer_20260501/raw_messages/learning_batches/raw_batch_7a5b3ddbf454ec1bfb07.txt",
+            "path": "payload/runtime/tenants/chejin/raw_messages/learning_batches/raw_batch_7a5b3ddbf454ec1bfb07.txt",
             "sha256": "e080afb1c13f763daa6e221a495894f8a35c873ed3c798596ee74dd88a955995",
             "bytes": 96
           },
           {
-            "path": "payload/runtime/tenants/jiangsu_chejin_usedcar_customer_20260501/raw_messages/learning_batches/raw_batch_818e2f280e9a3df08d90.txt",
+            "path": "payload/runtime/tenants/chejin/raw_messages/learning_batches/raw_batch_818e2f280e9a3df08d90.txt",
             "sha256": "17e53bae30d55d23a18c67442cee86fea6899a3edd184a451bc49169e9242ff8",
             "bytes": 94
           },
           {
-            "path": "payload/runtime/tenants/jiangsu_chejin_usedcar_customer_20260501/raw_messages/learning_batches/raw_batch_83bbdbe378e1380f7abf.txt",
+            "path": "payload/runtime/tenants/chejin/raw_messages/learning_batches/raw_batch_83bbdbe378e1380f7abf.txt",
             "sha256": "025a9389e61de9f55289114b9c7cf43250f5ff10857cad62831c8bdd75b3e082",
             "bytes": 146
           },
           {
-            "path": "payload/runtime/tenants/jiangsu_chejin_usedcar_customer_20260501/raw_messages/learning_batches/raw_batch_8ae03238cec159eebee0.txt",
+            "path": "payload/runtime/tenants/chejin/raw_messages/learning_batches/raw_batch_8ae03238cec159eebee0.txt",
             "sha256": "de7c0c258320028c0f73fa30d796c2fb1556ddb9db6cdae6a313f16711f760f7",
             "bytes": 60
           },
           {
-            "path": "payload/runtime/tenants/jiangsu_chejin_usedcar_customer_20260501/raw_messages/learning_batches/raw_batch_978e8ff41b88e3cb0e27.txt",
+            "path": "payload/runtime/tenants/chejin/raw_messages/learning_batches/raw_batch_978e8ff41b88e3cb0e27.txt",
             "sha256": "70601b0edcaddc57005a41313e36bc430b0b152aed81e07d897faa05b7c3b4dc",
             "bytes": 111
           },
           {
-            "path": "payload/runtime/tenants/jiangsu_chejin_usedcar_customer_20260501/raw_messages/learning_batches/raw_batch_97c1f2171b6dbc545677.txt",
+            "path": "payload/runtime/tenants/chejin/raw_messages/learning_batches/raw_batch_97c1f2171b6dbc545677.txt",
             "sha256": "f198da9e92fb5fe3d9f9d42a4c62dfeb9eab671de272666d7484b9f4e2a034e7",
             "bytes": 280
           },
           {
-            "path": "payload/runtime/tenants/jiangsu_chejin_usedcar_customer_20260501/raw_messages/learning_batches/raw_batch_9d4dce6419bf6649b2b5.txt",
+            "path": "payload/runtime/tenants/chejin/raw_messages/learning_batches/raw_batch_9d4dce6419bf6649b2b5.txt",
             "sha256": "0821734c56eafaad9b94ffe280f55890b6353f14bf46ddf5e3a33dc16b3cc690",
             "bytes": 871
           },
           {
-            "path": "payload/runtime/tenants/jiangsu_chejin_usedcar_customer_20260501/raw_messages/learning_batches/raw_batch_9f196c9901f186690562.txt",
+            "path": "payload/runtime/tenants/chejin/raw_messages/learning_batches/raw_batch_9f196c9901f186690562.txt",
             "sha256": "7f1d7dbbad340d1ca9742733dd4068fc09e6bc20d6cbbd0f41a501d221b18137",
             "bytes": 236
           },
           {
-            "path": "payload/runtime/tenants/jiangsu_chejin_usedcar_customer_20260501/raw_messages/learning_batches/raw_batch_a1736921791b8ecaac5c.txt",
+            "path": "payload/runtime/tenants/chejin/raw_messages/learning_batches/raw_batch_a1736921791b8ecaac5c.txt",
             "sha256": "389db3296849c80a8a313942680878a9729e694ebe2e805570ddced4a6e7c875",
             "bytes": 94
           },
           {
-            "path": "payload/runtime/tenants/jiangsu_chejin_usedcar_customer_20260501/raw_messages/learning_batches/raw_batch_a3cd2e8c0528a1fc166f.txt",
+            "path": "payload/runtime/tenants/chejin/raw_messages/learning_batches/raw_batch_a3cd2e8c0528a1fc166f.txt",
             "sha256": "15c45b849ec6dddec3db179176c245e9d74759ac64fb3538cb3241c95053232f",
             "bytes": 94
           },
           {
-            "path": "payload/runtime/tenants/jiangsu_chejin_usedcar_customer_20260501/raw_messages/learning_batches/raw_batch_a6d33ca7ddf2864a22f7.txt",
+            "path": "payload/runtime/tenants/chejin/raw_messages/learning_batches/raw_batch_a6d33ca7ddf2864a22f7.txt",
             "sha256": "6c795e3fb6febf3c5bc58271540dacbed36573795f50982e1496060a729a2d36",
             "bytes": 85
           },
           {
-            "path": "payload/runtime/tenants/jiangsu_chejin_usedcar_customer_20260501/raw_messages/learning_batches/raw_batch_a80a481ce4a4b817226f.txt",
+            "path": "payload/runtime/tenants/chejin/raw_messages/learning_batches/raw_batch_a80a481ce4a4b817226f.txt",
             "sha256": "80d7e58be0a2ad2880e8aabd8e65cc4cdc767de56b7186731ef28fdd0c5672a5",
             "bytes": 820
           },
           {
-            "path": "payload/runtime/tenants/jiangsu_chejin_usedcar_customer_20260501/raw_messages/learning_batches/raw_batch_a810e8b162f913be1572.txt",
+            "path": "payload/runtime/tenants/chejin/raw_messages/learning_batches/raw_batch_a810e8b162f913be1572.txt",
             "sha256": "60cae569b5f52997f50a54e50ec31e6831311348488d87752b1389edaca92352",
             "bytes": 820
           },
           {
-            "path": "payload/runtime/tenants/jiangsu_chejin_usedcar_customer_20260501/raw_messages/learning_batches/raw_batch_ab55003148829c44b38f.txt",
+            "path": "payload/runtime/tenants/chejin/raw_messages/learning_batches/raw_batch_ab55003148829c44b38f.txt",
             "sha256": "93fc360f58901784eff0e303c781a77db63bde8efd96a42ec5035c3d1f931347",
             "bytes": 94
           },
           {
-            "path": "payload/runtime/tenants/jiangsu_chejin_usedcar_customer_20260501/raw_messages/learning_batches/raw_batch_af9b26795648b27ce724.txt",
+            "path": "payload/runtime/tenants/chejin/raw_messages/learning_batches/raw_batch_af9b26795648b27ce724.txt",
             "sha256": "4199d92660a68a912bd8f5ed28b9fe154b72ece399d3c89dabaebaa19db78064",
             "bytes": 871
           },
           {
-            "path": "payload/runtime/tenants/jiangsu_chejin_usedcar_customer_20260501/raw_messages/learning_batches/raw_batch_b6593cec05a82e9185bc.txt",
+            "path": "payload/runtime/tenants/chejin/raw_messages/learning_batches/raw_batch_b6593cec05a82e9185bc.txt",
             "sha256": "e212256973ffe1bb223b9817d6aa92fb510da62225b81ac5e5744d167e47e275",
             "bytes": 820
           },
           {
-            "path": "payload/runtime/tenants/jiangsu_chejin_usedcar_customer_20260501/raw_messages/learning_batches/raw_batch_b93bf7f7d2f0c6d73b3b.txt",
+            "path": "payload/runtime/tenants/chejin/raw_messages/learning_batches/raw_batch_b93bf7f7d2f0c6d73b3b.txt",
             "sha256": "d968d9fa34a9404b3778e680fd2844d0e7e743bba290afb50a8ed7caa81779dc",
             "bytes": 280
           },
           {
-            "path": "payload/runtime/tenants/jiangsu_chejin_usedcar_customer_20260501/raw_messages/learning_batches/raw_batch_be642e90cf66b1239a9e.txt",
+            "path": "payload/runtime/tenants/chejin/raw_messages/learning_batches/raw_batch_be642e90cf66b1239a9e.txt",
             "sha256": "d225e8e4bd29d0bcb4c54352da2cfda14c01c05758beb6946c76c933fb328011",
             "bytes": 871
           },
           {
-            "path": "payload/runtime/tenants/jiangsu_chejin_usedcar_customer_20260501/raw_messages/learning_batches/raw_batch_bfcc0f895bdf20627afe.txt",
+            "path": "payload/runtime/tenants/chejin/raw_messages/learning_batches/raw_batch_bfcc0f895bdf20627afe.txt",
             "sha256": "295e02d3c796743e4315755473d1203ff1ad6dfcd8a35fb4df80067bcc00164e",
             "bytes": 280
           },
           {
-            "path": "payload/runtime/tenants/jiangsu_chejin_usedcar_customer_20260501/raw_messages/learning_batches/raw_batch_c259410cd3dc1df6b2de.txt",
+            "path": "payload/runtime/tenants/chejin/raw_messages/learning_batches/raw_batch_c259410cd3dc1df6b2de.txt",
             "sha256": "8a1b92fb4e4908dfb8ab1ecf42cfa8bf71878676e9b3d517a3faf0833e0ac8b4",
             "bytes": 94
           },
           {
-            "path": "payload/runtime/tenants/jiangsu_chejin_usedcar_customer_20260501/raw_messages/learning_batches/raw_batch_c6f9b051b6b3a6471f14.txt",
+            "path": "payload/runtime/tenants/chejin/raw_messages/learning_batches/raw_batch_c6f9b051b6b3a6471f14.txt",
             "sha256": "83b0552c2a06acc8aedd896eb621b6f493179b870b708dedaf479fe2054e3337",
             "bytes": 236
           },
           {
-            "path": "payload/runtime/tenants/jiangsu_chejin_usedcar_customer_20260501/raw_messages/learning_batches/raw_batch_c88d3dba0b527eebb4f8.txt",
+            "path": "payload/runtime/tenants/chejin/raw_messages/learning_batches/raw_batch_c88d3dba0b527eebb4f8.txt",
             "sha256": "8b00c995709b2b9214aeb21941e45dcd32105f7cba650ac64de3b97b7b95df13",
             "bytes": 871
           },
           {
-            "path": "payload/runtime/tenants/jiangsu_chejin_usedcar_customer_20260501/raw_messages/learning_batches/raw_batch_c9a14ebd09eee76dc628.txt",
+            "path": "payload/runtime/tenants/chejin/raw_messages/learning_batches/raw_batch_c9a14ebd09eee76dc628.txt",
             "sha256": "7d432ecd470f53d5aea7c0a3892b4b7deaf7bec0c47f217ece19c573a673a815",
             "bytes": 896
           },
           {
-            "path": "payload/runtime/tenants/jiangsu_chejin_usedcar_customer_20260501/raw_messages/learning_batches/raw_batch_cb47ded06e2e021bd8f4.txt",
+            "path": "payload/runtime/tenants/chejin/raw_messages/learning_batches/raw_batch_cb47ded06e2e021bd8f4.txt",
             "sha256": "a90dca421d408c3409834636f45d1a0a168aaea76c4d5390cbbc030ffce2e6d5",
             "bytes": 96
           },
           {
-            "path": "payload/runtime/tenants/jiangsu_chejin_usedcar_customer_20260501/raw_messages/learning_batches/raw_batch_cf0d0e876d67be376322.txt",
+            "path": "payload/runtime/tenants/chejin/raw_messages/learning_batches/raw_batch_cf0d0e876d67be376322.txt",
             "sha256": "b7f57d74404786a28b849839d439359e96dd1ac0732b546565ce464d07f161c1",
             "bytes": 94
           },
           {
-            "path": "payload/runtime/tenants/jiangsu_chejin_usedcar_customer_20260501/raw_messages/learning_batches/raw_batch_d1f51b9930028d9c7246.txt",
+            "path": "payload/runtime/tenants/chejin/raw_messages/learning_batches/raw_batch_d1f51b9930028d9c7246.txt",
             "sha256": "5daa80c1b552709c82867dde051eae23e0c9390ce535ee77062ee90788bce91c",
             "bytes": 60
           },
           {
-            "path": "payload/runtime/tenants/jiangsu_chejin_usedcar_customer_20260501/raw_messages/learning_batches/raw_batch_d4b71294a90d5f7dabd8.txt",
+            "path": "payload/runtime/tenants/chejin/raw_messages/learning_batches/raw_batch_d4b71294a90d5f7dabd8.txt",
             "sha256": "d057421492d35dd36997a69197a9e3ee43b3e07bfc40526880f85c3d89113eb1",
             "bytes": 96
           },
           {
-            "path": "payload/runtime/tenants/jiangsu_chejin_usedcar_customer_20260501/raw_messages/learning_batches/raw_batch_d78cb8134d88f947c093.txt",
+            "path": "payload/runtime/tenants/chejin/raw_messages/learning_batches/raw_batch_d78cb8134d88f947c093.txt",
             "sha256": "ef3b2fc3b7b8cc254aff438a2a6d8499e3c16d1c03a658e4674d22df01930e8f",
             "bytes": 178
           },
           {
-            "path": "payload/runtime/tenants/jiangsu_chejin_usedcar_customer_20260501/raw_messages/learning_batches/raw_batch_d7c685d6b0da20f0c178.txt",
+            "path": "payload/runtime/tenants/chejin/raw_messages/learning_batches/raw_batch_d7c685d6b0da20f0c178.txt",
             "sha256": "05300ca1f8cbe44faa7e28ede95bedb495dc1dd3bf7598b8658ff44907404d7f",
             "bytes": 96
           },
           {
-            "path": "payload/runtime/tenants/jiangsu_chejin_usedcar_customer_20260501/raw_messages/learning_batches/raw_batch_d8ba0fec41c9d0cbe655.txt",
+            "path": "payload/runtime/tenants/chejin/raw_messages/learning_batches/raw_batch_d8ba0fec41c9d0cbe655.txt",
             "sha256": "19d10197c797806babc5fed6743dfba49b0e6cec1bf0a680867aa81a92276301",
             "bytes": 146
           },
           {
-            "path": "payload/runtime/tenants/jiangsu_chejin_usedcar_customer_20260501/raw_messages/learning_batches/raw_batch_d9edf40cbaa763ecf239.txt",
+            "path": "payload/runtime/tenants/chejin/raw_messages/learning_batches/raw_batch_d9edf40cbaa763ecf239.txt",
             "sha256": "b58a67438154b885cd1b88519145f8a245998ed5bb6bc377ad5e64f7f40a5eca",
             "bytes": 143
           },
           {
-            "path": "payload/runtime/tenants/jiangsu_chejin_usedcar_customer_20260501/raw_messages/learning_batches/raw_batch_db32a31f2264abbd6698.txt",
+            "path": "payload/runtime/tenants/chejin/raw_messages/learning_batches/raw_batch_db32a31f2264abbd6698.txt",
             "sha256": "3e546e594296bce8533961ff909872d27f5c9cc0740215326711714ff7814d18",
             "bytes": 94
           },
           {
-            "path": "payload/runtime/tenants/jiangsu_chejin_usedcar_customer_20260501/raw_messages/learning_batches/raw_batch_e10e458401fb06f3d0de.txt",
+            "path": "payload/runtime/tenants/chejin/raw_messages/learning_batches/raw_batch_e10e458401fb06f3d0de.txt",
             "sha256": "a6160af0d4c04110ef8227d446da3f9d883e130ec0d0a3964527b0b10417cdd1",
             "bytes": 280
           },
           {
-            "path": "payload/runtime/tenants/jiangsu_chejin_usedcar_customer_20260501/raw_messages/learning_batches/raw_batch_e8b549fe6e402ddda357.txt",
+            "path": "payload/runtime/tenants/chejin/raw_messages/learning_batches/raw_batch_e8b549fe6e402ddda357.txt",
             "sha256": "bd0648de22672e4dfdb8cc8275e5631a8e84a0dc6070b547ca9bda0aed65efb6",
             "bytes": 85
           },
           {
-            "path": "payload/runtime/tenants/jiangsu_chejin_usedcar_customer_20260501/raw_messages/learning_batches/raw_batch_e944b2d32095e138ca0c.txt",
+            "path": "payload/runtime/tenants/chejin/raw_messages/learning_batches/raw_batch_e944b2d32095e138ca0c.txt",
             "sha256": "603a80211b7206c787981bea64cb7834daafce5f758bb8547860901e0b05304c",
             "bytes": 96
           },
           {
-            "path": "payload/runtime/tenants/jiangsu_chejin_usedcar_customer_20260501/raw_messages/learning_batches/raw_batch_e9d6a7d9b194e1766df6.txt",
+            "path": "payload/runtime/tenants/chejin/raw_messages/learning_batches/raw_batch_e9d6a7d9b194e1766df6.txt",
             "sha256": "97d525fcad4c0f3c3b56be224a338358a3a94aa83cfd9f42709279d5bc0493b3",
             "bytes": 72
           },
           {
-            "path": "payload/runtime/tenants/jiangsu_chejin_usedcar_customer_20260501/raw_messages/learning_batches/raw_batch_eb7e77e2e53aa3ec53e5.txt",
+            "path": "payload/runtime/tenants/chejin/raw_messages/learning_batches/raw_batch_eb7e77e2e53aa3ec53e5.txt",
             "sha256": "91c953917d78f0d88a5cb981392eba89ebaff15484855ac6b634ec85ac1ad1cb",
             "bytes": 94
           },
           {
-            "path": "payload/runtime/tenants/jiangsu_chejin_usedcar_customer_20260501/raw_messages/learning_batches/raw_batch_ebad9242798eb082a678.txt",
+            "path": "payload/runtime/tenants/chejin/raw_messages/learning_batches/raw_batch_ebad9242798eb082a678.txt",
             "sha256": "c35256b82de278d25c30ac6ea500004e6f212cb00c8368edd915f14d66d2dc9d",
             "bytes": 143
           },
           {
-            "path": "payload/runtime/tenants/jiangsu_chejin_usedcar_customer_20260501/raw_messages/learning_batches/raw_batch_eee4d0540ca0e14a872d.txt",
+            "path": "payload/runtime/tenants/chejin/raw_messages/learning_batches/raw_batch_eee4d0540ca0e14a872d.txt",
             "sha256": "32c0df5872bdef1b0786d5774e9032bd549dfd9978d62d0e2b47f23a24a7aaa6",
             "bytes": 72
           },
           {
-            "path": "payload/runtime/tenants/jiangsu_chejin_usedcar_customer_20260501/raw_messages/learning_batches/raw_batch_f6d5be87ecaecaa2f0f0.txt",
+            "path": "payload/runtime/tenants/chejin/raw_messages/learning_batches/raw_batch_f6d5be87ecaecaa2f0f0.txt",
             "sha256": "7a216f21b1f7877817ceae33fee52e0929f69d68de78e4cc03ece7e3eb50fc54",
             "bytes": 871
           },
           {
-            "path": "payload/runtime/tenants/jiangsu_chejin_usedcar_customer_20260501/raw_messages/learning_batches/raw_batch_f6fe6cdc0ec6e30a79a5.txt",
+            "path": "payload/runtime/tenants/chejin/raw_messages/learning_batches/raw_batch_f6fe6cdc0ec6e30a79a5.txt",
             "sha256": "da9e7506fc5c6ba0d7c61e5677d50b6f07baf87e990bae744532cba9d304cb9b",
             "bytes": 820
           },
           {
-            "path": "payload/runtime/tenants/jiangsu_chejin_usedcar_customer_20260501/raw_messages/learning_batches/raw_batch_f7748bf2c64aeb0b4d07.txt",
+            "path": "payload/runtime/tenants/chejin/raw_messages/learning_batches/raw_batch_f7748bf2c64aeb0b4d07.txt",
             "sha256": "d4e5adc2284ff34fa3d4dd8cff31ad0701e716b42fd1812908b5425c10da0c53",
             "bytes": 162
           },
           {
-            "path": "payload/runtime/tenants/jiangsu_chejin_usedcar_customer_20260501/raw_messages/learning_batches/raw_batch_fbe98bf3fac2eb1bb068.txt",
+            "path": "payload/runtime/tenants/chejin/raw_messages/learning_batches/raw_batch_fbe98bf3fac2eb1bb068.txt",
             "sha256": "c7d11d1eba18784e9125db954724016f6c92b54170e3dbf1b68e4d41751544ec",
             "bytes": 96
           },
           {
-            "path": "payload/runtime/tenants/jiangsu_chejin_usedcar_customer_20260501/raw_messages/messages.json",
+            "path": "payload/runtime/tenants/chejin/raw_messages/messages.json",
             "sha256": "99c35b196348953defcc88ba5332b52f4a0a3507e65afd3ec40451cd31b0b3e7",
             "bytes": 21662
           },
           {
-            "path": "payload/runtime/tenants/jiangsu_chejin_usedcar_customer_20260501/recorder/settings.json",
+            "path": "payload/runtime/tenants/chejin/recorder/settings.json",
             "sha256": "0c0ddde05756aff9b3d76ec2d06e4adbc5f9cde850ce9b115de1ac2b2adc7bb2",
             "bytes": 195
           },
           {
-            "path": "payload/tenants/jiangsu_chejin_usedcar_customer_20260501/knowledge_bases/chats/items/.gitkeep",
+            "path": "payload/tenants/chejin/knowledge_bases/chats/items/.gitkeep",
             "sha256": "7eb70257593da06f682a3ddda54a9d260d4fc514f645237f5ca74b08f8da61a6",
             "bytes": 2
           },
           {
-            "path": "payload/tenants/jiangsu_chejin_usedcar_customer_20260501/knowledge_bases/chats/items/chejin_budget_chat_commuter.json",
+            "path": "payload/tenants/chejin/knowledge_bases/chats/items/chejin_budget_chat_commuter.json",
             "sha256": "3470563f21bcfc41728deef442bd67a195e0b8cae6299abfaf4fd7fd4735e5a1",
             "bytes": 1254
           },
           {
-            "path": "payload/tenants/jiangsu_chejin_usedcar_customer_20260501/knowledge_bases/chats/items/chejin_sleep_wakeup_chat_new_stock.json",
+            "path": "payload/tenants/chejin/knowledge_bases/chats/items/chejin_sleep_wakeup_chat_new_stock.json",
             "sha256": "7a3e48f021bcc05ff702928171fc7e10087446ab49b4be7853f46f69c5db0beb",
             "bytes": 1288
           },
           {
-            "path": "payload/tenants/jiangsu_chejin_usedcar_customer_20260501/knowledge_bases/chats/items/chejin_trade_in_chat_collect.json",
+            "path": "payload/tenants/chejin/knowledge_bases/chats/items/chejin_trade_in_chat_collect.json",
             "sha256": "54871c5cc9ba6adefcf6c4bb85f9a1d1159779e97b9351fef862ab93e8292043",
             "bytes": 1281
           },
           {
-            "path": "payload/tenants/jiangsu_chejin_usedcar_customer_20260501/knowledge_bases/chats/resolver.json",
+            "path": "payload/tenants/chejin/knowledge_bases/chats/resolver.json",
             "sha256": "4a57b350b978e84f1ca894512486c71c0fc0c917f264bace474a381de6a10ff1",
             "bytes": 624
           },
           {
-            "path": "payload/tenants/jiangsu_chejin_usedcar_customer_20260501/knowledge_bases/chats/schema.json",
+            "path": "payload/tenants/chejin/knowledge_bases/chats/schema.json",
             "sha256": "a9d54ccc6ba454a03dbe3c2e9ec6b88d5ca3215c01c330bf182e16403d5145be",
             "bytes": 1895
           },
           {
-            "path": "payload/tenants/jiangsu_chejin_usedcar_customer_20260501/knowledge_bases/erp_exports/items/.gitkeep",
+            "path": "payload/tenants/chejin/knowledge_bases/erp_exports/items/.gitkeep",
             "sha256": "7eb70257593da06f682a3ddda54a9d260d4fc514f645237f5ca74b08f8da61a6",
             "bytes": 2
           },
           {
-            "path": "payload/tenants/jiangsu_chejin_usedcar_customer_20260501/knowledge_bases/erp_exports/resolver.json",
+            "path": "payload/tenants/chejin/knowledge_bases/erp_exports/resolver.json",
             "sha256": "85b595f35bee4bb1a650457c1f79e6d803afebc1d370f191f2cc648ecb84ec0c",
             "bytes": 380
           },
           {
-            "path": "payload/tenants/jiangsu_chejin_usedcar_customer_20260501/knowledge_bases/erp_exports/schema.json",
+            "path": "payload/tenants/chejin/knowledge_bases/erp_exports/schema.json",
             "sha256": "28608ce42dc5ce6e006480b0c125960383d578fb7ffefb31ad1f5b7d6a7cebce",
             "bytes": 1271
           },
           {
-            "path": "payload/tenants/jiangsu_chejin_usedcar_customer_20260501/knowledge_bases/policies/items/.gitkeep",
+            "path": "payload/tenants/chejin/knowledge_bases/policies/items/.gitkeep",
             "sha256": "7eb70257593da06f682a3ddda54a9d260d4fc514f645237f5ca74b08f8da61a6",
             "bytes": 2
           },
           {
-            "path": "payload/tenants/jiangsu_chejin_usedcar_customer_20260501/knowledge_bases/policies/items/chejin_douyin_lead_first_reply.json",
+            "path": "payload/tenants/chejin/knowledge_bases/policies/items/chejin_douyin_lead_first_reply.json",
             "sha256": "4d4897cb8983b687e77f05807f72468491d0a6a2097ea24c0e7dc34bd7a55659",
             "bytes": 1377
           },
           {
-            "path": "payload/tenants/jiangsu_chejin_usedcar_customer_20260501/knowledge_bases/policies/items/chejin_handoff_high_intent.json",
+            "path": "payload/tenants/chejin/knowledge_bases/policies/items/chejin_handoff_high_intent.json",
             "sha256": "988db864a3f31dd86905404b8c8860c3e87a674c5a5f2742c06ac16e454aed96",
             "bytes": 1440
           },
           {
-            "path": "payload/tenants/jiangsu_chejin_usedcar_customer_20260501/knowledge_bases/policies/items/chejin_trade_in_info_collect.json",
+            "path": "payload/tenants/chejin/knowledge_bases/policies/items/chejin_trade_in_info_collect.json",
             "sha256": "570813a1838bfc56b4154cd0e22d1b4771c4f166f21f37c402fde0f8d8d33ac4",
             "bytes": 1393
           },
           {
-            "path": "payload/tenants/jiangsu_chejin_usedcar_customer_20260501/knowledge_bases/policies/resolver.json",
+            "path": "payload/tenants/chejin/knowledge_bases/policies/resolver.json",
             "sha256": "6ce50a6c785349a792c9a2609a77a534406811b3d4aa184ae4cdfa55b5f562ea",
             "bytes": 672
           },
           {
-            "path": "payload/tenants/jiangsu_chejin_usedcar_customer_20260501/knowledge_bases/policies/schema.json",
+            "path": "payload/tenants/chejin/knowledge_bases/policies/schema.json",
             "sha256": "0763af12893459fe0b55ae775e253fa956b6d379e2e4dda86ff002456ab2056e",
             "bytes": 2429
           },
           {
-            "path": "payload/tenants/jiangsu_chejin_usedcar_customer_20260501/knowledge_bases/products/items/.gitkeep",
+            "path": "payload/tenants/chejin/knowledge_bases/products/items/.gitkeep",
             "sha256": "7eb70257593da06f682a3ddda54a9d260d4fc514f645237f5ca74b08f8da61a6",
             "bytes": 2
           },
           {
-            "path": "payload/tenants/jiangsu_chejin_usedcar_customer_20260501/knowledge_bases/products/items/chejin_bmw320_2019_m.json",
+            "path": "payload/tenants/chejin/knowledge_bases/products/items/chejin_bmw320_2019_m.json",
             "sha256": "c863202f09bd6b63144f13f727bab93cf3c66d621636f718f25d14c3f2b6082a",
             "bytes": 1605
           },
           {
-            "path": "payload/tenants/jiangsu_chejin_usedcar_customer_20260501/knowledge_bases/products/items/chejin_camry_2021_20g.json",
+            "path": "payload/tenants/chejin/knowledge_bases/products/items/chejin_camry_2021_20g.json",
             "sha256": "e2049a1d8925c8b6fce5449710afb6c5bd29992f63316f84fddb327714f3c564",
             "bytes": 1606
           },
           {
-            "path": "payload/tenants/jiangsu_chejin_usedcar_customer_20260501/knowledge_bases/products/items/chejin_civic_2020_220turbo.json",
+            "path": "payload/tenants/chejin/knowledge_bases/products/items/chejin_civic_2020_220turbo.json",
             "sha256": "f60c4d3d6e46b916d53b7a5a48ff6d29eb60ec66bf3a252ed83e472a10f37ffc",
             "bytes": 1642
           },
           {
-            "path": "payload/tenants/jiangsu_chejin_usedcar_customer_20260501/knowledge_bases/products/items/chejin_gl8_2020_es653t.json",
+            "path": "payload/tenants/chejin/knowledge_bases/products/items/chejin_gl8_2020_es653t.json",
             "sha256": "8c1e767986007c8383475eb60c395751f8777b8b12ee15ca945dd4f08b232777",
             "bytes": 1595
           },
           {
-            "path": "payload/tenants/jiangsu_chejin_usedcar_customer_20260501/knowledge_bases/products/items/chejin_qinplus_2022_dmi55.json",
+            "path": "payload/tenants/chejin/knowledge_bases/products/items/chejin_qinplus_2022_dmi55.json",
             "sha256": "36fd2648643e6c8b08c536de536f8be1173d2d599dfbfb4ec95888e59790eded",
             "bytes": 1599
           },
           {
-            "path": "payload/tenants/jiangsu_chejin_usedcar_customer_20260501/knowledge_bases/products/resolver.json",
+            "path": "payload/tenants/chejin/knowledge_bases/products/resolver.json",
             "sha256": "cdd911588311fa55a89728a56ee3a57b935ab0e5bc4a259528d1e893040c15aa",
             "bytes": 536
           },
           {
-            "path": "payload/tenants/jiangsu_chejin_usedcar_customer_20260501/knowledge_bases/products/schema.json",
+            "path": "payload/tenants/chejin/knowledge_bases/products/schema.json",
             "sha256": "425d68a7f05099cce3a8b6a1d894b2c4b7c3ed7a52dc8a03ae7f4c27f381f4eb",
             "bytes": 2269
           },
           {
-            "path": "payload/tenants/jiangsu_chejin_usedcar_customer_20260501/knowledge_bases/registry.json",
+            "path": "payload/tenants/chejin/knowledge_bases/registry.json",
             "sha256": "05d32ddf52b3499c15d62771ee6251db28fb25feec31be8dc6d756dd02380c98",
             "bytes": 1329
           },
           {
-            "path": "payload/tenants/jiangsu_chejin_usedcar_customer_20260501/product_item_knowledge/chejin_camry_2021_20g/faq/chejin_camry_commute_faq.json",
+            "path": "payload/tenants/chejin/product_item_knowledge/chejin_camry_2021_20g/faq/chejin_camry_commute_faq.json",
             "sha256": "4e2db7f3bc84540704edac32dabb76b7be96cfa1b662d9206e1413e9b2432697",
             "bytes": 1383
           },
           {
-            "path": "payload/tenants/jiangsu_chejin_usedcar_customer_20260501/product_item_knowledge/chejin_gl8_2020_es653t/explanations/chejin_gl8_business_scene.json",
+            "path": "payload/tenants/chejin/product_item_knowledge/chejin_gl8_2020_es653t/explanations/chejin_gl8_business_scene.json",
             "sha256": "132205895048dd50a2bd1175c3014facdfb891c0e05750884f605dec65a5660f",
             "bytes": 1389
           },
           {
-            "path": "payload/tenants/jiangsu_chejin_usedcar_customer_20260501/product_item_knowledge/chejin_qinplus_2022_dmi55/rules/chejin_qinplus_battery_handoff.json",
+            "path": "payload/tenants/chejin/product_item_knowledge/chejin_qinplus_2022_dmi55/rules/chejin_qinplus_battery_handoff.json",
             "sha256": "07459a1474bdcf641884cfda13b281ae6b724ab6a1cfc07a159da53944ea2a53",
             "bytes": 1509
           },
           {
-            "path": "payload/tenants/jiangsu_chejin_usedcar_customer_20260501/rag_chunks/source_2d21086386cd800b.json",
+            "path": "payload/tenants/chejin/rag_chunks/source_2d21086386cd800b.json",
             "sha256": "04c130db19fd123a80c96f729bed48b5d40ab4931592d675d55a10be3418430b",
             "bytes": 1426
           },
           {
-            "path": "payload/tenants/jiangsu_chejin_usedcar_customer_20260501/rag_chunks/source_46ade21c94a25215.json",
+            "path": "payload/tenants/chejin/rag_chunks/source_46ade21c94a25215.json",
             "sha256": "7c66d14972a7ffd3415bd89f7b3f729f15f96d5d3c928cc714cabf491bc6cfcf",
             "bytes": 1705
           },
           {
-            "path": "payload/tenants/jiangsu_chejin_usedcar_customer_20260501/rag_chunks/source_98b8438d7f65da3a.json",
+            "path": "payload/tenants/chejin/rag_chunks/source_98b8438d7f65da3a.json",
             "sha256": "e8f460636bec58e86ad0ae3e71b5fa60cbab36845d946ad37dd1b875739cd36a",
             "bytes": 1764
           },
           {
-            "path": "payload/tenants/jiangsu_chejin_usedcar_customer_20260501/rag_chunks/source_d262d55f8b02b514.json",
+            "path": "payload/tenants/chejin/rag_chunks/source_d262d55f8b02b514.json",
             "sha256": "3f5f5795c82e4ba4d72b3945ec2f9b438176714090f822ae471e5efa2b8b9c7d",
             "bytes": 1571
           },
           {
-            "path": "payload/tenants/jiangsu_chejin_usedcar_customer_20260501/rag_experience/experiences.json",
+            "path": "payload/tenants/chejin/rag_experience/experiences.json",
             "sha256": "d495f1d9aae19f6104ffa4be10f097ede4456f944fe3db8f0c0dd95351dfb912",
             "bytes": 13403
           },
           {
-            "path": "payload/tenants/jiangsu_chejin_usedcar_customer_20260501/rag_index/index.json",
+            "path": "payload/tenants/chejin/rag_index/index.json",
             "sha256": "61d482088eccd60d8a5b5b042614443b630dc0cfeb4b9a95afb5d026c0fdf620",
             "bytes": 32982
           },
           {
-            "path": "payload/tenants/jiangsu_chejin_usedcar_customer_20260501/rag_sources/sources.json",
+            "path": "payload/tenants/chejin/rag_sources/sources.json",
             "sha256": "f5eb3de6d43725fbce2422d7782c391bf7978f504bcdafe923a4e631ecdc0cbd",
             "bytes": 2403
           },
           {
-            "path": "payload/tenants/jiangsu_chejin_usedcar_customer_20260501/review_candidates/pending/raw_0aa6e09d264ec7ad.json",
+            "path": "payload/tenants/chejin/review_candidates/pending/raw_0aa6e09d264ec7ad.json",
             "sha256": "e3ff9ab3c311f9e701c6fa81e11dff945eab06697636315cd3d68c91995be854",
             "bytes": 10876
           },
           {
-            "path": "payload/tenants/jiangsu_chejin_usedcar_customer_20260501/review_candidates/pending/raw_780fd867cde6a5a5.json",
+            "path": "payload/tenants/chejin/review_candidates/pending/raw_780fd867cde6a5a5.json",
             "sha256": "e80428987a8ec7d7cf3e7457c6f162e1883a3541b92db945832f1655abc8219f",
             "bytes": 9061
           },
           {
-            "path": "payload/tenants/jiangsu_chejin_usedcar_customer_20260501/review_candidates/pending/raw_f42d6d436a2f85f9.json",
+            "path": "payload/tenants/chejin/review_candidates/pending/raw_f42d6d436a2f85f9.json",
             "sha256": "c5528e03c2060ed95e4df36d1e8c22a5081c0df8b33947dfbfee1afb4b8d32db",
             "bytes": 14456
           },
           {
-            "path": "payload/tenants/jiangsu_chejin_usedcar_customer_20260501/tenant.json",
+            "path": "payload/tenants/chejin/tenant.json",
             "sha256": "4f9c7435ace70ac31b33fd31da2a1e0450f47fc236e61933570f1cf9cf2b21e1",
             "bytes": 457
           }
@@ -8571,6 +9855,36 @@
       "created_at": "2026-05-09T13:37:03+00:00",
       "updated_by": "platform-admin",
       "updated_at": "2026-05-09T13:37:03+00:00"
+    },
+    "shared_global_contextual_honorific_usage": {
+      "item_id": "shared_global_contextual_honorific_usage",
+      "industry_id": "global",
+      "category_id": "reply_style",
+      "title": "自然称呼使用规则",
+      "content": "微信客服不要每条回复都在开头加称呼。称呼主要用于开场寒暄，或客户切换到新话题时有选择地使用；中途连续追问默认不加。称呼要结合客户画像自然轮换：男性可在“姓哥/哥/老板”之间切换，女性可用“姓姐/姐”。不要把文件传输助手、群名、门店名、客服名、测试名等非真人会话名拆成姓氏称呼。",
+      "keywords": [
+        "称呼",
+        "哥",
+        "姐",
+        "老板",
+        "开场",
+        "新话题",
+        "真人感"
+      ],
+      "applies_to": "所有行业的微信客服对话",
+      "notes": "平台通用回复口吻",
+      "status": "active",
+      "source": "system_seed_industry_library",
+      "tenant_id": "default",
+      "data": {
+        "title": "自然称呼使用规则",
+        "guideline_text": "微信客服不要每条回复都在开头加称呼。称呼主要用于开场寒暄，或客户切换到新话题时有选择地使用；中途连续追问默认不加。称呼要结合客户画像自然轮换：男性可在“姓哥/哥/老板”之间切换，女性可用“姓姐/姐”。不要把文件传输助手、群名、门店名、客服名、测试名等非真人会话名拆成姓氏称呼。",
+        "applies_to": "所有微信 AI 客服账号的客户可见回复"
+      },
+      "created_by": "system_seed",
+      "created_at": "2026-05-18T08:23:30+00:00",
+      "updated_by": "system_seed",
+      "updated_at": "2026-05-18T08:23:30+00:00"
     }
   },
   "admin_credentials": {
@@ -8628,7 +9942,7 @@
       "ip_address": "127.0.0.1",
       "trusted_until": "2026-06-07T04:35:13+00:00",
       "created_at": "2026-05-08T04:35:13+00:00",
-      "last_seen_at": "2026-05-10T17:30:36+00:00"
+      "last_seen_at": "2026-05-19T03:11:45+00:00"
     },
     "c1dcdf880206a49c5166abfe9a29fb35ccc0ef99c49a8372573821be61113525": {
       "fingerprint": "c1dcdf880206a49c5166abfe9a29fb35ccc0ef99c49a8372573821be61113525",
@@ -8646,7 +9960,16 @@
       "ip_address": "127.0.0.1",
       "trusted_until": "2026-06-09T18:34:32+00:00",
       "created_at": "2026-05-10T18:34:32+00:00",
-      "last_seen_at": "2026-05-11T05:16:10+00:00"
+      "last_seen_at": "2026-05-12T17:44:21+00:00"
+    },
+    "940a70ea91e4c1ea7be3c22004077226898480f31d3fabed61b6180fafa703f5": {
+      "fingerprint": "940a70ea91e4c1ea7be3c22004077226898480f31d3fabed61b6180fafa703f5",
+      "user_id": "user_YTE2rdUWFGqX",
+      "device_name": "Win32 zh-CN",
+      "ip_address": "127.0.0.1",
+      "trusted_until": "2026-06-11T18:26:18+00:00",
+      "created_at": "2026-05-12T18:26:18+00:00",
+      "last_seen_at": "2026-05-13T07:18:55+00:00"
     }
   },
   "smtp_config": {
@@ -8658,13 +9981,13 @@
     "password": "fvq7p7x7y5cDPsEb",
     "from_email": "xuc@alcochrom.com",
     "sender_name": "OmniAuto",
-    "otp_required": true,
+    "otp_required": false,
     "code_length": 4,
     "ttl_minutes": 15,
     "resend_seconds": 60,
     "trusted_device_days": 30,
     "initialized_at": "2026-04-30T17:51:13+00:00",
-    "updated_at": "2026-04-30T17:51:13+00:00"
+    "updated_at": "2026-05-18T08:34:37+00:00"
   },
   "shared_scan_state": {
     "default:chats:quote_detail_request:0137ae6eeb65e716": {
@@ -9082,18 +10405,37 @@
       "version": "1.0.0",
       "config": {
         "description": "Rule-first order extraction with optional LLM supplementation, exports to order-sheet style workbook.",
-        "date_output_mode": "MMDD_text",
+        "date_output_mode": "YYYY-MM-DD",
         "allow_empty_cost_fields": true,
         "llm_enabled": true,
-        "llm_max_rows_per_run": 40,
+        "llm_max_rows_per_run": 12,
         "supported_content_types": [
           "text",
           "quote"
-        ]
+        ],
+        "llm_repair_max_rows_per_run": 8,
+        "llm_dynamic_budget_enabled": true,
+        "llm_dynamic_budget_ratio": 0.35,
+        "llm_dynamic_budget_max": 64,
+        "llm_dynamic_repair_ratio": 0.25,
+        "llm_dynamic_repair_max": 32,
+        "llm_segmentation_enabled": true,
+        "llm_segmentation_max_segments": 6,
+        "llm_supplement_mode": "missing_core_fields_only",
+        "extract_mode": "llm_first",
+        "missing_quantity_strategy": "strict",
+        "include_record_types_in_main_sheet": [
+          "order_item",
+          "gift_item"
+        ],
+        "force_multi_sku_split_enabled": true,
+        "force_multi_sku_min_skus": 2,
+        "force_multi_order_signal_threshold": 2,
+        "context_followup_enabled": true
       },
       "builtin": true,
       "created_at": "2026-05-09T11:28:42+00:00",
-      "updated_at": "2026-05-09T11:28:42+00:00"
+      "updated_at": "2026-05-14T02:28:02+00:00"
     }
   },
   "recorder_module_bindings": {

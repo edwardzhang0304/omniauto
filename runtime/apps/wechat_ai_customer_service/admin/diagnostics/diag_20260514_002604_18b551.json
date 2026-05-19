@@ -1,0 +1,367 @@
+{
+  "ok": true,
+  "run_id": "diag_20260514_002604_18b551",
+  "mode": "quick",
+  "status": "warning",
+  "created_at": "2026-05-14T00:26:49",
+  "checks": [
+    {
+      "name": "quick_knowledge_validation",
+      "ok": false,
+      "issues": [
+        {
+          "code": "llm_inappropriate",
+          "severity": "error",
+          "title": "LLM：场景不适用",
+          "detail": "这些聊天模板明确针对二手车业务（如SUV、车源、金融审批等），与当前办公设备、安防等业务场景完全不匹配，可能导致客服回复错误信息。",
+          "target": "chats/wf_tpl_a",
+          "target_label": "chats/wf_tpl_a, chats/wf_tpl_b, chats/wf_tpl_c",
+          "repairable": false,
+          "action_type": "delete",
+          "involved_targets": [
+            "chats/wf_tpl_a",
+            "chats/wf_tpl_b",
+            "chats/wf_tpl_c"
+          ],
+          "llm_reasoning": "这些聊天模板明确针对二手车业务（如SUV、车源、金融审批等），与当前办公设备、安防等业务场景完全不匹配，可能导致客服回复错误信息。",
+          "suggestions": [
+            {
+              "title": "建议删除",
+              "detail": "该条目存在明显错误或不适用，建议归档或废弃。",
+              "level": "danger"
+            }
+          ]
+        },
+        {
+          "code": "llm_duplicate_semantic",
+          "severity": "warning",
+          "title": "LLM：语义重复",
+          "detail": "两个条目都是关于发票政策，内容高度重合（均支持普票和专票、1-3个工作日开票等），建议合并为一个完整条目。",
+          "target": "policies/invoice",
+          "target_label": "policies/invoice, policies/invoice_policy_details",
+          "repairable": false,
+          "action_type": "merge",
+          "involved_targets": [
+            "policies/invoice",
+            "policies/invoice_policy_details"
+          ],
+          "llm_reasoning": "两个条目都是关于发票政策，内容高度重合（均支持普票和专票、1-3个工作日开票等），建议合并为一个完整条目。",
+          "suggestions": [
+            {
+              "title": "建议合并",
+              "detail": "多条知识表达同一含义，建议保留信息最完整的一条，将其余归档。",
+              "level": "warning"
+            }
+          ]
+        },
+        {
+          "code": "llm_duplicate_semantic",
+          "severity": "warning",
+          "title": "LLM：语义重复",
+          "detail": "两者都是公司信息，company_profile包含地址电话等详细信息，item_2712d3045ad2包含公司名称和主营范围，内容有重复且互补，可合并。",
+          "target": "policies/company_profile",
+          "target_label": "policies/company_profile, policies/item_2712d3045ad2",
+          "repairable": false,
+          "action_type": "merge",
+          "involved_targets": [
+            "policies/company_profile",
+            "policies/item_2712d3045ad2"
+          ],
+          "llm_reasoning": "两者都是公司信息，company_profile包含地址电话等详细信息，item_2712d3045ad2包含公司名称和主营范围，内容有重复且互补，可合并。",
+          "suggestions": [
+            {
+              "title": "建议合并",
+              "detail": "多条知识表达同一含义，建议保留信息最完整的一条，将其余归档。",
+              "level": "warning"
+            }
+          ]
+        },
+        {
+          "code": "llm_logic_error",
+          "severity": "error",
+          "title": "LLM：逻辑错误",
+          "detail": "物流政策中规定非偏远地区满1000包邮，而偏远地区运费规则中却说常规地区默认包邮，两者无条件包邮与有条件包邮矛盾。",
+          "target": "policies/logistics_policy_details",
+          "target_label": "policies/logistics_policy_details, policies/remote_area_shipping_rule",
+          "repairable": false,
+          "action_type": "review",
+          "involved_targets": [
+            "policies/logistics_policy_details",
+            "policies/remote_area_shipping_rule"
+          ],
+          "llm_reasoning": "物流政策中规定非偏远地区满1000包邮，而偏远地区运费规则中却说常规地区默认包邮，两者无条件包邮与有条件包邮矛盾。",
+          "suggestions": [
+            {
+              "title": "建议人工复核",
+              "detail": "LLM认为该条目可能存在问题，请人工确认后决定处理方式。",
+              "level": "warning"
+            }
+          ]
+        },
+        {
+          "code": "llm_duplicate_semantic",
+          "severity": "warning",
+          "title": "LLM：语义重复",
+          "detail": "两者均为付款政策，内容高度重叠，支付方式、定金政策相同，建议合并为一个详细条目。",
+          "target": "policies/payment",
+          "target_label": "policies/payment, policies/payment_policy_details",
+          "repairable": false,
+          "action_type": "merge",
+          "involved_targets": [
+            "policies/payment",
+            "policies/payment_policy_details"
+          ],
+          "llm_reasoning": "两者均为付款政策，内容高度重叠，支付方式、定金政策相同，建议合并为一个详细条目。",
+          "suggestions": [
+            {
+              "title": "建议合并",
+              "detail": "多条知识表达同一含义，建议保留信息最完整的一条，将其余归档。",
+              "level": "warning"
+            }
+          ]
+        },
+        {
+          "code": "llm_rag_quality_low",
+          "severity": "warning",
+          "title": "LLM：RAG经验质量低",
+          "detail": "RAG经验要求额外提供收票邮箱和手机号，但正式知识条目中未包含，可能导致回复不一致。",
+          "target": "policies/special_invoice_rule",
+          "target_label": "policies/special_invoice_rule, rag_exp_9151bc188e5982efba1c",
+          "repairable": false,
+          "action_type": "review",
+          "involved_targets": [
+            "policies/special_invoice_rule",
+            "rag_exp_9151bc188e5982efba1c"
+          ],
+          "llm_reasoning": "RAG经验要求额外提供收票邮箱和手机号，但正式知识条目中未包含，可能导致回复不一致。",
+          "suggestions": [
+            {
+              "title": "建议人工复核",
+              "detail": "LLM认为该条目可能存在问题，请人工确认后决定处理方式。",
+              "level": "warning"
+            }
+          ]
+        },
+        {
+          "code": "knowledge_token_budget_large",
+          "severity": "info",
+          "title": "知识体积较大",
+          "detail": "当前分类知识库总量估算约 42842 token。这不是知识格式故障，也没有某条知识需要立即删除；它提醒后续继续按客户问题检索相关知识，避免一次性加载全部知识。",
+          "target_label": "全局知识库",
+          "details": [
+            {
+              "label": "问题性质",
+              "value": "容量提示，不是知识格式故障",
+              "level": "normal"
+            },
+            {
+              "label": "估算总量",
+              "value": "约 42842 token",
+              "level": "warning"
+            },
+            {
+              "label": "检测阈值",
+              "value": "超过 7000 token 时提示",
+              "level": "normal"
+            },
+            {
+              "label": "文件数量",
+              "value": "68 个 JSON 文件",
+              "level": "normal"
+            },
+            {
+              "label": "chats",
+              "value": "约 8793 token / 16 个文件",
+              "level": "normal"
+            },
+            {
+              "label": "erp_exports",
+              "value": "约 860 token / 2 个文件",
+              "level": "normal"
+            },
+            {
+              "label": "policies",
+              "value": "约 24980 token / 39 个文件",
+              "level": "normal"
+            },
+            {
+              "label": "products",
+              "value": "约 7517 token / 11 个文件",
+              "level": "normal"
+            }
+          ],
+          "suggestions": [
+            {
+              "title": "不建议自动删除知识",
+              "detail": "当前没有发现哪一条知识错误，系统不能为了降低体积擅自删内容。",
+              "level": "danger"
+            },
+            {
+              "title": "继续保持按门类和问题范围检索",
+              "detail": "客服运行时应只取相关商品、政策、话术和上下文证据，不要把全库一次性塞给大模型。",
+              "level": "normal"
+            },
+            {
+              "title": "如果后续继续变大",
+              "detail": "优先拆分过长政策、归档过期商品、把重复话术合并为模板，再重新检测。",
+              "level": "warning"
+            }
+          ],
+          "repairable": false
+        }
+      ],
+      "token_budget_estimate": 42842,
+      "recent_only": true
+    }
+  ],
+  "issues": [
+    {
+      "code": "llm_inappropriate",
+      "severity": "warning",
+      "title": "LLM：场景不适用",
+      "detail": "这些聊天模板明确针对二手车业务（如SUV、车源、金融审批等），与当前办公设备、安防等业务场景完全不匹配，可能导致客服回复错误信息。",
+      "target": "chats/wf_tpl_a",
+      "target_label": "chats/wf_tpl_a, chats/wf_tpl_b, chats/wf_tpl_c",
+      "repairable": false,
+      "action_type": "delete",
+      "involved_targets": [
+        "chats/wf_tpl_a",
+        "chats/wf_tpl_b",
+        "chats/wf_tpl_c"
+      ],
+      "llm_reasoning": "这些聊天模板明确针对二手车业务（如SUV、车源、金融审批等），与当前办公设备、安防等业务场景完全不匹配，可能导致客服回复错误信息。",
+      "suggestions": [
+        {
+          "title": "建议删除",
+          "detail": "该条目存在明显错误或不适用，建议归档或废弃。",
+          "level": "danger"
+        }
+      ],
+      "fingerprint": "c27d342d1332b3da40f79c4b"
+    },
+    {
+      "code": "llm_duplicate_semantic",
+      "severity": "info",
+      "title": "LLM：语义重复",
+      "detail": "两个条目都是关于发票政策，内容高度重合（均支持普票和专票、1-3个工作日开票等），建议合并为一个完整条目。",
+      "target": "policies/invoice",
+      "target_label": "policies/invoice, policies/invoice_policy_details",
+      "repairable": false,
+      "action_type": "merge",
+      "involved_targets": [
+        "policies/invoice",
+        "policies/invoice_policy_details"
+      ],
+      "llm_reasoning": "两个条目都是关于发票政策，内容高度重合（均支持普票和专票、1-3个工作日开票等），建议合并为一个完整条目。",
+      "suggestions": [
+        {
+          "title": "建议合并",
+          "detail": "多条知识表达同一含义，建议保留信息最完整的一条，将其余归档。",
+          "level": "warning"
+        }
+      ],
+      "fingerprint": "aa24c5ba198fb86899f0a29e"
+    },
+    {
+      "code": "llm_duplicate_semantic",
+      "severity": "info",
+      "title": "LLM：语义重复",
+      "detail": "两者都是公司信息，company_profile包含地址电话等详细信息，item_2712d3045ad2包含公司名称和主营范围，内容有重复且互补，可合并。",
+      "target": "policies/company_profile",
+      "target_label": "policies/company_profile, policies/item_2712d3045ad2",
+      "repairable": false,
+      "action_type": "merge",
+      "involved_targets": [
+        "policies/company_profile",
+        "policies/item_2712d3045ad2"
+      ],
+      "llm_reasoning": "两者都是公司信息，company_profile包含地址电话等详细信息，item_2712d3045ad2包含公司名称和主营范围，内容有重复且互补，可合并。",
+      "suggestions": [
+        {
+          "title": "建议合并",
+          "detail": "多条知识表达同一含义，建议保留信息最完整的一条，将其余归档。",
+          "level": "warning"
+        }
+      ],
+      "fingerprint": "e255b00a7e4977066b46b0c6"
+    },
+    {
+      "code": "llm_logic_error",
+      "severity": "warning",
+      "title": "LLM：逻辑错误",
+      "detail": "物流政策中规定非偏远地区满1000包邮，而偏远地区运费规则中却说常规地区默认包邮，两者无条件包邮与有条件包邮矛盾。",
+      "target": "policies/logistics_policy_details",
+      "target_label": "policies/logistics_policy_details, policies/remote_area_shipping_rule",
+      "repairable": false,
+      "action_type": "review",
+      "involved_targets": [
+        "policies/logistics_policy_details",
+        "policies/remote_area_shipping_rule"
+      ],
+      "llm_reasoning": "物流政策中规定非偏远地区满1000包邮，而偏远地区运费规则中却说常规地区默认包邮，两者无条件包邮与有条件包邮矛盾。",
+      "suggestions": [
+        {
+          "title": "建议人工复核",
+          "detail": "LLM认为该条目可能存在问题，请人工确认后决定处理方式。",
+          "level": "warning"
+        }
+      ],
+      "fingerprint": "605d6b51d92cff762795f961"
+    },
+    {
+      "code": "llm_duplicate_semantic",
+      "severity": "info",
+      "title": "LLM：语义重复",
+      "detail": "两者均为付款政策，内容高度重叠，支付方式、定金政策相同，建议合并为一个详细条目。",
+      "target": "policies/payment",
+      "target_label": "policies/payment, policies/payment_policy_details",
+      "repairable": false,
+      "action_type": "merge",
+      "involved_targets": [
+        "policies/payment",
+        "policies/payment_policy_details"
+      ],
+      "llm_reasoning": "两者均为付款政策，内容高度重叠，支付方式、定金政策相同，建议合并为一个详细条目。",
+      "suggestions": [
+        {
+          "title": "建议合并",
+          "detail": "多条知识表达同一含义，建议保留信息最完整的一条，将其余归档。",
+          "level": "warning"
+        }
+      ],
+      "fingerprint": "748033d7ffc9205bda900485"
+    },
+    {
+      "code": "llm_rag_quality_low",
+      "severity": "info",
+      "title": "LLM：RAG经验质量低",
+      "detail": "RAG经验要求额外提供收票邮箱和手机号，但正式知识条目中未包含，可能导致回复不一致。",
+      "target": "policies/special_invoice_rule",
+      "target_label": "policies/special_invoice_rule, rag_exp_9151bc188e5982efba1c",
+      "repairable": false,
+      "action_type": "review",
+      "involved_targets": [
+        "policies/special_invoice_rule",
+        "rag_exp_9151bc188e5982efba1c"
+      ],
+      "llm_reasoning": "RAG经验要求额外提供收票邮箱和手机号，但正式知识条目中未包含，可能导致回复不一致。",
+      "suggestions": [
+        {
+          "title": "建议人工复核",
+          "detail": "LLM认为该条目可能存在问题，请人工确认后决定处理方式。",
+          "level": "warning"
+        }
+      ],
+      "fingerprint": "794fb7831fcf518ade296200"
+    }
+  ],
+  "ignored_count": 0,
+  "summary": {
+    "error_count": 0,
+    "warning_count": 2,
+    "info_count": 4,
+    "ignored_count": 0,
+    "hidden_notice_count": 1
+  },
+  "auto_dedup_rag": null
+}

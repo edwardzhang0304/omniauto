@@ -18,6 +18,7 @@ from .formal_review_state import mark_item_new
 from .knowledge_base_store import KnowledgeBaseStore
 from .knowledge_compiler import KnowledgeCompiler
 from .knowledge_deduper import KnowledgeDeduper, normalize_key, normalize_price_tiers
+from .source_authority_policy import evaluate_candidate_source_authority, mark_candidate_source_policy
 from .version_store import VersionStore
 from apps.wechat_ai_customer_service.knowledge_paths import active_tenant_id, tenant_review_candidates_root
 from apps.wechat_ai_customer_service.platform_understanding_rules import intent_keywords
@@ -183,6 +184,16 @@ class CandidateStore:
         target_file = str(patch.get("target_file") or "")
         if target_file not in TARGET_FILES:
             return {"ok": False, "message": f"unsupported target_file: {target_file}"}
+        source_decision = existing_or_current_source_authority(candidate, legacy_target_category(target_file))
+        mark_candidate_source_policy(candidate, source_decision)
+        if not source_decision.get("allowed"):
+            source.write_text(json.dumps(candidate, ensure_ascii=False, indent=2), encoding="utf-8")
+            upsert_candidate_to_db(candidate)
+            return {
+                "ok": False,
+                "message": str(source_decision.get("message") or source_decision.get("reason") or "candidate source is not authoritative"),
+                "source_authority": source_decision,
+            }
         content = self.current_target_content(target_file)
         apply_patch_to_content(content, patch)
         validation = self.diagnostics.validate_target_content(target_file, content)
@@ -212,6 +223,16 @@ class CandidateStore:
     ) -> dict[str, Any]:
         if target_category in PRODUCT_MASTER_TARGET_CATEGORIES:
             return {"ok": False, "message": "商品资料属于权威主数据，禁止通过候选知识链路写入；请在商品库手动导入/维护。"}
+        source_decision = existing_or_current_source_authority(candidate, target_category)
+        mark_candidate_source_policy(candidate, source_decision)
+        if not source_decision.get("allowed"):
+            source.write_text(json.dumps(candidate, ensure_ascii=False, indent=2), encoding="utf-8")
+            upsert_candidate_to_db(candidate)
+            return {
+                "ok": False,
+                "message": str(source_decision.get("message") or source_decision.get("reason") or "candidate source is not authoritative"),
+                "source_authority": source_decision,
+            }
         operation = str(patch.get("operation") or "")
         if operation != "upsert_item":
             return {"ok": False, "message": f"unsupported native operation: {operation}"}
@@ -682,6 +703,25 @@ def normalize_runtime_for_category(target_category: str, data: dict[str, Any], e
         "requires_handoff": requires_handoff,
         "risk_level": str(data.get("risk_level") or existing.get("risk_level") or ("warning" if requires_handoff else "normal")),
     }
+
+
+def existing_or_current_source_authority(candidate: dict[str, Any], target_category: str = "") -> dict[str, Any]:
+    if not target_category:
+        return evaluate_candidate_source_authority(candidate)
+    proposal = dict(candidate.get("proposal") if isinstance(candidate.get("proposal"), dict) else {})
+    patch = dict(proposal.get("formal_patch") if isinstance(proposal.get("formal_patch"), dict) else {})
+    patch["target_category"] = target_category
+    proposal["target_category"] = target_category
+    proposal["formal_patch"] = patch
+    return evaluate_candidate_source_authority({**candidate, "proposal": proposal})
+
+
+def legacy_target_category(target_file: str) -> str:
+    if target_file == "style_examples":
+        return "chats"
+    if target_file == "product_knowledge":
+        return "products"
+    return ""
 
 
 def safe_product_id(value: str) -> str:

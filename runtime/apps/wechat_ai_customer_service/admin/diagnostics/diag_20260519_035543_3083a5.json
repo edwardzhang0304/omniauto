@@ -1,0 +1,581 @@
+{
+  "ok": true,
+  "run_id": "diag_20260519_035543_3083a5",
+  "mode": "quick",
+  "status": "warning",
+  "created_at": "2026-05-19T03:56:25",
+  "checks": [
+    {
+      "name": "quick_knowledge_validation",
+      "ok": false,
+      "issues": [
+        {
+          "code": "llm_inappropriate",
+          "severity": "error",
+          "title": "LLM：场景不适用",
+          "detail": "该条目明确写明“仅用于管理台回归”，属于测试/回归用话术，不应作为线上客服知识回复模板使用，容易被误召回给用户。",
+          "target": "chats/admin_check_style_example",
+          "target_label": "chats/admin_check_style_example",
+          "repairable": false,
+          "action_type": "delete",
+          "involved_targets": [
+            "chats/admin_check_style_example"
+          ],
+          "llm_reasoning": "该条目明确写明“仅用于管理台回归”，属于测试/回归用话术，不应作为线上客服知识回复模板使用，容易被误召回给用户。",
+          "suggestions": [
+            {
+              "title": "建议删除",
+              "detail": "该条目存在明显错误或不适用，建议归档或废弃。",
+              "level": "danger"
+            }
+          ]
+        },
+        {
+          "code": "llm_inappropriate",
+          "severity": "error",
+          "title": "LLM：场景不适用",
+          "detail": "两条内容均是二手车/汽车金融场景（SUV车源、征信贷款审批），与当前知识库主营的办公设备、门锁、净化设备等业务明显不匹配，属于跨业务污染样本。",
+          "target": "chats/wf_tpl_a",
+          "target_label": "chats/wf_tpl_a, chats/wf_tpl_b",
+          "repairable": false,
+          "action_type": "delete",
+          "involved_targets": [
+            "chats/wf_tpl_a",
+            "chats/wf_tpl_b"
+          ],
+          "llm_reasoning": "两条内容均是二手车/汽车金融场景（SUV车源、征信贷款审批），与当前知识库主营的办公设备、门锁、净化设备等业务明显不匹配，属于跨业务污染样本。",
+          "suggestions": [
+            {
+              "title": "建议删除",
+              "detail": "该条目存在明显错误或不适用，建议归档或废弃。",
+              "level": "danger"
+            }
+          ]
+        },
+        {
+          "code": "llm_logic_error",
+          "severity": "error",
+          "title": "LLM：逻辑错误",
+          "detail": "公司主体信息出现明显冲突：有的条目标注“杭州云桥办公设备有限公司”，有的条目标注“杭州星澜供应链科技有限公司”，且对公账户对应“星澜供应链”。同一知识库中公司名称/主体不一致会导致开票、合同、付款等关键流程错误。",
+          "target": "policies/company_profile",
+          "target_label": "policies/company_profile, policies/company_profile_details, policies/item_2712d3045ad2, policies/bank_account",
+          "repairable": false,
+          "action_type": "review",
+          "involved_targets": [
+            "policies/company_profile",
+            "policies/company_profile_details",
+            "policies/item_2712d3045ad2",
+            "policies/bank_account"
+          ],
+          "llm_reasoning": "公司主体信息出现明显冲突：有的条目标注“杭州云桥办公设备有限公司”，有的条目标注“杭州星澜供应链科技有限公司”，且对公账户对应“星澜供应链”。同一知识库中公司名称/主体不一致会导致开票、合同、付款等关键流程错误。",
+          "suggestions": [
+            {
+              "title": "建议人工复核",
+              "detail": "LLM认为该条目可能存在问题，请人工确认后决定处理方式。",
+              "level": "warning"
+            }
+          ]
+        },
+        {
+          "code": "llm_duplicate_semantic",
+          "severity": "warning",
+          "title": "LLM：语义重复",
+          "detail": "两条均为售后总政策，核心规则高度重合（7天质量问题、破损拍照、退款赔偿转人工）。建议合并为一条结构化主政策，避免召回分裂与维护重复。",
+          "target": "policies/after_sales",
+          "target_label": "policies/after_sales, policies/after_sales_policy_details",
+          "repairable": false,
+          "action_type": "merge",
+          "involved_targets": [
+            "policies/after_sales",
+            "policies/after_sales_policy_details"
+          ],
+          "llm_reasoning": "两条均为售后总政策，核心规则高度重合（7天质量问题、破损拍照、退款赔偿转人工）。建议合并为一条结构化主政策，避免召回分裂与维护重复。",
+          "suggestions": [
+            {
+              "title": "建议合并",
+              "detail": "多条知识表达同一含义，建议保留信息最完整的一条，将其余归档。",
+              "level": "warning"
+            }
+          ]
+        },
+        {
+          "code": "llm_duplicate_semantic",
+          "severity": "warning",
+          "title": "LLM：语义重复",
+          "detail": "两条均描述开票政策，字段要求、开票时效、红冲需人工等核心信息一致，属于同义重复维护。",
+          "target": "policies/invoice",
+          "target_label": "policies/invoice, policies/invoice_policy_details",
+          "repairable": false,
+          "action_type": "merge",
+          "involved_targets": [
+            "policies/invoice",
+            "policies/invoice_policy_details"
+          ],
+          "llm_reasoning": "两条均描述开票政策，字段要求、开票时效、红冲需人工等核心信息一致，属于同义重复维护。",
+          "suggestions": [
+            {
+              "title": "建议合并",
+              "detail": "多条知识表达同一含义，建议保留信息最完整的一条，将其余归档。",
+              "level": "warning"
+            }
+          ]
+        },
+        {
+          "code": "llm_duplicate_semantic",
+          "severity": "warning",
+          "title": "LLM：语义重复",
+          "detail": "两条均为物流政策，承运商、仓库、16:00截单、偏远地区人工确认、上楼规则等信息重复度高，建议合并减少冗余。",
+          "target": "policies/logistics",
+          "target_label": "policies/logistics, policies/logistics_policy_details",
+          "repairable": false,
+          "action_type": "merge",
+          "involved_targets": [
+            "policies/logistics",
+            "policies/logistics_policy_details"
+          ],
+          "llm_reasoning": "两条均为物流政策，承运商、仓库、16:00截单、偏远地区人工确认、上楼规则等信息重复度高，建议合并减少冗余。",
+          "suggestions": [
+            {
+              "title": "建议合并",
+              "detail": "多条知识表达同一含义，建议保留信息最完整的一条，将其余归档。",
+              "level": "warning"
+            }
+          ]
+        },
+        {
+          "code": "llm_duplicate_semantic",
+          "severity": "warning",
+          "title": "LLM：语义重复",
+          "detail": "两条都在表达“账期/月结/先货后款需人工审核，AI不能直接同意”。规则意图一致，分散配置会增加召回冲突概率。",
+          "target": "policies/contract",
+          "target_label": "policies/contract, policies/credit-term-policy",
+          "repairable": false,
+          "action_type": "merge",
+          "involved_targets": [
+            "policies/contract",
+            "policies/credit-term-policy"
+          ],
+          "llm_reasoning": "两条都在表达“账期/月结/先货后款需人工审核，AI不能直接同意”。规则意图一致，分散配置会增加召回冲突概率。",
+          "suggestions": [
+            {
+              "title": "建议合并",
+              "detail": "多条知识表达同一含义，建议保留信息最完整的一条，将其余归档。",
+              "level": "warning"
+            }
+          ]
+        },
+        {
+          "code": "llm_logic_error",
+          "severity": "error",
+          "title": "LLM：逻辑错误",
+          "detail": "两条规则对“转人工”场景存在直接冲突：manual_handoff_reply 在命中“转人工/人工客服”时返回“已转人工”，但配置为 requires_handoff=False、allow_auto_reply=True；而 manual_required 对“我要人工/转人工”配置为 requires_handoff=True、allow_auto_reply=False 且高风险人工接管。会导致系统口径与实际处理流程不一致（假转人工）。",
+          "target": "policies/manual_handoff_reply",
+          "target_label": "policies/manual_handoff_reply, policies/manual_required",
+          "repairable": false,
+          "action_type": "review",
+          "involved_targets": [
+            "policies/manual_handoff_reply",
+            "policies/manual_required"
+          ],
+          "llm_reasoning": "两条规则对“转人工”场景存在直接冲突：manual_handoff_reply 在命中“转人工/人工客服”时返回“已转人工”，但配置为 requires_handoff=False、allow_auto_reply=True；而 manual_required 对“我要人工/转人工”配置为 requires_handoff=True、allow_auto_reply=False 且高风险人工接管。会导致系统口径与实际处理流程不一致（假转人工）。",
+          "suggestions": [
+            {
+              "title": "建议人工复核",
+              "detail": "LLM认为该条目可能存在问题，请人工确认后决定处理方式。",
+              "level": "warning"
+            }
+          ]
+        },
+        {
+          "code": "llm_rag_quality_low",
+          "severity": "warning",
+          "title": "LLM：RAG经验质量低",
+          "detail": "该RAG回复基本是在复述“我查到一条相关说明+原问题文本”，没有提供任何可执行商品信息或结构化导购内容，属于低信息量/低可用性回复，难以支持真实客服场景。",
+          "target": "rag_exp_b91acdcb32d2eaea0197",
+          "target_label": "rag_exp_b91acdcb32d2eaea0197",
+          "repairable": false,
+          "action_type": "delete",
+          "involved_targets": [
+            "rag_exp_b91acdcb32d2eaea0197"
+          ],
+          "llm_reasoning": "该RAG回复基本是在复述“我查到一条相关说明+原问题文本”，没有提供任何可执行商品信息或结构化导购内容，属于低信息量/低可用性回复，难以支持真实客服场景。",
+          "suggestions": [
+            {
+              "title": "建议删除",
+              "detail": "该条目存在明显错误或不适用，建议归档或废弃。",
+              "level": "danger"
+            }
+          ]
+        },
+        {
+          "code": "llm_inappropriate",
+          "severity": "error",
+          "title": "LLM：场景不适用",
+          "detail": "内容为“20万预算、省油SUV推荐”等汽车销售场景，与当前知识库主体（企业采购/通用商品、付款开票、样品、物流规则）明显不匹配，属于跨业务污染样本，会误导RAG召回。",
+          "target": "rag_exp_e2d619cecd90156795f0",
+          "target_label": "rag_exp_e2d619cecd90156795f0",
+          "repairable": false,
+          "action_type": "delete",
+          "involved_targets": [
+            "rag_exp_e2d619cecd90156795f0"
+          ],
+          "llm_reasoning": "内容为“20万预算、省油SUV推荐”等汽车销售场景，与当前知识库主体（企业采购/通用商品、付款开票、样品、物流规则）明显不匹配，属于跨业务污染样本，会误导RAG召回。",
+          "suggestions": [
+            {
+              "title": "建议删除",
+              "detail": "该条目存在明显错误或不适用，建议归档或废弃。",
+              "level": "danger"
+            }
+          ]
+        },
+        {
+          "code": "llm_rag_quality_low",
+          "severity": "warning",
+          "title": "LLM：RAG经验质量低",
+          "detail": "该经验文本存在明显拼接/重复噪声（同段内容重复），且上下文问句“可以签采购合同盖章并走月结吗？”与前置回复“安装和上门调试...”主题不一致，样本对齐质量差，可能干扰检索与生成。",
+          "target": "rag_exp_5528e1e9e45d675b064a",
+          "target_label": "rag_exp_5528e1e9e45d675b064a",
+          "repairable": false,
+          "action_type": "delete",
+          "involved_targets": [
+            "rag_exp_5528e1e9e45d675b064a"
+          ],
+          "llm_reasoning": "该经验文本存在明显拼接/重复噪声（同段内容重复），且上下文问句“可以签采购合同盖章并走月结吗？”与前置回复“安装和上门调试...”主题不一致，样本对齐质量差，可能干扰检索与生成。",
+          "suggestions": [
+            {
+              "title": "建议删除",
+              "detail": "该条目存在明显错误或不适用，建议归档或废弃。",
+              "level": "danger"
+            }
+          ]
+        },
+        {
+          "code": "knowledge_token_budget_large",
+          "severity": "info",
+          "title": "知识体积较大",
+          "detail": "当前分类知识库总量估算约 56155 token。这不是知识格式故障，也没有某条知识需要立即删除；它提醒后续继续按客户问题检索相关知识，避免一次性加载全部知识。",
+          "target_label": "全局知识库",
+          "details": [
+            {
+              "label": "问题性质",
+              "value": "容量提示，不是知识格式故障",
+              "level": "normal"
+            },
+            {
+              "label": "估算总量",
+              "value": "约 56155 token",
+              "level": "warning"
+            },
+            {
+              "label": "检测阈值",
+              "value": "超过 7000 token 时提示",
+              "level": "normal"
+            },
+            {
+              "label": "文件数量",
+              "value": "90 个 JSON 文件",
+              "level": "normal"
+            },
+            {
+              "label": "chats",
+              "value": "约 29731 token / 49 个文件",
+              "level": "normal"
+            },
+            {
+              "label": "erp_exports",
+              "value": "约 860 token / 2 个文件",
+              "level": "normal"
+            },
+            {
+              "label": "policies",
+              "value": "约 24980 token / 39 个文件",
+              "level": "normal"
+            }
+          ],
+          "suggestions": [
+            {
+              "title": "不建议自动删除知识",
+              "detail": "当前没有发现哪一条知识错误，系统不能为了降低体积擅自删内容。",
+              "level": "danger"
+            },
+            {
+              "title": "继续保持按门类和问题范围检索",
+              "detail": "客服运行时应只取相关商品、政策、话术和上下文证据，不要把全库一次性塞给大模型。",
+              "level": "normal"
+            },
+            {
+              "title": "如果后续继续变大",
+              "detail": "优先拆分过长政策、归档过期商品、把重复话术合并为模板，再重新检测。",
+              "level": "warning"
+            }
+          ],
+          "repairable": false
+        }
+      ],
+      "token_budget_estimate": 56155,
+      "recent_only": true
+    }
+  ],
+  "issues": [
+    {
+      "code": "llm_inappropriate",
+      "severity": "warning",
+      "title": "LLM：场景不适用",
+      "detail": "该条目明确写明“仅用于管理台回归”，属于测试/回归用话术，不应作为线上客服知识回复模板使用，容易被误召回给用户。",
+      "target": "chats/admin_check_style_example",
+      "target_label": "chats/admin_check_style_example",
+      "repairable": false,
+      "action_type": "delete",
+      "involved_targets": [
+        "chats/admin_check_style_example"
+      ],
+      "llm_reasoning": "该条目明确写明“仅用于管理台回归”，属于测试/回归用话术，不应作为线上客服知识回复模板使用，容易被误召回给用户。",
+      "suggestions": [
+        {
+          "title": "建议删除",
+          "detail": "该条目存在明显错误或不适用，建议归档或废弃。",
+          "level": "danger"
+        }
+      ],
+      "fingerprint": "c39fa52997c1df151495e061"
+    },
+    {
+      "code": "llm_inappropriate",
+      "severity": "warning",
+      "title": "LLM：场景不适用",
+      "detail": "两条内容均是二手车/汽车金融场景（SUV车源、征信贷款审批），与当前知识库主营的办公设备、门锁、净化设备等业务明显不匹配，属于跨业务污染样本。",
+      "target": "chats/wf_tpl_a",
+      "target_label": "chats/wf_tpl_a, chats/wf_tpl_b",
+      "repairable": false,
+      "action_type": "delete",
+      "involved_targets": [
+        "chats/wf_tpl_a",
+        "chats/wf_tpl_b"
+      ],
+      "llm_reasoning": "两条内容均是二手车/汽车金融场景（SUV车源、征信贷款审批），与当前知识库主营的办公设备、门锁、净化设备等业务明显不匹配，属于跨业务污染样本。",
+      "suggestions": [
+        {
+          "title": "建议删除",
+          "detail": "该条目存在明显错误或不适用，建议归档或废弃。",
+          "level": "danger"
+        }
+      ],
+      "fingerprint": "c733c8d2ffa6835b656d35c7"
+    },
+    {
+      "code": "llm_logic_error",
+      "severity": "warning",
+      "title": "LLM：逻辑错误",
+      "detail": "公司主体信息出现明显冲突：有的条目标注“杭州云桥办公设备有限公司”，有的条目标注“杭州星澜供应链科技有限公司”，且对公账户对应“星澜供应链”。同一知识库中公司名称/主体不一致会导致开票、合同、付款等关键流程错误。",
+      "target": "policies/company_profile",
+      "target_label": "policies/company_profile, policies/company_profile_details, policies/item_2712d3045ad2, policies/bank_account",
+      "repairable": false,
+      "action_type": "review",
+      "involved_targets": [
+        "policies/company_profile",
+        "policies/company_profile_details",
+        "policies/item_2712d3045ad2",
+        "policies/bank_account"
+      ],
+      "llm_reasoning": "公司主体信息出现明显冲突：有的条目标注“杭州云桥办公设备有限公司”，有的条目标注“杭州星澜供应链科技有限公司”，且对公账户对应“星澜供应链”。同一知识库中公司名称/主体不一致会导致开票、合同、付款等关键流程错误。",
+      "suggestions": [
+        {
+          "title": "建议人工复核",
+          "detail": "LLM认为该条目可能存在问题，请人工确认后决定处理方式。",
+          "level": "warning"
+        }
+      ],
+      "fingerprint": "b924f10bc98b43f66200fbce"
+    },
+    {
+      "code": "llm_duplicate_semantic",
+      "severity": "info",
+      "title": "LLM：语义重复",
+      "detail": "两条均为售后总政策，核心规则高度重合（7天质量问题、破损拍照、退款赔偿转人工）。建议合并为一条结构化主政策，避免召回分裂与维护重复。",
+      "target": "policies/after_sales",
+      "target_label": "policies/after_sales, policies/after_sales_policy_details",
+      "repairable": false,
+      "action_type": "merge",
+      "involved_targets": [
+        "policies/after_sales",
+        "policies/after_sales_policy_details"
+      ],
+      "llm_reasoning": "两条均为售后总政策，核心规则高度重合（7天质量问题、破损拍照、退款赔偿转人工）。建议合并为一条结构化主政策，避免召回分裂与维护重复。",
+      "suggestions": [
+        {
+          "title": "建议合并",
+          "detail": "多条知识表达同一含义，建议保留信息最完整的一条，将其余归档。",
+          "level": "warning"
+        }
+      ],
+      "fingerprint": "8e08919c0a900048e98260d6"
+    },
+    {
+      "code": "llm_duplicate_semantic",
+      "severity": "info",
+      "title": "LLM：语义重复",
+      "detail": "两条均描述开票政策，字段要求、开票时效、红冲需人工等核心信息一致，属于同义重复维护。",
+      "target": "policies/invoice",
+      "target_label": "policies/invoice, policies/invoice_policy_details",
+      "repairable": false,
+      "action_type": "merge",
+      "involved_targets": [
+        "policies/invoice",
+        "policies/invoice_policy_details"
+      ],
+      "llm_reasoning": "两条均描述开票政策，字段要求、开票时效、红冲需人工等核心信息一致，属于同义重复维护。",
+      "suggestions": [
+        {
+          "title": "建议合并",
+          "detail": "多条知识表达同一含义，建议保留信息最完整的一条，将其余归档。",
+          "level": "warning"
+        }
+      ],
+      "fingerprint": "012450e6b9f2d93a211e8716"
+    },
+    {
+      "code": "llm_duplicate_semantic",
+      "severity": "info",
+      "title": "LLM：语义重复",
+      "detail": "两条均为物流政策，承运商、仓库、16:00截单、偏远地区人工确认、上楼规则等信息重复度高，建议合并减少冗余。",
+      "target": "policies/logistics",
+      "target_label": "policies/logistics, policies/logistics_policy_details",
+      "repairable": false,
+      "action_type": "merge",
+      "involved_targets": [
+        "policies/logistics",
+        "policies/logistics_policy_details"
+      ],
+      "llm_reasoning": "两条均为物流政策，承运商、仓库、16:00截单、偏远地区人工确认、上楼规则等信息重复度高，建议合并减少冗余。",
+      "suggestions": [
+        {
+          "title": "建议合并",
+          "detail": "多条知识表达同一含义，建议保留信息最完整的一条，将其余归档。",
+          "level": "warning"
+        }
+      ],
+      "fingerprint": "931c7424b6db405c4845b32a"
+    },
+    {
+      "code": "llm_duplicate_semantic",
+      "severity": "info",
+      "title": "LLM：语义重复",
+      "detail": "两条都在表达“账期/月结/先货后款需人工审核，AI不能直接同意”。规则意图一致，分散配置会增加召回冲突概率。",
+      "target": "policies/contract",
+      "target_label": "policies/contract, policies/credit-term-policy",
+      "repairable": false,
+      "action_type": "merge",
+      "involved_targets": [
+        "policies/contract",
+        "policies/credit-term-policy"
+      ],
+      "llm_reasoning": "两条都在表达“账期/月结/先货后款需人工审核，AI不能直接同意”。规则意图一致，分散配置会增加召回冲突概率。",
+      "suggestions": [
+        {
+          "title": "建议合并",
+          "detail": "多条知识表达同一含义，建议保留信息最完整的一条，将其余归档。",
+          "level": "warning"
+        }
+      ],
+      "fingerprint": "1651302ba3d3e82639b9c4c0"
+    },
+    {
+      "code": "llm_logic_error",
+      "severity": "warning",
+      "title": "LLM：逻辑错误",
+      "detail": "两条规则对“转人工”场景存在直接冲突：manual_handoff_reply 在命中“转人工/人工客服”时返回“已转人工”，但配置为 requires_handoff=False、allow_auto_reply=True；而 manual_required 对“我要人工/转人工”配置为 requires_handoff=True、allow_auto_reply=False 且高风险人工接管。会导致系统口径与实际处理流程不一致（假转人工）。",
+      "target": "policies/manual_handoff_reply",
+      "target_label": "policies/manual_handoff_reply, policies/manual_required",
+      "repairable": false,
+      "action_type": "review",
+      "involved_targets": [
+        "policies/manual_handoff_reply",
+        "policies/manual_required"
+      ],
+      "llm_reasoning": "两条规则对“转人工”场景存在直接冲突：manual_handoff_reply 在命中“转人工/人工客服”时返回“已转人工”，但配置为 requires_handoff=False、allow_auto_reply=True；而 manual_required 对“我要人工/转人工”配置为 requires_handoff=True、allow_auto_reply=False 且高风险人工接管。会导致系统口径与实际处理流程不一致（假转人工）。",
+      "suggestions": [
+        {
+          "title": "建议人工复核",
+          "detail": "LLM认为该条目可能存在问题，请人工确认后决定处理方式。",
+          "level": "warning"
+        }
+      ],
+      "fingerprint": "0c6c0750214f3281ba0a0854"
+    },
+    {
+      "code": "llm_rag_quality_low",
+      "severity": "info",
+      "title": "LLM：RAG经验质量低",
+      "detail": "该RAG回复基本是在复述“我查到一条相关说明+原问题文本”，没有提供任何可执行商品信息或结构化导购内容，属于低信息量/低可用性回复，难以支持真实客服场景。",
+      "target": "rag_exp_b91acdcb32d2eaea0197",
+      "target_label": "rag_exp_b91acdcb32d2eaea0197",
+      "repairable": false,
+      "action_type": "delete",
+      "involved_targets": [
+        "rag_exp_b91acdcb32d2eaea0197"
+      ],
+      "llm_reasoning": "该RAG回复基本是在复述“我查到一条相关说明+原问题文本”，没有提供任何可执行商品信息或结构化导购内容，属于低信息量/低可用性回复，难以支持真实客服场景。",
+      "suggestions": [
+        {
+          "title": "建议删除",
+          "detail": "该条目存在明显错误或不适用，建议归档或废弃。",
+          "level": "danger"
+        }
+      ],
+      "fingerprint": "94144126a2f7d96fafe642e2"
+    },
+    {
+      "code": "llm_inappropriate",
+      "severity": "warning",
+      "title": "LLM：场景不适用",
+      "detail": "内容为“20万预算、省油SUV推荐”等汽车销售场景，与当前知识库主体（企业采购/通用商品、付款开票、样品、物流规则）明显不匹配，属于跨业务污染样本，会误导RAG召回。",
+      "target": "rag_exp_e2d619cecd90156795f0",
+      "target_label": "rag_exp_e2d619cecd90156795f0",
+      "repairable": false,
+      "action_type": "delete",
+      "involved_targets": [
+        "rag_exp_e2d619cecd90156795f0"
+      ],
+      "llm_reasoning": "内容为“20万预算、省油SUV推荐”等汽车销售场景，与当前知识库主体（企业采购/通用商品、付款开票、样品、物流规则）明显不匹配，属于跨业务污染样本，会误导RAG召回。",
+      "suggestions": [
+        {
+          "title": "建议删除",
+          "detail": "该条目存在明显错误或不适用，建议归档或废弃。",
+          "level": "danger"
+        }
+      ],
+      "fingerprint": "1869c328902e53da10f7cd26"
+    },
+    {
+      "code": "llm_rag_quality_low",
+      "severity": "info",
+      "title": "LLM：RAG经验质量低",
+      "detail": "该经验文本存在明显拼接/重复噪声（同段内容重复），且上下文问句“可以签采购合同盖章并走月结吗？”与前置回复“安装和上门调试...”主题不一致，样本对齐质量差，可能干扰检索与生成。",
+      "target": "rag_exp_5528e1e9e45d675b064a",
+      "target_label": "rag_exp_5528e1e9e45d675b064a",
+      "repairable": false,
+      "action_type": "delete",
+      "involved_targets": [
+        "rag_exp_5528e1e9e45d675b064a"
+      ],
+      "llm_reasoning": "该经验文本存在明显拼接/重复噪声（同段内容重复），且上下文问句“可以签采购合同盖章并走月结吗？”与前置回复“安装和上门调试...”主题不一致，样本对齐质量差，可能干扰检索与生成。",
+      "suggestions": [
+        {
+          "title": "建议删除",
+          "detail": "该条目存在明显错误或不适用，建议归档或废弃。",
+          "level": "danger"
+        }
+      ],
+      "fingerprint": "7a3bb4682d1fe693df848a78"
+    }
+  ],
+  "ignored_count": 0,
+  "summary": {
+    "error_count": 0,
+    "warning_count": 5,
+    "info_count": 6,
+    "ignored_count": 0,
+    "hidden_notice_count": 1
+  },
+  "auto_dedup_rag": null
+}

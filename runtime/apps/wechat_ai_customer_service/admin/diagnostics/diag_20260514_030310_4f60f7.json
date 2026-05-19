@@ -1,0 +1,578 @@
+{
+  "ok": true,
+  "run_id": "diag_20260514_030310_4f60f7",
+  "mode": "quick",
+  "status": "warning",
+  "created_at": "2026-05-14T03:03:54",
+  "checks": [
+    {
+      "name": "quick_knowledge_validation",
+      "ok": false,
+      "issues": [
+        {
+          "code": "llm_duplicate_semantic",
+          "severity": "warning",
+          "title": "LLM：语义重复",
+          "detail": "两个条目都包含完全相同的测试银行账户信息（开户行、账号），导致信息重复，可能造成不一致。",
+          "target": "policies/bank_account",
+          "target_label": "policies/bank_account, policies/company_profile_details",
+          "repairable": false,
+          "action_type": "merge",
+          "involved_targets": [
+            "policies/bank_account",
+            "policies/company_profile_details"
+          ],
+          "llm_reasoning": "两个条目都包含完全相同的测试银行账户信息（开户行、账号），导致信息重复，可能造成不一致。",
+          "suggestions": [
+            {
+              "title": "建议合并",
+              "detail": "多条知识表达同一含义，建议保留信息最完整的一条，将其余归档。",
+              "level": "warning"
+            }
+          ]
+        },
+        {
+          "code": "llm_duplicate_semantic",
+          "severity": "warning",
+          "title": "LLM：语义重复",
+          "detail": "两个条目都涵盖售后政策，核心内容相似（7天内非人为质量问题可售后、外包装破损处理、退款等转人工），存在语义重复。",
+          "target": "policies/after_sales",
+          "target_label": "policies/after_sales, policies/after_sales_policy_details",
+          "repairable": false,
+          "action_type": "merge",
+          "involved_targets": [
+            "policies/after_sales",
+            "policies/after_sales_policy_details"
+          ],
+          "llm_reasoning": "两个条目都涵盖售后政策，核心内容相似（7天内非人为质量问题可售后、外包装破损处理、退款等转人工），存在语义重复。",
+          "suggestions": [
+            {
+              "title": "建议合并",
+              "detail": "多条知识表达同一含义，建议保留信息最完整的一条，将其余归档。",
+              "level": "warning"
+            }
+          ]
+        },
+        {
+          "code": "llm_logic_error",
+          "severity": "error",
+          "title": "LLM：逻辑错误",
+          "detail": "条目中 requires_handoff 设置为 False，但回答内容明确说明“退款、赔偿、争议或投诉需要转人工继续处理”，属性与内容矛盾。",
+          "target": "policies/after_sales",
+          "target_label": "policies/after_sales",
+          "repairable": false,
+          "action_type": "review",
+          "involved_targets": [
+            "policies/after_sales"
+          ],
+          "llm_reasoning": "条目中 requires_handoff 设置为 False，但回答内容明确说明“退款、赔偿、争议或投诉需要转人工继续处理”，属性与内容矛盾。",
+          "suggestions": [
+            {
+              "title": "建议人工复核",
+              "detail": "LLM认为该条目可能存在问题，请人工确认后决定处理方式。",
+              "level": "warning"
+            }
+          ]
+        },
+        {
+          "code": "llm_inappropriate",
+          "severity": "error",
+          "title": "LLM：场景不适用",
+          "detail": "条目内容为“测试话术，仅用于管理台回归”，属于纯测试数据，不应出现在正式知识库中。",
+          "target": "chats/admin_check_style_example",
+          "target_label": "chats/admin_check_style_example",
+          "repairable": false,
+          "action_type": "delete",
+          "involved_targets": [
+            "chats/admin_check_style_example"
+          ],
+          "llm_reasoning": "条目内容为“测试话术，仅用于管理台回归”，属于纯测试数据，不应出现在正式知识库中。",
+          "suggestions": [
+            {
+              "title": "建议删除",
+              "detail": "该条目存在明显错误或不适用，建议归档或废弃。",
+              "level": "danger"
+            }
+          ]
+        },
+        {
+          "code": "llm_inappropriate",
+          "severity": "error",
+          "title": "LLM：场景不适用",
+          "detail": "条目末尾注明“以上为自动客服联调测试数据，不代表真实公司信息”，是测试数据，不应在正式知识库中使用。",
+          "target": "policies/company_profile_details",
+          "target_label": "policies/company_profile_details",
+          "repairable": false,
+          "action_type": "delete",
+          "involved_targets": [
+            "policies/company_profile_details"
+          ],
+          "llm_reasoning": "条目末尾注明“以上为自动客服联调测试数据，不代表真实公司信息”，是测试数据，不应在正式知识库中使用。",
+          "suggestions": [
+            {
+              "title": "建议删除",
+              "detail": "该条目存在明显错误或不适用，建议归档或废弃。",
+              "level": "danger"
+            }
+          ]
+        },
+        {
+          "code": "llm_inappropriate",
+          "severity": "error",
+          "title": "LLM：场景不适用",
+          "detail": "该产品缺少分类、规格、完整运费政策等关键信息，库存仅5件，且与公司主营（办公设备等）关联性弱，疑似遗留的测试条目。",
+          "target": "products/wooden-rocking-chair",
+          "target_label": "products/wooden-rocking-chair",
+          "repairable": false,
+          "action_type": "review",
+          "involved_targets": [
+            "products/wooden-rocking-chair"
+          ],
+          "llm_reasoning": "该产品缺少分类、规格、完整运费政策等关键信息，库存仅5件，且与公司主营（办公设备等）关联性弱，疑似遗留的测试条目。",
+          "suggestions": [
+            {
+              "title": "建议人工复核",
+              "detail": "LLM认为该条目可能存在问题，请人工确认后决定处理方式。",
+              "level": "warning"
+            }
+          ]
+        },
+        {
+          "code": "llm_duplicate_semantic",
+          "severity": "warning",
+          "title": "LLM：语义重复",
+          "detail": "两条目内容高度重复，都是物流政策，建议合并为一个结构化条目或保留一个。",
+          "target": "policies/logistics",
+          "target_label": "policies/logistics, policies/logistics_policy_details",
+          "repairable": false,
+          "action_type": "merge",
+          "involved_targets": [
+            "policies/logistics",
+            "policies/logistics_policy_details"
+          ],
+          "llm_reasoning": "两条目内容高度重复，都是物流政策，建议合并为一个结构化条目或保留一个。",
+          "suggestions": [
+            {
+              "title": "建议合并",
+              "detail": "多条知识表达同一含义，建议保留信息最完整的一条，将其余归档。",
+              "level": "warning"
+            }
+          ]
+        },
+        {
+          "code": "llm_duplicate_semantic",
+          "severity": "warning",
+          "title": "LLM：语义重复",
+          "detail": "两条目内容高度重复，都是付款政策，建议合并。",
+          "target": "policies/payment",
+          "target_label": "policies/payment, policies/payment_policy_details",
+          "repairable": false,
+          "action_type": "merge",
+          "involved_targets": [
+            "policies/payment",
+            "policies/payment_policy_details"
+          ],
+          "llm_reasoning": "两条目内容高度重复，都是付款政策，建议合并。",
+          "suggestions": [
+            {
+              "title": "建议合并",
+              "detail": "多条知识表达同一含义，建议保留信息最完整的一条，将其余归档。",
+              "level": "warning"
+            }
+          ]
+        },
+        {
+          "code": "llm_duplicate_semantic",
+          "severity": "warning",
+          "title": "LLM：语义重复",
+          "detail": "两条目均涉及转人工场景，但回复策略不同（一个直接回复已转人工，另一个记录并转人工），可能导致冲突，需要明确优先级或合并。",
+          "target": "policies/manual_handoff_reply",
+          "target_label": "policies/manual_handoff_reply, policies/manual_required",
+          "repairable": false,
+          "action_type": "review",
+          "involved_targets": [
+            "policies/manual_handoff_reply",
+            "policies/manual_required"
+          ],
+          "llm_reasoning": "两条目均涉及转人工场景，但回复策略不同（一个直接回复已转人工，另一个记录并转人工），可能导致冲突，需要明确优先级或合并。",
+          "suggestions": [
+            {
+              "title": "建议人工复核",
+              "detail": "LLM认为该条目可能存在问题，请人工确认后决定处理方式。",
+              "level": "warning"
+            }
+          ]
+        },
+        {
+          "code": "llm_rag_quality_low",
+          "severity": "warning",
+          "title": "LLM：RAG经验质量低",
+          "detail": "包含大量自动化测试数据（如'自动化测试折叠床'、'ZDC-TEST'），属于测试内容，不应出现在正式知识库中，可能误导客服。",
+          "target": "rag_exp_89d634d4bdf63881b18b",
+          "target_label": "rag_exp_89d634d4bdf63881b18b",
+          "repairable": false,
+          "action_type": "delete",
+          "involved_targets": [
+            "rag_exp_89d634d4bdf63881b18b"
+          ],
+          "llm_reasoning": "包含大量自动化测试数据（如'自动化测试折叠床'、'ZDC-TEST'），属于测试内容，不应出现在正式知识库中，可能误导客服。",
+          "suggestions": [
+            {
+              "title": "建议删除",
+              "detail": "该条目存在明显错误或不适用，建议归档或废弃。",
+              "level": "danger"
+            }
+          ]
+        },
+        {
+          "code": "llm_rag_quality_low",
+          "severity": "warning",
+          "title": "LLM：RAG经验质量低",
+          "detail": "包含测试聊天记录（如'[OmniAuto自测]'），属于测试数据，应删除。",
+          "target": "rag_exp_9151bc188e5982efba1c",
+          "target_label": "rag_exp_9151bc188e5982efba1c",
+          "repairable": false,
+          "action_type": "delete",
+          "involved_targets": [
+            "rag_exp_9151bc188e5982efba1c"
+          ],
+          "llm_reasoning": "包含测试聊天记录（如'[OmniAuto自测]'），属于测试数据，应删除。",
+          "suggestions": [
+            {
+              "title": "建议删除",
+              "detail": "该条目存在明显错误或不适用，建议归档或废弃。",
+              "level": "danger"
+            }
+          ]
+        },
+        {
+          "code": "knowledge_token_budget_large",
+          "severity": "info",
+          "title": "知识体积较大",
+          "detail": "当前分类知识库总量估算约 62180 token。这不是知识格式故障，也没有某条知识需要立即删除；它提醒后续继续按客户问题检索相关知识，避免一次性加载全部知识。",
+          "target_label": "全局知识库",
+          "details": [
+            {
+              "label": "问题性质",
+              "value": "容量提示，不是知识格式故障",
+              "level": "normal"
+            },
+            {
+              "label": "估算总量",
+              "value": "约 62180 token",
+              "level": "warning"
+            },
+            {
+              "label": "检测阈值",
+              "value": "超过 7000 token 时提示",
+              "level": "normal"
+            },
+            {
+              "label": "文件数量",
+              "value": "98 个 JSON 文件",
+              "level": "normal"
+            },
+            {
+              "label": "chats",
+              "value": "约 28130 token / 46 个文件",
+              "level": "normal"
+            },
+            {
+              "label": "erp_exports",
+              "value": "约 860 token / 2 个文件",
+              "level": "normal"
+            },
+            {
+              "label": "policies",
+              "value": "约 24980 token / 39 个文件",
+              "level": "normal"
+            },
+            {
+              "label": "products",
+              "value": "约 7517 token / 11 个文件",
+              "level": "normal"
+            }
+          ],
+          "suggestions": [
+            {
+              "title": "不建议自动删除知识",
+              "detail": "当前没有发现哪一条知识错误，系统不能为了降低体积擅自删内容。",
+              "level": "danger"
+            },
+            {
+              "title": "继续保持按门类和问题范围检索",
+              "detail": "客服运行时应只取相关商品、政策、话术和上下文证据，不要把全库一次性塞给大模型。",
+              "level": "normal"
+            },
+            {
+              "title": "如果后续继续变大",
+              "detail": "优先拆分过长政策、归档过期商品、把重复话术合并为模板，再重新检测。",
+              "level": "warning"
+            }
+          ],
+          "repairable": false
+        }
+      ],
+      "token_budget_estimate": 62180,
+      "recent_only": true
+    }
+  ],
+  "issues": [
+    {
+      "code": "llm_duplicate_semantic",
+      "severity": "info",
+      "title": "LLM：语义重复",
+      "detail": "两个条目都包含完全相同的测试银行账户信息（开户行、账号），导致信息重复，可能造成不一致。",
+      "target": "policies/bank_account",
+      "target_label": "policies/bank_account, policies/company_profile_details",
+      "repairable": false,
+      "action_type": "merge",
+      "involved_targets": [
+        "policies/bank_account",
+        "policies/company_profile_details"
+      ],
+      "llm_reasoning": "两个条目都包含完全相同的测试银行账户信息（开户行、账号），导致信息重复，可能造成不一致。",
+      "suggestions": [
+        {
+          "title": "建议合并",
+          "detail": "多条知识表达同一含义，建议保留信息最完整的一条，将其余归档。",
+          "level": "warning"
+        }
+      ],
+      "fingerprint": "2dc34508f03a2e97ac3794aa"
+    },
+    {
+      "code": "llm_duplicate_semantic",
+      "severity": "info",
+      "title": "LLM：语义重复",
+      "detail": "两个条目都涵盖售后政策，核心内容相似（7天内非人为质量问题可售后、外包装破损处理、退款等转人工），存在语义重复。",
+      "target": "policies/after_sales",
+      "target_label": "policies/after_sales, policies/after_sales_policy_details",
+      "repairable": false,
+      "action_type": "merge",
+      "involved_targets": [
+        "policies/after_sales",
+        "policies/after_sales_policy_details"
+      ],
+      "llm_reasoning": "两个条目都涵盖售后政策，核心内容相似（7天内非人为质量问题可售后、外包装破损处理、退款等转人工），存在语义重复。",
+      "suggestions": [
+        {
+          "title": "建议合并",
+          "detail": "多条知识表达同一含义，建议保留信息最完整的一条，将其余归档。",
+          "level": "warning"
+        }
+      ],
+      "fingerprint": "0ddae40cd0fba86dce464d22"
+    },
+    {
+      "code": "llm_logic_error",
+      "severity": "warning",
+      "title": "LLM：逻辑错误",
+      "detail": "条目中 requires_handoff 设置为 False，但回答内容明确说明“退款、赔偿、争议或投诉需要转人工继续处理”，属性与内容矛盾。",
+      "target": "policies/after_sales",
+      "target_label": "policies/after_sales",
+      "repairable": false,
+      "action_type": "review",
+      "involved_targets": [
+        "policies/after_sales"
+      ],
+      "llm_reasoning": "条目中 requires_handoff 设置为 False，但回答内容明确说明“退款、赔偿、争议或投诉需要转人工继续处理”，属性与内容矛盾。",
+      "suggestions": [
+        {
+          "title": "建议人工复核",
+          "detail": "LLM认为该条目可能存在问题，请人工确认后决定处理方式。",
+          "level": "warning"
+        }
+      ],
+      "fingerprint": "3368658ef2a1b7726f1f09ba"
+    },
+    {
+      "code": "llm_inappropriate",
+      "severity": "warning",
+      "title": "LLM：场景不适用",
+      "detail": "条目内容为“测试话术，仅用于管理台回归”，属于纯测试数据，不应出现在正式知识库中。",
+      "target": "chats/admin_check_style_example",
+      "target_label": "chats/admin_check_style_example",
+      "repairable": false,
+      "action_type": "delete",
+      "involved_targets": [
+        "chats/admin_check_style_example"
+      ],
+      "llm_reasoning": "条目内容为“测试话术，仅用于管理台回归”，属于纯测试数据，不应出现在正式知识库中。",
+      "suggestions": [
+        {
+          "title": "建议删除",
+          "detail": "该条目存在明显错误或不适用，建议归档或废弃。",
+          "level": "danger"
+        }
+      ],
+      "fingerprint": "a68eeadddde2df7e87882062"
+    },
+    {
+      "code": "llm_inappropriate",
+      "severity": "warning",
+      "title": "LLM：场景不适用",
+      "detail": "条目末尾注明“以上为自动客服联调测试数据，不代表真实公司信息”，是测试数据，不应在正式知识库中使用。",
+      "target": "policies/company_profile_details",
+      "target_label": "policies/company_profile_details",
+      "repairable": false,
+      "action_type": "delete",
+      "involved_targets": [
+        "policies/company_profile_details"
+      ],
+      "llm_reasoning": "条目末尾注明“以上为自动客服联调测试数据，不代表真实公司信息”，是测试数据，不应在正式知识库中使用。",
+      "suggestions": [
+        {
+          "title": "建议删除",
+          "detail": "该条目存在明显错误或不适用，建议归档或废弃。",
+          "level": "danger"
+        }
+      ],
+      "fingerprint": "8298de952eb7fe0d5ed3440c"
+    },
+    {
+      "code": "llm_inappropriate",
+      "severity": "warning",
+      "title": "LLM：场景不适用",
+      "detail": "该产品缺少分类、规格、完整运费政策等关键信息，库存仅5件，且与公司主营（办公设备等）关联性弱，疑似遗留的测试条目。",
+      "target": "products/wooden-rocking-chair",
+      "target_label": "products/wooden-rocking-chair",
+      "repairable": false,
+      "action_type": "review",
+      "involved_targets": [
+        "products/wooden-rocking-chair"
+      ],
+      "llm_reasoning": "该产品缺少分类、规格、完整运费政策等关键信息，库存仅5件，且与公司主营（办公设备等）关联性弱，疑似遗留的测试条目。",
+      "suggestions": [
+        {
+          "title": "建议人工复核",
+          "detail": "LLM认为该条目可能存在问题，请人工确认后决定处理方式。",
+          "level": "warning"
+        }
+      ],
+      "fingerprint": "c0b5c919d779031291e37999"
+    },
+    {
+      "code": "llm_duplicate_semantic",
+      "severity": "info",
+      "title": "LLM：语义重复",
+      "detail": "两条目内容高度重复，都是物流政策，建议合并为一个结构化条目或保留一个。",
+      "target": "policies/logistics",
+      "target_label": "policies/logistics, policies/logistics_policy_details",
+      "repairable": false,
+      "action_type": "merge",
+      "involved_targets": [
+        "policies/logistics",
+        "policies/logistics_policy_details"
+      ],
+      "llm_reasoning": "两条目内容高度重复，都是物流政策，建议合并为一个结构化条目或保留一个。",
+      "suggestions": [
+        {
+          "title": "建议合并",
+          "detail": "多条知识表达同一含义，建议保留信息最完整的一条，将其余归档。",
+          "level": "warning"
+        }
+      ],
+      "fingerprint": "c71e159d7bade8c8e3f1da8d"
+    },
+    {
+      "code": "llm_duplicate_semantic",
+      "severity": "info",
+      "title": "LLM：语义重复",
+      "detail": "两条目内容高度重复，都是付款政策，建议合并。",
+      "target": "policies/payment",
+      "target_label": "policies/payment, policies/payment_policy_details",
+      "repairable": false,
+      "action_type": "merge",
+      "involved_targets": [
+        "policies/payment",
+        "policies/payment_policy_details"
+      ],
+      "llm_reasoning": "两条目内容高度重复，都是付款政策，建议合并。",
+      "suggestions": [
+        {
+          "title": "建议合并",
+          "detail": "多条知识表达同一含义，建议保留信息最完整的一条，将其余归档。",
+          "level": "warning"
+        }
+      ],
+      "fingerprint": "0df1e1846706c3f5b31f49fa"
+    },
+    {
+      "code": "llm_duplicate_semantic",
+      "severity": "info",
+      "title": "LLM：语义重复",
+      "detail": "两条目均涉及转人工场景，但回复策略不同（一个直接回复已转人工，另一个记录并转人工），可能导致冲突，需要明确优先级或合并。",
+      "target": "policies/manual_handoff_reply",
+      "target_label": "policies/manual_handoff_reply, policies/manual_required",
+      "repairable": false,
+      "action_type": "review",
+      "involved_targets": [
+        "policies/manual_handoff_reply",
+        "policies/manual_required"
+      ],
+      "llm_reasoning": "两条目均涉及转人工场景，但回复策略不同（一个直接回复已转人工，另一个记录并转人工），可能导致冲突，需要明确优先级或合并。",
+      "suggestions": [
+        {
+          "title": "建议人工复核",
+          "detail": "LLM认为该条目可能存在问题，请人工确认后决定处理方式。",
+          "level": "warning"
+        }
+      ],
+      "fingerprint": "a66e056c853ba4d5e0c92fdd"
+    },
+    {
+      "code": "llm_rag_quality_low",
+      "severity": "info",
+      "title": "LLM：RAG经验质量低",
+      "detail": "包含大量自动化测试数据（如'自动化测试折叠床'、'ZDC-TEST'），属于测试内容，不应出现在正式知识库中，可能误导客服。",
+      "target": "rag_exp_89d634d4bdf63881b18b",
+      "target_label": "rag_exp_89d634d4bdf63881b18b",
+      "repairable": false,
+      "action_type": "delete",
+      "involved_targets": [
+        "rag_exp_89d634d4bdf63881b18b"
+      ],
+      "llm_reasoning": "包含大量自动化测试数据（如'自动化测试折叠床'、'ZDC-TEST'），属于测试内容，不应出现在正式知识库中，可能误导客服。",
+      "suggestions": [
+        {
+          "title": "建议删除",
+          "detail": "该条目存在明显错误或不适用，建议归档或废弃。",
+          "level": "danger"
+        }
+      ],
+      "fingerprint": "44d7cefebc9c53be7284fc0f"
+    },
+    {
+      "code": "llm_rag_quality_low",
+      "severity": "info",
+      "title": "LLM：RAG经验质量低",
+      "detail": "包含测试聊天记录（如'[OmniAuto自测]'），属于测试数据，应删除。",
+      "target": "rag_exp_9151bc188e5982efba1c",
+      "target_label": "rag_exp_9151bc188e5982efba1c",
+      "repairable": false,
+      "action_type": "delete",
+      "involved_targets": [
+        "rag_exp_9151bc188e5982efba1c"
+      ],
+      "llm_reasoning": "包含测试聊天记录（如'[OmniAuto自测]'），属于测试数据，应删除。",
+      "suggestions": [
+        {
+          "title": "建议删除",
+          "detail": "该条目存在明显错误或不适用，建议归档或废弃。",
+          "level": "danger"
+        }
+      ],
+      "fingerprint": "0d8912db821345501bdf49d1"
+    }
+  ],
+  "ignored_count": 0,
+  "summary": {
+    "error_count": 0,
+    "warning_count": 4,
+    "info_count": 7,
+    "ignored_count": 0,
+    "hidden_notice_count": 1
+  },
+  "auto_dedup_rag": null
+}

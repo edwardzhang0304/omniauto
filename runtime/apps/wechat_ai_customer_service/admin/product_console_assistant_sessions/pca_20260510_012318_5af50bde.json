@@ -1,0 +1,23 @@
+{
+  "session_id": "pca_20260510_012318_5af50bde",
+  "created_at": "2026-05-10T01:23:18",
+  "updated_at": "2026-05-10T01:23:18",
+  "status": "collecting",
+  "mode": "command",
+  "use_llm": true,
+  "history": [
+    {
+      "role": "user",
+      "content": "小米电视 客户问：可以上门安装吗？\n回答：可以，上门安装额外加收150元安装费。请联系人工客服登记上门时间和地点",
+      "created_at": "2026-05-10T01:23:18"
+    }
+  ],
+  "aggregated_text": "小米电视 客户问：可以上门安装吗？\n回答：可以，上门安装额外加收150元安装费。请联系人工客服登记上门时间和地点",
+  "question": "信息还不完整：没有明确的操作指令（如设置库存、更新价格等）。",
+  "missing_fields": [],
+  "warnings": [],
+  "draft_item": {},
+  "command_plan": {},
+  "generator_session_id": "",
+  "last_result": {}
+}

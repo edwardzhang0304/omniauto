@@ -1,0 +1,1230 @@
+{
+  "ok": true,
+  "run_id": "diag_20260510_160656_cf5606",
+  "mode": "quick",
+  "status": "warning",
+  "created_at": "2026-05-10T16:10:32",
+  "checks": [
+    {
+      "name": "quick_knowledge_validation",
+      "ok": false,
+      "issues": [
+        {
+          "code": "llm_logic_error",
+          "severity": "error",
+          "title": "LLM：逻辑错误",
+          "detail": "单价798元与阶梯价10把起369元/把、30把起339元/把严重矛盾，阶梯价远低于单价，不符合常理。",
+          "target": "products/office_chair_oc_300",
+          "target_label": "products/office_chair_oc_300",
+          "repairable": false,
+          "action_type": "review",
+          "involved_targets": [
+            "products/office_chair_oc_300"
+          ],
+          "llm_reasoning": "单价798元与阶梯价10把起369元/把、30把起339元/把严重矛盾，阶梯价远低于单价，不符合常理。",
+          "suggestions": [
+            {
+              "title": "建议人工复核",
+              "detail": "LLM认为该条目可能存在问题，请人工确认后决定处理方式。",
+              "level": "warning"
+            }
+          ]
+        },
+        {
+          "code": "llm_logic_error",
+          "severity": "error",
+          "title": "LLM：逻辑错误",
+          "detail": "包邮政策冲突：活动规则单笔满1000元包邮（偏远除外），而物流政策中江浙沪满500包邮、其他非偏远满1000包邮，两者不一致。",
+          "target": "policies/free_shipping_promo_2026_spring",
+          "target_label": "policies/free_shipping_promo_2026_spring, policies/logistics_policy_details",
+          "repairable": false,
+          "action_type": "review",
+          "involved_targets": [
+            "policies/free_shipping_promo_2026_spring",
+            "policies/logistics_policy_details"
+          ],
+          "llm_reasoning": "包邮政策冲突：活动规则单笔满1000元包邮（偏远除外），而物流政策中江浙沪满500包邮、其他非偏远满1000包邮，两者不一致。",
+          "suggestions": [
+            {
+              "title": "建议人工复核",
+              "detail": "LLM认为该条目可能存在问题，请人工确认后决定处理方式。",
+              "level": "warning"
+            }
+          ]
+        },
+        {
+          "code": "llm_duplicate_semantic",
+          "severity": "warning",
+          "title": "LLM：语义重复",
+          "detail": "两个条目都包含公司名称、地址、主营范围等相同信息，语义重复。",
+          "target": "policies/company_profile",
+          "target_label": "policies/company_profile, policies/item_2712d3045ad2",
+          "repairable": false,
+          "action_type": "merge",
+          "involved_targets": [
+            "policies/company_profile",
+            "policies/item_2712d3045ad2"
+          ],
+          "llm_reasoning": "两个条目都包含公司名称、地址、主营范围等相同信息，语义重复。",
+          "suggestions": [
+            {
+              "title": "建议合并",
+              "detail": "多条知识表达同一含义，建议保留信息最完整的一条，将其余归档。",
+              "level": "warning"
+            }
+          ]
+        },
+        {
+          "code": "llm_duplicate_semantic",
+          "severity": "warning",
+          "title": "LLM：语义重复",
+          "detail": "两个条目都描述发票开具政策，内容高度重叠，语义重复。",
+          "target": "policies/invoice",
+          "target_label": "policies/invoice, policies/invoice_policy_details",
+          "repairable": false,
+          "action_type": "merge",
+          "involved_targets": [
+            "policies/invoice",
+            "policies/invoice_policy_details"
+          ],
+          "llm_reasoning": "两个条目都描述发票开具政策，内容高度重叠，语义重复。",
+          "suggestions": [
+            {
+              "title": "建议合并",
+              "detail": "多条知识表达同一含义，建议保留信息最完整的一条，将其余归档。",
+              "level": "warning"
+            }
+          ]
+        },
+        {
+          "code": "llm_rag_quality_low",
+          "severity": "warning",
+          "title": "LLM：RAG经验质量低",
+          "detail": "内容连续重复三次完全相同，属于低质量重复数据，无有效信息。",
+          "target": "rag_exp_a1f316dcf5a7206e3f77",
+          "target_label": "rag_exp_a1f316dcf5a7206e3f77",
+          "repairable": false,
+          "action_type": "delete",
+          "involved_targets": [
+            "rag_exp_a1f316dcf5a7206e3f77"
+          ],
+          "llm_reasoning": "内容连续重复三次完全相同，属于低质量重复数据，无有效信息。",
+          "suggestions": [
+            {
+              "title": "建议删除",
+              "detail": "该条目存在明显错误或不适用，建议归档或废弃。",
+              "level": "danger"
+            }
+          ]
+        },
+        {
+          "code": "llm_rag_quality_low",
+          "severity": "warning",
+          "title": "LLM：RAG经验质量低",
+          "detail": "内容连续重复三次完全相同，属于低质量重复数据。",
+          "target": "rag_exp_fa82ad940301722461dc",
+          "target_label": "rag_exp_fa82ad940301722461dc",
+          "repairable": false,
+          "action_type": "delete",
+          "involved_targets": [
+            "rag_exp_fa82ad940301722461dc"
+          ],
+          "llm_reasoning": "内容连续重复三次完全相同，属于低质量重复数据。",
+          "suggestions": [
+            {
+              "title": "建议删除",
+              "detail": "该条目存在明显错误或不适用，建议归档或废弃。",
+              "level": "danger"
+            }
+          ]
+        },
+        {
+          "code": "llm_rag_quality_low",
+          "severity": "warning",
+          "title": "LLM：RAG经验质量低",
+          "detail": "内容连续重复三次完全相同，属于低质量重复数据。",
+          "target": "rag_exp_ca838449f5edc377c1a4",
+          "target_label": "rag_exp_ca838449f5edc377c1a4",
+          "repairable": false,
+          "action_type": "delete",
+          "involved_targets": [
+            "rag_exp_ca838449f5edc377c1a4"
+          ],
+          "llm_reasoning": "内容连续重复三次完全相同，属于低质量重复数据。",
+          "suggestions": [
+            {
+              "title": "建议删除",
+              "detail": "该条目存在明显错误或不适用，建议归档或废弃。",
+              "level": "danger"
+            }
+          ]
+        },
+        {
+          "code": "llm_rag_quality_low",
+          "severity": "warning",
+          "title": "LLM：RAG经验质量低",
+          "detail": "内容连续重复三次完全相同，属于低质量重复数据。",
+          "target": "rag_exp_bec2217b9e334e99f027",
+          "target_label": "rag_exp_bec2217b9e334e99f027",
+          "repairable": false,
+          "action_type": "delete",
+          "involved_targets": [
+            "rag_exp_bec2217b9e334e99f027"
+          ],
+          "llm_reasoning": "内容连续重复三次完全相同，属于低质量重复数据。",
+          "suggestions": [
+            {
+              "title": "建议删除",
+              "detail": "该条目存在明显错误或不适用，建议归档或废弃。",
+              "level": "danger"
+            }
+          ]
+        },
+        {
+          "code": "llm_rag_quality_low",
+          "severity": "warning",
+          "title": "LLM：RAG经验质量低",
+          "detail": "内容连续重复三次完全相同，属于低质量重复数据。",
+          "target": "rag_exp_3217a01138a999c7ac4c",
+          "target_label": "rag_exp_3217a01138a999c7ac4c",
+          "repairable": false,
+          "action_type": "delete",
+          "involved_targets": [
+            "rag_exp_3217a01138a999c7ac4c"
+          ],
+          "llm_reasoning": "内容连续重复三次完全相同，属于低质量重复数据。",
+          "suggestions": [
+            {
+              "title": "建议删除",
+              "detail": "该条目存在明显错误或不适用，建议归档或废弃。",
+              "level": "danger"
+            }
+          ]
+        },
+        {
+          "code": "llm_rag_quality_low",
+          "severity": "warning",
+          "title": "LLM：RAG经验质量低",
+          "detail": "内容连续重复三次完全相同，属于低质量重复数据。",
+          "target": "rag_exp_f1f3f2c853f571ca3fb7",
+          "target_label": "rag_exp_f1f3f2c853f571ca3fb7",
+          "repairable": false,
+          "action_type": "delete",
+          "involved_targets": [
+            "rag_exp_f1f3f2c853f571ca3fb7"
+          ],
+          "llm_reasoning": "内容连续重复三次完全相同，属于低质量重复数据。",
+          "suggestions": [
+            {
+              "title": "建议删除",
+              "detail": "该条目存在明显错误或不适用，建议归档或废弃。",
+              "level": "danger"
+            }
+          ]
+        },
+        {
+          "code": "llm_rag_quality_low",
+          "severity": "warning",
+          "title": "LLM：RAG经验质量低",
+          "detail": "内容连续重复三次完全相同，属于低质量重复数据。",
+          "target": "rag_exp_3d6cb8893e8753c6b00f",
+          "target_label": "rag_exp_3d6cb8893e8753c6b00f",
+          "repairable": false,
+          "action_type": "delete",
+          "involved_targets": [
+            "rag_exp_3d6cb8893e8753c6b00f"
+          ],
+          "llm_reasoning": "内容连续重复三次完全相同，属于低质量重复数据。",
+          "suggestions": [
+            {
+              "title": "建议删除",
+              "detail": "该条目存在明显错误或不适用，建议归档或废弃。",
+              "level": "danger"
+            }
+          ]
+        },
+        {
+          "code": "llm_logic_error",
+          "severity": "error",
+          "title": "LLM：逻辑错误",
+          "detail": "用户询问收到破损能否赔偿或退款，客服回复保修信息，答非所问，逻辑错误。",
+          "target": "rag_exp_a2996658659873e60dcd",
+          "target_label": "rag_exp_a2996658659873e60dcd",
+          "repairable": false,
+          "action_type": "delete",
+          "involved_targets": [
+            "rag_exp_a2996658659873e60dcd"
+          ],
+          "llm_reasoning": "用户询问收到破损能否赔偿或退款，客服回复保修信息，答非所问，逻辑错误。",
+          "suggestions": [
+            {
+              "title": "建议删除",
+              "detail": "该条目存在明显错误或不适用，建议归档或废弃。",
+              "level": "danger"
+            }
+          ]
+        },
+        {
+          "code": "llm_logic_error",
+          "severity": "error",
+          "title": "LLM：逻辑错误",
+          "detail": "用户询问商用冰箱保修多久，客服回复现货和发货信息，不匹配，逻辑错误。",
+          "target": "rag_exp_ca4f3d0cb4ab0c72320e",
+          "target_label": "rag_exp_ca4f3d0cb4ab0c72320e",
+          "repairable": false,
+          "action_type": "delete",
+          "involved_targets": [
+            "rag_exp_ca4f3d0cb4ab0c72320e"
+          ],
+          "llm_reasoning": "用户询问商用冰箱保修多久，客服回复现货和发货信息，不匹配，逻辑错误。",
+          "suggestions": [
+            {
+              "title": "建议删除",
+              "detail": "该条目存在明显错误或不适用，建议归档或废弃。",
+              "level": "danger"
+            }
+          ]
+        },
+        {
+          "code": "llm_logic_error",
+          "severity": "error",
+          "title": "LLM：逻辑错误",
+          "detail": "用户询问发货多久和送货上楼，客服回复对公账户信息，不匹配，逻辑错误。",
+          "target": "rag_exp_026828368f9d2a01012d",
+          "target_label": "rag_exp_026828368f9d2a01012d",
+          "repairable": false,
+          "action_type": "delete",
+          "involved_targets": [
+            "rag_exp_026828368f9d2a01012d"
+          ],
+          "llm_reasoning": "用户询问发货多久和送货上楼，客服回复对公账户信息，不匹配，逻辑错误。",
+          "suggestions": [
+            {
+              "title": "建议删除",
+              "detail": "该条目存在明显错误或不适用，建议归档或废弃。",
+              "level": "danger"
+            }
+          ]
+        },
+        {
+          "code": "llm_logic_error",
+          "severity": "error",
+          "title": "LLM：逻辑错误",
+          "detail": "用户要求提供对公账户和银行账号，客服回复开票信息，不匹配，逻辑错误。",
+          "target": "rag_exp_9151bc188e5982efba1c",
+          "target_label": "rag_exp_9151bc188e5982efba1c",
+          "repairable": false,
+          "action_type": "delete",
+          "involved_targets": [
+            "rag_exp_9151bc188e5982efba1c"
+          ],
+          "llm_reasoning": "用户要求提供对公账户和银行账号，客服回复开票信息，不匹配，逻辑错误。",
+          "suggestions": [
+            {
+              "title": "建议删除",
+              "detail": "该条目存在明显错误或不适用，建议归档或废弃。",
+              "level": "danger"
+            }
+          ]
+        },
+        {
+          "code": "llm_rag_quality_low",
+          "severity": "warning",
+          "title": "LLM：RAG经验质量低",
+          "detail": "内容连续重复三次完全相同，属于低质量重复数据。",
+          "target": "rag_exp_aaf9521af562dd581128",
+          "target_label": "rag_exp_aaf9521af562dd581128",
+          "repairable": false,
+          "action_type": "delete",
+          "involved_targets": [
+            "rag_exp_aaf9521af562dd581128"
+          ],
+          "llm_reasoning": "内容连续重复三次完全相同，属于低质量重复数据。",
+          "suggestions": [
+            {
+              "title": "建议删除",
+              "detail": "该条目存在明显错误或不适用，建议归档或废弃。",
+              "level": "danger"
+            }
+          ]
+        },
+        {
+          "code": "llm_rag_quality_low",
+          "severity": "warning",
+          "title": "LLM：RAG经验质量低",
+          "detail": "内容连续重复三次完全相同，属于低质量重复数据。",
+          "target": "rag_exp_e27b4d6a2be9516a8011",
+          "target_label": "rag_exp_e27b4d6a2be9516a8011",
+          "repairable": false,
+          "action_type": "delete",
+          "involved_targets": [
+            "rag_exp_e27b4d6a2be9516a8011"
+          ],
+          "llm_reasoning": "内容连续重复三次完全相同，属于低质量重复数据。",
+          "suggestions": [
+            {
+              "title": "建议删除",
+              "detail": "该条目存在明显错误或不适用，建议归档或废弃。",
+              "level": "danger"
+            }
+          ]
+        },
+        {
+          "code": "llm_rag_quality_low",
+          "severity": "warning",
+          "title": "LLM：RAG经验质量低",
+          "detail": "内容连续重复三次完全相同，属于低质量重复数据。",
+          "target": "rag_exp_337bfa6a9682396642f8",
+          "target_label": "rag_exp_337bfa6a9682396642f8",
+          "repairable": false,
+          "action_type": "delete",
+          "involved_targets": [
+            "rag_exp_337bfa6a9682396642f8"
+          ],
+          "llm_reasoning": "内容连续重复三次完全相同，属于低质量重复数据。",
+          "suggestions": [
+            {
+              "title": "建议删除",
+              "detail": "该条目存在明显错误或不适用，建议归档或废弃。",
+              "level": "danger"
+            }
+          ]
+        },
+        {
+          "code": "llm_rag_quality_low",
+          "severity": "warning",
+          "title": "LLM：RAG经验质量低",
+          "detail": "内容连续重复三次完全相同，属于低质量重复数据。",
+          "target": "rag_exp_61f94ff416afd8100c78",
+          "target_label": "rag_exp_61f94ff416afd8100c78",
+          "repairable": false,
+          "action_type": "delete",
+          "involved_targets": [
+            "rag_exp_61f94ff416afd8100c78"
+          ],
+          "llm_reasoning": "内容连续重复三次完全相同，属于低质量重复数据。",
+          "suggestions": [
+            {
+              "title": "建议删除",
+              "detail": "该条目存在明显错误或不适用，建议归档或废弃。",
+              "level": "danger"
+            }
+          ]
+        },
+        {
+          "code": "llm_logic_error",
+          "severity": "error",
+          "title": "LLM：逻辑错误",
+          "detail": "用户询问再来10台发到杭州多少钱，客服回复按6台计算且单价950元/台，数量不匹配且与历史优惠价矛盾。",
+          "target": "rag_exp_c9dc44d677d79451fb5b",
+          "target_label": "rag_exp_c9dc44d677d79451fb5b",
+          "repairable": false,
+          "action_type": "delete",
+          "involved_targets": [
+            "rag_exp_c9dc44d677d79451fb5b"
+          ],
+          "llm_reasoning": "用户询问再来10台发到杭州多少钱，客服回复按6台计算且单价950元/台，数量不匹配且与历史优惠价矛盾。",
+          "suggestions": [
+            {
+              "title": "建议删除",
+              "detail": "该条目存在明显错误或不适用，建议归档或废弃。",
+              "level": "danger"
+            }
+          ]
+        },
+        {
+          "code": "llm_duplicate_semantic",
+          "severity": "warning",
+          "title": "LLM：语义重复",
+          "detail": "这些RAG经验条目高度相似，均涉及商用冰箱BX-200的报价、阶梯优惠和包邮活动，内容重复，建议合并为少数典型对话记录。",
+          "target": "rag_exp_0f30278af23518457793",
+          "target_label": "rag_exp_0f30278af23518457793, rag_exp_c6b438d7930e624567c8, rag_exp_bfac41e484673c244b57, rag_exp_54e4cea950478344dd2e, rag_exp_962eb12b0694a2b26ec9, rag_exp_e95d142eb0a9d53e9dea, rag_exp_4a1363f787bab6fd1168, rag_exp_8e2b05ba4aadc9d94c7a, rag_exp_5ba7bc799f9c239f50df, rag_exp_5026314278bc7efbe0a4, rag_exp_85eb239f8315361c07c0, rag_exp_c146f094fa4d3c10308f, rag_exp_4257c544042b76ed53fa, rag_exp_1ffb8be0406f31fb929e, rag_exp_3b940911d73316b47f12",
+          "repairable": false,
+          "action_type": "merge",
+          "involved_targets": [
+            "rag_exp_0f30278af23518457793",
+            "rag_exp_c6b438d7930e624567c8",
+            "rag_exp_bfac41e484673c244b57",
+            "rag_exp_54e4cea950478344dd2e",
+            "rag_exp_962eb12b0694a2b26ec9",
+            "rag_exp_e95d142eb0a9d53e9dea",
+            "rag_exp_4a1363f787bab6fd1168",
+            "rag_exp_8e2b05ba4aadc9d94c7a",
+            "rag_exp_5ba7bc799f9c239f50df",
+            "rag_exp_5026314278bc7efbe0a4",
+            "rag_exp_85eb239f8315361c07c0",
+            "rag_exp_c146f094fa4d3c10308f",
+            "rag_exp_4257c544042b76ed53fa",
+            "rag_exp_1ffb8be0406f31fb929e",
+            "rag_exp_3b940911d73316b47f12"
+          ],
+          "llm_reasoning": "这些RAG经验条目高度相似，均涉及商用冰箱BX-200的报价、阶梯优惠和包邮活动，内容重复，建议合并为少数典型对话记录。",
+          "suggestions": [
+            {
+              "title": "建议合并",
+              "detail": "多条知识表达同一含义，建议保留信息最完整的一条，将其余归档。",
+              "level": "warning"
+            }
+          ]
+        },
+        {
+          "code": "llm_rag_quality_low",
+          "severity": "warning",
+          "title": "LLM：RAG经验质量低",
+          "detail": "这些条目中同一句话重复多次（如'商用冰箱多少钱？'、'你们公司信息和地址发我一下'、'你好，在吗？'），内容无实际训练价值，属于低质量数据。",
+          "target": "rag_exp_c38b73869ee1da6daaa8",
+          "target_label": "rag_exp_c38b73869ee1da6daaa8, rag_exp_b855f4bd20513f31b832, rag_exp_671859fb4c0d577021e3, rag_exp_dcd25c8c61bac6abb608, rag_exp_fc4f5b38342d29237774",
+          "repairable": false,
+          "action_type": "delete",
+          "involved_targets": [
+            "rag_exp_c38b73869ee1da6daaa8",
+            "rag_exp_b855f4bd20513f31b832",
+            "rag_exp_671859fb4c0d577021e3",
+            "rag_exp_dcd25c8c61bac6abb608",
+            "rag_exp_fc4f5b38342d29237774"
+          ],
+          "llm_reasoning": "这些条目中同一句话重复多次（如'商用冰箱多少钱？'、'你们公司信息和地址发我一下'、'你好，在吗？'），内容无实际训练价值，属于低质量数据。",
+          "suggestions": [
+            {
+              "title": "建议删除",
+              "detail": "该条目存在明显错误或不适用，建议归档或废弃。",
+              "level": "danger"
+            }
+          ]
+        },
+        {
+          "code": "llm_duplicate_semantic",
+          "severity": "warning",
+          "title": "LLM：语义重复",
+          "detail": "这些RAG经验均来自同一测试场景，内容高度重复，均为商用冰箱BX-200报价及批量优惠信息，建议合并为一个标准话术。",
+          "target": "rag_exp_adf157d3da404949390c",
+          "target_label": "rag_exp_adf157d3da404949390c, rag_exp_0cb3550d28529c22f4d6, rag_exp_ffb71ead52331314690c, rag_exp_eae2231e5694904aa7af, rag_exp_977952dc3e43641cf333, rag_exp_0d99c8a187ed623d5bdc, rag_exp_43fb4084442a12f37186, rag_exp_08854ea8890087055ecf",
+          "repairable": false,
+          "action_type": "merge",
+          "involved_targets": [
+            "rag_exp_adf157d3da404949390c",
+            "rag_exp_0cb3550d28529c22f4d6",
+            "rag_exp_ffb71ead52331314690c",
+            "rag_exp_eae2231e5694904aa7af",
+            "rag_exp_977952dc3e43641cf333",
+            "rag_exp_0d99c8a187ed623d5bdc",
+            "rag_exp_43fb4084442a12f37186",
+            "rag_exp_08854ea8890087055ecf"
+          ],
+          "llm_reasoning": "这些RAG经验均来自同一测试场景，内容高度重复，均为商用冰箱BX-200报价及批量优惠信息，建议合并为一个标准话术。",
+          "suggestions": [
+            {
+              "title": "建议合并",
+              "detail": "多条知识表达同一含义，建议保留信息最完整的一条，将其余归档。",
+              "level": "warning"
+            }
+          ]
+        },
+        {
+          "code": "llm_rag_quality_low",
+          "severity": "warning",
+          "title": "LLM：RAG经验质量低",
+          "detail": "这些条目为无效噪音或无意义重复内容，对知识库无贡献，应删除。",
+          "target": "rag_exp_db18bd8ce7819602a304",
+          "target_label": "rag_exp_db18bd8ce7819602a304, rag_exp_5a574e8d242fc86a1b3d, rag_exp_7f6be88eb8bbe84022dc",
+          "repairable": false,
+          "action_type": "delete",
+          "involved_targets": [
+            "rag_exp_db18bd8ce7819602a304",
+            "rag_exp_5a574e8d242fc86a1b3d",
+            "rag_exp_7f6be88eb8bbe84022dc"
+          ],
+          "llm_reasoning": "这些条目为无效噪音或无意义重复内容，对知识库无贡献，应删除。",
+          "suggestions": [
+            {
+              "title": "建议删除",
+              "detail": "该条目存在明显错误或不适用，建议归档或废弃。",
+              "level": "danger"
+            }
+          ]
+        },
+        {
+          "code": "llm_rag_quality_low",
+          "severity": "warning",
+          "title": "LLM：RAG经验质量低",
+          "detail": "条目内容完全重复三次，信息冗余，建议清理为单次记录。",
+          "target": "rag_exp_89af65a4428a33bb5815",
+          "target_label": "rag_exp_89af65a4428a33bb5815",
+          "repairable": false,
+          "action_type": "review",
+          "involved_targets": [
+            "rag_exp_89af65a4428a33bb5815"
+          ],
+          "llm_reasoning": "条目内容完全重复三次，信息冗余，建议清理为单次记录。",
+          "suggestions": [
+            {
+              "title": "建议人工复核",
+              "detail": "LLM认为该条目可能存在问题，请人工确认后决定处理方式。",
+              "level": "warning"
+            }
+          ]
+        },
+        {
+          "code": "knowledge_token_budget_large",
+          "severity": "info",
+          "title": "知识体积较大",
+          "detail": "当前分类知识库总量估算约 42842 token。这不是知识格式故障，也没有某条知识需要立即删除；它提醒后续继续按客户问题检索相关知识，避免一次性加载全部知识。",
+          "target_label": "全局知识库",
+          "details": [
+            {
+              "label": "问题性质",
+              "value": "容量提示，不是知识格式故障",
+              "level": "normal"
+            },
+            {
+              "label": "估算总量",
+              "value": "约 42842 token",
+              "level": "warning"
+            },
+            {
+              "label": "检测阈值",
+              "value": "超过 7000 token 时提示",
+              "level": "normal"
+            },
+            {
+              "label": "文件数量",
+              "value": "68 个 JSON 文件",
+              "level": "normal"
+            },
+            {
+              "label": "chats",
+              "value": "约 8793 token / 16 个文件",
+              "level": "normal"
+            },
+            {
+              "label": "erp_exports",
+              "value": "约 860 token / 2 个文件",
+              "level": "normal"
+            },
+            {
+              "label": "policies",
+              "value": "约 24980 token / 39 个文件",
+              "level": "normal"
+            },
+            {
+              "label": "products",
+              "value": "约 7517 token / 11 个文件",
+              "level": "normal"
+            }
+          ],
+          "suggestions": [
+            {
+              "title": "不建议自动删除知识",
+              "detail": "当前没有发现哪一条知识错误，系统不能为了降低体积擅自删内容。",
+              "level": "danger"
+            },
+            {
+              "title": "继续保持按门类和问题范围检索",
+              "detail": "客服运行时应只取相关商品、政策、话术和上下文证据，不要把全库一次性塞给大模型。",
+              "level": "normal"
+            },
+            {
+              "title": "如果后续继续变大",
+              "detail": "优先拆分过长政策、归档过期商品、把重复话术合并为模板，再重新检测。",
+              "level": "warning"
+            }
+          ],
+          "repairable": false
+        }
+      ],
+      "token_budget_estimate": 42842,
+      "recent_only": true
+    }
+  ],
+  "issues": [
+    {
+      "code": "llm_logic_error",
+      "severity": "warning",
+      "title": "LLM：逻辑错误",
+      "detail": "单价798元与阶梯价10把起369元/把、30把起339元/把严重矛盾，阶梯价远低于单价，不符合常理。",
+      "target": "products/office_chair_oc_300",
+      "target_label": "products/office_chair_oc_300",
+      "repairable": false,
+      "action_type": "review",
+      "involved_targets": [
+        "products/office_chair_oc_300"
+      ],
+      "llm_reasoning": "单价798元与阶梯价10把起369元/把、30把起339元/把严重矛盾，阶梯价远低于单价，不符合常理。",
+      "suggestions": [
+        {
+          "title": "建议人工复核",
+          "detail": "LLM认为该条目可能存在问题，请人工确认后决定处理方式。",
+          "level": "warning"
+        }
+      ],
+      "fingerprint": "8fcac22c2680f4d8f89e6642"
+    },
+    {
+      "code": "llm_logic_error",
+      "severity": "warning",
+      "title": "LLM：逻辑错误",
+      "detail": "包邮政策冲突：活动规则单笔满1000元包邮（偏远除外），而物流政策中江浙沪满500包邮、其他非偏远满1000包邮，两者不一致。",
+      "target": "policies/free_shipping_promo_2026_spring",
+      "target_label": "policies/free_shipping_promo_2026_spring, policies/logistics_policy_details",
+      "repairable": false,
+      "action_type": "review",
+      "involved_targets": [
+        "policies/free_shipping_promo_2026_spring",
+        "policies/logistics_policy_details"
+      ],
+      "llm_reasoning": "包邮政策冲突：活动规则单笔满1000元包邮（偏远除外），而物流政策中江浙沪满500包邮、其他非偏远满1000包邮，两者不一致。",
+      "suggestions": [
+        {
+          "title": "建议人工复核",
+          "detail": "LLM认为该条目可能存在问题，请人工确认后决定处理方式。",
+          "level": "warning"
+        }
+      ],
+      "fingerprint": "55e34292355fd85f7a199779"
+    },
+    {
+      "code": "llm_duplicate_semantic",
+      "severity": "info",
+      "title": "LLM：语义重复",
+      "detail": "两个条目都包含公司名称、地址、主营范围等相同信息，语义重复。",
+      "target": "policies/company_profile",
+      "target_label": "policies/company_profile, policies/item_2712d3045ad2",
+      "repairable": false,
+      "action_type": "merge",
+      "involved_targets": [
+        "policies/company_profile",
+        "policies/item_2712d3045ad2"
+      ],
+      "llm_reasoning": "两个条目都包含公司名称、地址、主营范围等相同信息，语义重复。",
+      "suggestions": [
+        {
+          "title": "建议合并",
+          "detail": "多条知识表达同一含义，建议保留信息最完整的一条，将其余归档。",
+          "level": "warning"
+        }
+      ],
+      "fingerprint": "27f87f92b53200f5f1c305db"
+    },
+    {
+      "code": "llm_duplicate_semantic",
+      "severity": "info",
+      "title": "LLM：语义重复",
+      "detail": "两个条目都描述发票开具政策，内容高度重叠，语义重复。",
+      "target": "policies/invoice",
+      "target_label": "policies/invoice, policies/invoice_policy_details",
+      "repairable": false,
+      "action_type": "merge",
+      "involved_targets": [
+        "policies/invoice",
+        "policies/invoice_policy_details"
+      ],
+      "llm_reasoning": "两个条目都描述发票开具政策，内容高度重叠，语义重复。",
+      "suggestions": [
+        {
+          "title": "建议合并",
+          "detail": "多条知识表达同一含义，建议保留信息最完整的一条，将其余归档。",
+          "level": "warning"
+        }
+      ],
+      "fingerprint": "bf25f66ee3a0c871f1e355fb"
+    },
+    {
+      "code": "llm_rag_quality_low",
+      "severity": "info",
+      "title": "LLM：RAG经验质量低",
+      "detail": "内容连续重复三次完全相同，属于低质量重复数据，无有效信息。",
+      "target": "rag_exp_a1f316dcf5a7206e3f77",
+      "target_label": "rag_exp_a1f316dcf5a7206e3f77",
+      "repairable": false,
+      "action_type": "delete",
+      "involved_targets": [
+        "rag_exp_a1f316dcf5a7206e3f77"
+      ],
+      "llm_reasoning": "内容连续重复三次完全相同，属于低质量重复数据，无有效信息。",
+      "suggestions": [
+        {
+          "title": "建议删除",
+          "detail": "该条目存在明显错误或不适用，建议归档或废弃。",
+          "level": "danger"
+        }
+      ],
+      "fingerprint": "370a307a20d91778f426e5b6"
+    },
+    {
+      "code": "llm_rag_quality_low",
+      "severity": "info",
+      "title": "LLM：RAG经验质量低",
+      "detail": "内容连续重复三次完全相同，属于低质量重复数据。",
+      "target": "rag_exp_fa82ad940301722461dc",
+      "target_label": "rag_exp_fa82ad940301722461dc",
+      "repairable": false,
+      "action_type": "delete",
+      "involved_targets": [
+        "rag_exp_fa82ad940301722461dc"
+      ],
+      "llm_reasoning": "内容连续重复三次完全相同，属于低质量重复数据。",
+      "suggestions": [
+        {
+          "title": "建议删除",
+          "detail": "该条目存在明显错误或不适用，建议归档或废弃。",
+          "level": "danger"
+        }
+      ],
+      "fingerprint": "988393d26f9fd20bc02949ae"
+    },
+    {
+      "code": "llm_rag_quality_low",
+      "severity": "info",
+      "title": "LLM：RAG经验质量低",
+      "detail": "内容连续重复三次完全相同，属于低质量重复数据。",
+      "target": "rag_exp_ca838449f5edc377c1a4",
+      "target_label": "rag_exp_ca838449f5edc377c1a4",
+      "repairable": false,
+      "action_type": "delete",
+      "involved_targets": [
+        "rag_exp_ca838449f5edc377c1a4"
+      ],
+      "llm_reasoning": "内容连续重复三次完全相同，属于低质量重复数据。",
+      "suggestions": [
+        {
+          "title": "建议删除",
+          "detail": "该条目存在明显错误或不适用，建议归档或废弃。",
+          "level": "danger"
+        }
+      ],
+      "fingerprint": "63f589a9ef341663b2b42a74"
+    },
+    {
+      "code": "llm_rag_quality_low",
+      "severity": "info",
+      "title": "LLM：RAG经验质量低",
+      "detail": "内容连续重复三次完全相同，属于低质量重复数据。",
+      "target": "rag_exp_bec2217b9e334e99f027",
+      "target_label": "rag_exp_bec2217b9e334e99f027",
+      "repairable": false,
+      "action_type": "delete",
+      "involved_targets": [
+        "rag_exp_bec2217b9e334e99f027"
+      ],
+      "llm_reasoning": "内容连续重复三次完全相同，属于低质量重复数据。",
+      "suggestions": [
+        {
+          "title": "建议删除",
+          "detail": "该条目存在明显错误或不适用，建议归档或废弃。",
+          "level": "danger"
+        }
+      ],
+      "fingerprint": "f470c92242a42c09686b6e71"
+    },
+    {
+      "code": "llm_rag_quality_low",
+      "severity": "info",
+      "title": "LLM：RAG经验质量低",
+      "detail": "内容连续重复三次完全相同，属于低质量重复数据。",
+      "target": "rag_exp_3217a01138a999c7ac4c",
+      "target_label": "rag_exp_3217a01138a999c7ac4c",
+      "repairable": false,
+      "action_type": "delete",
+      "involved_targets": [
+        "rag_exp_3217a01138a999c7ac4c"
+      ],
+      "llm_reasoning": "内容连续重复三次完全相同，属于低质量重复数据。",
+      "suggestions": [
+        {
+          "title": "建议删除",
+          "detail": "该条目存在明显错误或不适用，建议归档或废弃。",
+          "level": "danger"
+        }
+      ],
+      "fingerprint": "fc0d8c690122c4eaa017fb96"
+    },
+    {
+      "code": "llm_rag_quality_low",
+      "severity": "info",
+      "title": "LLM：RAG经验质量低",
+      "detail": "内容连续重复三次完全相同，属于低质量重复数据。",
+      "target": "rag_exp_f1f3f2c853f571ca3fb7",
+      "target_label": "rag_exp_f1f3f2c853f571ca3fb7",
+      "repairable": false,
+      "action_type": "delete",
+      "involved_targets": [
+        "rag_exp_f1f3f2c853f571ca3fb7"
+      ],
+      "llm_reasoning": "内容连续重复三次完全相同，属于低质量重复数据。",
+      "suggestions": [
+        {
+          "title": "建议删除",
+          "detail": "该条目存在明显错误或不适用，建议归档或废弃。",
+          "level": "danger"
+        }
+      ],
+      "fingerprint": "20c5336acd4db7fb8b6ae448"
+    },
+    {
+      "code": "llm_rag_quality_low",
+      "severity": "info",
+      "title": "LLM：RAG经验质量低",
+      "detail": "内容连续重复三次完全相同，属于低质量重复数据。",
+      "target": "rag_exp_3d6cb8893e8753c6b00f",
+      "target_label": "rag_exp_3d6cb8893e8753c6b00f",
+      "repairable": false,
+      "action_type": "delete",
+      "involved_targets": [
+        "rag_exp_3d6cb8893e8753c6b00f"
+      ],
+      "llm_reasoning": "内容连续重复三次完全相同，属于低质量重复数据。",
+      "suggestions": [
+        {
+          "title": "建议删除",
+          "detail": "该条目存在明显错误或不适用，建议归档或废弃。",
+          "level": "danger"
+        }
+      ],
+      "fingerprint": "e36a64ee51cb9db49fd51102"
+    },
+    {
+      "code": "llm_logic_error",
+      "severity": "warning",
+      "title": "LLM：逻辑错误",
+      "detail": "用户询问收到破损能否赔偿或退款，客服回复保修信息，答非所问，逻辑错误。",
+      "target": "rag_exp_a2996658659873e60dcd",
+      "target_label": "rag_exp_a2996658659873e60dcd",
+      "repairable": false,
+      "action_type": "delete",
+      "involved_targets": [
+        "rag_exp_a2996658659873e60dcd"
+      ],
+      "llm_reasoning": "用户询问收到破损能否赔偿或退款，客服回复保修信息，答非所问，逻辑错误。",
+      "suggestions": [
+        {
+          "title": "建议删除",
+          "detail": "该条目存在明显错误或不适用，建议归档或废弃。",
+          "level": "danger"
+        }
+      ],
+      "fingerprint": "95bafab58c64774340cf2619"
+    },
+    {
+      "code": "llm_logic_error",
+      "severity": "warning",
+      "title": "LLM：逻辑错误",
+      "detail": "用户询问商用冰箱保修多久，客服回复现货和发货信息，不匹配，逻辑错误。",
+      "target": "rag_exp_ca4f3d0cb4ab0c72320e",
+      "target_label": "rag_exp_ca4f3d0cb4ab0c72320e",
+      "repairable": false,
+      "action_type": "delete",
+      "involved_targets": [
+        "rag_exp_ca4f3d0cb4ab0c72320e"
+      ],
+      "llm_reasoning": "用户询问商用冰箱保修多久，客服回复现货和发货信息，不匹配，逻辑错误。",
+      "suggestions": [
+        {
+          "title": "建议删除",
+          "detail": "该条目存在明显错误或不适用，建议归档或废弃。",
+          "level": "danger"
+        }
+      ],
+      "fingerprint": "f658d002db7f7871e9fa7915"
+    },
+    {
+      "code": "llm_logic_error",
+      "severity": "warning",
+      "title": "LLM：逻辑错误",
+      "detail": "用户询问发货多久和送货上楼，客服回复对公账户信息，不匹配，逻辑错误。",
+      "target": "rag_exp_026828368f9d2a01012d",
+      "target_label": "rag_exp_026828368f9d2a01012d",
+      "repairable": false,
+      "action_type": "delete",
+      "involved_targets": [
+        "rag_exp_026828368f9d2a01012d"
+      ],
+      "llm_reasoning": "用户询问发货多久和送货上楼，客服回复对公账户信息，不匹配，逻辑错误。",
+      "suggestions": [
+        {
+          "title": "建议删除",
+          "detail": "该条目存在明显错误或不适用，建议归档或废弃。",
+          "level": "danger"
+        }
+      ],
+      "fingerprint": "22fb9737ff21f45e2afa1bea"
+    },
+    {
+      "code": "llm_logic_error",
+      "severity": "warning",
+      "title": "LLM：逻辑错误",
+      "detail": "用户要求提供对公账户和银行账号，客服回复开票信息，不匹配，逻辑错误。",
+      "target": "rag_exp_9151bc188e5982efba1c",
+      "target_label": "rag_exp_9151bc188e5982efba1c",
+      "repairable": false,
+      "action_type": "delete",
+      "involved_targets": [
+        "rag_exp_9151bc188e5982efba1c"
+      ],
+      "llm_reasoning": "用户要求提供对公账户和银行账号，客服回复开票信息，不匹配，逻辑错误。",
+      "suggestions": [
+        {
+          "title": "建议删除",
+          "detail": "该条目存在明显错误或不适用，建议归档或废弃。",
+          "level": "danger"
+        }
+      ],
+      "fingerprint": "fc9f130622034dce9ad87d55"
+    },
+    {
+      "code": "llm_rag_quality_low",
+      "severity": "info",
+      "title": "LLM：RAG经验质量低",
+      "detail": "内容连续重复三次完全相同，属于低质量重复数据。",
+      "target": "rag_exp_aaf9521af562dd581128",
+      "target_label": "rag_exp_aaf9521af562dd581128",
+      "repairable": false,
+      "action_type": "delete",
+      "involved_targets": [
+        "rag_exp_aaf9521af562dd581128"
+      ],
+      "llm_reasoning": "内容连续重复三次完全相同，属于低质量重复数据。",
+      "suggestions": [
+        {
+          "title": "建议删除",
+          "detail": "该条目存在明显错误或不适用，建议归档或废弃。",
+          "level": "danger"
+        }
+      ],
+      "fingerprint": "7aadaee0472c2dca9d909616"
+    },
+    {
+      "code": "llm_rag_quality_low",
+      "severity": "info",
+      "title": "LLM：RAG经验质量低",
+      "detail": "内容连续重复三次完全相同，属于低质量重复数据。",
+      "target": "rag_exp_e27b4d6a2be9516a8011",
+      "target_label": "rag_exp_e27b4d6a2be9516a8011",
+      "repairable": false,
+      "action_type": "delete",
+      "involved_targets": [
+        "rag_exp_e27b4d6a2be9516a8011"
+      ],
+      "llm_reasoning": "内容连续重复三次完全相同，属于低质量重复数据。",
+      "suggestions": [
+        {
+          "title": "建议删除",
+          "detail": "该条目存在明显错误或不适用，建议归档或废弃。",
+          "level": "danger"
+        }
+      ],
+      "fingerprint": "7fd11ac9acf31dcbcb77232a"
+    },
+    {
+      "code": "llm_rag_quality_low",
+      "severity": "info",
+      "title": "LLM：RAG经验质量低",
+      "detail": "内容连续重复三次完全相同，属于低质量重复数据。",
+      "target": "rag_exp_337bfa6a9682396642f8",
+      "target_label": "rag_exp_337bfa6a9682396642f8",
+      "repairable": false,
+      "action_type": "delete",
+      "involved_targets": [
+        "rag_exp_337bfa6a9682396642f8"
+      ],
+      "llm_reasoning": "内容连续重复三次完全相同，属于低质量重复数据。",
+      "suggestions": [
+        {
+          "title": "建议删除",
+          "detail": "该条目存在明显错误或不适用，建议归档或废弃。",
+          "level": "danger"
+        }
+      ],
+      "fingerprint": "e3410f9b7ac3f4e6c05458c4"
+    },
+    {
+      "code": "llm_rag_quality_low",
+      "severity": "info",
+      "title": "LLM：RAG经验质量低",
+      "detail": "内容连续重复三次完全相同，属于低质量重复数据。",
+      "target": "rag_exp_61f94ff416afd8100c78",
+      "target_label": "rag_exp_61f94ff416afd8100c78",
+      "repairable": false,
+      "action_type": "delete",
+      "involved_targets": [
+        "rag_exp_61f94ff416afd8100c78"
+      ],
+      "llm_reasoning": "内容连续重复三次完全相同，属于低质量重复数据。",
+      "suggestions": [
+        {
+          "title": "建议删除",
+          "detail": "该条目存在明显错误或不适用，建议归档或废弃。",
+          "level": "danger"
+        }
+      ],
+      "fingerprint": "5c6109b77355a779cbba90f2"
+    },
+    {
+      "code": "llm_logic_error",
+      "severity": "warning",
+      "title": "LLM：逻辑错误",
+      "detail": "用户询问再来10台发到杭州多少钱，客服回复按6台计算且单价950元/台，数量不匹配且与历史优惠价矛盾。",
+      "target": "rag_exp_c9dc44d677d79451fb5b",
+      "target_label": "rag_exp_c9dc44d677d79451fb5b",
+      "repairable": false,
+      "action_type": "delete",
+      "involved_targets": [
+        "rag_exp_c9dc44d677d79451fb5b"
+      ],
+      "llm_reasoning": "用户询问再来10台发到杭州多少钱，客服回复按6台计算且单价950元/台，数量不匹配且与历史优惠价矛盾。",
+      "suggestions": [
+        {
+          "title": "建议删除",
+          "detail": "该条目存在明显错误或不适用，建议归档或废弃。",
+          "level": "danger"
+        }
+      ],
+      "fingerprint": "e0beebc9e51e03900041d3a9"
+    },
+    {
+      "code": "llm_duplicate_semantic",
+      "severity": "info",
+      "title": "LLM：语义重复",
+      "detail": "这些RAG经验条目高度相似，均涉及商用冰箱BX-200的报价、阶梯优惠和包邮活动，内容重复，建议合并为少数典型对话记录。",
+      "target": "rag_exp_0f30278af23518457793",
+      "target_label": "rag_exp_0f30278af23518457793, rag_exp_c6b438d7930e624567c8, rag_exp_bfac41e484673c244b57, rag_exp_54e4cea950478344dd2e, rag_exp_962eb12b0694a2b26ec9, rag_exp_e95d142eb0a9d53e9dea, rag_exp_4a1363f787bab6fd1168, rag_exp_8e2b05ba4aadc9d94c7a, rag_exp_5ba7bc799f9c239f50df, rag_exp_5026314278bc7efbe0a4, rag_exp_85eb239f8315361c07c0, rag_exp_c146f094fa4d3c10308f, rag_exp_4257c544042b76ed53fa, rag_exp_1ffb8be0406f31fb929e, rag_exp_3b940911d73316b47f12",
+      "repairable": false,
+      "action_type": "merge",
+      "involved_targets": [
+        "rag_exp_0f30278af23518457793",
+        "rag_exp_c6b438d7930e624567c8",
+        "rag_exp_bfac41e484673c244b57",
+        "rag_exp_54e4cea950478344dd2e",
+        "rag_exp_962eb12b0694a2b26ec9",
+        "rag_exp_e95d142eb0a9d53e9dea",
+        "rag_exp_4a1363f787bab6fd1168",
+        "rag_exp_8e2b05ba4aadc9d94c7a",
+        "rag_exp_5ba7bc799f9c239f50df",
+        "rag_exp_5026314278bc7efbe0a4",
+        "rag_exp_85eb239f8315361c07c0",
+        "rag_exp_c146f094fa4d3c10308f",
+        "rag_exp_4257c544042b76ed53fa",
+        "rag_exp_1ffb8be0406f31fb929e",
+        "rag_exp_3b940911d73316b47f12"
+      ],
+      "llm_reasoning": "这些RAG经验条目高度相似，均涉及商用冰箱BX-200的报价、阶梯优惠和包邮活动，内容重复，建议合并为少数典型对话记录。",
+      "suggestions": [
+        {
+          "title": "建议合并",
+          "detail": "多条知识表达同一含义，建议保留信息最完整的一条，将其余归档。",
+          "level": "warning"
+        }
+      ],
+      "fingerprint": "85b10ca8f95f220d1264ba4d"
+    },
+    {
+      "code": "llm_rag_quality_low",
+      "severity": "info",
+      "title": "LLM：RAG经验质量低",
+      "detail": "这些条目中同一句话重复多次（如'商用冰箱多少钱？'、'你们公司信息和地址发我一下'、'你好，在吗？'），内容无实际训练价值，属于低质量数据。",
+      "target": "rag_exp_c38b73869ee1da6daaa8",
+      "target_label": "rag_exp_c38b73869ee1da6daaa8, rag_exp_b855f4bd20513f31b832, rag_exp_671859fb4c0d577021e3, rag_exp_dcd25c8c61bac6abb608, rag_exp_fc4f5b38342d29237774",
+      "repairable": false,
+      "action_type": "delete",
+      "involved_targets": [
+        "rag_exp_c38b73869ee1da6daaa8",
+        "rag_exp_b855f4bd20513f31b832",
+        "rag_exp_671859fb4c0d577021e3",
+        "rag_exp_dcd25c8c61bac6abb608",
+        "rag_exp_fc4f5b38342d29237774"
+      ],
+      "llm_reasoning": "这些条目中同一句话重复多次（如'商用冰箱多少钱？'、'你们公司信息和地址发我一下'、'你好，在吗？'），内容无实际训练价值，属于低质量数据。",
+      "suggestions": [
+        {
+          "title": "建议删除",
+          "detail": "该条目存在明显错误或不适用，建议归档或废弃。",
+          "level": "danger"
+        }
+      ],
+      "fingerprint": "625b4e85189ae0b7ef38fb08"
+    },
+    {
+      "code": "llm_duplicate_semantic",
+      "severity": "info",
+      "title": "LLM：语义重复",
+      "detail": "这些RAG经验均来自同一测试场景，内容高度重复，均为商用冰箱BX-200报价及批量优惠信息，建议合并为一个标准话术。",
+      "target": "rag_exp_adf157d3da404949390c",
+      "target_label": "rag_exp_adf157d3da404949390c, rag_exp_0cb3550d28529c22f4d6, rag_exp_ffb71ead52331314690c, rag_exp_eae2231e5694904aa7af, rag_exp_977952dc3e43641cf333, rag_exp_0d99c8a187ed623d5bdc, rag_exp_43fb4084442a12f37186, rag_exp_08854ea8890087055ecf",
+      "repairable": false,
+      "action_type": "merge",
+      "involved_targets": [
+        "rag_exp_adf157d3da404949390c",
+        "rag_exp_0cb3550d28529c22f4d6",
+        "rag_exp_ffb71ead52331314690c",
+        "rag_exp_eae2231e5694904aa7af",
+        "rag_exp_977952dc3e43641cf333",
+        "rag_exp_0d99c8a187ed623d5bdc",
+        "rag_exp_43fb4084442a12f37186",
+        "rag_exp_08854ea8890087055ecf"
+      ],
+      "llm_reasoning": "这些RAG经验均来自同一测试场景，内容高度重复，均为商用冰箱BX-200报价及批量优惠信息，建议合并为一个标准话术。",
+      "suggestions": [
+        {
+          "title": "建议合并",
+          "detail": "多条知识表达同一含义，建议保留信息最完整的一条，将其余归档。",
+          "level": "warning"
+        }
+      ],
+      "fingerprint": "836f3245e959f9045de56a01"
+    },
+    {
+      "code": "llm_rag_quality_low",
+      "severity": "info",
+      "title": "LLM：RAG经验质量低",
+      "detail": "这些条目为无效噪音或无意义重复内容，对知识库无贡献，应删除。",
+      "target": "rag_exp_db18bd8ce7819602a304",
+      "target_label": "rag_exp_db18bd8ce7819602a304, rag_exp_5a574e8d242fc86a1b3d, rag_exp_7f6be88eb8bbe84022dc",
+      "repairable": false,
+      "action_type": "delete",
+      "involved_targets": [
+        "rag_exp_db18bd8ce7819602a304",
+        "rag_exp_5a574e8d242fc86a1b3d",
+        "rag_exp_7f6be88eb8bbe84022dc"
+      ],
+      "llm_reasoning": "这些条目为无效噪音或无意义重复内容，对知识库无贡献，应删除。",
+      "suggestions": [
+        {
+          "title": "建议删除",
+          "detail": "该条目存在明显错误或不适用，建议归档或废弃。",
+          "level": "danger"
+        }
+      ],
+      "fingerprint": "1c56b1fbba45f0d1ee1003ab"
+    },
+    {
+      "code": "llm_rag_quality_low",
+      "severity": "info",
+      "title": "LLM：RAG经验质量低",
+      "detail": "条目内容完全重复三次，信息冗余，建议清理为单次记录。",
+      "target": "rag_exp_89af65a4428a33bb5815",
+      "target_label": "rag_exp_89af65a4428a33bb5815",
+      "repairable": false,
+      "action_type": "review",
+      "involved_targets": [
+        "rag_exp_89af65a4428a33bb5815"
+      ],
+      "llm_reasoning": "条目内容完全重复三次，信息冗余，建议清理为单次记录。",
+      "suggestions": [
+        {
+          "title": "建议人工复核",
+          "detail": "LLM认为该条目可能存在问题，请人工确认后决定处理方式。",
+          "level": "warning"
+        }
+      ],
+      "fingerprint": "a79811e7cc11a83d238402b7"
+    }
+  ],
+  "ignored_count": 0,
+  "summary": {
+    "error_count": 0,
+    "warning_count": 7,
+    "info_count": 18,
+    "ignored_count": 0,
+    "hidden_notice_count": 1
+  },
+  "auto_dedup_rag": null
+}

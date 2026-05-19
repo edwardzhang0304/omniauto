@@ -1,0 +1,128 @@
+{
+  "session_id": "gen_20260509_142753_d2c1916e",
+  "status": "saved",
+  "created_at": "2026-05-09T14:27:53",
+  "updated_at": "2026-05-09T14:27:53",
+  "history": [
+    {
+      "role": "user",
+      "content": "新增商品：联调实测商品 20260509_142752，SKU LLM-20260509_142752，单价 321 元/件，库存 7 件，24小时发货，质保一年。",
+      "created_at": "2026-05-09T14:27:53"
+    }
+  ],
+  "category_id": "products",
+  "category_name": "商品资料",
+  "confidence": 0.62,
+  "provider": "heuristic",
+  "draft_item": {
+    "schema_version": 1,
+    "category_id": "products",
+    "id": "llm-20260509_142752",
+    "status": "active",
+    "source": {
+      "type": "ai_generator",
+      "session_id": "gen_20260509_142753_d2c1916e"
+    },
+    "data": {
+      "name": "联调实测商品 20260509_142752",
+      "sku": "LLM-20260509_142752",
+      "category": "",
+      "aliases": [],
+      "specs": "",
+      "price": 321.0,
+      "unit": "件",
+      "price_tiers": [
+        {
+          "min_quantity": 7.0,
+          "unit_price": 24.0
+        }
+      ],
+      "inventory": 7.0,
+      "shipping_policy": "新增商品：联调实测商品 20260509_142752，SKU LLM-20260509_142752，单价 321 元/件，库存 7 件，24小时发货，质保一年",
+      "warranty_policy": "新增商品：联调实测商品 20260509_142752，SKU LLM-20260509_142752，单价 321 元/件，库存 7 件，24小时发货，质保一年",
+      "reply_templates": {},
+      "risk_rules": [],
+      "additional_details": {
+        "用户原始描述": "新增商品：联调实测商品 20260509_142752，SKU LLM-20260509_142752，单价 321 元/件，库存 7 件，24小时发货，质保一年。"
+      }
+    },
+    "runtime": {
+      "allow_auto_reply": true,
+      "requires_handoff": false,
+      "risk_level": "normal"
+    },
+    "metadata": {
+      "created_at": "2026-05-09T14:27:53",
+      "updated_at": "2026-05-09T14:27:53",
+      "created_by": "admin",
+      "updated_by": "admin"
+    }
+  },
+  "missing_fields": [],
+  "question": "",
+  "warnings": [],
+  "summary_rows": [
+    {
+      "label": "知识 ID",
+      "value": "llm-20260509_142752"
+    },
+    {
+      "label": "商品名称",
+      "value": "联调实测商品 20260509_142752"
+    },
+    {
+      "label": "型号/SKU",
+      "value": "LLM-20260509_142752"
+    },
+    {
+      "label": "基础价格",
+      "value": "321.0"
+    },
+    {
+      "label": "计价单位",
+      "value": "件"
+    },
+    {
+      "label": "批量价格",
+      "value": "7 起：24 元"
+    },
+    {
+      "label": "库存",
+      "value": "7.0"
+    },
+    {
+      "label": "发货/物流",
+      "value": "新增商品：联调实测商品 20260509_142752，SKU LLM-20260509_142752，单价 321 元/件，库存 7 件，24小时发货，质保一年"
+    },
+    {
+      "label": "售后/保修",
+      "value": "新增商品：联调实测商品 20260509_142752，SKU LLM-20260509_142752，单价 321 元/件，库存 7 件，24小时发货，质保一年"
+    },
+    {
+      "label": "补充信息",
+      "value": "用户原始描述: 新增商品：联调实测商品 20260509_142752，SKU LLM-20260509_142752，单价 321 元/件，库存 7 件，24小时发货，质保一年。"
+    }
+  ],
+  "intake": {
+    "status": "ready",
+    "ok": true,
+    "confidence": 0.62,
+    "missing_fields": [],
+    "missing_labels": [],
+    "question": "",
+    "warnings": [],
+    "preserved_detail_keys": [
+      "用户原始描述"
+    ]
+  },
+  "llm_assist": {
+    "policy_version": "knowledge_llm_assist_v1",
+    "stage": "manual_description_to_draft_knowledge",
+    "attempted": false,
+    "provider": "",
+    "status": "rule_only_disabled_by_request",
+    "reason": "llm_disabled_by_caller",
+    "fallback_allowed": true,
+    "human_approval_required": true
+  }
+}

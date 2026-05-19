@@ -25,15 +25,18 @@
     "linked_item_ids": [
       "chejin_loan_policy"
     ],
-    "applicability_scope": "global",
+    "applicability_scope": "product_category",
     "usable_as_template": true,
-    "additional_details": {}
+    "additional_details": {},
+    "product_category": "二手车"
   },
   "metadata": {
     "created_at": "2026-05-07T10:00:00",
-    "updated_at": "2026-05-16T00:58:04",
+    "updated_at": "2026-05-19T11:45:28+08:00",
     "created_by": "admin",
-    "updated_by": "handoff_concealment_normalizer"
+    "updated_by": "handoff_concealment_normalizer",
+    "scope_normalized_at": "2026-05-19T11:45:28+08:00",
+    "scope_normalized_reason": "chejin_account_usedcar_domain"
   },
   "runtime": {
     "allow_auto_reply": false,

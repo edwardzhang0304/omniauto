@@ -1,0 +1,35 @@
+{
+  "source": {
+    "source_id": "source_8b902bdb99552d4d",
+    "tenant_id": "chejin",
+    "layer": "tenant",
+    "source_type": "wechat_raw_message",
+    "category": "private",
+    "product_id": "",
+    "source_path": "D:\\AI\\omniauto\\runtime\\apps\\wechat_ai_customer_service\\tenants\\chejin\\raw_messages\\learning_batches\\raw_batch_371d9771557292e2490a.txt",
+    "content_hash": "26472fee0b97d38792f4f2cc13b06ce3",
+    "status": "quarantined",
+    "created_at": "2026-05-06T19:51:29",
+    "updated_at": "2026-05-06T19:51:29",
+    "quarantine_reason": "raw_wechat_source_not_directly_retrievable"
+  },
+  "chunks": [
+    {
+      "chunk_id": "chunk_199a608c4d845fea",
+      "source_id": "source_8b902bdb99552d4d",
+      "tenant_id": "chejin",
+      "layer": "tenant",
+      "source_type": "wechat_raw_message",
+      "category": "private",
+      "product_id": "",
+      "source_path": "D:\\AI\\omniauto\\runtime\\apps\\wechat_ai_customer_service\\tenants\\chejin\\raw_messages\\learning_batches\\raw_batch_371d9771557292e2490a.txt",
+      "chunk_index": 0,
+      "text": "[2026-05-06T19:51:29] 许聪: 南京，家用车",
+      "char_count": 32,
+      "status": "quarantined",
+      "created_at": "2026-05-06T19:51:29",
+      "quarantine_reason": "raw_wechat_source_not_directly_retrievable",
+      "quarantined_at": "2026-05-19T01:47:03"
+    }
+  ]
+}

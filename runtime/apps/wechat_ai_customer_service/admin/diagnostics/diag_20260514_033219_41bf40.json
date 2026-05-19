@@ -1,0 +1,406 @@
+{
+  "ok": true,
+  "run_id": "diag_20260514_033219_41bf40",
+  "mode": "quick",
+  "status": "ok",
+  "created_at": "2026-05-14T03:32:35",
+  "checks": [
+    {
+      "name": "quick_knowledge_validation",
+      "ok": true,
+      "issues": [
+        {
+          "code": "llm_duplicate_semantic",
+          "severity": "warning",
+          "title": "LLM：语义重复",
+          "detail": "两条政策都描述公司信息，内容高度重叠，company_profile_details 更详细，建议合并。",
+          "target": "policies/company_profile",
+          "target_label": "policies/company_profile, policies/company_profile_details",
+          "repairable": false,
+          "action_type": "merge",
+          "involved_targets": [
+            "policies/company_profile",
+            "policies/company_profile_details"
+          ],
+          "llm_reasoning": "两条政策都描述公司信息，内容高度重叠，company_profile_details 更详细，建议合并。",
+          "suggestions": [
+            {
+              "title": "建议合并",
+              "detail": "多条知识表达同一含义，建议保留信息最完整的一条，将其余归档。",
+              "level": "warning"
+            }
+          ]
+        },
+        {
+          "code": "llm_duplicate_semantic",
+          "severity": "warning",
+          "title": "LLM：语义重复",
+          "detail": "两条政策都描述售后政策，内容高度重叠，after_sales_policy_details 更结构化，建议合并。",
+          "target": "policies/after_sales",
+          "target_label": "policies/after_sales, policies/after_sales_policy_details",
+          "repairable": false,
+          "action_type": "merge",
+          "involved_targets": [
+            "policies/after_sales",
+            "policies/after_sales_policy_details"
+          ],
+          "llm_reasoning": "两条政策都描述售后政策，内容高度重叠，after_sales_policy_details 更结构化，建议合并。",
+          "suggestions": [
+            {
+              "title": "建议合并",
+              "detail": "多条知识表达同一含义，建议保留信息最完整的一条，将其余归档。",
+              "level": "warning"
+            }
+          ]
+        },
+        {
+          "code": "llm_duplicate_semantic",
+          "severity": "warning",
+          "title": "LLM：语义重复",
+          "detail": "这两个条目都描述了物流政策，包括仓库、承运商、发货时间、大件送货上楼等，内容高度重叠，只是格式不同（一个纯文本，一个JSON）。",
+          "target": "policies/logistics",
+          "target_label": "policies/logistics, policies/logistics_policy_details",
+          "repairable": false,
+          "action_type": "merge",
+          "involved_targets": [
+            "policies/logistics",
+            "policies/logistics_policy_details"
+          ],
+          "llm_reasoning": "这两个条目都描述了物流政策，包括仓库、承运商、发货时间、大件送货上楼等，内容高度重叠，只是格式不同（一个纯文本，一个JSON）。",
+          "suggestions": [
+            {
+              "title": "建议合并",
+              "detail": "多条知识表达同一含义，建议保留信息最完整的一条，将其余归档。",
+              "level": "warning"
+            }
+          ]
+        },
+        {
+          "code": "llm_duplicate_semantic",
+          "severity": "warning",
+          "title": "LLM：语义重复",
+          "detail": "这两个条目都描述了付款方式、定金政策等，内容高度重叠，只是格式不同。",
+          "target": "policies/payment",
+          "target_label": "policies/payment, policies/payment_policy_details",
+          "repairable": false,
+          "action_type": "merge",
+          "involved_targets": [
+            "policies/payment",
+            "policies/payment_policy_details"
+          ],
+          "llm_reasoning": "这两个条目都描述了付款方式、定金政策等，内容高度重叠，只是格式不同。",
+          "suggestions": [
+            {
+              "title": "建议合并",
+              "detail": "多条知识表达同一含义，建议保留信息最完整的一条，将其余归档。",
+              "level": "warning"
+            }
+          ]
+        },
+        {
+          "code": "llm_duplicate_semantic",
+          "severity": "warning",
+          "title": "LLM：语义重复",
+          "detail": "两个条目都涉及增值税专用发票的开票要求，invoice_policy_details包含必要字段，special_invoice_rule则更详细地列出了注册地址、开户行等信息，有部分重叠，建议合并为一条完整政策。",
+          "target": "policies/invoice_policy_details",
+          "target_label": "policies/invoice_policy_details, policies/special_invoice_rule",
+          "repairable": false,
+          "action_type": "merge",
+          "involved_targets": [
+            "policies/invoice_policy_details",
+            "policies/special_invoice_rule"
+          ],
+          "llm_reasoning": "两个条目都涉及增值税专用发票的开票要求，invoice_policy_details包含必要字段，special_invoice_rule则更详细地列出了注册地址、开户行等信息，有部分重叠，建议合并为一条完整政策。",
+          "suggestions": [
+            {
+              "title": "建议合并",
+              "detail": "多条知识表达同一含义，建议保留信息最完整的一条，将其余归档。",
+              "level": "warning"
+            }
+          ]
+        },
+        {
+          "code": "llm_rag_quality_low",
+          "severity": "warning",
+          "title": "LLM：RAG经验质量低",
+          "detail": "该RAG经验内容为测试数据（自动化测试折叠床、折叠椅等），且多次重复，质量低，不适合作为正式知识库条目。",
+          "target": "rag_exp_89d634d4bdf63881b18b",
+          "target_label": "rag_exp_89d634d4bdf63881b18b",
+          "repairable": false,
+          "action_type": "delete",
+          "involved_targets": [
+            "rag_exp_89d634d4bdf63881b18b"
+          ],
+          "llm_reasoning": "该RAG经验内容为测试数据（自动化测试折叠床、折叠椅等），且多次重复，质量低，不适合作为正式知识库条目。",
+          "suggestions": [
+            {
+              "title": "建议删除",
+              "detail": "该条目存在明显错误或不适用，建议归档或废弃。",
+              "level": "danger"
+            }
+          ]
+        },
+        {
+          "code": "llm_rag_quality_low",
+          "severity": "warning",
+          "title": "LLM：RAG经验质量低",
+          "detail": "该RAG经验内容包含测试标记（如'OmniAuto自测'），虽然开票信息本身正确，但测试痕迹可能误导客服或用户，建议清理后保留。",
+          "target": "rag_exp_9151bc188e5982efba1c",
+          "target_label": "rag_exp_9151bc188e5982efba1c",
+          "repairable": false,
+          "action_type": "review",
+          "involved_targets": [
+            "rag_exp_9151bc188e5982efba1c"
+          ],
+          "llm_reasoning": "该RAG经验内容包含测试标记（如'OmniAuto自测'），虽然开票信息本身正确，但测试痕迹可能误导客服或用户，建议清理后保留。",
+          "suggestions": [
+            {
+              "title": "建议人工复核",
+              "detail": "LLM认为该条目可能存在问题，请人工确认后决定处理方式。",
+              "level": "warning"
+            }
+          ]
+        },
+        {
+          "code": "knowledge_token_budget_large",
+          "severity": "info",
+          "title": "知识体积较大",
+          "detail": "当前分类知识库总量估算约 62180 token。这不是知识格式故障，也没有某条知识需要立即删除；它提醒后续继续按客户问题检索相关知识，避免一次性加载全部知识。",
+          "target_label": "全局知识库",
+          "details": [
+            {
+              "label": "问题性质",
+              "value": "容量提示，不是知识格式故障",
+              "level": "normal"
+            },
+            {
+              "label": "估算总量",
+              "value": "约 62180 token",
+              "level": "warning"
+            },
+            {
+              "label": "检测阈值",
+              "value": "超过 7000 token 时提示",
+              "level": "normal"
+            },
+            {
+              "label": "文件数量",
+              "value": "98 个 JSON 文件",
+              "level": "normal"
+            },
+            {
+              "label": "chats",
+              "value": "约 28130 token / 46 个文件",
+              "level": "normal"
+            },
+            {
+              "label": "erp_exports",
+              "value": "约 860 token / 2 个文件",
+              "level": "normal"
+            },
+            {
+              "label": "policies",
+              "value": "约 24980 token / 39 个文件",
+              "level": "normal"
+            },
+            {
+              "label": "products",
+              "value": "约 7517 token / 11 个文件",
+              "level": "normal"
+            }
+          ],
+          "suggestions": [
+            {
+              "title": "不建议自动删除知识",
+              "detail": "当前没有发现哪一条知识错误，系统不能为了降低体积擅自删内容。",
+              "level": "danger"
+            },
+            {
+              "title": "继续保持按门类和问题范围检索",
+              "detail": "客服运行时应只取相关商品、政策、话术和上下文证据，不要把全库一次性塞给大模型。",
+              "level": "normal"
+            },
+            {
+              "title": "如果后续继续变大",
+              "detail": "优先拆分过长政策、归档过期商品、把重复话术合并为模板，再重新检测。",
+              "level": "warning"
+            }
+          ],
+          "repairable": false
+        }
+      ],
+      "token_budget_estimate": 62180,
+      "recent_only": true
+    }
+  ],
+  "issues": [
+    {
+      "code": "llm_duplicate_semantic",
+      "severity": "info",
+      "title": "LLM：语义重复",
+      "detail": "两条政策都描述公司信息，内容高度重叠，company_profile_details 更详细，建议合并。",
+      "target": "policies/company_profile",
+      "target_label": "policies/company_profile, policies/company_profile_details",
+      "repairable": false,
+      "action_type": "merge",
+      "involved_targets": [
+        "policies/company_profile",
+        "policies/company_profile_details"
+      ],
+      "llm_reasoning": "两条政策都描述公司信息，内容高度重叠，company_profile_details 更详细，建议合并。",
+      "suggestions": [
+        {
+          "title": "建议合并",
+          "detail": "多条知识表达同一含义，建议保留信息最完整的一条，将其余归档。",
+          "level": "warning"
+        }
+      ],
+      "fingerprint": "a0538dbdeb99e1ff23f29ce1"
+    },
+    {
+      "code": "llm_duplicate_semantic",
+      "severity": "info",
+      "title": "LLM：语义重复",
+      "detail": "两条政策都描述售后政策，内容高度重叠，after_sales_policy_details 更结构化，建议合并。",
+      "target": "policies/after_sales",
+      "target_label": "policies/after_sales, policies/after_sales_policy_details",
+      "repairable": false,
+      "action_type": "merge",
+      "involved_targets": [
+        "policies/after_sales",
+        "policies/after_sales_policy_details"
+      ],
+      "llm_reasoning": "两条政策都描述售后政策，内容高度重叠，after_sales_policy_details 更结构化，建议合并。",
+      "suggestions": [
+        {
+          "title": "建议合并",
+          "detail": "多条知识表达同一含义，建议保留信息最完整的一条，将其余归档。",
+          "level": "warning"
+        }
+      ],
+      "fingerprint": "5587cdce27da371a2bc4270f"
+    },
+    {
+      "code": "llm_duplicate_semantic",
+      "severity": "info",
+      "title": "LLM：语义重复",
+      "detail": "这两个条目都描述了物流政策，包括仓库、承运商、发货时间、大件送货上楼等，内容高度重叠，只是格式不同（一个纯文本，一个JSON）。",
+      "target": "policies/logistics",
+      "target_label": "policies/logistics, policies/logistics_policy_details",
+      "repairable": false,
+      "action_type": "merge",
+      "involved_targets": [
+        "policies/logistics",
+        "policies/logistics_policy_details"
+      ],
+      "llm_reasoning": "这两个条目都描述了物流政策，包括仓库、承运商、发货时间、大件送货上楼等，内容高度重叠，只是格式不同（一个纯文本，一个JSON）。",
+      "suggestions": [
+        {
+          "title": "建议合并",
+          "detail": "多条知识表达同一含义，建议保留信息最完整的一条，将其余归档。",
+          "level": "warning"
+        }
+      ],
+      "fingerprint": "2fc180a508f44b0278ce97f8"
+    },
+    {
+      "code": "llm_duplicate_semantic",
+      "severity": "info",
+      "title": "LLM：语义重复",
+      "detail": "这两个条目都描述了付款方式、定金政策等，内容高度重叠，只是格式不同。",
+      "target": "policies/payment",
+      "target_label": "policies/payment, policies/payment_policy_details",
+      "repairable": false,
+      "action_type": "merge",
+      "involved_targets": [
+        "policies/payment",
+        "policies/payment_policy_details"
+      ],
+      "llm_reasoning": "这两个条目都描述了付款方式、定金政策等，内容高度重叠，只是格式不同。",
+      "suggestions": [
+        {
+          "title": "建议合并",
+          "detail": "多条知识表达同一含义，建议保留信息最完整的一条，将其余归档。",
+          "level": "warning"
+        }
+      ],
+      "fingerprint": "d0784225b07210bfc138ab2a"
+    },
+    {
+      "code": "llm_duplicate_semantic",
+      "severity": "info",
+      "title": "LLM：语义重复",
+      "detail": "两个条目都涉及增值税专用发票的开票要求，invoice_policy_details包含必要字段，special_invoice_rule则更详细地列出了注册地址、开户行等信息，有部分重叠，建议合并为一条完整政策。",
+      "target": "policies/invoice_policy_details",
+      "target_label": "policies/invoice_policy_details, policies/special_invoice_rule",
+      "repairable": false,
+      "action_type": "merge",
+      "involved_targets": [
+        "policies/invoice_policy_details",
+        "policies/special_invoice_rule"
+      ],
+      "llm_reasoning": "两个条目都涉及增值税专用发票的开票要求，invoice_policy_details包含必要字段，special_invoice_rule则更详细地列出了注册地址、开户行等信息，有部分重叠，建议合并为一条完整政策。",
+      "suggestions": [
+        {
+          "title": "建议合并",
+          "detail": "多条知识表达同一含义，建议保留信息最完整的一条，将其余归档。",
+          "level": "warning"
+        }
+      ],
+      "fingerprint": "0bbbd7115b0f14e82bc9596e"
+    },
+    {
+      "code": "llm_rag_quality_low",
+      "severity": "info",
+      "title": "LLM：RAG经验质量低",
+      "detail": "该RAG经验内容为测试数据（自动化测试折叠床、折叠椅等），且多次重复，质量低，不适合作为正式知识库条目。",
+      "target": "rag_exp_89d634d4bdf63881b18b",
+      "target_label": "rag_exp_89d634d4bdf63881b18b",
+      "repairable": false,
+      "action_type": "delete",
+      "involved_targets": [
+        "rag_exp_89d634d4bdf63881b18b"
+      ],
+      "llm_reasoning": "该RAG经验内容为测试数据（自动化测试折叠床、折叠椅等），且多次重复，质量低，不适合作为正式知识库条目。",
+      "suggestions": [
+        {
+          "title": "建议删除",
+          "detail": "该条目存在明显错误或不适用，建议归档或废弃。",
+          "level": "danger"
+        }
+      ],
+      "fingerprint": "754ba600e743c3a8f0574111"
+    },
+    {
+      "code": "llm_rag_quality_low",
+      "severity": "info",
+      "title": "LLM：RAG经验质量低",
+      "detail": "该RAG经验内容包含测试标记（如'OmniAuto自测'），虽然开票信息本身正确，但测试痕迹可能误导客服或用户，建议清理后保留。",
+      "target": "rag_exp_9151bc188e5982efba1c",
+      "target_label": "rag_exp_9151bc188e5982efba1c",
+      "repairable": false,
+      "action_type": "review",
+      "involved_targets": [
+        "rag_exp_9151bc188e5982efba1c"
+      ],
+      "llm_reasoning": "该RAG经验内容包含测试标记（如'OmniAuto自测'），虽然开票信息本身正确，但测试痕迹可能误导客服或用户，建议清理后保留。",
+      "suggestions": [
+        {
+          "title": "建议人工复核",
+          "detail": "LLM认为该条目可能存在问题，请人工确认后决定处理方式。",
+          "level": "warning"
+        }
+      ],
+      "fingerprint": "e1f2d98e93c4ee1456362ab0"
+    }
+  ],
+  "ignored_count": 0,
+  "summary": {
+    "error_count": 0,
+    "warning_count": 0,
+    "info_count": 7,
+    "ignored_count": 0,
+    "hidden_notice_count": 1
+  },
+  "auto_dedup_rag": null
+}

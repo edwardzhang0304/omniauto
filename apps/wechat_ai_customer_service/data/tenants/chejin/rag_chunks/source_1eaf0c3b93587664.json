@@ -1,0 +1,35 @@
+{
+  "source": {
+    "source_id": "source_1eaf0c3b93587664",
+    "tenant_id": "chejin",
+    "layer": "tenant",
+    "source_type": "wechat_raw_message",
+    "category": "group",
+    "product_id": "",
+    "source_path": "D:\\AI\\omniauto\\runtime\\apps\\wechat_ai_customer_service\\tenants\\chejin\\raw_messages\\learning_batches\\raw_batch_b29a2d7457257da95419.txt",
+    "content_hash": "4b2990eff831d189ee2b3728cf2306b8",
+    "status": "quarantined",
+    "created_at": "2026-05-16T13:14:05",
+    "updated_at": "2026-05-16T13:14:05",
+    "quarantine_reason": "raw_wechat_source_not_directly_retrievable"
+  },
+  "chunks": [
+    {
+      "chunk_id": "chunk_e5dcf959fac2196c",
+      "source_id": "source_1eaf0c3b93587664",
+      "tenant_id": "chejin",
+      "layer": "tenant",
+      "source_type": "wechat_raw_message",
+      "category": "group",
+      "product_id": "",
+      "source_path": "D:\\AI\\omniauto\\runtime\\apps\\wechat_ai_customer_service\\tenants\\chejin\\raw_messages\\learning_batches\\raw_batch_b29a2d7457257da95419.txt",
+      "chunk_index": 0,
+      "text": "[2026-05-01 16:00:00] 销售A: 商品资料：江苏车金记录员完整车源 CHEJIN_20260516_131200\n测试批次：CHEJIN_20260516_131200\n商品名称：2020款别克GL8 ES陆尊653T豪华型\n型号：CHEJIN-REC-GL8-2020ES\n商品类目：二手车/MPV\n价格：17.60万\n单位：台\n库存：1\n发货：南京门店可看车，商务客户试乘需人工确认\n售后：车况以检测报告为准\n[2026-05-01 16:01:00] 销售B: 政策规则：江苏车金记录员风控 CHEJIN_20260516_131200\n测试批次：CHEJIN_20260516_131200\n规则名称：保证无事故转人工\n规则类型：contract\n触发关键词：保证无事故,赔偿,CHEJIN_20260516_131200\n答案：此类问题必须让销售人工按检测报告和合同回复。\n[2026-05-01 16:02:00] 销售C: 边界噪音：CHEJIN_20260516_131200_NOISE 今天午饭吃什么，这不是车源也不是客服知识。",
+      "char_count": 484,
+      "status": "quarantined",
+      "created_at": "2026-05-16T13:14:05",
+      "quarantine_reason": "raw_wechat_source_not_directly_retrievable",
+      "quarantined_at": "2026-05-19T01:47:03"
+    }
+  ]
+}

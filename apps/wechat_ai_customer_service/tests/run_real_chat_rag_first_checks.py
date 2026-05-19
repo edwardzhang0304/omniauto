@@ -153,26 +153,12 @@ def check_chejin_learning_layers_have_migrated_samples() -> bool:
     tenant_dir = tenant_root(TENANT_ID)
     rag_path = tenant_dir / "rag_experience" / "experiences.json"
     style_path = tenant_dir / "style_memory" / "examples.jsonl"
-    curated_root = tenant_dir / "learning_packs" / "curated_templates"
     rag_items = json.loads(rag_path.read_text(encoding="utf-8")) if rag_path.exists() else []
     migrated_rag = [
         item
         for item in rag_items
         if str((item.get("migration") or {}).get("from_layer") or "") == "formal_knowledge.chats"
         and str(item.get("source_type") or "") == "cleaned_real_chat_pack"
-    ]
-    # RAG experience files are runtime state and intentionally ignored by Git.
-    # A clean checkout must still carry the importable curated pack so the same
-    # real-chat experiences can be regenerated through the governed intake path.
-    curated_rows = []
-    for path in sorted(curated_root.glob("*.jsonl")):
-        for line in path.read_text(encoding="utf-8").splitlines():
-            if line.strip():
-                curated_rows.append(json.loads(line))
-    migrated_curated = [
-        item
-        for item in curated_rows
-        if str(((item.get("source") or {}) if isinstance(item.get("source"), dict) else {}).get("type") or "") == "cleaned_real_chat_pack"
     ]
     style_rows = []
     if style_path.exists():
@@ -185,8 +171,7 @@ def check_chejin_learning_layers_have_migrated_samples() -> bool:
         if str((item.get("migration") or {}).get("from_layer") or "") == "formal_knowledge.chats"
         and str(item.get("source_type") or "") == "cleaned_real_chat_pack"
     ]
-    has_rag_source = len(migrated_rag) >= 900 or len(migrated_curated) >= 900
-    return has_rag_source and len(migrated_style) >= 900
+    return len(migrated_rag) >= 900 and len(migrated_style) >= 900
 
 
 def check_low_value_rag_reply_auto_discards() -> bool:

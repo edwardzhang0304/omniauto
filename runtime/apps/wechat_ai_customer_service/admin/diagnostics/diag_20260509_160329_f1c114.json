@@ -1,0 +1,1310 @@
+{
+  "ok": true,
+  "run_id": "diag_20260509_160329_f1c114",
+  "mode": "full",
+  "status": "warning",
+  "created_at": "2026-05-09T16:09:07",
+  "checks": [
+    {
+      "name": "quick_knowledge_validation",
+      "ok": false,
+      "issues": [
+        {
+          "code": "llm_duplicate_semantic",
+          "severity": "warning",
+          "title": "LLM：语义重复",
+          "detail": "两条话术均表达'不能直接决定，需请示'，语义重复，可合并为通用转人工话术。",
+          "target": "chats/discount_handoff",
+          "target_label": "chats/discount_handoff, chats/over_boundary_handoff",
+          "repairable": false,
+          "action_type": "merge",
+          "involved_targets": [
+            "chats/discount_handoff",
+            "chats/over_boundary_handoff"
+          ],
+          "llm_reasoning": "两条话术均表达'不能直接决定，需请示'，语义重复，可合并为通用转人工话术。",
+          "suggestions": [
+            {
+              "title": "建议合并",
+              "detail": "多条知识表达同一含义，建议保留信息最完整的一条，将其余归档。",
+              "level": "warning"
+            }
+          ]
+        },
+        {
+          "code": "llm_duplicate_semantic",
+          "severity": "warning",
+          "title": "LLM：语义重复",
+          "detail": "两条政策均关于发票开具，内容重叠，可合并为统一发票政策。",
+          "target": "policies/invoice",
+          "target_label": "policies/invoice, policies/invoice_policy_details",
+          "repairable": false,
+          "action_type": "merge",
+          "involved_targets": [
+            "policies/invoice",
+            "policies/invoice_policy_details"
+          ],
+          "llm_reasoning": "两条政策均关于发票开具，内容重叠，可合并为统一发票政策。",
+          "suggestions": [
+            {
+              "title": "建议合并",
+              "detail": "多条知识表达同一含义，建议保留信息最完整的一条，将其余归档。",
+              "level": "warning"
+            }
+          ]
+        },
+        {
+          "code": "llm_duplicate_semantic",
+          "severity": "warning",
+          "title": "LLM：语义重复",
+          "detail": "两条条目均包含公司名称、主营范围等信息，内容重复，可合并。",
+          "target": "policies/company_profile",
+          "target_label": "policies/company_profile, policies/item_2712d3045ad2",
+          "repairable": false,
+          "action_type": "merge",
+          "involved_targets": [
+            "policies/company_profile",
+            "policies/item_2712d3045ad2"
+          ],
+          "llm_reasoning": "两条条目均包含公司名称、主营范围等信息，内容重复，可合并。",
+          "suggestions": [
+            {
+              "title": "建议合并",
+              "detail": "多条知识表达同一含义，建议保留信息最完整的一条，将其余归档。",
+              "level": "warning"
+            }
+          ]
+        },
+        {
+          "code": "llm_duplicate_semantic",
+          "severity": "warning",
+          "title": "LLM：语义重复",
+          "detail": "账期政策与合同政策中关于账期的部分重复，且contract已覆盖账期，credit-term-policy可合并或删除。",
+          "target": "policies/credit-term-policy",
+          "target_label": "policies/credit-term-policy, policies/contract",
+          "repairable": false,
+          "action_type": "merge",
+          "involved_targets": [
+            "policies/credit-term-policy",
+            "policies/contract"
+          ],
+          "llm_reasoning": "账期政策与合同政策中关于账期的部分重复，且contract已覆盖账期，credit-term-policy可合并或删除。",
+          "suggestions": [
+            {
+              "title": "建议合并",
+              "detail": "多条知识表达同一含义，建议保留信息最完整的一条，将其余归档。",
+              "level": "warning"
+            }
+          ]
+        },
+        {
+          "code": "llm_inappropriate",
+          "severity": "error",
+          "title": "LLM：场景不适用",
+          "detail": "该政策针对产品MT-160，但知识库中无此产品，场景不适用，可能导致误匹配。",
+          "target": "policies/after-sales-mt160-compensation",
+          "target_label": "policies/after-sales-mt160-compensation",
+          "repairable": false,
+          "action_type": "delete",
+          "involved_targets": [
+            "policies/after-sales-mt160-compensation"
+          ],
+          "llm_reasoning": "该政策针对产品MT-160，但知识库中无此产品，场景不适用，可能导致误匹配。",
+          "suggestions": [
+            {
+              "title": "建议删除",
+              "detail": "该条目存在明显错误或不适用，建议归档或废弃。",
+              "level": "danger"
+            }
+          ]
+        },
+        {
+          "code": "llm_logic_error",
+          "severity": "error",
+          "title": "LLM：逻辑错误",
+          "detail": "两个条目均包含关键词'转人工'，但manual_handoff_reply为自动回复且不转人工，manual_required为转人工，可能冲突导致用户需求处理矛盾。",
+          "target": "policies/manual_handoff_reply",
+          "target_label": "policies/manual_handoff_reply, policies/manual_required",
+          "repairable": false,
+          "action_type": "review",
+          "involved_targets": [
+            "policies/manual_handoff_reply",
+            "policies/manual_required"
+          ],
+          "llm_reasoning": "两个条目均包含关键词'转人工'，但manual_handoff_reply为自动回复且不转人工，manual_required为转人工，可能冲突导致用户需求处理矛盾。",
+          "suggestions": [
+            {
+              "title": "建议人工复核",
+              "detail": "LLM认为该条目可能存在问题，请人工确认后决定处理方式。",
+              "level": "warning"
+            }
+          ]
+        },
+        {
+          "code": "llm_inappropriate",
+          "severity": "error",
+          "title": "LLM：场景不适用",
+          "detail": "这些RAG经验涉及二手车和新能源车业务，与当前办公设备销售的知识库场景完全不匹配，会导致客服给出错误回复。",
+          "target": "rag_exp_64d466c04970cdf4b0a1",
+          "target_label": "rag_exp_64d466c04970cdf4b0a1, rag_exp_50d36f28a748647ebb2a, rag_exp_a277de5376014f11f0bd",
+          "repairable": false,
+          "action_type": "delete",
+          "involved_targets": [
+            "rag_exp_64d466c04970cdf4b0a1",
+            "rag_exp_50d36f28a748647ebb2a",
+            "rag_exp_a277de5376014f11f0bd"
+          ],
+          "llm_reasoning": "这些RAG经验涉及二手车和新能源车业务，与当前办公设备销售的知识库场景完全不匹配，会导致客服给出错误回复。",
+          "suggestions": [
+            {
+              "title": "建议删除",
+              "detail": "该条目存在明显错误或不适用，建议归档或废弃。",
+              "level": "danger"
+            }
+          ]
+        },
+        {
+          "code": "llm_rag_quality_low",
+          "severity": "warning",
+          "title": "LLM：RAG经验质量低",
+          "detail": "这些RAG经验为测试数据（包含'automation test'或'live-regression'等标记），内容重复且质量极低，不应在生产环境中使用。",
+          "target": "rag_exp_8b4a09b6a2ca741d9544",
+          "target_label": "rag_exp_8b4a09b6a2ca741d9544, rag_exp_6f55fb8ecc5147391378, rag_exp_e95d142eb0a9d53e9dea, rag_exp_c91cdeaf5454672f365e, rag_exp_3d142b5cd006a8b29fd5, rag_exp_3c61fc318fb703ce11b1, rag_exp_671859fb4c0d577021e3, rag_exp_d9c9d2c25b3bfd0591f5, rag_exp_85eb239f8315361c07c0, rag_exp_411b5848b2273ddbb8d9, rag_exp_4a1363f787bab6fd1168, rag_exp_c6b438d7930e624567c8, rag_exp_e8774d1451f5d284b7ca, rag_exp_dcd25c8c61bac6abb608, rag_exp_c146f094fa4d3c10308f, rag_exp_4257c544042b76ed53fa, rag_exp_8e2b05ba4aadc9d94c7a",
+          "repairable": false,
+          "action_type": "delete",
+          "involved_targets": [
+            "rag_exp_8b4a09b6a2ca741d9544",
+            "rag_exp_6f55fb8ecc5147391378",
+            "rag_exp_e95d142eb0a9d53e9dea",
+            "rag_exp_c91cdeaf5454672f365e",
+            "rag_exp_3d142b5cd006a8b29fd5",
+            "rag_exp_3c61fc318fb703ce11b1",
+            "rag_exp_671859fb4c0d577021e3",
+            "rag_exp_d9c9d2c25b3bfd0591f5",
+            "rag_exp_85eb239f8315361c07c0",
+            "rag_exp_411b5848b2273ddbb8d9",
+            "rag_exp_4a1363f787bab6fd1168",
+            "rag_exp_c6b438d7930e624567c8",
+            "rag_exp_e8774d1451f5d284b7ca",
+            "rag_exp_dcd25c8c61bac6abb608",
+            "rag_exp_c146f094fa4d3c10308f",
+            "rag_exp_4257c544042b76ed53fa",
+            "rag_exp_8e2b05ba4aadc9d94c7a"
+          ],
+          "llm_reasoning": "这些RAG经验为测试数据（包含'automation test'或'live-regression'等标记），内容重复且质量极低，不应在生产环境中使用。",
+          "suggestions": [
+            {
+              "title": "建议删除",
+              "detail": "该条目存在明显错误或不适用，建议归档或废弃。",
+              "level": "danger"
+            }
+          ]
+        },
+        {
+          "code": "llm_duplicate_semantic",
+          "severity": "warning",
+          "title": "LLM：语义重复",
+          "detail": "这些条目均包含完全相同的商品价格、批量优惠和包邮活动描述（商用冰箱BX-200: 999元/台, 5台起950, 10台起920, 满1000包邮），语义高度重复。",
+          "target": "rag_exp_5ba7bc799f9c239f50df",
+          "target_label": "rag_exp_5ba7bc799f9c239f50df, rag_exp_0cb3550d28529c22f4d6, rag_exp_eae2231e5694904aa7af, rag_exp_43fb4084442a12f37186, rag_exp_fd2ceb11a4e72fd8629e",
+          "repairable": false,
+          "action_type": "merge",
+          "involved_targets": [
+            "rag_exp_5ba7bc799f9c239f50df",
+            "rag_exp_0cb3550d28529c22f4d6",
+            "rag_exp_eae2231e5694904aa7af",
+            "rag_exp_43fb4084442a12f37186",
+            "rag_exp_fd2ceb11a4e72fd8629e"
+          ],
+          "llm_reasoning": "这些条目均包含完全相同的商品价格、批量优惠和包邮活动描述（商用冰箱BX-200: 999元/台, 5台起950, 10台起920, 满1000包邮），语义高度重复。",
+          "suggestions": [
+            {
+              "title": "建议合并",
+              "detail": "多条知识表达同一含义，建议保留信息最完整的一条，将其余归档。",
+              "level": "warning"
+            }
+          ]
+        },
+        {
+          "code": "llm_duplicate_semantic",
+          "severity": "warning",
+          "title": "LLM：语义重复",
+          "detail": "这两个条目均描述同一款二手车（2020款别克GL8 ES陆尊653T豪华型），内容几乎完全相同。",
+          "target": "rag_exp_8714f755c3520589942a",
+          "target_label": "rag_exp_8714f755c3520589942a, rag_exp_43fff6aa6c96561194c8",
+          "repairable": false,
+          "action_type": "merge",
+          "involved_targets": [
+            "rag_exp_8714f755c3520589942a",
+            "rag_exp_43fff6aa6c96561194c8"
+          ],
+          "llm_reasoning": "这两个条目均描述同一款二手车（2020款别克GL8 ES陆尊653T豪华型），内容几乎完全相同。",
+          "suggestions": [
+            {
+              "title": "建议合并",
+              "detail": "多条知识表达同一含义，建议保留信息最完整的一条，将其余归档。",
+              "level": "warning"
+            }
+          ]
+        },
+        {
+          "code": "llm_duplicate_semantic",
+          "severity": "warning",
+          "title": "LLM：语义重复",
+          "detail": "这三个条目均为新能源车（秦PLUS）的聊天记录，内容高度相似。",
+          "target": "rag_exp_25670a35864f6fe212ec",
+          "target_label": "rag_exp_25670a35864f6fe212ec, rag_exp_9872247bed22c580b42d, rag_exp_a22584af3e4adbb6a510",
+          "repairable": false,
+          "action_type": "merge",
+          "involved_targets": [
+            "rag_exp_25670a35864f6fe212ec",
+            "rag_exp_9872247bed22c580b42d",
+            "rag_exp_a22584af3e4adbb6a510"
+          ],
+          "llm_reasoning": "这三个条目均为新能源车（秦PLUS）的聊天记录，内容高度相似。",
+          "suggestions": [
+            {
+              "title": "建议合并",
+              "detail": "多条知识表达同一含义，建议保留信息最完整的一条，将其余归档。",
+              "level": "warning"
+            }
+          ]
+        },
+        {
+          "code": "llm_duplicate_semantic",
+          "severity": "warning",
+          "title": "LLM：语义重复",
+          "detail": "这些条目均列出相同商品列表（商用冰箱、办公椅、净水器滤芯、空气净化器等），内容几乎一致。",
+          "target": "rag_exp_bfac41e484673c244b57",
+          "target_label": "rag_exp_bfac41e484673c244b57, rag_exp_54e4cea950478344dd2e, rag_exp_977952dc3e43641cf333, rag_exp_08854ea8890087055ecf",
+          "repairable": false,
+          "action_type": "merge",
+          "involved_targets": [
+            "rag_exp_bfac41e484673c244b57",
+            "rag_exp_54e4cea950478344dd2e",
+            "rag_exp_977952dc3e43641cf333",
+            "rag_exp_08854ea8890087055ecf"
+          ],
+          "llm_reasoning": "这些条目均列出相同商品列表（商用冰箱、办公椅、净水器滤芯、空气净化器等），内容几乎一致。",
+          "suggestions": [
+            {
+              "title": "建议合并",
+              "detail": "多条知识表达同一含义，建议保留信息最完整的一条，将其余归档。",
+              "level": "warning"
+            }
+          ]
+        },
+        {
+          "code": "llm_rag_quality_low",
+          "severity": "warning",
+          "title": "LLM：RAG经验质量低",
+          "detail": "这些条目仅包含用户重复提问或系统时间戳，无有效客服回答，作为RAG经验质量极低，无法提供有用知识。",
+          "target": "rag_exp_fc4f5b38342d29237774",
+          "target_label": "rag_exp_fc4f5b38342d29237774, rag_exp_d0747bbb8055438be758, rag_exp_7f6be88eb8bbe84022dc, rag_exp_d2ee8ec83e2ee9a7b2d7, rag_exp_3f9de1a8712c9989ce71",
+          "repairable": false,
+          "action_type": "delete",
+          "involved_targets": [
+            "rag_exp_fc4f5b38342d29237774",
+            "rag_exp_d0747bbb8055438be758",
+            "rag_exp_7f6be88eb8bbe84022dc",
+            "rag_exp_d2ee8ec83e2ee9a7b2d7",
+            "rag_exp_3f9de1a8712c9989ce71"
+          ],
+          "llm_reasoning": "这些条目仅包含用户重复提问或系统时间戳，无有效客服回答，作为RAG经验质量极低，无法提供有用知识。",
+          "suggestions": [
+            {
+              "title": "建议删除",
+              "detail": "该条目存在明显错误或不适用，建议归档或废弃。",
+              "level": "danger"
+            }
+          ]
+        },
+        {
+          "code": "llm_rag_quality_low",
+          "severity": "warning",
+          "title": "LLM：RAG经验质量低",
+          "detail": "条目内容为“边界噪音”，记录天气和测试心跳，与客服知识无关，属于无效噪音。",
+          "target": "rag_exp_4402776c67e8ecee0ce0",
+          "target_label": "rag_exp_4402776c67e8ecee0ce0, rag_exp_7027502a9a773bbe00ec",
+          "repairable": false,
+          "action_type": "delete",
+          "involved_targets": [
+            "rag_exp_4402776c67e8ecee0ce0",
+            "rag_exp_7027502a9a773bbe00ec"
+          ],
+          "llm_reasoning": "条目内容为“边界噪音”，记录天气和测试心跳，与客服知识无关，属于无效噪音。",
+          "suggestions": [
+            {
+              "title": "建议删除",
+              "detail": "该条目存在明显错误或不适用，建议归档或废弃。",
+              "level": "danger"
+            }
+          ]
+        },
+        {
+          "code": "llm_rag_quality_low",
+          "severity": "warning",
+          "title": "LLM：RAG经验质量低",
+          "detail": "条目为内部政策规则测试记录，包含字段边界和触发关键词，并非面向客户的客服知识，建议重新评估是否应纳入知识库。",
+          "target": "rag_exp_8ccccfef1aafea27711b",
+          "target_label": "rag_exp_8ccccfef1aafea27711b, rag_exp_1d03a62c5c7ce01ef378",
+          "repairable": false,
+          "action_type": "review",
+          "involved_targets": [
+            "rag_exp_8ccccfef1aafea27711b",
+            "rag_exp_1d03a62c5c7ce01ef378"
+          ],
+          "llm_reasoning": "条目为内部政策规则测试记录，包含字段边界和触发关键词，并非面向客户的客服知识，建议重新评估是否应纳入知识库。",
+          "suggestions": [
+            {
+              "title": "建议人工复核",
+              "detail": "LLM认为该条目可能存在问题，请人工确认后决定处理方式。",
+              "level": "warning"
+            }
+          ]
+        },
+        {
+          "code": "llm_logic_error",
+          "severity": "error",
+          "title": "LLM：逻辑错误",
+          "detail": "用户询问“你们有哪些商品？”，客服却回答关于商用冰箱的追问，未直接回答用户问题，属于话术不匹配。",
+          "target": "rag_exp_0d99c8a187ed623d5bdc",
+          "target_label": "rag_exp_0d99c8a187ed623d5bdc",
+          "repairable": false,
+          "action_type": "review",
+          "involved_targets": [
+            "rag_exp_0d99c8a187ed623d5bdc"
+          ],
+          "llm_reasoning": "用户询问“你们有哪些商品？”，客服却回答关于商用冰箱的追问，未直接回答用户问题，属于话术不匹配。",
+          "suggestions": [
+            {
+              "title": "建议人工复核",
+              "detail": "LLM认为该条目可能存在问题，请人工确认后决定处理方式。",
+              "level": "warning"
+            }
+          ]
+        },
+        {
+          "code": "llm_rag_quality_low",
+          "severity": "warning",
+          "title": "LLM：RAG经验质量低",
+          "detail": "内容为边界噪音测试数据，重复三次，不是有效客服知识。",
+          "target": "rag_exp_db18bd8ce7819602a304",
+          "target_label": "rag_exp_db18bd8ce7819602a304",
+          "repairable": false,
+          "action_type": "delete",
+          "involved_targets": [
+            "rag_exp_db18bd8ce7819602a304"
+          ],
+          "llm_reasoning": "内容为边界噪音测试数据，重复三次，不是有效客服知识。",
+          "suggestions": [
+            {
+              "title": "建议删除",
+              "detail": "该条目存在明显错误或不适用，建议归档或废弃。",
+              "level": "danger"
+            }
+          ]
+        },
+        {
+          "code": "llm_rag_quality_low",
+          "severity": "warning",
+          "title": "LLM：RAG经验质量低",
+          "detail": "内容包含测试批次和规则名称，重复三次，疑似测试数据，不具备知识价值。",
+          "target": "rag_exp_03a63d42ef398fbfda8a",
+          "target_label": "rag_exp_03a63d42ef398fbfda8a",
+          "repairable": false,
+          "action_type": "delete",
+          "involved_targets": [
+            "rag_exp_03a63d42ef398fbfda8a"
+          ],
+          "llm_reasoning": "内容包含测试批次和规则名称，重复三次，疑似测试数据，不具备知识价值。",
+          "suggestions": [
+            {
+              "title": "建议删除",
+              "detail": "该条目存在明显错误或不适用，建议归档或废弃。",
+              "level": "danger"
+            }
+          ]
+        },
+        {
+          "code": "llm_duplicate_semantic",
+          "severity": "warning",
+          "title": "LLM：语义重复",
+          "detail": "内容重复三次，且为测试批次数据，建议确认是否保留有效信息。",
+          "target": "rag_exp_be4952b9b72763afae3e",
+          "target_label": "rag_exp_be4952b9b72763afae3e",
+          "repairable": false,
+          "action_type": "review",
+          "involved_targets": [
+            "rag_exp_be4952b9b72763afae3e"
+          ],
+          "llm_reasoning": "内容重复三次，且为测试批次数据，建议确认是否保留有效信息。",
+          "suggestions": [
+            {
+              "title": "建议人工复核",
+              "detail": "LLM认为该条目可能存在问题，请人工确认后决定处理方式。",
+              "level": "warning"
+            }
+          ]
+        },
+        {
+          "code": "llm_rag_quality_low",
+          "severity": "warning",
+          "title": "LLM：RAG经验质量低",
+          "detail": "内容为'暂存缺价测试商品'，重复三次，明显是测试数据。",
+          "target": "rag_exp_9a6790ce2d781ce0a11e",
+          "target_label": "rag_exp_9a6790ce2d781ce0a11e",
+          "repairable": false,
+          "action_type": "delete",
+          "involved_targets": [
+            "rag_exp_9a6790ce2d781ce0a11e"
+          ],
+          "llm_reasoning": "内容为'暂存缺价测试商品'，重复三次，明显是测试数据。",
+          "suggestions": [
+            {
+              "title": "建议删除",
+              "detail": "该条目存在明显错误或不适用，建议归档或废弃。",
+              "level": "danger"
+            }
+          ]
+        },
+        {
+          "code": "llm_rag_quality_low",
+          "severity": "warning",
+          "title": "LLM：RAG经验质量低",
+          "detail": "内容为自动化测试折叠床等，重复三次，属测试数据。",
+          "target": "rag_exp_794f04141b28161c0a3e",
+          "target_label": "rag_exp_794f04141b28161c0a3e",
+          "repairable": false,
+          "action_type": "delete",
+          "involved_targets": [
+            "rag_exp_794f04141b28161c0a3e"
+          ],
+          "llm_reasoning": "内容为自动化测试折叠床等，重复三次，属测试数据。",
+          "suggestions": [
+            {
+              "title": "建议删除",
+              "detail": "该条目存在明显错误或不适用，建议归档或废弃。",
+              "level": "danger"
+            }
+          ]
+        },
+        {
+          "code": "llm_rag_quality_low",
+          "severity": "warning",
+          "title": "LLM：RAG经验质量低",
+          "detail": "内容仅为'duplicate candidate probe'，重复三次，无实际知识。",
+          "target": "rag_exp_5a574e8d242fc86a1b3d",
+          "target_label": "rag_exp_5a574e8d242fc86a1b3d",
+          "repairable": false,
+          "action_type": "delete",
+          "involved_targets": [
+            "rag_exp_5a574e8d242fc86a1b3d"
+          ],
+          "llm_reasoning": "内容仅为'duplicate candidate probe'，重复三次，无实际知识。",
+          "suggestions": [
+            {
+              "title": "建议删除",
+              "detail": "该条目存在明显错误或不适用，建议归档或废弃。",
+              "level": "danger"
+            }
+          ]
+        },
+        {
+          "code": "llm_duplicate_semantic",
+          "severity": "warning",
+          "title": "LLM：语义重复",
+          "detail": "内容重复三次，但话术本身合理，建议合并为一条。",
+          "target": "rag_exp_89af65a4428a33bb5815",
+          "target_label": "rag_exp_89af65a4428a33bb5815",
+          "repairable": false,
+          "action_type": "merge",
+          "involved_targets": [
+            "rag_exp_89af65a4428a33bb5815"
+          ],
+          "llm_reasoning": "内容重复三次，但话术本身合理，建议合并为一条。",
+          "suggestions": [
+            {
+              "title": "建议合并",
+              "detail": "多条知识表达同一含义，建议保留信息最完整的一条，将其余归档。",
+              "level": "warning"
+            }
+          ]
+        },
+        {
+          "code": "llm_duplicate_semantic",
+          "severity": "warning",
+          "title": "LLM：语义重复",
+          "detail": "内容重复三次，但规则本身合理，建议合并。",
+          "target": "rag_exp_3a14a2970b3c90d11fc5",
+          "target_label": "rag_exp_3a14a2970b3c90d11fc5",
+          "repairable": false,
+          "action_type": "merge",
+          "involved_targets": [
+            "rag_exp_3a14a2970b3c90d11fc5"
+          ],
+          "llm_reasoning": "内容重复三次，但规则本身合理，建议合并。",
+          "suggestions": [
+            {
+              "title": "建议合并",
+              "detail": "多条知识表达同一含义，建议保留信息最完整的一条，将其余归档。",
+              "level": "warning"
+            }
+          ]
+        },
+        {
+          "code": "knowledge_token_budget_large",
+          "severity": "info",
+          "title": "知识体积较大",
+          "detail": "当前分类知识库总量估算约 42842 token。这不是知识格式故障，也没有某条知识需要立即删除；它提醒后续继续按客户问题检索相关知识，避免一次性加载全部知识。",
+          "target_label": "全局知识库",
+          "details": [
+            {
+              "label": "问题性质",
+              "value": "容量提示，不是知识格式故障",
+              "level": "normal"
+            },
+            {
+              "label": "估算总量",
+              "value": "约 42842 token",
+              "level": "warning"
+            },
+            {
+              "label": "检测阈值",
+              "value": "超过 7000 token 时提示",
+              "level": "normal"
+            },
+            {
+              "label": "文件数量",
+              "value": "68 个 JSON 文件",
+              "level": "normal"
+            },
+            {
+              "label": "chats",
+              "value": "约 8793 token / 16 个文件",
+              "level": "normal"
+            },
+            {
+              "label": "erp_exports",
+              "value": "约 860 token / 2 个文件",
+              "level": "normal"
+            },
+            {
+              "label": "policies",
+              "value": "约 24980 token / 39 个文件",
+              "level": "normal"
+            },
+            {
+              "label": "products",
+              "value": "约 7517 token / 11 个文件",
+              "level": "normal"
+            }
+          ],
+          "suggestions": [
+            {
+              "title": "不建议自动删除知识",
+              "detail": "当前没有发现哪一条知识错误，系统不能为了降低体积擅自删内容。",
+              "level": "danger"
+            },
+            {
+              "title": "继续保持按门类和问题范围检索",
+              "detail": "客服运行时应只取相关商品、政策、话术和上下文证据，不要把全库一次性塞给大模型。",
+              "level": "normal"
+            },
+            {
+              "title": "如果后续继续变大",
+              "detail": "优先拆分过长政策、归档过期商品、把重复话术合并为模板，再重新检测。",
+              "level": "warning"
+            }
+          ],
+          "repairable": false
+        }
+      ],
+      "token_budget_estimate": 42842,
+      "recent_only": false
+    },
+    {
+      "name": "knowledge_runtime",
+      "ok": true,
+      "returncode": 0,
+      "stdout_tail": "rue\n    },\n    {\n      \"name\": \"check_invoice_hits_policies\",\n      \"ok\": true\n    },\n    {\n      \"name\": \"check_public_bank_account_can_auto_reply\",\n      \"ok\": true\n    },\n    {\n      \"name\": \"check_context_product_shipping\",\n      \"ok\": true\n    },\n    {\n      \"name\": \"check_chat_style_hits_chats\",\n      \"ok\": true\n    },\n    {\n      \"name\": \"check_global_guidelines_are_layered_style_context\",\n      \"ok\": true\n    },\n    {\n      \"name\": \"check_tenant_visible_catalog_policy_drives_used_car_catalog\",\n      \"ok\": true\n    },\n    {\n      \"name\": \"check_tenant_formal_overrides_conflicting_shared_public\",\n      \"ok\": true\n    },\n    {\n      \"name\": \"check_product_scoped_rule_requires_product_context\",\n      \"ok\": true\n    },\n    {\n      \"name\": \"check_general_knowledge_applicability_scope\",\n      \"ok\": true\n    },\n    {\n      \"name\": \"check_manual_boundary_requires_handoff\",\n      \"ok\": true\n    },\n    {\n      \"name\": \"check_unknown_business_question_handoffs\",\n      \"ok\": true\n    },\n    {\n      \"name\": \"check_custom_category_can_return_evidence\",\n      \"ok\": true\n    },\n    {\n      \"name\": \"check_unread_formal_product_is_visible_but_not_runtime_usable\",\n      \"ok\": true\n    }\n  ]\n}\n",
+      "stderr_tail": "",
+      "issues": []
+    },
+    {
+      "name": "knowledge_compiler",
+      "ok": true,
+      "returncode": 0,
+      "stdout_tail": "{\n  \"ok\": true,\n  \"count\": 3,\n  \"failures\": [],\n  \"results\": [\n    {\n      \"name\": \"check_compile_to_disk_writes_expected_files\",\n      \"ok\": true\n    },\n    {\n      \"name\": \"check_compiled_counts_match_category_source\",\n      \"ok\": true\n    },\n    {\n      \"name\": \"check_compiled_product_knowledge_is_legacy_compatible\",\n      \"ok\": true\n    }\n  ]\n}\n",
+      "stderr_tail": "",
+      "issues": []
+    },
+    {
+      "name": "offline_regression",
+      "ok": true,
+      "returncode": 0,
+      "stdout_tail": "{\n  \"ok\": true,\n  \"scenario_path\": \"D:\\\\AI\\\\omniauto\\\\apps\\\\wechat_ai_customer_service\\\\tests\\\\scenarios\\\\offline_regression.json\",\n  \"count\": 11,\n  \"failures\": [],\n  \"results\": [\n    {\n      \"name\": \"catalog_request\",\n      \"ok\": true\n    },\n    {\n      \"name\": \"product_quote\",\n      \"ok\": true\n    },\n    {\n      \"name\": \"below_tier_discount_handoff\",\n      \"ok\": true\n    },\n    {\n      \"name\": \"invoice_policy\",\n      \"ok\": true\n    },\n    {\n      \"name\": \"warranty_policy\",\n      \"ok\": true\n    },\n    {\n      \"name\": \"context_shipping\",\n      \"ok\": true\n    },\n    {\n      \"name\": \"evidence_discount_handoff\",\n      \"ok\": true\n    },\n    {\n      \"name\": \"customer_data_complete\",\n      \"ok\": true\n    },\n    {\n      \"name\": \"greeting_not_customer_data\",\n      \"ok\": true\n    },\n    {\n      \"name\": \"manual_handoff_contract\",\n      \"ok\": true\n    },\n    {\n      \"name\": \"no_relevant_business_evidence\",\n      \"ok\": true\n    }\n  ]\n}\n",
+      "stderr_tail": "",
+      "issues": []
+    },
+    {
+      "name": "workflow_logic",
+      "ok": true,
+      "returncode": 0,
+      "stdout_tail": "s\": [],\n  \"results\": [\n    {\n      \"name\": \"check_configured_bot_prefix_is_skipped\",\n      \"ok\": true\n    },\n    {\n      \"name\": \"check_mixed_safety_batch_forces_handoff\",\n      \"ok\": true\n    },\n    {\n      \"name\": \"check_incomplete_customer_data_is_completed_and_written\",\n      \"ok\": true\n    },\n    {\n      \"name\": \"check_rate_limit_notice_and_backoff\",\n      \"ok\": true\n    },\n    {\n      \"name\": \"check_auto_reply_disabled_blocks_runtime_send\",\n      \"ok\": true\n    },\n    {\n      \"name\": \"check_customer_service_console_switches_take_effect\",\n      \"ok\": true\n    },\n    {\n      \"name\": \"check_deepseek_flash_is_default\",\n      \"ok\": true\n    },\n    {\n      \"name\": \"check_llm_reply_application_guards\",\n      \"ok\": true\n    },\n    {\n      \"name\": \"check_llm_boundary_fallback_on_invalid_model_output\",\n      \"ok\": true\n    },\n    {\n      \"name\": \"check_review_queue_reports_pending_and_handoff_items\",\n      \"ok\": true\n    },\n    {\n      \"name\": \"check_evidence_boundary_cases\",\n      \"ok\": true\n    },\n    {\n      \"name\": \"check_after_sales_intent_preempts_duration_logistics\",\n      \"ok\": true\n    },\n    {\n      \"name\": \"check_wechat_main_window_recognition\",\n      \"ok\": true\n    }\n  ]\n}\n",
+      "stderr_tail": "",
+      "issues": []
+    }
+  ],
+  "issues": [
+    {
+      "code": "llm_duplicate_semantic",
+      "severity": "info",
+      "title": "LLM：语义重复",
+      "detail": "两条话术均表达'不能直接决定，需请示'，语义重复，可合并为通用转人工话术。",
+      "target": "chats/discount_handoff",
+      "target_label": "chats/discount_handoff, chats/over_boundary_handoff",
+      "repairable": false,
+      "action_type": "merge",
+      "involved_targets": [
+        "chats/discount_handoff",
+        "chats/over_boundary_handoff"
+      ],
+      "llm_reasoning": "两条话术均表达'不能直接决定，需请示'，语义重复，可合并为通用转人工话术。",
+      "suggestions": [
+        {
+          "title": "建议合并",
+          "detail": "多条知识表达同一含义，建议保留信息最完整的一条，将其余归档。",
+          "level": "warning"
+        }
+      ],
+      "fingerprint": "7ac7e2e3f2d2c7d098bed4b3"
+    },
+    {
+      "code": "llm_duplicate_semantic",
+      "severity": "info",
+      "title": "LLM：语义重复",
+      "detail": "两条政策均关于发票开具，内容重叠，可合并为统一发票政策。",
+      "target": "policies/invoice",
+      "target_label": "policies/invoice, policies/invoice_policy_details",
+      "repairable": false,
+      "action_type": "merge",
+      "involved_targets": [
+        "policies/invoice",
+        "policies/invoice_policy_details"
+      ],
+      "llm_reasoning": "两条政策均关于发票开具，内容重叠，可合并为统一发票政策。",
+      "suggestions": [
+        {
+          "title": "建议合并",
+          "detail": "多条知识表达同一含义，建议保留信息最完整的一条，将其余归档。",
+          "level": "warning"
+        }
+      ],
+      "fingerprint": "77a4905d2c3fc097278f22b8"
+    },
+    {
+      "code": "llm_duplicate_semantic",
+      "severity": "info",
+      "title": "LLM：语义重复",
+      "detail": "两条条目均包含公司名称、主营范围等信息，内容重复，可合并。",
+      "target": "policies/company_profile",
+      "target_label": "policies/company_profile, policies/item_2712d3045ad2",
+      "repairable": false,
+      "action_type": "merge",
+      "involved_targets": [
+        "policies/company_profile",
+        "policies/item_2712d3045ad2"
+      ],
+      "llm_reasoning": "两条条目均包含公司名称、主营范围等信息，内容重复，可合并。",
+      "suggestions": [
+        {
+          "title": "建议合并",
+          "detail": "多条知识表达同一含义，建议保留信息最完整的一条，将其余归档。",
+          "level": "warning"
+        }
+      ],
+      "fingerprint": "e7e58bdacd78fb06aca4c2fb"
+    },
+    {
+      "code": "llm_duplicate_semantic",
+      "severity": "info",
+      "title": "LLM：语义重复",
+      "detail": "账期政策与合同政策中关于账期的部分重复，且contract已覆盖账期，credit-term-policy可合并或删除。",
+      "target": "policies/credit-term-policy",
+      "target_label": "policies/credit-term-policy, policies/contract",
+      "repairable": false,
+      "action_type": "merge",
+      "involved_targets": [
+        "policies/credit-term-policy",
+        "policies/contract"
+      ],
+      "llm_reasoning": "账期政策与合同政策中关于账期的部分重复，且contract已覆盖账期，credit-term-policy可合并或删除。",
+      "suggestions": [
+        {
+          "title": "建议合并",
+          "detail": "多条知识表达同一含义，建议保留信息最完整的一条，将其余归档。",
+          "level": "warning"
+        }
+      ],
+      "fingerprint": "83cf4700f1a14142355dd2db"
+    },
+    {
+      "code": "llm_inappropriate",
+      "severity": "warning",
+      "title": "LLM：场景不适用",
+      "detail": "该政策针对产品MT-160，但知识库中无此产品，场景不适用，可能导致误匹配。",
+      "target": "policies/after-sales-mt160-compensation",
+      "target_label": "policies/after-sales-mt160-compensation",
+      "repairable": false,
+      "action_type": "delete",
+      "involved_targets": [
+        "policies/after-sales-mt160-compensation"
+      ],
+      "llm_reasoning": "该政策针对产品MT-160，但知识库中无此产品，场景不适用，可能导致误匹配。",
+      "suggestions": [
+        {
+          "title": "建议删除",
+          "detail": "该条目存在明显错误或不适用，建议归档或废弃。",
+          "level": "danger"
+        }
+      ],
+      "fingerprint": "f1809a2a7172b78222d6d831"
+    },
+    {
+      "code": "llm_logic_error",
+      "severity": "warning",
+      "title": "LLM：逻辑错误",
+      "detail": "两个条目均包含关键词'转人工'，但manual_handoff_reply为自动回复且不转人工，manual_required为转人工，可能冲突导致用户需求处理矛盾。",
+      "target": "policies/manual_handoff_reply",
+      "target_label": "policies/manual_handoff_reply, policies/manual_required",
+      "repairable": false,
+      "action_type": "review",
+      "involved_targets": [
+        "policies/manual_handoff_reply",
+        "policies/manual_required"
+      ],
+      "llm_reasoning": "两个条目均包含关键词'转人工'，但manual_handoff_reply为自动回复且不转人工，manual_required为转人工，可能冲突导致用户需求处理矛盾。",
+      "suggestions": [
+        {
+          "title": "建议人工复核",
+          "detail": "LLM认为该条目可能存在问题，请人工确认后决定处理方式。",
+          "level": "warning"
+        }
+      ],
+      "fingerprint": "b9ff487d03acdf0a7992a86d"
+    },
+    {
+      "code": "llm_inappropriate",
+      "severity": "warning",
+      "title": "LLM：场景不适用",
+      "detail": "这些RAG经验涉及二手车和新能源车业务，与当前办公设备销售的知识库场景完全不匹配，会导致客服给出错误回复。",
+      "target": "rag_exp_64d466c04970cdf4b0a1",
+      "target_label": "rag_exp_64d466c04970cdf4b0a1, rag_exp_50d36f28a748647ebb2a, rag_exp_a277de5376014f11f0bd",
+      "repairable": false,
+      "action_type": "delete",
+      "involved_targets": [
+        "rag_exp_64d466c04970cdf4b0a1",
+        "rag_exp_50d36f28a748647ebb2a",
+        "rag_exp_a277de5376014f11f0bd"
+      ],
+      "llm_reasoning": "这些RAG经验涉及二手车和新能源车业务，与当前办公设备销售的知识库场景完全不匹配，会导致客服给出错误回复。",
+      "suggestions": [
+        {
+          "title": "建议删除",
+          "detail": "该条目存在明显错误或不适用，建议归档或废弃。",
+          "level": "danger"
+        }
+      ],
+      "fingerprint": "4222c402373f8a9066645536"
+    },
+    {
+      "code": "llm_rag_quality_low",
+      "severity": "info",
+      "title": "LLM：RAG经验质量低",
+      "detail": "这些RAG经验为测试数据（包含'automation test'或'live-regression'等标记），内容重复且质量极低，不应在生产环境中使用。",
+      "target": "rag_exp_8b4a09b6a2ca741d9544",
+      "target_label": "rag_exp_8b4a09b6a2ca741d9544, rag_exp_6f55fb8ecc5147391378, rag_exp_e95d142eb0a9d53e9dea, rag_exp_c91cdeaf5454672f365e, rag_exp_3d142b5cd006a8b29fd5, rag_exp_3c61fc318fb703ce11b1, rag_exp_671859fb4c0d577021e3, rag_exp_d9c9d2c25b3bfd0591f5, rag_exp_85eb239f8315361c07c0, rag_exp_411b5848b2273ddbb8d9, rag_exp_4a1363f787bab6fd1168, rag_exp_c6b438d7930e624567c8, rag_exp_e8774d1451f5d284b7ca, rag_exp_dcd25c8c61bac6abb608, rag_exp_c146f094fa4d3c10308f, rag_exp_4257c544042b76ed53fa, rag_exp_8e2b05ba4aadc9d94c7a",
+      "repairable": false,
+      "action_type": "delete",
+      "involved_targets": [
+        "rag_exp_8b4a09b6a2ca741d9544",
+        "rag_exp_6f55fb8ecc5147391378",
+        "rag_exp_e95d142eb0a9d53e9dea",
+        "rag_exp_c91cdeaf5454672f365e",
+        "rag_exp_3d142b5cd006a8b29fd5",
+        "rag_exp_3c61fc318fb703ce11b1",
+        "rag_exp_671859fb4c0d577021e3",
+        "rag_exp_d9c9d2c25b3bfd0591f5",
+        "rag_exp_85eb239f8315361c07c0",
+        "rag_exp_411b5848b2273ddbb8d9",
+        "rag_exp_4a1363f787bab6fd1168",
+        "rag_exp_c6b438d7930e624567c8",
+        "rag_exp_e8774d1451f5d284b7ca",
+        "rag_exp_dcd25c8c61bac6abb608",
+        "rag_exp_c146f094fa4d3c10308f",
+        "rag_exp_4257c544042b76ed53fa",
+        "rag_exp_8e2b05ba4aadc9d94c7a"
+      ],
+      "llm_reasoning": "这些RAG经验为测试数据（包含'automation test'或'live-regression'等标记），内容重复且质量极低，不应在生产环境中使用。",
+      "suggestions": [
+        {
+          "title": "建议删除",
+          "detail": "该条目存在明显错误或不适用，建议归档或废弃。",
+          "level": "danger"
+        }
+      ],
+      "fingerprint": "aed3ec9a4f8774d10025e4b5"
+    },
+    {
+      "code": "llm_duplicate_semantic",
+      "severity": "info",
+      "title": "LLM：语义重复",
+      "detail": "这些条目均包含完全相同的商品价格、批量优惠和包邮活动描述（商用冰箱BX-200: 999元/台, 5台起950, 10台起920, 满1000包邮），语义高度重复。",
+      "target": "rag_exp_5ba7bc799f9c239f50df",
+      "target_label": "rag_exp_5ba7bc799f9c239f50df, rag_exp_0cb3550d28529c22f4d6, rag_exp_eae2231e5694904aa7af, rag_exp_43fb4084442a12f37186, rag_exp_fd2ceb11a4e72fd8629e",
+      "repairable": false,
+      "action_type": "merge",
+      "involved_targets": [
+        "rag_exp_5ba7bc799f9c239f50df",
+        "rag_exp_0cb3550d28529c22f4d6",
+        "rag_exp_eae2231e5694904aa7af",
+        "rag_exp_43fb4084442a12f37186",
+        "rag_exp_fd2ceb11a4e72fd8629e"
+      ],
+      "llm_reasoning": "这些条目均包含完全相同的商品价格、批量优惠和包邮活动描述（商用冰箱BX-200: 999元/台, 5台起950, 10台起920, 满1000包邮），语义高度重复。",
+      "suggestions": [
+        {
+          "title": "建议合并",
+          "detail": "多条知识表达同一含义，建议保留信息最完整的一条，将其余归档。",
+          "level": "warning"
+        }
+      ],
+      "fingerprint": "9a67b926d28bc735801bd3ce"
+    },
+    {
+      "code": "llm_duplicate_semantic",
+      "severity": "info",
+      "title": "LLM：语义重复",
+      "detail": "这两个条目均描述同一款二手车（2020款别克GL8 ES陆尊653T豪华型），内容几乎完全相同。",
+      "target": "rag_exp_8714f755c3520589942a",
+      "target_label": "rag_exp_8714f755c3520589942a, rag_exp_43fff6aa6c96561194c8",
+      "repairable": false,
+      "action_type": "merge",
+      "involved_targets": [
+        "rag_exp_8714f755c3520589942a",
+        "rag_exp_43fff6aa6c96561194c8"
+      ],
+      "llm_reasoning": "这两个条目均描述同一款二手车（2020款别克GL8 ES陆尊653T豪华型），内容几乎完全相同。",
+      "suggestions": [
+        {
+          "title": "建议合并",
+          "detail": "多条知识表达同一含义，建议保留信息最完整的一条，将其余归档。",
+          "level": "warning"
+        }
+      ],
+      "fingerprint": "02311a01b3052afba49a748e"
+    },
+    {
+      "code": "llm_duplicate_semantic",
+      "severity": "info",
+      "title": "LLM：语义重复",
+      "detail": "这三个条目均为新能源车（秦PLUS）的聊天记录，内容高度相似。",
+      "target": "rag_exp_25670a35864f6fe212ec",
+      "target_label": "rag_exp_25670a35864f6fe212ec, rag_exp_9872247bed22c580b42d, rag_exp_a22584af3e4adbb6a510",
+      "repairable": false,
+      "action_type": "merge",
+      "involved_targets": [
+        "rag_exp_25670a35864f6fe212ec",
+        "rag_exp_9872247bed22c580b42d",
+        "rag_exp_a22584af3e4adbb6a510"
+      ],
+      "llm_reasoning": "这三个条目均为新能源车（秦PLUS）的聊天记录，内容高度相似。",
+      "suggestions": [
+        {
+          "title": "建议合并",
+          "detail": "多条知识表达同一含义，建议保留信息最完整的一条，将其余归档。",
+          "level": "warning"
+        }
+      ],
+      "fingerprint": "bfa1c028d9b9c7043af09ed2"
+    },
+    {
+      "code": "llm_duplicate_semantic",
+      "severity": "info",
+      "title": "LLM：语义重复",
+      "detail": "这些条目均列出相同商品列表（商用冰箱、办公椅、净水器滤芯、空气净化器等），内容几乎一致。",
+      "target": "rag_exp_bfac41e484673c244b57",
+      "target_label": "rag_exp_bfac41e484673c244b57, rag_exp_54e4cea950478344dd2e, rag_exp_977952dc3e43641cf333, rag_exp_08854ea8890087055ecf",
+      "repairable": false,
+      "action_type": "merge",
+      "involved_targets": [
+        "rag_exp_bfac41e484673c244b57",
+        "rag_exp_54e4cea950478344dd2e",
+        "rag_exp_977952dc3e43641cf333",
+        "rag_exp_08854ea8890087055ecf"
+      ],
+      "llm_reasoning": "这些条目均列出相同商品列表（商用冰箱、办公椅、净水器滤芯、空气净化器等），内容几乎一致。",
+      "suggestions": [
+        {
+          "title": "建议合并",
+          "detail": "多条知识表达同一含义，建议保留信息最完整的一条，将其余归档。",
+          "level": "warning"
+        }
+      ],
+      "fingerprint": "25881553692157d32e08a779"
+    },
+    {
+      "code": "llm_rag_quality_low",
+      "severity": "info",
+      "title": "LLM：RAG经验质量低",
+      "detail": "这些条目仅包含用户重复提问或系统时间戳，无有效客服回答，作为RAG经验质量极低，无法提供有用知识。",
+      "target": "rag_exp_fc4f5b38342d29237774",
+      "target_label": "rag_exp_fc4f5b38342d29237774, rag_exp_d0747bbb8055438be758, rag_exp_7f6be88eb8bbe84022dc, rag_exp_d2ee8ec83e2ee9a7b2d7, rag_exp_3f9de1a8712c9989ce71",
+      "repairable": false,
+      "action_type": "delete",
+      "involved_targets": [
+        "rag_exp_fc4f5b38342d29237774",
+        "rag_exp_d0747bbb8055438be758",
+        "rag_exp_7f6be88eb8bbe84022dc",
+        "rag_exp_d2ee8ec83e2ee9a7b2d7",
+        "rag_exp_3f9de1a8712c9989ce71"
+      ],
+      "llm_reasoning": "这些条目仅包含用户重复提问或系统时间戳，无有效客服回答，作为RAG经验质量极低，无法提供有用知识。",
+      "suggestions": [
+        {
+          "title": "建议删除",
+          "detail": "该条目存在明显错误或不适用，建议归档或废弃。",
+          "level": "danger"
+        }
+      ],
+      "fingerprint": "e5494bc07e8fee06e43976a0"
+    },
+    {
+      "code": "llm_rag_quality_low",
+      "severity": "info",
+      "title": "LLM：RAG经验质量低",
+      "detail": "条目内容为“边界噪音”，记录天气和测试心跳，与客服知识无关，属于无效噪音。",
+      "target": "rag_exp_4402776c67e8ecee0ce0",
+      "target_label": "rag_exp_4402776c67e8ecee0ce0, rag_exp_7027502a9a773bbe00ec",
+      "repairable": false,
+      "action_type": "delete",
+      "involved_targets": [
+        "rag_exp_4402776c67e8ecee0ce0",
+        "rag_exp_7027502a9a773bbe00ec"
+      ],
+      "llm_reasoning": "条目内容为“边界噪音”，记录天气和测试心跳，与客服知识无关，属于无效噪音。",
+      "suggestions": [
+        {
+          "title": "建议删除",
+          "detail": "该条目存在明显错误或不适用，建议归档或废弃。",
+          "level": "danger"
+        }
+      ],
+      "fingerprint": "0ff84f6ebde23a6f632855c9"
+    },
+    {
+      "code": "llm_rag_quality_low",
+      "severity": "info",
+      "title": "LLM：RAG经验质量低",
+      "detail": "条目为内部政策规则测试记录，包含字段边界和触发关键词，并非面向客户的客服知识，建议重新评估是否应纳入知识库。",
+      "target": "rag_exp_8ccccfef1aafea27711b",
+      "target_label": "rag_exp_8ccccfef1aafea27711b, rag_exp_1d03a62c5c7ce01ef378",
+      "repairable": false,
+      "action_type": "review",
+      "involved_targets": [
+        "rag_exp_8ccccfef1aafea27711b",
+        "rag_exp_1d03a62c5c7ce01ef378"
+      ],
+      "llm_reasoning": "条目为内部政策规则测试记录，包含字段边界和触发关键词，并非面向客户的客服知识，建议重新评估是否应纳入知识库。",
+      "suggestions": [
+        {
+          "title": "建议人工复核",
+          "detail": "LLM认为该条目可能存在问题，请人工确认后决定处理方式。",
+          "level": "warning"
+        }
+      ],
+      "fingerprint": "f60ce4d374cdc194821c786a"
+    },
+    {
+      "code": "llm_logic_error",
+      "severity": "warning",
+      "title": "LLM：逻辑错误",
+      "detail": "用户询问“你们有哪些商品？”，客服却回答关于商用冰箱的追问，未直接回答用户问题，属于话术不匹配。",
+      "target": "rag_exp_0d99c8a187ed623d5bdc",
+      "target_label": "rag_exp_0d99c8a187ed623d5bdc",
+      "repairable": false,
+      "action_type": "review",
+      "involved_targets": [
+        "rag_exp_0d99c8a187ed623d5bdc"
+      ],
+      "llm_reasoning": "用户询问“你们有哪些商品？”，客服却回答关于商用冰箱的追问，未直接回答用户问题，属于话术不匹配。",
+      "suggestions": [
+        {
+          "title": "建议人工复核",
+          "detail": "LLM认为该条目可能存在问题，请人工确认后决定处理方式。",
+          "level": "warning"
+        }
+      ],
+      "fingerprint": "1acc778ea8c512e5abdd9d97"
+    },
+    {
+      "code": "llm_rag_quality_low",
+      "severity": "info",
+      "title": "LLM：RAG经验质量低",
+      "detail": "内容为边界噪音测试数据，重复三次，不是有效客服知识。",
+      "target": "rag_exp_db18bd8ce7819602a304",
+      "target_label": "rag_exp_db18bd8ce7819602a304",
+      "repairable": false,
+      "action_type": "delete",
+      "involved_targets": [
+        "rag_exp_db18bd8ce7819602a304"
+      ],
+      "llm_reasoning": "内容为边界噪音测试数据，重复三次，不是有效客服知识。",
+      "suggestions": [
+        {
+          "title": "建议删除",
+          "detail": "该条目存在明显错误或不适用，建议归档或废弃。",
+          "level": "danger"
+        }
+      ],
+      "fingerprint": "bec7ebc6e9d64178fee49158"
+    },
+    {
+      "code": "llm_rag_quality_low",
+      "severity": "info",
+      "title": "LLM：RAG经验质量低",
+      "detail": "内容包含测试批次和规则名称，重复三次，疑似测试数据，不具备知识价值。",
+      "target": "rag_exp_03a63d42ef398fbfda8a",
+      "target_label": "rag_exp_03a63d42ef398fbfda8a",
+      "repairable": false,
+      "action_type": "delete",
+      "involved_targets": [
+        "rag_exp_03a63d42ef398fbfda8a"
+      ],
+      "llm_reasoning": "内容包含测试批次和规则名称，重复三次，疑似测试数据，不具备知识价值。",
+      "suggestions": [
+        {
+          "title": "建议删除",
+          "detail": "该条目存在明显错误或不适用，建议归档或废弃。",
+          "level": "danger"
+        }
+      ],
+      "fingerprint": "635caf142fe01c6a4a0dad1a"
+    },
+    {
+      "code": "llm_duplicate_semantic",
+      "severity": "info",
+      "title": "LLM：语义重复",
+      "detail": "内容重复三次，且为测试批次数据，建议确认是否保留有效信息。",
+      "target": "rag_exp_be4952b9b72763afae3e",
+      "target_label": "rag_exp_be4952b9b72763afae3e",
+      "repairable": false,
+      "action_type": "review",
+      "involved_targets": [
+        "rag_exp_be4952b9b72763afae3e"
+      ],
+      "llm_reasoning": "内容重复三次，且为测试批次数据，建议确认是否保留有效信息。",
+      "suggestions": [
+        {
+          "title": "建议人工复核",
+          "detail": "LLM认为该条目可能存在问题，请人工确认后决定处理方式。",
+          "level": "warning"
+        }
+      ],
+      "fingerprint": "5fbf247c2a6eaf93609d5f26"
+    },
+    {
+      "code": "llm_rag_quality_low",
+      "severity": "info",
+      "title": "LLM：RAG经验质量低",
+      "detail": "内容为'暂存缺价测试商品'，重复三次，明显是测试数据。",
+      "target": "rag_exp_9a6790ce2d781ce0a11e",
+      "target_label": "rag_exp_9a6790ce2d781ce0a11e",
+      "repairable": false,
+      "action_type": "delete",
+      "involved_targets": [
+        "rag_exp_9a6790ce2d781ce0a11e"
+      ],
+      "llm_reasoning": "内容为'暂存缺价测试商品'，重复三次，明显是测试数据。",
+      "suggestions": [
+        {
+          "title": "建议删除",
+          "detail": "该条目存在明显错误或不适用，建议归档或废弃。",
+          "level": "danger"
+        }
+      ],
+      "fingerprint": "45f205c4bf9aa52666164442"
+    },
+    {
+      "code": "llm_rag_quality_low",
+      "severity": "info",
+      "title": "LLM：RAG经验质量低",
+      "detail": "内容为自动化测试折叠床等，重复三次，属测试数据。",
+      "target": "rag_exp_794f04141b28161c0a3e",
+      "target_label": "rag_exp_794f04141b28161c0a3e",
+      "repairable": false,
+      "action_type": "delete",
+      "involved_targets": [
+        "rag_exp_794f04141b28161c0a3e"
+      ],
+      "llm_reasoning": "内容为自动化测试折叠床等，重复三次，属测试数据。",
+      "suggestions": [
+        {
+          "title": "建议删除",
+          "detail": "该条目存在明显错误或不适用，建议归档或废弃。",
+          "level": "danger"
+        }
+      ],
+      "fingerprint": "6ec32ab4d2138e40d186c356"
+    },
+    {
+      "code": "llm_rag_quality_low",
+      "severity": "info",
+      "title": "LLM：RAG经验质量低",
+      "detail": "内容仅为'duplicate candidate probe'，重复三次，无实际知识。",
+      "target": "rag_exp_5a574e8d242fc86a1b3d",
+      "target_label": "rag_exp_5a574e8d242fc86a1b3d",
+      "repairable": false,
+      "action_type": "delete",
+      "involved_targets": [
+        "rag_exp_5a574e8d242fc86a1b3d"
+      ],
+      "llm_reasoning": "内容仅为'duplicate candidate probe'，重复三次，无实际知识。",
+      "suggestions": [
+        {
+          "title": "建议删除",
+          "detail": "该条目存在明显错误或不适用，建议归档或废弃。",
+          "level": "danger"
+        }
+      ],
+      "fingerprint": "3efe20d8620c7fbdf380d0d9"
+    },
+    {
+      "code": "llm_duplicate_semantic",
+      "severity": "info",
+      "title": "LLM：语义重复",
+      "detail": "内容重复三次，但话术本身合理，建议合并为一条。",
+      "target": "rag_exp_89af65a4428a33bb5815",
+      "target_label": "rag_exp_89af65a4428a33bb5815",
+      "repairable": false,
+      "action_type": "merge",
+      "involved_targets": [
+        "rag_exp_89af65a4428a33bb5815"
+      ],
+      "llm_reasoning": "内容重复三次，但话术本身合理，建议合并为一条。",
+      "suggestions": [
+        {
+          "title": "建议合并",
+          "detail": "多条知识表达同一含义，建议保留信息最完整的一条，将其余归档。",
+          "level": "warning"
+        }
+      ],
+      "fingerprint": "085767f52e1f00dd3a9c62a4"
+    },
+    {
+      "code": "llm_duplicate_semantic",
+      "severity": "info",
+      "title": "LLM：语义重复",
+      "detail": "内容重复三次，但规则本身合理，建议合并。",
+      "target": "rag_exp_3a14a2970b3c90d11fc5",
+      "target_label": "rag_exp_3a14a2970b3c90d11fc5",
+      "repairable": false,
+      "action_type": "merge",
+      "involved_targets": [
+        "rag_exp_3a14a2970b3c90d11fc5"
+      ],
+      "llm_reasoning": "内容重复三次，但规则本身合理，建议合并。",
+      "suggestions": [
+        {
+          "title": "建议合并",
+          "detail": "多条知识表达同一含义，建议保留信息最完整的一条，将其余归档。",
+          "level": "warning"
+        }
+      ],
+      "fingerprint": "8ae15272ae920c0d8046a8fb"
+    }
+  ],
+  "ignored_count": 0,
+  "summary": {
+    "error_count": 0,
+    "warning_count": 4,
+    "info_count": 20,
+    "ignored_count": 0,
+    "hidden_notice_count": 1
+  },
+  "auto_dedup_rag": {
+    "ok": true,
+    "message": "Auto-dedup discarded 10 RAG experience(s)",
+    "discarded": [
+      "rag_exp_a0ecef03d883a6e2a254",
+      "rag_exp_0d52db70ea8e975ffbb0",
+      "rag_exp_b90c9a6cfa95d7e39e6a",
+      "rag_exp_448584fe653a22c05a4c",
+      "rag_exp_a0e9f7dd1c28a51261f9",
+      "rag_exp_a0e9f7dd1c28a51261f9",
+      "rag_exp_0d76adef990947137024",
+      "rag_exp_f7997027f4758cbdf36b",
+      "rag_exp_1841396c7ad47558943f",
+      "rag_exp_142354fd08afb78fdc35"
+    ],
+    "duplicate_groups": [
+      [
+        "rag_exp_a0ecef03d883a6e2a254",
+        "rag_exp_8b4a09b6a2ca741d9544"
+      ],
+      [
+        "rag_exp_a0ecef03d883a6e2a254",
+        "rag_exp_8b4a09b6a2ca741d9544",
+        "rag_exp_0d52db70ea8e975ffbb0",
+        "rag_exp_50d36f28a748647ebb2a"
+      ],
+      [
+        "rag_exp_dcd25c8c61bac6abb608",
+        "rag_exp_671859fb4c0d577021e3",
+        "rag_exp_b90c9a6cfa95d7e39e6a",
+        "rag_exp_3f9de1a8712c9989ce71"
+      ],
+      [
+        "rag_exp_448584fe653a22c05a4c",
+        "rag_exp_adf157d3da404949390c"
+      ],
+      [
+        "rag_exp_fc4f5b38342d29237774",
+        "rag_exp_d0747bbb8055438be758",
+        "rag_exp_7f6be88eb8bbe84022dc",
+        "rag_exp_a0e9f7dd1c28a51261f9"
+      ],
+      [
+        "rag_exp_fc4f5b38342d29237774",
+        "rag_exp_d0747bbb8055438be758",
+        "rag_exp_7f6be88eb8bbe84022dc",
+        "rag_exp_a0e9f7dd1c28a51261f9",
+        "rag_exp_d2ee8ec83e2ee9a7b2d7",
+        "rag_exp_a0e9f7dd1c28a51261f9"
+      ],
+      [
+        "rag_exp_4402776c67e8ecee0ce0",
+        "rag_exp_7027502a9a773bbe00ec",
+        "rag_exp_0d76adef990947137024",
+        "rag_exp_db18bd8ce7819602a304"
+      ],
+      [
+        "rag_exp_8ccccfef1aafea27711b",
+        "rag_exp_f7997027f4758cbdf36b",
+        "rag_exp_1d03a62c5c7ce01ef378"
+      ],
+      [
+        "rag_exp_25670a35864f6fe212ec",
+        "rag_exp_9872247bed22c580b42d",
+        "rag_exp_1841396c7ad47558943f",
+        "rag_exp_a22584af3e4adbb6a510"
+      ],
+      [
+        "rag_exp_8714f755c3520589942a",
+        "rag_exp_142354fd08afb78fdc35",
+        "rag_exp_43fff6aa6c96561194c8"
+      ]
+    ]
+  }
+}

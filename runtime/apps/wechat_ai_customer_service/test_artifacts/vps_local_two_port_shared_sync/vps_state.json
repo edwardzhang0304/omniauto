@@ -6,19 +6,19 @@
       "display_name": "Default Tenant",
       "industry_id": "home_appliance",
       "status": "active",
-      "created_at": "2026-05-09T19:57:17+00:00",
-      "updated_at": "2026-05-09T19:57:17+00:00",
+      "created_at": "2026-05-19T03:57:41+00:00",
+      "updated_at": "2026-05-19T03:57:41+00:00",
       "metadata": {
         "industry_id": "home_appliance"
       }
     },
-    "jiangsu_chejin_usedcar_customer_20260501": {
-      "tenant_id": "jiangsu_chejin_usedcar_customer_20260501",
+    "chejin": {
+      "tenant_id": "chejin",
       "display_name": "Used Car Tenant",
       "industry_id": "used_car",
       "status": "active",
-      "created_at": "2026-05-09T19:57:17+00:00",
-      "updated_at": "2026-05-09T19:57:17+00:00",
+      "created_at": "2026-05-19T03:57:41+00:00",
+      "updated_at": "2026-05-19T03:57:41+00:00",
       "metadata": {
         "industry_id": "used_car"
       }
@@ -34,8 +34,22 @@
         "account_username": "rag_enterprise_eval",
         "industry_id": "home_appliance"
       },
-      "created_at": "2026-05-09T19:57:19+00:00",
-      "updated_at": "2026-05-09T19:57:19+00:00"
+      "created_at": "2026-05-19T03:57:44+00:00",
+      "updated_at": "2026-05-19T03:57:44+00:00"
+    },
+    "rag_reply_auto_discard_probe": {
+      "tenant_id": "rag_reply_auto_discard_probe",
+      "display_name": "rag_reply_auto_discard_probe",
+      "status": "active",
+      "sync_enabled": true,
+      "industry_id": "home_appliance",
+      "metadata": {
+        "source": "local_client_account",
+        "account_username": "rag_reply_auto_discard_probe",
+        "industry_id": "home_appliance"
+      },
+      "created_at": "2026-05-19T03:57:44+00:00",
+      "updated_at": "2026-05-19T03:57:44+00:00"
     },
     "smart_recorder_test": {
       "tenant_id": "smart_recorder_test",
@@ -48,22 +62,78 @@
         "account_username": "smart_recorder_test",
         "industry_id": "home_appliance"
       },
-      "created_at": "2026-05-09T19:57:19+00:00",
-      "updated_at": "2026-05-09T19:57:19+00:00"
+      "created_at": "2026-05-19T03:57:44+00:00",
+      "updated_at": "2026-05-19T03:57:44+00:00"
     },
-    "smart_recorder_test_debug": {
-      "tenant_id": "smart_recorder_test_debug",
-      "display_name": "smart_recorder_test_debug",
+    "wf_iso_20260514_014721": {
+      "tenant_id": "wf_iso_20260514_014721",
+      "display_name": "wf_iso_20260514_014721",
       "status": "active",
       "sync_enabled": true,
       "industry_id": "home_appliance",
       "metadata": {
         "source": "local_client_account",
-        "account_username": "smart_recorder_test_debug",
+        "account_username": "wf_iso_20260514_014721",
         "industry_id": "home_appliance"
       },
-      "created_at": "2026-05-09T19:57:19+00:00",
-      "updated_at": "2026-05-09T19:57:19+00:00"
+      "created_at": "2026-05-19T03:57:44+00:00",
+      "updated_at": "2026-05-19T03:57:44+00:00"
+    },
+    "wf_iso_20260514_014812": {
+      "tenant_id": "wf_iso_20260514_014812",
+      "display_name": "wf_iso_20260514_014812",
+      "status": "active",
+      "sync_enabled": true,
+      "industry_id": "home_appliance",
+      "metadata": {
+        "source": "local_client_account",
+        "account_username": "wf_iso_20260514_014812",
+        "industry_id": "home_appliance"
+      },
+      "created_at": "2026-05-19T03:57:44+00:00",
+      "updated_at": "2026-05-19T03:57:44+00:00"
+    },
+    "wf_iso_20260514_014912": {
+      "tenant_id": "wf_iso_20260514_014912",
+      "display_name": "wf_iso_20260514_014912",
+      "status": "active",
+      "sync_enabled": true,
+      "industry_id": "home_appliance",
+      "metadata": {
+        "source": "local_client_account",
+        "account_username": "wf_iso_20260514_014912",
+        "industry_id": "home_appliance"
+      },
+      "created_at": "2026-05-19T03:57:44+00:00",
+      "updated_at": "2026-05-19T03:57:44+00:00"
+    },
+    "wf_iso_20260514_015014": {
+      "tenant_id": "wf_iso_20260514_015014",
+      "display_name": "wf_iso_20260514_015014",
+      "status": "active",
+      "sync_enabled": true,
+      "industry_id": "home_appliance",
+      "metadata": {
+        "source": "local_client_account",
+        "account_username": "wf_iso_20260514_015014",
+        "industry_id": "home_appliance"
+      },
+      "created_at": "2026-05-19T03:57:44+00:00",
+      "updated_at": "2026-05-19T03:57:44+00:00"
+    },
+    "workflow_switch_probe": {
+      "tenant_id": "workflow_switch_probe",
+      "display_name": "workflow_switch_probe",
+      "status": "active",
+      "sync_enabled": true,
+      "industry_id": "home_appliance",
+      "metadata": {
+        "source": "local_client_account",
+        "account_username": "workflow_switch_probe",
+        "industry_id": "home_appliance"
+      },
+      "created_at": "2026-05-19T03:57:44+00:00",
+      "updated_at": "2026-05-19T03:57:44+00:00"
     }
   },
   "shared_library": {
@@ -97,9 +167,9 @@
         "applies_to": "all customer-service tenants"
       },
       "created_by": "two-port-test",
-      "created_at": "2026-05-09T19:57:17+00:00",
+      "created_at": "2026-05-19T03:57:41+00:00",
       "updated_by": "two-port-test",
-      "updated_at": "2026-05-09T19:57:17+00:00"
+      "updated_at": "2026-05-19T03:57:41+00:00"
     },
     "cloud_home_appliance_install_style": {
       "item_id": "cloud_home_appliance_install_style",
@@ -130,9 +200,9 @@
         "applies_to": "home appliance consultations"
       },
       "created_by": "two-port-test",
-      "created_at": "2026-05-09T19:57:17+00:00",
+      "created_at": "2026-05-19T03:57:41+00:00",
       "updated_by": "two-port-test",
-      "updated_at": "2026-05-09T19:57:17+00:00"
+      "updated_at": "2026-05-19T03:57:41+00:00"
     },
     "cloud_usedcar_transfer_boundary": {
       "item_id": "cloud_usedcar_transfer_boundary",
@@ -167,9 +237,9 @@
         "requires_handoff": true
       },
       "created_by": "two-port-test",
-      "created_at": "2026-05-09T19:57:17+00:00",
+      "created_at": "2026-05-19T03:57:41+00:00",
       "updated_by": "two-port-test",
-      "updated_at": "2026-05-09T19:57:17+00:00"
+      "updated_at": "2026-05-19T03:57:41+00:00"
     },
     "shared_global_evidence_first": {
       "item_id": "shared_global_evidence_first",
@@ -192,9 +262,39 @@
         "guideline_text": "回复必须优先依据正式知识、共享规则和已确认上下文；无证据时明确说明需核实并转人工。"
       },
       "created_by": "system_seed",
-      "created_at": "2026-05-09T19:57:19+00:00",
+      "created_at": "2026-05-19T03:57:44+00:00",
       "updated_by": "system_seed",
-      "updated_at": "2026-05-09T19:57:19+00:00"
+      "updated_at": "2026-05-19T03:57:44+00:00"
+    },
+    "shared_global_contextual_honorific_usage": {
+      "item_id": "shared_global_contextual_honorific_usage",
+      "industry_id": "global",
+      "category_id": "reply_style",
+      "title": "自然称呼使用规则",
+      "content": "微信客服不要每条回复都在开头加称呼。称呼主要用于开场寒暄，或客户切换到新话题时有选择地使用；中途连续追问默认不加。称呼要结合客户画像自然轮换：男性可在“姓哥/哥/老板”之间切换，女性可用“姓姐/姐”。不要把文件传输助手、群名、门店名、客服名、测试名等非真人会话名拆成姓氏称呼。",
+      "keywords": [
+        "称呼",
+        "哥",
+        "姐",
+        "老板",
+        "开场",
+        "新话题",
+        "真人感"
+      ],
+      "applies_to": "所有行业的微信客服对话",
+      "notes": "平台通用回复口吻",
+      "status": "active",
+      "source": "system_seed_industry_library",
+      "tenant_id": "default",
+      "data": {
+        "title": "自然称呼使用规则",
+        "guideline_text": "微信客服不要每条回复都在开头加称呼。称呼主要用于开场寒暄，或客户切换到新话题时有选择地使用；中途连续追问默认不加。称呼要结合客户画像自然轮换：男性可在“姓哥/哥/老板”之间切换，女性可用“姓姐/姐”。不要把文件传输助手、群名、门店名、客服名、测试名等非真人会话名拆成姓氏称呼。",
+        "applies_to": "所有微信 AI 客服账号的客户可见回复"
+      },
+      "created_by": "system_seed",
+      "created_at": "2026-05-19T03:57:44+00:00",
+      "updated_by": "system_seed",
+      "updated_at": "2026-05-19T03:57:44+00:00"
     },
     "shared_global_no_fabrication": {
       "item_id": "shared_global_no_fabrication",
@@ -222,9 +322,9 @@
         "handoff_reason": "missing_authoritative_evidence"
       },
       "created_by": "system_seed",
-      "created_at": "2026-05-09T19:57:19+00:00",
+      "created_at": "2026-05-19T03:57:44+00:00",
       "updated_by": "system_seed",
-      "updated_at": "2026-05-09T19:57:19+00:00"
+      "updated_at": "2026-05-19T03:57:44+00:00"
     },
     "shared_global_privacy_minimum_collection": {
       "item_id": "shared_global_privacy_minimum_collection",
@@ -249,9 +349,9 @@
         "guideline_text": "仅在履约必要时采集姓名、电话、地址等信息，避免索取与交易无关的身份证件、银行卡、验证码等敏感信息。"
       },
       "created_by": "system_seed",
-      "created_at": "2026-05-09T19:57:19+00:00",
+      "created_at": "2026-05-19T03:57:44+00:00",
       "updated_by": "system_seed",
-      "updated_at": "2026-05-09T19:57:19+00:00"
+      "updated_at": "2026-05-19T03:57:44+00:00"
     },
     "shared_global_no_private_payment": {
       "item_id": "shared_global_no_private_payment",
@@ -278,9 +378,9 @@
         "handoff_reason": "payment_channel_compliance"
       },
       "created_by": "system_seed",
-      "created_at": "2026-05-09T19:57:19+00:00",
+      "created_at": "2026-05-19T03:57:44+00:00",
       "updated_by": "system_seed",
-      "updated_at": "2026-05-09T19:57:19+00:00"
+      "updated_at": "2026-05-19T03:57:44+00:00"
     },
     "shared_used_car_compliance_disclosure": {
       "item_id": "shared_used_car_compliance_disclosure",
@@ -306,9 +406,9 @@
         "guideline_text": "涉及事故、水泡、火烧、里程、过户次数、检修记录等问题，必须基于可验证资料；不确定时先说明待核验。"
       },
       "created_by": "system_seed",
-      "created_at": "2026-05-09T19:57:19+00:00",
+      "created_at": "2026-05-19T03:57:44+00:00",
       "updated_by": "system_seed",
-      "updated_at": "2026-05-09T19:57:19+00:00"
+      "updated_at": "2026-05-19T03:57:44+00:00"
     },
     "shared_used_car_transfer_docs": {
       "item_id": "shared_used_car_transfer_docs",
@@ -333,9 +433,9 @@
         "guideline_text": "提醒客户交易完成后应交付合法证照与交易凭证，涉及过户办理必须按登记流程执行。"
       },
       "created_by": "system_seed",
-      "created_at": "2026-05-09T19:57:19+00:00",
+      "created_at": "2026-05-19T03:57:44+00:00",
       "updated_by": "system_seed",
-      "updated_at": "2026-05-09T19:57:19+00:00"
+      "updated_at": "2026-05-19T03:57:44+00:00"
     },
     "shared_used_car_finance_handoff": {
       "item_id": "shared_used_car_finance_handoff",
@@ -363,9 +463,9 @@
         "handoff_reason": "used_car_finance_manual_review"
       },
       "created_by": "system_seed",
-      "created_at": "2026-05-09T19:57:19+00:00",
+      "created_at": "2026-05-19T03:57:44+00:00",
       "updated_by": "system_seed",
-      "updated_at": "2026-05-09T19:57:19+00:00"
+      "updated_at": "2026-05-19T03:57:44+00:00"
     },
     "shared_used_car_test_drive_notice": {
       "item_id": "shared_used_car_test_drive_notice",
@@ -390,9 +490,9 @@
         "guideline_text": "试驾沟通需明确有效证件、保险覆盖、试驾路线与责任边界；涉及高风险路况或改装车辆必须人工确认。"
       },
       "created_by": "system_seed",
-      "created_at": "2026-05-09T19:57:19+00:00",
+      "created_at": "2026-05-19T03:57:44+00:00",
       "updated_by": "system_seed",
-      "updated_at": "2026-05-09T19:57:19+00:00"
+      "updated_at": "2026-05-19T03:57:44+00:00"
     },
     "shared_used_car_deposit_contract_boundary": {
       "item_id": "shared_used_car_deposit_contract_boundary",
@@ -420,9 +520,9 @@
         "handoff_reason": "used_car_contract_manual_review"
       },
       "created_by": "system_seed",
-      "created_at": "2026-05-09T19:57:19+00:00",
+      "created_at": "2026-05-19T03:57:44+00:00",
       "updated_by": "system_seed",
-      "updated_at": "2026-05-09T19:57:19+00:00"
+      "updated_at": "2026-05-19T03:57:44+00:00"
     },
     "shared_home_appliance_three_guarantees": {
       "item_id": "shared_home_appliance_three_guarantees",
@@ -447,9 +547,9 @@
         "guideline_text": "家电售后答复需围绕三包、质保期、维修记录与票据凭证，避免超出标准承诺。"
       },
       "created_by": "system_seed",
-      "created_at": "2026-05-09T19:57:19+00:00",
+      "created_at": "2026-05-19T03:57:44+00:00",
       "updated_by": "system_seed",
-      "updated_at": "2026-05-09T19:57:19+00:00"
+      "updated_at": "2026-05-19T03:57:44+00:00"
     },
     "shared_home_appliance_install_scope": {
       "item_id": "shared_home_appliance_install_scope",
@@ -477,9 +577,9 @@
         "handoff_reason": "home_appliance_install_manual_review"
       },
       "created_by": "system_seed",
-      "created_at": "2026-05-09T19:57:19+00:00",
+      "created_at": "2026-05-19T03:57:44+00:00",
       "updated_by": "system_seed",
-      "updated_at": "2026-05-09T19:57:19+00:00"
+      "updated_at": "2026-05-19T03:57:44+00:00"
     },
     "shared_home_appliance_delivery_style": {
       "item_id": "shared_home_appliance_delivery_style",
@@ -503,9 +603,9 @@
         "guideline_text": "先给出可确认的配送区间，再提示受库存、仓配与预约档期影响，必要时转人工排期。"
       },
       "created_by": "system_seed",
-      "created_at": "2026-05-09T19:57:19+00:00",
+      "created_at": "2026-05-19T03:57:44+00:00",
       "updated_by": "system_seed",
-      "updated_at": "2026-05-09T19:57:19+00:00"
+      "updated_at": "2026-05-19T03:57:44+00:00"
     },
     "shared_home_appliance_energy_label_notice": {
       "item_id": "shared_home_appliance_energy_label_notice",
@@ -530,9 +630,9 @@
         "guideline_text": "能效等级、额定功率、用电环境相关答复应引用规格参数，不得臆测省电比例或改写官方标识信息。"
       },
       "created_by": "system_seed",
-      "created_at": "2026-05-09T19:57:19+00:00",
+      "created_at": "2026-05-19T03:57:44+00:00",
       "updated_by": "system_seed",
-      "updated_at": "2026-05-09T19:57:19+00:00"
+      "updated_at": "2026-05-19T03:57:44+00:00"
     },
     "shared_home_appliance_refund_policy_boundary": {
       "item_id": "shared_home_appliance_refund_policy_boundary",
@@ -560,9 +660,9 @@
         "handoff_reason": "home_appliance_after_sales_dispute"
       },
       "created_by": "system_seed",
-      "created_at": "2026-05-09T19:57:19+00:00",
+      "created_at": "2026-05-19T03:57:44+00:00",
       "updated_by": "system_seed",
-      "updated_at": "2026-05-09T19:57:19+00:00"
+      "updated_at": "2026-05-19T03:57:44+00:00"
     },
     "shared_fast_food_food_safety": {
       "item_id": "shared_fast_food_food_safety",
@@ -590,9 +690,9 @@
         "handoff_reason": "fast_food_safety_manual_escalation"
       },
       "created_by": "system_seed",
-      "created_at": "2026-05-09T19:57:19+00:00",
+      "created_at": "2026-05-19T03:57:44+00:00",
       "updated_by": "system_seed",
-      "updated_at": "2026-05-09T19:57:19+00:00"
+      "updated_at": "2026-05-19T03:57:44+00:00"
     },
     "shared_fast_food_order_recheck": {
       "item_id": "shared_fast_food_order_recheck",
@@ -618,9 +718,9 @@
         "guideline_text": "自动回复应优先确认门店、用餐方式、餐品、份数、忌口/过敏原与联系方式，减少错单漏单。"
       },
       "created_by": "system_seed",
-      "created_at": "2026-05-09T19:57:19+00:00",
+      "created_at": "2026-05-19T03:57:44+00:00",
       "updated_by": "system_seed",
-      "updated_at": "2026-05-09T19:57:19+00:00"
+      "updated_at": "2026-05-19T03:57:44+00:00"
     },
     "shared_fast_food_delivery_style": {
       "item_id": "shared_fast_food_delivery_style",
@@ -645,9 +745,9 @@
         "guideline_text": "对超时、洒漏、漏单场景先致歉，明确补救路径（补发/退款/人工处理）并收集最小必要信息。"
       },
       "created_by": "system_seed",
-      "created_at": "2026-05-09T19:57:19+00:00",
+      "created_at": "2026-05-19T03:57:44+00:00",
       "updated_by": "system_seed",
-      "updated_at": "2026-05-09T19:57:19+00:00"
+      "updated_at": "2026-05-19T03:57:44+00:00"
     },
     "shared_fast_food_allergen_boundary": {
       "item_id": "shared_fast_food_allergen_boundary",
@@ -675,9 +775,9 @@
         "handoff_reason": "fast_food_allergen_manual_review"
       },
       "created_by": "system_seed",
-      "created_at": "2026-05-09T19:57:19+00:00",
+      "created_at": "2026-05-19T03:57:44+00:00",
       "updated_by": "system_seed",
-      "updated_at": "2026-05-09T19:57:19+00:00"
+      "updated_at": "2026-05-19T03:57:44+00:00"
     },
     "shared_fast_food_temperature_notice": {
       "item_id": "shared_fast_food_temperature_notice",
@@ -702,9 +802,9 @@
         "guideline_text": "对保温时长、复热建议、冷链餐品时效等应使用门店标准口径；不确定时提醒尽快食用并转人工确认。"
       },
       "created_by": "system_seed",
-      "created_at": "2026-05-09T19:57:19+00:00",
+      "created_at": "2026-05-19T03:57:44+00:00",
       "updated_by": "system_seed",
-      "updated_at": "2026-05-09T19:57:19+00:00"
+      "updated_at": "2026-05-19T03:57:44+00:00"
     },
     "shared_lab_instruments_calibration_scope": {
       "item_id": "shared_lab_instruments_calibration_scope",
@@ -729,9 +829,9 @@
         "guideline_text": "精度、不确定度、合规结论需基于有效校准/检定证书与资质范围，不得超范围承诺。"
       },
       "created_by": "system_seed",
-      "created_at": "2026-05-09T19:57:19+00:00",
+      "created_at": "2026-05-19T03:57:44+00:00",
       "updated_by": "system_seed",
-      "updated_at": "2026-05-09T19:57:19+00:00"
+      "updated_at": "2026-05-19T03:57:44+00:00"
     },
     "shared_lab_instruments_compliance_handoff": {
       "item_id": "shared_lab_instruments_compliance_handoff",
@@ -759,9 +859,9 @@
         "handoff_reason": "lab_compliance_manual_review"
       },
       "created_by": "system_seed",
-      "created_at": "2026-05-09T19:57:19+00:00",
+      "created_at": "2026-05-19T03:57:44+00:00",
       "updated_by": "system_seed",
-      "updated_at": "2026-05-09T19:57:19+00:00"
+      "updated_at": "2026-05-19T03:57:44+00:00"
     },
     "shared_lab_instruments_maintenance_style": {
       "item_id": "shared_lab_instruments_maintenance_style",
@@ -786,9 +886,9 @@
         "guideline_text": "先确认型号、序列号、故障现象、使用环境和校准状态，再给出基础排查建议与送修路径。"
       },
       "created_by": "system_seed",
-      "created_at": "2026-05-09T19:57:19+00:00",
+      "created_at": "2026-05-19T03:57:44+00:00",
       "updated_by": "system_seed",
-      "updated_at": "2026-05-09T19:57:19+00:00"
+      "updated_at": "2026-05-19T03:57:44+00:00"
     },
     "shared_lab_instruments_hazard_notice": {
       "item_id": "shared_lab_instruments_hazard_notice",
@@ -816,9 +916,9 @@
         "handoff_reason": "lab_hse_manual_review"
       },
       "created_by": "system_seed",
-      "created_at": "2026-05-09T19:57:19+00:00",
+      "created_at": "2026-05-19T03:57:44+00:00",
       "updated_by": "system_seed",
-      "updated_at": "2026-05-09T19:57:19+00:00"
+      "updated_at": "2026-05-19T03:57:44+00:00"
     },
     "shared_lab_instruments_validation_evidence": {
       "item_id": "shared_lab_instruments_validation_evidence",
@@ -843,29 +943,30 @@
         "guideline_text": "涉及审计追踪、软件版本、方法学验证、电子签名等合规问答时，应提示以已归档验证记录为准。"
       },
       "created_by": "system_seed",
-      "created_at": "2026-05-09T19:57:19+00:00",
+      "created_at": "2026-05-19T03:57:44+00:00",
       "updated_by": "system_seed",
-      "updated_at": "2026-05-09T19:57:19+00:00"
+      "updated_at": "2026-05-19T03:57:44+00:00"
     }
   },
   "users": {
-    "jiangsu_chejin_usedcar_customer_20260501": {
-      "user_id": "jiangsu_chejin_usedcar_customer_20260501",
-      "username": "jiangsu_chejin_usedcar_customer_20260501",
+    "chejin": {
+      "user_id": "chejin",
+      "username": "chejin",
       "display_name": "江苏车金二手车测试客户 2026-05-01",
-      "email": "jiangsu-chejin-usedcar@example.local",
+      "email": "xu__cong@126.com",
       "role": "customer",
       "tenant_ids": [
-        "jiangsu_chejin_usedcar_customer_20260501"
+        "chejin"
       ],
       "resource_scopes": [
         "*"
       ],
       "status": "active",
       "source": "local_client_account",
-      "created_at": "2026-05-01T08:09:49+00:00",
-      "updated_at": "2026-05-09T19:05:39+00:00",
-      "password_hash": "pbkdf2_sha256$120000$0255594a9a656c234330bc4f233005fa$MqsUU5Wy8h9tLIiWu9JLvKc+a0h6pu2oGJVEUMLp0I0="
+      "created_at": "2026-05-18T08:34:37+00:00",
+      "updated_at": "2026-05-18T21:21:06+00:00",
+      "password_hash": "pbkdf2_sha256$120000$eb0caeea0c6550710f22977c8a910287$dWW9uT0nmaLdns0v9Sa8WtPnmlzumFnID0f0zTQniZc=",
+      "initialized_at": "2026-05-18T08:34:37+00:00"
     }
   },
   "sessions": {},
@@ -890,9 +991,9 @@
         "restore_backup",
         "push_update"
       ],
-      "node_token": "node_0-A4uRJ43Tfhp9hy5yzMnY1QdwTA1zxm",
-      "registered_at": "2026-05-09T19:57:19+00:00",
-      "last_seen_at": "2026-05-09T19:57:19+00:00",
+      "node_token": "node_BFPVO-zFmjNPml2YP0LmqMUCLeKTEouY",
+      "registered_at": "2026-05-19T03:57:44+00:00",
+      "last_seen_at": "2026-05-19T03:57:44+00:00",
       "metadata": {
         "hostname": "LAPTOP-HJGDTB1M",
         "platform": "Windows-11-10.0.26200-SP0",
@@ -914,13 +1015,13 @@
   "releases": {},
   "audit_events": [
     {
-      "event_id": "audit_20260509195719551905_f90f77",
+      "event_id": "audit_20260519035744012345_1bb9a1",
       "actor_id": "local-node",
       "action": "register_node",
       "target_type": "local_node",
       "target_id": "two_port_node_01",
       "detail": {},
-      "created_at": "2026-05-09T19:57:19+00:00"
+      "created_at": "2026-05-19T03:57:44+00:00"
     }
   ]
 }

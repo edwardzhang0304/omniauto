@@ -1,0 +1,11 @@
+{
+  "schema_version": 1,
+  "tenant_id": "chejin",
+  "account_username": "chejin",
+  "display_name": "江苏车金二手车测试客户 2026-05-01",
+  "industry_id": "used_car",
+  "knowledge_base_root": "knowledge_bases",
+  "product_item_knowledge_root": "product_item_knowledge",
+  "updated_at": "2026-05-18T08:43:09+00:00",
+  "created_at": "2026-05-18T08:34:37+00:00"
+}

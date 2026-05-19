@@ -1,0 +1,46 @@
+{
+  "ok": true,
+  "job_id": "import_job_416b2f1c6ea2",
+  "tenant_id": "chejin",
+  "industry_id": "used_car",
+  "mode": "apply",
+  "status": "completed",
+  "release_version": "",
+  "source_dry_run_job_id": "import_job_29fe6b1607dc",
+  "ready_items_file": "D:\\AI\\omniauto\\apps\\wechat_ai_customer_service\\data\\tenants\\chejin\\learning_packs\\import_jobs\\import_job_29fe6b1607dc_ready_items.jsonl",
+  "summary": {
+    "total": 1,
+    "applied_items": 1,
+    "failed_items": 0,
+    "new_items": 1,
+    "updated_items": 0,
+    "skipped_items": 0,
+    "blocked_items": 0
+  },
+  "applied_item_ids": [
+    "chejin_probe_one"
+  ],
+  "failed_items": [],
+  "rollback_to": "20260514_175332_fe4921c6",
+  "backup_snapshot": {
+    "version_id": "20260514_175332_fe4921c6",
+    "created_at": "2026-05-14T17:53:34",
+    "reason": "workflow template import apply",
+    "metadata": {
+      "tenant_id": "chejin",
+      "industry_id": "used_car",
+      "dry_run_job_id": "import_job_29fe6b1607dc",
+      "release_version": "",
+      "source": "workflow_service"
+    },
+    "structured_path": "D:\\AI\\omniauto\\apps\\wechat_ai_customer_service\\data\\versions\\20260514_175332_fe4921c6\\structured",
+    "knowledge_base_path": "D:\\AI\\omniauto\\apps\\wechat_ai_customer_service\\data\\versions\\20260514_175332_fe4921c6\\knowledge_bases",
+    "shared_knowledge_path": "D:\\AI\\omniauto\\apps\\wechat_ai_customer_service\\data\\versions\\20260514_175332_fe4921c6\\shared_knowledge",
+    "tenants_path": "D:\\AI\\omniauto\\apps\\wechat_ai_customer_service\\data\\versions\\20260514_175332_fe4921c6\\tenants",
+    "raw_backup_package_path": "D:\\AI\\omniauto\\apps\\wechat_ai_customer_service\\data\\versions\\20260514_175332_fe4921c6\\download\\backup_7b509797ed80f02d63e3.zip",
+    "readable_export_path": "D:\\AI\\omniauto\\apps\\wechat_ai_customer_service\\data\\versions\\20260514_175332_fe4921c6\\download\\readable\\local_20260514_175332_fe4921c6_readable.xlsx",
+    "download_package_path": "D:\\AI\\omniauto\\apps\\wechat_ai_customer_service\\data\\versions\\20260514_175332_fe4921c6\\download\\20260514_175332_fe4921c6_complete_backup.zip",
+    "download_package_bytes": 4858732
+  },
+  "created_at": "2026-05-14T17:53:40"
+}

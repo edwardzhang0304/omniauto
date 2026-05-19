@@ -1,5 +1,2341 @@
 [
   {
+    "batch_id": "raw_batch_b175d7f958031959bb03",
+    "tenant_id": "default",
+    "conversation_id": "conv_6a6c8916a9e214148a",
+    "message_ids": [
+      "raw_msg_a3d461763761913fc577"
+    ],
+    "reason": "customer_service_poll",
+    "source_module": "customer_service",
+    "status": "pending",
+    "created_at": "2026-05-16T00:59:47"
+  },
+  {
+    "batch_id": "raw_batch_26111aa928f6f3576472",
+    "tenant_id": "default",
+    "conversation_id": "conv_6a6c8916a9e214148a",
+    "message_ids": [
+      "raw_msg_9b8be2917590a8d24da8",
+      "raw_msg_d8ff9d916ad9572bec8d"
+    ],
+    "reason": "customer_service_poll",
+    "source_module": "customer_service",
+    "status": "processed",
+    "created_at": "2026-05-15T21:41:27",
+    "processed_at": "2026-05-15T21:59:13",
+    "transcript_path": "D:\\AI\\omniauto\\runtime\\apps\\wechat_ai_customer_service\\tenants\\default\\raw_messages\\learning_batches\\raw_batch_26111aa928f6f3576472.txt",
+    "candidate_ids": [],
+    "candidate_count": 0,
+    "skipped_duplicate_count": 0,
+    "skipped_duplicates": [],
+    "skipped_source_policy_count": 0,
+    "skipped_source_policy": [],
+    "llm_assist_policy": {
+      "policy_version": "knowledge_llm_assist_v1",
+      "stage": "raw_wechat_message_to_rag_experience_review",
+      "requested": true,
+      "rule_fallback_allowed": true,
+      "human_approval_required": true,
+      "strict_promotion_policy": "raw WeChat messages create RAG experiences only; pending candidates require manual RAG promotion"
+    },
+    "rag_ingest": {
+      "ok": true,
+      "source": {
+        "source_id": "source_317aa6e11f91df8a",
+        "tenant_id": "default",
+        "layer": "tenant",
+        "source_type": "wechat_raw_message",
+        "category": "file_transfer",
+        "product_id": "",
+        "source_path": "D:\\AI\\omniauto\\runtime\\apps\\wechat_ai_customer_service\\tenants\\default\\raw_messages\\learning_batches\\raw_batch_26111aa928f6f3576472.txt",
+        "content_hash": "9abce99dbfc1d8d0f9b2bdb016dfedd4",
+        "status": "active",
+        "created_at": "2026-05-15T21:57:58",
+        "updated_at": "2026-05-15T21:57:58"
+      },
+      "source_id": "source_317aa6e11f91df8a",
+      "chunk_count": 1,
+      "chunks_path": "D:\\AI\\omniauto\\apps\\wechat_ai_customer_service\\data\\tenants\\default\\rag_chunks\\source_317aa6e11f91df8a.json",
+      "index": {
+        "ok": true,
+        "index_path": "D:\\AI\\omniauto\\apps\\wechat_ai_customer_service\\data\\tenants\\default\\rag_index\\index.json",
+        "entry_count": 255
+      }
+    },
+    "rag_experience_id": "rag_exp_4e2d3496ae3a78edbc40",
+    "strict_promotion_policy": "rag_experience_manual_promotion_only",
+    "updated_at": "2026-05-15T21:59:13"
+  },
+  {
+    "batch_id": "raw_batch_939ec798de6573bc2014",
+    "tenant_id": "default",
+    "conversation_id": "conv_6a6c8916a9e214148a",
+    "message_ids": [
+      "raw_msg_e79eb0345483f29714be",
+      "raw_msg_eb7b8a667c59613bf192",
+      "raw_msg_565b024aae9276751d3d"
+    ],
+    "reason": "customer_service_poll",
+    "source_module": "customer_service",
+    "status": "processed",
+    "created_at": "2026-05-15T21:39:30",
+    "processed_at": "2026-05-15T21:57:58",
+    "transcript_path": "D:\\AI\\omniauto\\runtime\\apps\\wechat_ai_customer_service\\tenants\\default\\raw_messages\\learning_batches\\raw_batch_939ec798de6573bc2014.txt",
+    "candidate_ids": [],
+    "candidate_count": 0,
+    "skipped_duplicate_count": 0,
+    "skipped_duplicates": [],
+    "skipped_source_policy_count": 0,
+    "skipped_source_policy": [],
+    "llm_assist_policy": {
+      "policy_version": "knowledge_llm_assist_v1",
+      "stage": "raw_wechat_message_to_rag_experience_review",
+      "requested": true,
+      "rule_fallback_allowed": true,
+      "human_approval_required": true,
+      "strict_promotion_policy": "raw WeChat messages create RAG experiences only; pending candidates require manual RAG promotion"
+    },
+    "rag_ingest": {
+      "ok": true,
+      "source": {
+        "source_id": "source_9080f0d764cced00",
+        "tenant_id": "default",
+        "layer": "tenant",
+        "source_type": "wechat_raw_message",
+        "category": "file_transfer",
+        "product_id": "",
+        "source_path": "D:\\AI\\omniauto\\runtime\\apps\\wechat_ai_customer_service\\tenants\\default\\raw_messages\\learning_batches\\raw_batch_939ec798de6573bc2014.txt",
+        "content_hash": "d061b302857b83351dd718627ddfdd0a",
+        "status": "active",
+        "created_at": "2026-05-15T21:56:37",
+        "updated_at": "2026-05-15T21:56:37"
+      },
+      "source_id": "source_9080f0d764cced00",
+      "chunk_count": 1,
+      "chunks_path": "D:\\AI\\omniauto\\apps\\wechat_ai_customer_service\\data\\tenants\\default\\rag_chunks\\source_9080f0d764cced00.json",
+      "index": {
+        "ok": true,
+        "index_path": "D:\\AI\\omniauto\\apps\\wechat_ai_customer_service\\data\\tenants\\default\\rag_index\\index.json",
+        "entry_count": 254
+      }
+    },
+    "rag_experience_id": "rag_exp_7dba255d6f6b10fc27a2",
+    "strict_promotion_policy": "rag_experience_manual_promotion_only",
+    "updated_at": "2026-05-15T21:57:58"
+  },
+  {
+    "batch_id": "raw_batch_13027f5fd264a25ad26b",
+    "tenant_id": "default",
+    "conversation_id": "conv_6a6c8916a9e214148a",
+    "message_ids": [
+      "raw_msg_e74af24e2158f7531c91",
+      "raw_msg_76619941a6b6835e76d4"
+    ],
+    "reason": "customer_service_poll",
+    "source_module": "customer_service",
+    "status": "processed",
+    "created_at": "2026-05-15T21:38:56",
+    "processed_at": "2026-05-15T21:56:03",
+    "transcript_path": "D:\\AI\\omniauto\\runtime\\apps\\wechat_ai_customer_service\\tenants\\default\\raw_messages\\learning_batches\\raw_batch_13027f5fd264a25ad26b.txt",
+    "candidate_ids": [],
+    "candidate_count": 0,
+    "skipped_duplicate_count": 0,
+    "skipped_duplicates": [],
+    "skipped_source_policy_count": 0,
+    "skipped_source_policy": [],
+    "llm_assist_policy": {
+      "policy_version": "knowledge_llm_assist_v1",
+      "stage": "raw_wechat_message_to_rag_experience_review",
+      "requested": true,
+      "rule_fallback_allowed": true,
+      "human_approval_required": true,
+      "strict_promotion_policy": "raw WeChat messages create RAG experiences only; pending candidates require manual RAG promotion"
+    },
+    "rag_ingest": {
+      "ok": true,
+      "source": {
+        "source_id": "source_7577bb43160d7956",
+        "tenant_id": "default",
+        "layer": "tenant",
+        "source_type": "wechat_raw_message",
+        "category": "file_transfer",
+        "product_id": "",
+        "source_path": "D:\\AI\\omniauto\\runtime\\apps\\wechat_ai_customer_service\\tenants\\default\\raw_messages\\learning_batches\\raw_batch_13027f5fd264a25ad26b.txt",
+        "content_hash": "f6617134546a08413b3b01fb98ce56a5",
+        "status": "active",
+        "created_at": "2026-05-15T21:54:47",
+        "updated_at": "2026-05-15T21:54:47"
+      },
+      "source_id": "source_7577bb43160d7956",
+      "chunk_count": 1,
+      "chunks_path": "D:\\AI\\omniauto\\apps\\wechat_ai_customer_service\\data\\tenants\\default\\rag_chunks\\source_7577bb43160d7956.json",
+      "index": {
+        "ok": true,
+        "index_path": "D:\\AI\\omniauto\\apps\\wechat_ai_customer_service\\data\\tenants\\default\\rag_index\\index.json",
+        "entry_count": 253
+      }
+    },
+    "rag_experience_id": "rag_exp_e17f23126371e0ac9798",
+    "strict_promotion_policy": "rag_experience_manual_promotion_only",
+    "updated_at": "2026-05-15T21:56:03"
+  },
+  {
+    "batch_id": "raw_batch_cfec9b7e20af8412fea0",
+    "tenant_id": "default",
+    "conversation_id": "conv_6a6c8916a9e214148a",
+    "message_ids": [
+      "raw_msg_79643fbfad99ffcf282e"
+    ],
+    "reason": "customer_service_poll",
+    "source_module": "customer_service",
+    "status": "processed",
+    "created_at": "2026-05-15T21:37:31",
+    "processed_at": "2026-05-15T21:54:47",
+    "transcript_path": "D:\\AI\\omniauto\\runtime\\apps\\wechat_ai_customer_service\\tenants\\default\\raw_messages\\learning_batches\\raw_batch_cfec9b7e20af8412fea0.txt",
+    "candidate_ids": [],
+    "candidate_count": 0,
+    "skipped_duplicate_count": 0,
+    "skipped_duplicates": [],
+    "skipped_source_policy_count": 0,
+    "skipped_source_policy": [],
+    "llm_assist_policy": {
+      "policy_version": "knowledge_llm_assist_v1",
+      "stage": "raw_wechat_message_to_rag_experience_review",
+      "requested": true,
+      "rule_fallback_allowed": true,
+      "human_approval_required": true,
+      "strict_promotion_policy": "raw WeChat messages create RAG experiences only; pending candidates require manual RAG promotion"
+    },
+    "rag_ingest": {
+      "ok": true,
+      "source": {
+        "source_id": "source_22c3e8e8a4a11b59",
+        "tenant_id": "default",
+        "layer": "tenant",
+        "source_type": "wechat_raw_message",
+        "category": "file_transfer",
+        "product_id": "",
+        "source_path": "D:\\AI\\omniauto\\runtime\\apps\\wechat_ai_customer_service\\tenants\\default\\raw_messages\\learning_batches\\raw_batch_cfec9b7e20af8412fea0.txt",
+        "content_hash": "b7936d3a44d54c5f90a165cb2b24e411",
+        "status": "active",
+        "created_at": "2026-05-15T21:53:32",
+        "updated_at": "2026-05-15T21:53:32"
+      },
+      "source_id": "source_22c3e8e8a4a11b59",
+      "chunk_count": 1,
+      "chunks_path": "D:\\AI\\omniauto\\apps\\wechat_ai_customer_service\\data\\tenants\\default\\rag_chunks\\source_22c3e8e8a4a11b59.json",
+      "index": {
+        "ok": true,
+        "index_path": "D:\\AI\\omniauto\\apps\\wechat_ai_customer_service\\data\\tenants\\default\\rag_index\\index.json",
+        "entry_count": 252
+      }
+    },
+    "rag_experience_id": "rag_exp_553aeb870ee9e1c0194d",
+    "strict_promotion_policy": "rag_experience_manual_promotion_only",
+    "updated_at": "2026-05-15T21:54:47"
+  },
+  {
+    "batch_id": "raw_batch_45c663bffca6dc2b2319",
+    "tenant_id": "default",
+    "conversation_id": "conv_6a6c8916a9e214148a",
+    "message_ids": [
+      "raw_msg_3cfd389d4fa2ecd1716f",
+      "raw_msg_406ab4b42556d9a8b4d2",
+      "raw_msg_424be0c3f1a37bedd3c1"
+    ],
+    "reason": "customer_service_poll",
+    "source_module": "customer_service",
+    "status": "processed",
+    "created_at": "2026-05-15T21:35:07",
+    "processed_at": "2026-05-15T21:52:58",
+    "transcript_path": "D:\\AI\\omniauto\\runtime\\apps\\wechat_ai_customer_service\\tenants\\default\\raw_messages\\learning_batches\\raw_batch_45c663bffca6dc2b2319.txt",
+    "candidate_ids": [],
+    "candidate_count": 0,
+    "skipped_duplicate_count": 0,
+    "skipped_duplicates": [],
+    "skipped_source_policy_count": 0,
+    "skipped_source_policy": [],
+    "llm_assist_policy": {
+      "policy_version": "knowledge_llm_assist_v1",
+      "stage": "raw_wechat_message_to_rag_experience_review",
+      "requested": true,
+      "rule_fallback_allowed": true,
+      "human_approval_required": true,
+      "strict_promotion_policy": "raw WeChat messages create RAG experiences only; pending candidates require manual RAG promotion"
+    },
+    "rag_ingest": {
+      "ok": true,
+      "source": {
+        "source_id": "source_063108639f26b8e4",
+        "tenant_id": "default",
+        "layer": "tenant",
+        "source_type": "wechat_raw_message",
+        "category": "file_transfer",
+        "product_id": "",
+        "source_path": "D:\\AI\\omniauto\\runtime\\apps\\wechat_ai_customer_service\\tenants\\default\\raw_messages\\learning_batches\\raw_batch_45c663bffca6dc2b2319.txt",
+        "content_hash": "6a5ee7c19d2233404d8c581ddd633a26",
+        "status": "active",
+        "created_at": "2026-05-15T21:51:40",
+        "updated_at": "2026-05-15T21:51:40"
+      },
+      "source_id": "source_063108639f26b8e4",
+      "chunk_count": 1,
+      "chunks_path": "D:\\AI\\omniauto\\apps\\wechat_ai_customer_service\\data\\tenants\\default\\rag_chunks\\source_063108639f26b8e4.json",
+      "index": {
+        "ok": true,
+        "index_path": "D:\\AI\\omniauto\\apps\\wechat_ai_customer_service\\data\\tenants\\default\\rag_index\\index.json",
+        "entry_count": 251
+      }
+    },
+    "rag_experience_id": "rag_exp_8c66565076b36b0c2c33",
+    "strict_promotion_policy": "rag_experience_manual_promotion_only",
+    "updated_at": "2026-05-15T21:52:58"
+  },
+  {
+    "batch_id": "raw_batch_210f6342217d8338b6d7",
+    "tenant_id": "default",
+    "conversation_id": "conv_6a6c8916a9e214148a",
+    "message_ids": [
+      "raw_msg_974e7e5362602b0f8d22",
+      "raw_msg_f09e6c605cce25f8d27c"
+    ],
+    "reason": "customer_service_poll",
+    "source_module": "customer_service",
+    "status": "processed",
+    "created_at": "2026-05-15T21:34:27",
+    "processed_at": "2026-05-15T21:51:40",
+    "transcript_path": "D:\\AI\\omniauto\\runtime\\apps\\wechat_ai_customer_service\\tenants\\default\\raw_messages\\learning_batches\\raw_batch_210f6342217d8338b6d7.txt",
+    "candidate_ids": [],
+    "candidate_count": 0,
+    "skipped_duplicate_count": 0,
+    "skipped_duplicates": [],
+    "skipped_source_policy_count": 0,
+    "skipped_source_policy": [],
+    "llm_assist_policy": {
+      "policy_version": "knowledge_llm_assist_v1",
+      "stage": "raw_wechat_message_to_rag_experience_review",
+      "requested": true,
+      "rule_fallback_allowed": true,
+      "human_approval_required": true,
+      "strict_promotion_policy": "raw WeChat messages create RAG experiences only; pending candidates require manual RAG promotion"
+    },
+    "rag_ingest": {
+      "ok": true,
+      "source": {
+        "source_id": "source_51402c7bbe6a77ac",
+        "tenant_id": "default",
+        "layer": "tenant",
+        "source_type": "wechat_raw_message",
+        "category": "file_transfer",
+        "product_id": "",
+        "source_path": "D:\\AI\\omniauto\\runtime\\apps\\wechat_ai_customer_service\\tenants\\default\\raw_messages\\learning_batches\\raw_batch_210f6342217d8338b6d7.txt",
+        "content_hash": "822f1c3dc86e54fff8421b2057559e45",
+        "status": "active",
+        "created_at": "2026-05-15T21:50:26",
+        "updated_at": "2026-05-15T21:50:26"
+      },
+      "source_id": "source_51402c7bbe6a77ac",
+      "chunk_count": 1,
+      "chunks_path": "D:\\AI\\omniauto\\apps\\wechat_ai_customer_service\\data\\tenants\\default\\rag_chunks\\source_51402c7bbe6a77ac.json",
+      "index": {
+        "ok": true,
+        "index_path": "D:\\AI\\omniauto\\apps\\wechat_ai_customer_service\\data\\tenants\\default\\rag_index\\index.json",
+        "entry_count": 250
+      }
+    },
+    "rag_experience_id": "rag_exp_41dd186ce8b053d89dde",
+    "strict_promotion_policy": "rag_experience_manual_promotion_only",
+    "updated_at": "2026-05-15T21:51:40"
+  },
+  {
+    "batch_id": "raw_batch_8611ea1c52e7ecfbefc3",
+    "tenant_id": "default",
+    "conversation_id": "conv_6a6c8916a9e214148a",
+    "message_ids": [
+      "raw_msg_b86871913c041c1124ce",
+      "raw_msg_1f5ea42b96428b778c6a"
+    ],
+    "reason": "customer_service_poll",
+    "source_module": "customer_service",
+    "status": "processed",
+    "created_at": "2026-05-15T21:33:58",
+    "processed_at": "2026-05-15T21:49:52",
+    "transcript_path": "D:\\AI\\omniauto\\runtime\\apps\\wechat_ai_customer_service\\tenants\\default\\raw_messages\\learning_batches\\raw_batch_8611ea1c52e7ecfbefc3.txt",
+    "candidate_ids": [],
+    "candidate_count": 0,
+    "skipped_duplicate_count": 0,
+    "skipped_duplicates": [],
+    "skipped_source_policy_count": 0,
+    "skipped_source_policy": [],
+    "llm_assist_policy": {
+      "policy_version": "knowledge_llm_assist_v1",
+      "stage": "raw_wechat_message_to_rag_experience_review",
+      "requested": true,
+      "rule_fallback_allowed": true,
+      "human_approval_required": true,
+      "strict_promotion_policy": "raw WeChat messages create RAG experiences only; pending candidates require manual RAG promotion"
+    },
+    "rag_ingest": {
+      "ok": true,
+      "source": {
+        "source_id": "source_f2752db49e5e30e6",
+        "tenant_id": "default",
+        "layer": "tenant",
+        "source_type": "wechat_raw_message",
+        "category": "file_transfer",
+        "product_id": "",
+        "source_path": "D:\\AI\\omniauto\\runtime\\apps\\wechat_ai_customer_service\\tenants\\default\\raw_messages\\learning_batches\\raw_batch_8611ea1c52e7ecfbefc3.txt",
+        "content_hash": "252306dc73d07f0d945802a56a84c6ee",
+        "status": "active",
+        "created_at": "2026-05-15T21:48:36",
+        "updated_at": "2026-05-15T21:48:36"
+      },
+      "source_id": "source_f2752db49e5e30e6",
+      "chunk_count": 1,
+      "chunks_path": "D:\\AI\\omniauto\\apps\\wechat_ai_customer_service\\data\\tenants\\default\\rag_chunks\\source_f2752db49e5e30e6.json",
+      "index": {
+        "ok": true,
+        "index_path": "D:\\AI\\omniauto\\apps\\wechat_ai_customer_service\\data\\tenants\\default\\rag_index\\index.json",
+        "entry_count": 249
+      }
+    },
+    "rag_experience_id": "rag_exp_5535a98e267015fb44a2",
+    "strict_promotion_policy": "rag_experience_manual_promotion_only",
+    "updated_at": "2026-05-15T21:49:52"
+  },
+  {
+    "batch_id": "raw_batch_8a6fadb6b7f64329d3e9",
+    "tenant_id": "default",
+    "conversation_id": "conv_6a6c8916a9e214148a",
+    "message_ids": [
+      "raw_msg_85e845edee573a3f2303"
+    ],
+    "reason": "customer_service_poll",
+    "source_module": "customer_service",
+    "status": "processed",
+    "created_at": "2026-05-15T21:33:09",
+    "processed_at": "2026-05-15T21:48:36",
+    "transcript_path": "D:\\AI\\omniauto\\runtime\\apps\\wechat_ai_customer_service\\tenants\\default\\raw_messages\\learning_batches\\raw_batch_8a6fadb6b7f64329d3e9.txt",
+    "candidate_ids": [],
+    "candidate_count": 0,
+    "skipped_duplicate_count": 0,
+    "skipped_duplicates": [],
+    "skipped_source_policy_count": 0,
+    "skipped_source_policy": [],
+    "llm_assist_policy": {
+      "policy_version": "knowledge_llm_assist_v1",
+      "stage": "raw_wechat_message_to_rag_experience_review",
+      "requested": true,
+      "rule_fallback_allowed": true,
+      "human_approval_required": true,
+      "strict_promotion_policy": "raw WeChat messages create RAG experiences only; pending candidates require manual RAG promotion"
+    },
+    "rag_ingest": {
+      "ok": true,
+      "source": {
+        "source_id": "source_87a8c220cc635640",
+        "tenant_id": "default",
+        "layer": "tenant",
+        "source_type": "wechat_raw_message",
+        "category": "file_transfer",
+        "product_id": "",
+        "source_path": "D:\\AI\\omniauto\\runtime\\apps\\wechat_ai_customer_service\\tenants\\default\\raw_messages\\learning_batches\\raw_batch_8a6fadb6b7f64329d3e9.txt",
+        "content_hash": "e28d827c0832177754e540a536a5cbe5",
+        "status": "active",
+        "created_at": "2026-05-15T21:47:19",
+        "updated_at": "2026-05-15T21:47:19"
+      },
+      "source_id": "source_87a8c220cc635640",
+      "chunk_count": 1,
+      "chunks_path": "D:\\AI\\omniauto\\apps\\wechat_ai_customer_service\\data\\tenants\\default\\rag_chunks\\source_87a8c220cc635640.json",
+      "index": {
+        "ok": true,
+        "index_path": "D:\\AI\\omniauto\\apps\\wechat_ai_customer_service\\data\\tenants\\default\\rag_index\\index.json",
+        "entry_count": 248
+      }
+    },
+    "rag_experience_id": "rag_exp_516646d1c5ec88e62076",
+    "strict_promotion_policy": "rag_experience_manual_promotion_only",
+    "updated_at": "2026-05-15T21:48:36"
+  },
+  {
+    "batch_id": "raw_batch_4f69d20ed263f0a843b5",
+    "tenant_id": "default",
+    "conversation_id": "conv_6a6c8916a9e214148a",
+    "message_ids": [
+      "raw_msg_4e9c8d5be7a62e6de826",
+      "raw_msg_0ac6abb2389a9a363604"
+    ],
+    "reason": "customer_service_poll",
+    "source_module": "customer_service",
+    "status": "processed",
+    "created_at": "2026-05-15T21:31:42",
+    "processed_at": "2026-05-15T21:46:45",
+    "transcript_path": "D:\\AI\\omniauto\\runtime\\apps\\wechat_ai_customer_service\\tenants\\default\\raw_messages\\learning_batches\\raw_batch_4f69d20ed263f0a843b5.txt",
+    "candidate_ids": [],
+    "candidate_count": 0,
+    "skipped_duplicate_count": 0,
+    "skipped_duplicates": [],
+    "skipped_source_policy_count": 0,
+    "skipped_source_policy": [],
+    "llm_assist_policy": {
+      "policy_version": "knowledge_llm_assist_v1",
+      "stage": "raw_wechat_message_to_rag_experience_review",
+      "requested": true,
+      "rule_fallback_allowed": true,
+      "human_approval_required": true,
+      "strict_promotion_policy": "raw WeChat messages create RAG experiences only; pending candidates require manual RAG promotion"
+    },
+    "rag_ingest": {
+      "ok": true,
+      "source": {
+        "source_id": "source_f84e84ad43721b3c",
+        "tenant_id": "default",
+        "layer": "tenant",
+        "source_type": "wechat_raw_message",
+        "category": "file_transfer",
+        "product_id": "",
+        "source_path": "D:\\AI\\omniauto\\runtime\\apps\\wechat_ai_customer_service\\tenants\\default\\raw_messages\\learning_batches\\raw_batch_4f69d20ed263f0a843b5.txt",
+        "content_hash": "c3bc7cc74b7fd5b9cff0acc0b87e29ba",
+        "status": "active",
+        "created_at": "2026-05-15T21:45:59",
+        "updated_at": "2026-05-15T21:45:59"
+      },
+      "source_id": "source_f84e84ad43721b3c",
+      "chunk_count": 1,
+      "chunks_path": "D:\\AI\\omniauto\\apps\\wechat_ai_customer_service\\data\\tenants\\default\\rag_chunks\\source_f84e84ad43721b3c.json",
+      "index": {
+        "ok": true,
+        "index_path": "D:\\AI\\omniauto\\apps\\wechat_ai_customer_service\\data\\tenants\\default\\rag_index\\index.json",
+        "entry_count": 247
+      }
+    },
+    "rag_experience_id": "rag_exp_4587c3da6204320e32c1",
+    "strict_promotion_policy": "rag_experience_manual_promotion_only",
+    "updated_at": "2026-05-15T21:46:45"
+  },
+  {
+    "batch_id": "raw_batch_24969ed25a0e85863d34",
+    "tenant_id": "default",
+    "conversation_id": "conv_6a6c8916a9e214148a",
+    "message_ids": [
+      "raw_msg_3c6e67292860b026aba6",
+      "raw_msg_7230b470e194b04c1b99"
+    ],
+    "reason": "customer_service_poll",
+    "source_module": "customer_service",
+    "status": "processed",
+    "created_at": "2026-05-15T21:30:47",
+    "processed_at": "2026-05-15T21:45:59",
+    "transcript_path": "D:\\AI\\omniauto\\runtime\\apps\\wechat_ai_customer_service\\tenants\\default\\raw_messages\\learning_batches\\raw_batch_24969ed25a0e85863d34.txt",
+    "candidate_ids": [],
+    "candidate_count": 0,
+    "skipped_duplicate_count": 0,
+    "skipped_duplicates": [],
+    "skipped_source_policy_count": 0,
+    "skipped_source_policy": [],
+    "llm_assist_policy": {
+      "policy_version": "knowledge_llm_assist_v1",
+      "stage": "raw_wechat_message_to_rag_experience_review",
+      "requested": true,
+      "rule_fallback_allowed": true,
+      "human_approval_required": true,
+      "strict_promotion_policy": "raw WeChat messages create RAG experiences only; pending candidates require manual RAG promotion"
+    },
+    "rag_ingest": {
+      "ok": true,
+      "source": {
+        "source_id": "source_31391cb34ba8b2d5",
+        "tenant_id": "default",
+        "layer": "tenant",
+        "source_type": "wechat_raw_message",
+        "category": "file_transfer",
+        "product_id": "",
+        "source_path": "D:\\AI\\omniauto\\runtime\\apps\\wechat_ai_customer_service\\tenants\\default\\raw_messages\\learning_batches\\raw_batch_24969ed25a0e85863d34.txt",
+        "content_hash": "1ce3a80b224f63f4ade2db81cef4c72e",
+        "status": "active",
+        "created_at": "2026-05-15T21:45:12",
+        "updated_at": "2026-05-15T21:45:12"
+      },
+      "source_id": "source_31391cb34ba8b2d5",
+      "chunk_count": 1,
+      "chunks_path": "D:\\AI\\omniauto\\apps\\wechat_ai_customer_service\\data\\tenants\\default\\rag_chunks\\source_31391cb34ba8b2d5.json",
+      "index": {
+        "ok": true,
+        "index_path": "D:\\AI\\omniauto\\apps\\wechat_ai_customer_service\\data\\tenants\\default\\rag_index\\index.json",
+        "entry_count": 246
+      }
+    },
+    "rag_experience_id": "rag_exp_5528e1e9e45d675b064a",
+    "strict_promotion_policy": "rag_experience_manual_promotion_only",
+    "updated_at": "2026-05-15T21:45:59"
+  },
+  {
+    "batch_id": "raw_batch_4dbc29db195f01bc6aee",
+    "tenant_id": "default",
+    "conversation_id": "conv_6a6c8916a9e214148a",
+    "message_ids": [
+      "raw_msg_f3c7217d8953e191ce1d",
+      "raw_msg_56722cd8d67d7da5af0c",
+      "raw_msg_a917baae96cdd0181df9"
+    ],
+    "reason": "customer_service_poll",
+    "source_module": "customer_service",
+    "status": "processed",
+    "created_at": "2026-05-15T21:29:29",
+    "processed_at": "2026-05-15T21:44:39",
+    "transcript_path": "D:\\AI\\omniauto\\runtime\\apps\\wechat_ai_customer_service\\tenants\\default\\raw_messages\\learning_batches\\raw_batch_4dbc29db195f01bc6aee.txt",
+    "candidate_ids": [],
+    "candidate_count": 0,
+    "skipped_duplicate_count": 0,
+    "skipped_duplicates": [],
+    "skipped_source_policy_count": 0,
+    "skipped_source_policy": [],
+    "llm_assist_policy": {
+      "policy_version": "knowledge_llm_assist_v1",
+      "stage": "raw_wechat_message_to_rag_experience_review",
+      "requested": true,
+      "rule_fallback_allowed": true,
+      "human_approval_required": true,
+      "strict_promotion_policy": "raw WeChat messages create RAG experiences only; pending candidates require manual RAG promotion"
+    },
+    "rag_ingest": {
+      "ok": true,
+      "source": {
+        "source_id": "source_769d3c2d62dcdfb9",
+        "tenant_id": "default",
+        "layer": "tenant",
+        "source_type": "wechat_raw_message",
+        "category": "file_transfer",
+        "product_id": "",
+        "source_path": "D:\\AI\\omniauto\\runtime\\apps\\wechat_ai_customer_service\\tenants\\default\\raw_messages\\learning_batches\\raw_batch_4dbc29db195f01bc6aee.txt",
+        "content_hash": "ff11b46b48e6797194789dac262e802a",
+        "status": "active",
+        "created_at": "2026-05-15T21:43:12",
+        "updated_at": "2026-05-15T21:43:12"
+      },
+      "source_id": "source_769d3c2d62dcdfb9",
+      "chunk_count": 1,
+      "chunks_path": "D:\\AI\\omniauto\\apps\\wechat_ai_customer_service\\data\\tenants\\default\\rag_chunks\\source_769d3c2d62dcdfb9.json",
+      "index": {
+        "ok": true,
+        "index_path": "D:\\AI\\omniauto\\apps\\wechat_ai_customer_service\\data\\tenants\\default\\rag_index\\index.json",
+        "entry_count": 245
+      }
+    },
+    "rag_experience_id": "rag_exp_baaff432b45236fcbd42",
+    "strict_promotion_policy": "rag_experience_manual_promotion_only",
+    "updated_at": "2026-05-15T21:44:39"
+  },
+  {
+    "batch_id": "raw_batch_02da38df7e21eb333740",
+    "tenant_id": "default",
+    "conversation_id": "conv_6a6c8916a9e214148a",
+    "message_ids": [
+      "raw_msg_74bf497ca75d83958b29",
+      "raw_msg_19c1bb592d584df6af97"
+    ],
+    "reason": "customer_service_poll",
+    "source_module": "customer_service",
+    "status": "processed",
+    "created_at": "2026-05-15T21:28:08",
+    "processed_at": "2026-05-15T21:43:12",
+    "transcript_path": "D:\\AI\\omniauto\\runtime\\apps\\wechat_ai_customer_service\\tenants\\default\\raw_messages\\learning_batches\\raw_batch_02da38df7e21eb333740.txt",
+    "candidate_ids": [],
+    "candidate_count": 0,
+    "skipped_duplicate_count": 0,
+    "skipped_duplicates": [],
+    "skipped_source_policy_count": 0,
+    "skipped_source_policy": [],
+    "llm_assist_policy": {
+      "policy_version": "knowledge_llm_assist_v1",
+      "stage": "raw_wechat_message_to_rag_experience_review",
+      "requested": true,
+      "rule_fallback_allowed": true,
+      "human_approval_required": true,
+      "strict_promotion_policy": "raw WeChat messages create RAG experiences only; pending candidates require manual RAG promotion"
+    },
+    "rag_ingest": {
+      "ok": true,
+      "source": {
+        "source_id": "source_bf5dfac409682964",
+        "tenant_id": "default",
+        "layer": "tenant",
+        "source_type": "wechat_raw_message",
+        "category": "file_transfer",
+        "product_id": "",
+        "source_path": "D:\\AI\\omniauto\\runtime\\apps\\wechat_ai_customer_service\\tenants\\default\\raw_messages\\learning_batches\\raw_batch_02da38df7e21eb333740.txt",
+        "content_hash": "59cbeecc9609c35a107b0e9d8b4390c7",
+        "status": "active",
+        "created_at": "2026-05-15T21:41:27",
+        "updated_at": "2026-05-15T21:41:27"
+      },
+      "source_id": "source_bf5dfac409682964",
+      "chunk_count": 1,
+      "chunks_path": "D:\\AI\\omniauto\\apps\\wechat_ai_customer_service\\data\\tenants\\default\\rag_chunks\\source_bf5dfac409682964.json",
+      "index": {
+        "ok": true,
+        "index_path": "D:\\AI\\omniauto\\apps\\wechat_ai_customer_service\\data\\tenants\\default\\rag_index\\index.json",
+        "entry_count": 244
+      }
+    },
+    "rag_experience_id": "rag_exp_b02bf4cc4855c1bb359c",
+    "strict_promotion_policy": "rag_experience_manual_promotion_only",
+    "updated_at": "2026-05-15T21:43:12"
+  },
+  {
+    "batch_id": "raw_batch_11472d2e7749ff86b2bf",
+    "tenant_id": "default",
+    "conversation_id": "conv_6a6c8916a9e214148a",
+    "message_ids": [
+      "raw_msg_c8de5aa61bac977d7214",
+      "raw_msg_f91be05ef876b9b51db8"
+    ],
+    "reason": "customer_service_poll",
+    "source_module": "customer_service",
+    "status": "processed",
+    "created_at": "2026-05-15T21:27:42",
+    "processed_at": "2026-05-15T21:40:43",
+    "transcript_path": "D:\\AI\\omniauto\\runtime\\apps\\wechat_ai_customer_service\\tenants\\default\\raw_messages\\learning_batches\\raw_batch_11472d2e7749ff86b2bf.txt",
+    "candidate_ids": [],
+    "candidate_count": 0,
+    "skipped_duplicate_count": 0,
+    "skipped_duplicates": [],
+    "skipped_source_policy_count": 0,
+    "skipped_source_policy": [],
+    "llm_assist_policy": {
+      "policy_version": "knowledge_llm_assist_v1",
+      "stage": "raw_wechat_message_to_rag_experience_review",
+      "requested": true,
+      "rule_fallback_allowed": true,
+      "human_approval_required": true,
+      "strict_promotion_policy": "raw WeChat messages create RAG experiences only; pending candidates require manual RAG promotion"
+    },
+    "rag_ingest": {
+      "ok": true,
+      "source": {
+        "source_id": "source_96d76b68cb9a22f3",
+        "tenant_id": "default",
+        "layer": "tenant",
+        "source_type": "wechat_raw_message",
+        "category": "file_transfer",
+        "product_id": "",
+        "source_path": "D:\\AI\\omniauto\\runtime\\apps\\wechat_ai_customer_service\\tenants\\default\\raw_messages\\learning_batches\\raw_batch_11472d2e7749ff86b2bf.txt",
+        "content_hash": "1e2aad2e760f840b929b80152a3f3e67",
+        "status": "active",
+        "created_at": "2026-05-15T21:38:58",
+        "updated_at": "2026-05-15T21:38:58"
+      },
+      "source_id": "source_96d76b68cb9a22f3",
+      "chunk_count": 1,
+      "chunks_path": "D:\\AI\\omniauto\\apps\\wechat_ai_customer_service\\data\\tenants\\default\\rag_chunks\\source_96d76b68cb9a22f3.json",
+      "index": {
+        "ok": true,
+        "index_path": "D:\\AI\\omniauto\\apps\\wechat_ai_customer_service\\data\\tenants\\default\\rag_index\\index.json",
+        "entry_count": 243
+      }
+    },
+    "rag_experience_id": "rag_exp_2a7da08ae8f23a10f4fc",
+    "strict_promotion_policy": "rag_experience_manual_promotion_only",
+    "updated_at": "2026-05-15T21:40:43"
+  },
+  {
+    "batch_id": "raw_batch_bf5909310bafa510b4ab",
+    "tenant_id": "default",
+    "conversation_id": "conv_6a6c8916a9e214148a",
+    "message_ids": [
+      "raw_msg_f559107413e32eb10a51",
+      "raw_msg_d4acf57fd5232f8a8d19"
+    ],
+    "reason": "customer_service_poll",
+    "source_module": "customer_service",
+    "status": "processed",
+    "created_at": "2026-05-15T21:27:24",
+    "processed_at": "2026-05-15T21:38:58",
+    "transcript_path": "D:\\AI\\omniauto\\runtime\\apps\\wechat_ai_customer_service\\tenants\\default\\raw_messages\\learning_batches\\raw_batch_bf5909310bafa510b4ab.txt",
+    "candidate_ids": [],
+    "candidate_count": 0,
+    "skipped_duplicate_count": 0,
+    "skipped_duplicates": [],
+    "skipped_source_policy_count": 0,
+    "skipped_source_policy": [],
+    "llm_assist_policy": {
+      "policy_version": "knowledge_llm_assist_v1",
+      "stage": "raw_wechat_message_to_rag_experience_review",
+      "requested": true,
+      "rule_fallback_allowed": true,
+      "human_approval_required": true,
+      "strict_promotion_policy": "raw WeChat messages create RAG experiences only; pending candidates require manual RAG promotion"
+    },
+    "rag_ingest": {
+      "ok": true,
+      "source": {
+        "source_id": "source_2eeefdd95437899f",
+        "tenant_id": "default",
+        "layer": "tenant",
+        "source_type": "wechat_raw_message",
+        "category": "file_transfer",
+        "product_id": "",
+        "source_path": "D:\\AI\\omniauto\\runtime\\apps\\wechat_ai_customer_service\\tenants\\default\\raw_messages\\learning_batches\\raw_batch_bf5909310bafa510b4ab.txt",
+        "content_hash": "8707966519795de64078880038ee9947",
+        "status": "active",
+        "created_at": "2026-05-15T21:37:17",
+        "updated_at": "2026-05-15T21:37:17"
+      },
+      "source_id": "source_2eeefdd95437899f",
+      "chunk_count": 1,
+      "chunks_path": "D:\\AI\\omniauto\\apps\\wechat_ai_customer_service\\data\\tenants\\default\\rag_chunks\\source_2eeefdd95437899f.json",
+      "index": {
+        "ok": true,
+        "index_path": "D:\\AI\\omniauto\\apps\\wechat_ai_customer_service\\data\\tenants\\default\\rag_index\\index.json",
+        "entry_count": 242
+      }
+    },
+    "rag_experience_id": "rag_exp_6d17c462ab6f0ea6cb45",
+    "strict_promotion_policy": "rag_experience_manual_promotion_only",
+    "updated_at": "2026-05-15T21:38:58"
+  },
+  {
+    "batch_id": "raw_batch_5db7fa5a8960ae7ee17a",
+    "tenant_id": "default",
+    "conversation_id": "conv_6a6c8916a9e214148a",
+    "message_ids": [
+      "raw_msg_3b77230c8753af469379"
+    ],
+    "reason": "customer_service_poll",
+    "source_module": "customer_service",
+    "status": "processed",
+    "created_at": "2026-05-15T21:26:43",
+    "processed_at": "2026-05-15T21:36:32",
+    "transcript_path": "D:\\AI\\omniauto\\runtime\\apps\\wechat_ai_customer_service\\tenants\\default\\raw_messages\\learning_batches\\raw_batch_5db7fa5a8960ae7ee17a.txt",
+    "candidate_ids": [],
+    "candidate_count": 0,
+    "skipped_duplicate_count": 0,
+    "skipped_duplicates": [],
+    "skipped_source_policy_count": 0,
+    "skipped_source_policy": [],
+    "llm_assist_policy": {
+      "policy_version": "knowledge_llm_assist_v1",
+      "stage": "raw_wechat_message_to_rag_experience_review",
+      "requested": true,
+      "rule_fallback_allowed": true,
+      "human_approval_required": true,
+      "strict_promotion_policy": "raw WeChat messages create RAG experiences only; pending candidates require manual RAG promotion"
+    },
+    "rag_ingest": {
+      "ok": true,
+      "source": {
+        "source_id": "source_179c642b0a0bd9f5",
+        "tenant_id": "default",
+        "layer": "tenant",
+        "source_type": "wechat_raw_message",
+        "category": "file_transfer",
+        "product_id": "",
+        "source_path": "D:\\AI\\omniauto\\runtime\\apps\\wechat_ai_customer_service\\tenants\\default\\raw_messages\\learning_batches\\raw_batch_5db7fa5a8960ae7ee17a.txt",
+        "content_hash": "9e0c9197618b3d538c9d9ad881a00f23",
+        "status": "active",
+        "created_at": "2026-05-15T21:35:36",
+        "updated_at": "2026-05-15T21:35:36"
+      },
+      "source_id": "source_179c642b0a0bd9f5",
+      "chunk_count": 1,
+      "chunks_path": "D:\\AI\\omniauto\\apps\\wechat_ai_customer_service\\data\\tenants\\default\\rag_chunks\\source_179c642b0a0bd9f5.json",
+      "index": {
+        "ok": true,
+        "index_path": "D:\\AI\\omniauto\\apps\\wechat_ai_customer_service\\data\\tenants\\default\\rag_index\\index.json",
+        "entry_count": 241
+      }
+    },
+    "rag_experience_id": "rag_exp_5497b10f55848bfddfbc",
+    "strict_promotion_policy": "rag_experience_manual_promotion_only",
+    "updated_at": "2026-05-15T21:36:32"
+  },
+  {
+    "batch_id": "raw_batch_f0c40d06e39a92703999",
+    "tenant_id": "default",
+    "conversation_id": "conv_6a6c8916a9e214148a",
+    "message_ids": [
+      "raw_msg_72c3d6ca961b1495ada6"
+    ],
+    "reason": "customer_service_poll",
+    "source_module": "customer_service",
+    "status": "processed",
+    "created_at": "2026-05-15T21:25:25",
+    "processed_at": "2026-05-15T21:35:36",
+    "transcript_path": "D:\\AI\\omniauto\\runtime\\apps\\wechat_ai_customer_service\\tenants\\default\\raw_messages\\learning_batches\\raw_batch_f0c40d06e39a92703999.txt",
+    "candidate_ids": [],
+    "candidate_count": 0,
+    "skipped_duplicate_count": 0,
+    "skipped_duplicates": [],
+    "skipped_source_policy_count": 0,
+    "skipped_source_policy": [],
+    "llm_assist_policy": {
+      "policy_version": "knowledge_llm_assist_v1",
+      "stage": "raw_wechat_message_to_rag_experience_review",
+      "requested": true,
+      "rule_fallback_allowed": true,
+      "human_approval_required": true,
+      "strict_promotion_policy": "raw WeChat messages create RAG experiences only; pending candidates require manual RAG promotion"
+    },
+    "rag_ingest": {
+      "ok": true,
+      "source": {
+        "source_id": "source_b28b1e8838bcc80d",
+        "tenant_id": "default",
+        "layer": "tenant",
+        "source_type": "wechat_raw_message",
+        "category": "file_transfer",
+        "product_id": "",
+        "source_path": "D:\\AI\\omniauto\\runtime\\apps\\wechat_ai_customer_service\\tenants\\default\\raw_messages\\learning_batches\\raw_batch_f0c40d06e39a92703999.txt",
+        "content_hash": "03675750926bc7afc1163693408e2949",
+        "status": "active",
+        "created_at": "2026-05-15T21:34:42",
+        "updated_at": "2026-05-15T21:34:42"
+      },
+      "source_id": "source_b28b1e8838bcc80d",
+      "chunk_count": 1,
+      "chunks_path": "D:\\AI\\omniauto\\apps\\wechat_ai_customer_service\\data\\tenants\\default\\rag_chunks\\source_b28b1e8838bcc80d.json",
+      "index": {
+        "ok": true,
+        "index_path": "D:\\AI\\omniauto\\apps\\wechat_ai_customer_service\\data\\tenants\\default\\rag_index\\index.json",
+        "entry_count": 240
+      }
+    },
+    "rag_experience_id": "rag_exp_45d8655a12f0e89b9081",
+    "strict_promotion_policy": "rag_experience_manual_promotion_only",
+    "updated_at": "2026-05-15T21:35:36"
+  },
+  {
+    "batch_id": "raw_batch_f23854d7bc52c36658f0",
+    "tenant_id": "default",
+    "conversation_id": "conv_6a6c8916a9e214148a",
+    "message_ids": [
+      "raw_msg_f7ccde2b2463203a34e5",
+      "raw_msg_8510505dfa6efa733d8d"
+    ],
+    "reason": "customer_service_poll",
+    "source_module": "customer_service",
+    "status": "processed",
+    "created_at": "2026-05-15T21:23:54",
+    "processed_at": "2026-05-15T21:33:57",
+    "transcript_path": "D:\\AI\\omniauto\\runtime\\apps\\wechat_ai_customer_service\\tenants\\default\\raw_messages\\learning_batches\\raw_batch_f23854d7bc52c36658f0.txt",
+    "candidate_ids": [],
+    "candidate_count": 0,
+    "skipped_duplicate_count": 0,
+    "skipped_duplicates": [],
+    "skipped_source_policy_count": 0,
+    "skipped_source_policy": [],
+    "llm_assist_policy": {
+      "policy_version": "knowledge_llm_assist_v1",
+      "stage": "raw_wechat_message_to_rag_experience_review",
+      "requested": true,
+      "rule_fallback_allowed": true,
+      "human_approval_required": true,
+      "strict_promotion_policy": "raw WeChat messages create RAG experiences only; pending candidates require manual RAG promotion"
+    },
+    "rag_ingest": {
+      "ok": true,
+      "source": {
+        "source_id": "source_df92c95fb78dc2ed",
+        "tenant_id": "default",
+        "layer": "tenant",
+        "source_type": "wechat_raw_message",
+        "category": "file_transfer",
+        "product_id": "",
+        "source_path": "D:\\AI\\omniauto\\runtime\\apps\\wechat_ai_customer_service\\tenants\\default\\raw_messages\\learning_batches\\raw_batch_f23854d7bc52c36658f0.txt",
+        "content_hash": "cb5221a43cd1e8cd918acfc275cc3e28",
+        "status": "active",
+        "created_at": "2026-05-15T21:32:20",
+        "updated_at": "2026-05-15T21:32:20"
+      },
+      "source_id": "source_df92c95fb78dc2ed",
+      "chunk_count": 1,
+      "chunks_path": "D:\\AI\\omniauto\\apps\\wechat_ai_customer_service\\data\\tenants\\default\\rag_chunks\\source_df92c95fb78dc2ed.json",
+      "index": {
+        "ok": true,
+        "index_path": "D:\\AI\\omniauto\\apps\\wechat_ai_customer_service\\data\\tenants\\default\\rag_index\\index.json",
+        "entry_count": 239
+      }
+    },
+    "rag_experience_id": "rag_exp_2b8abb1d0f2caef5bbe5",
+    "strict_promotion_policy": "rag_experience_manual_promotion_only",
+    "updated_at": "2026-05-15T21:33:57"
+  },
+  {
+    "batch_id": "raw_batch_95e14cb204357d37b5dd",
+    "tenant_id": "default",
+    "conversation_id": "conv_6a6c8916a9e214148a",
+    "message_ids": [
+      "raw_msg_81d37e0396ffaa76d585",
+      "raw_msg_223b00703c851386d7a7",
+      "raw_msg_f909d0222be118decb41"
+    ],
+    "reason": "customer_service_poll",
+    "source_module": "customer_service",
+    "status": "processed",
+    "created_at": "2026-05-15T21:23:24",
+    "processed_at": "2026-05-15T21:32:20",
+    "transcript_path": "D:\\AI\\omniauto\\runtime\\apps\\wechat_ai_customer_service\\tenants\\default\\raw_messages\\learning_batches\\raw_batch_95e14cb204357d37b5dd.txt",
+    "candidate_ids": [],
+    "candidate_count": 0,
+    "skipped_duplicate_count": 0,
+    "skipped_duplicates": [],
+    "skipped_source_policy_count": 0,
+    "skipped_source_policy": [],
+    "llm_assist_policy": {
+      "policy_version": "knowledge_llm_assist_v1",
+      "stage": "raw_wechat_message_to_rag_experience_review",
+      "requested": true,
+      "rule_fallback_allowed": true,
+      "human_approval_required": true,
+      "strict_promotion_policy": "raw WeChat messages create RAG experiences only; pending candidates require manual RAG promotion"
+    },
+    "rag_ingest": {
+      "ok": true,
+      "source": {
+        "source_id": "source_f2107d1b77e30e62",
+        "tenant_id": "default",
+        "layer": "tenant",
+        "source_type": "wechat_raw_message",
+        "category": "file_transfer",
+        "product_id": "",
+        "source_path": "D:\\AI\\omniauto\\runtime\\apps\\wechat_ai_customer_service\\tenants\\default\\raw_messages\\learning_batches\\raw_batch_95e14cb204357d37b5dd.txt",
+        "content_hash": "9244c494ecad52d57606f4f1140bc0c4",
+        "status": "active",
+        "created_at": "2026-05-15T21:30:46",
+        "updated_at": "2026-05-15T21:30:46"
+      },
+      "source_id": "source_f2107d1b77e30e62",
+      "chunk_count": 1,
+      "chunks_path": "D:\\AI\\omniauto\\apps\\wechat_ai_customer_service\\data\\tenants\\default\\rag_chunks\\source_f2107d1b77e30e62.json",
+      "index": {
+        "ok": true,
+        "index_path": "D:\\AI\\omniauto\\apps\\wechat_ai_customer_service\\data\\tenants\\default\\rag_index\\index.json",
+        "entry_count": 238
+      }
+    },
+    "rag_experience_id": "rag_exp_ab62799753adb4059a2a",
+    "strict_promotion_policy": "rag_experience_manual_promotion_only",
+    "updated_at": "2026-05-15T21:32:20"
+  },
+  {
+    "batch_id": "raw_batch_2ba84c08b148fe0d1f0c",
+    "tenant_id": "default",
+    "conversation_id": "conv_6a6c8916a9e214148a",
+    "message_ids": [
+      "raw_msg_c3ff04621c1eee18db92",
+      "raw_msg_49f7dca528ccdc1eece6"
+    ],
+    "reason": "customer_service_poll",
+    "source_module": "customer_service",
+    "status": "processed",
+    "created_at": "2026-05-15T21:21:41",
+    "processed_at": "2026-05-15T21:30:01",
+    "transcript_path": "D:\\AI\\omniauto\\runtime\\apps\\wechat_ai_customer_service\\tenants\\default\\raw_messages\\learning_batches\\raw_batch_2ba84c08b148fe0d1f0c.txt",
+    "candidate_ids": [],
+    "candidate_count": 0,
+    "skipped_duplicate_count": 0,
+    "skipped_duplicates": [],
+    "skipped_source_policy_count": 0,
+    "skipped_source_policy": [],
+    "llm_assist_policy": {
+      "policy_version": "knowledge_llm_assist_v1",
+      "stage": "raw_wechat_message_to_rag_experience_review",
+      "requested": true,
+      "rule_fallback_allowed": true,
+      "human_approval_required": true,
+      "strict_promotion_policy": "raw WeChat messages create RAG experiences only; pending candidates require manual RAG promotion"
+    },
+    "rag_ingest": {
+      "ok": true,
+      "source": {
+        "source_id": "source_5e2b6b29e0fe6785",
+        "tenant_id": "default",
+        "layer": "tenant",
+        "source_type": "wechat_raw_message",
+        "category": "file_transfer",
+        "product_id": "",
+        "source_path": "D:\\AI\\omniauto\\runtime\\apps\\wechat_ai_customer_service\\tenants\\default\\raw_messages\\learning_batches\\raw_batch_2ba84c08b148fe0d1f0c.txt",
+        "content_hash": "8d0de895b10cdeff39c59b4278fa7853",
+        "status": "active",
+        "created_at": "2026-05-15T21:28:24",
+        "updated_at": "2026-05-15T21:28:24"
+      },
+      "source_id": "source_5e2b6b29e0fe6785",
+      "chunk_count": 1,
+      "chunks_path": "D:\\AI\\omniauto\\apps\\wechat_ai_customer_service\\data\\tenants\\default\\rag_chunks\\source_5e2b6b29e0fe6785.json",
+      "index": {
+        "ok": true,
+        "index_path": "D:\\AI\\omniauto\\apps\\wechat_ai_customer_service\\data\\tenants\\default\\rag_index\\index.json",
+        "entry_count": 237
+      }
+    },
+    "rag_experience_id": "rag_exp_25810c16299b56b81fdd",
+    "strict_promotion_policy": "rag_experience_manual_promotion_only",
+    "updated_at": "2026-05-15T21:30:01"
+  },
+  {
+    "batch_id": "raw_batch_2ba00b38c09265ce6d1c",
+    "tenant_id": "default",
+    "conversation_id": "conv_6a6c8916a9e214148a",
+    "message_ids": [
+      "raw_msg_421e0dadd96dee11daa2",
+      "raw_msg_5cd68548d68acb7c2d1d"
+    ],
+    "reason": "customer_service_poll",
+    "source_module": "customer_service",
+    "status": "processed",
+    "created_at": "2026-05-15T21:21:22",
+    "processed_at": "2026-05-15T21:28:24",
+    "transcript_path": "D:\\AI\\omniauto\\runtime\\apps\\wechat_ai_customer_service\\tenants\\default\\raw_messages\\learning_batches\\raw_batch_2ba00b38c09265ce6d1c.txt",
+    "candidate_ids": [],
+    "candidate_count": 0,
+    "skipped_duplicate_count": 0,
+    "skipped_duplicates": [],
+    "skipped_source_policy_count": 0,
+    "skipped_source_policy": [],
+    "llm_assist_policy": {
+      "policy_version": "knowledge_llm_assist_v1",
+      "stage": "raw_wechat_message_to_rag_experience_review",
+      "requested": true,
+      "rule_fallback_allowed": true,
+      "human_approval_required": true,
+      "strict_promotion_policy": "raw WeChat messages create RAG experiences only; pending candidates require manual RAG promotion"
+    },
+    "rag_ingest": {
+      "ok": true,
+      "source": {
+        "source_id": "source_bf8feea528963872",
+        "tenant_id": "default",
+        "layer": "tenant",
+        "source_type": "wechat_raw_message",
+        "category": "file_transfer",
+        "product_id": "",
+        "source_path": "D:\\AI\\omniauto\\runtime\\apps\\wechat_ai_customer_service\\tenants\\default\\raw_messages\\learning_batches\\raw_batch_2ba00b38c09265ce6d1c.txt",
+        "content_hash": "d1e87b1cd49704c3ff6e38ea76d71ea6",
+        "status": "active",
+        "created_at": "2026-05-15T21:26:44",
+        "updated_at": "2026-05-15T21:26:44"
+      },
+      "source_id": "source_bf8feea528963872",
+      "chunk_count": 1,
+      "chunks_path": "D:\\AI\\omniauto\\apps\\wechat_ai_customer_service\\data\\tenants\\default\\rag_chunks\\source_bf8feea528963872.json",
+      "index": {
+        "ok": true,
+        "index_path": "D:\\AI\\omniauto\\apps\\wechat_ai_customer_service\\data\\tenants\\default\\rag_index\\index.json",
+        "entry_count": 236
+      }
+    },
+    "rag_experience_id": "rag_exp_bf071eaf131f8a8e8e72",
+    "strict_promotion_policy": "rag_experience_manual_promotion_only",
+    "updated_at": "2026-05-15T21:28:24"
+  },
+  {
+    "batch_id": "raw_batch_e60f9c7a15287dce9604",
+    "tenant_id": "default",
+    "conversation_id": "conv_6a6c8916a9e214148a",
+    "message_ids": [
+      "raw_msg_490266171f3c7031baf3",
+      "raw_msg_c02040f62894f8f17b83"
+    ],
+    "reason": "customer_service_poll",
+    "source_module": "customer_service",
+    "status": "processed",
+    "created_at": "2026-05-15T21:20:59",
+    "processed_at": "2026-05-15T21:26:02",
+    "transcript_path": "D:\\AI\\omniauto\\runtime\\apps\\wechat_ai_customer_service\\tenants\\default\\raw_messages\\learning_batches\\raw_batch_e60f9c7a15287dce9604.txt",
+    "candidate_ids": [],
+    "candidate_count": 0,
+    "skipped_duplicate_count": 0,
+    "skipped_duplicates": [],
+    "skipped_source_policy_count": 0,
+    "skipped_source_policy": [],
+    "llm_assist_policy": {
+      "policy_version": "knowledge_llm_assist_v1",
+      "stage": "raw_wechat_message_to_rag_experience_review",
+      "requested": true,
+      "rule_fallback_allowed": true,
+      "human_approval_required": true,
+      "strict_promotion_policy": "raw WeChat messages create RAG experiences only; pending candidates require manual RAG promotion"
+    },
+    "rag_ingest": {
+      "ok": true,
+      "source": {
+        "source_id": "source_e6d8e225cd3e82aa",
+        "tenant_id": "default",
+        "layer": "tenant",
+        "source_type": "wechat_raw_message",
+        "category": "file_transfer",
+        "product_id": "",
+        "source_path": "D:\\AI\\omniauto\\runtime\\apps\\wechat_ai_customer_service\\tenants\\default\\raw_messages\\learning_batches\\raw_batch_e60f9c7a15287dce9604.txt",
+        "content_hash": "7715c5204ce1311ca3e52c6d4a1e35f6",
+        "status": "active",
+        "created_at": "2026-05-15T21:25:08",
+        "updated_at": "2026-05-15T21:25:08"
+      },
+      "source_id": "source_e6d8e225cd3e82aa",
+      "chunk_count": 1,
+      "chunks_path": "D:\\AI\\omniauto\\apps\\wechat_ai_customer_service\\data\\tenants\\default\\rag_chunks\\source_e6d8e225cd3e82aa.json",
+      "index": {
+        "ok": true,
+        "index_path": "D:\\AI\\omniauto\\apps\\wechat_ai_customer_service\\data\\tenants\\default\\rag_index\\index.json",
+        "entry_count": 235
+      }
+    },
+    "rag_experience_id": "rag_exp_3cea155b6236bf8c79aa",
+    "strict_promotion_policy": "rag_experience_manual_promotion_only",
+    "updated_at": "2026-05-15T21:26:02"
+  },
+  {
+    "batch_id": "raw_batch_8283404aa7ee3c21a394",
+    "tenant_id": "default",
+    "conversation_id": "conv_6a6c8916a9e214148a",
+    "message_ids": [
+      "raw_msg_045b58e9f117d7263843",
+      "raw_msg_7c2ff0ea6b6b680dae65"
+    ],
+    "reason": "customer_service_poll",
+    "source_module": "customer_service",
+    "status": "processed",
+    "created_at": "2026-05-15T21:20:35",
+    "processed_at": "2026-05-15T21:25:08",
+    "transcript_path": "D:\\AI\\omniauto\\runtime\\apps\\wechat_ai_customer_service\\tenants\\default\\raw_messages\\learning_batches\\raw_batch_8283404aa7ee3c21a394.txt",
+    "candidate_ids": [],
+    "candidate_count": 0,
+    "skipped_duplicate_count": 0,
+    "skipped_duplicates": [],
+    "skipped_source_policy_count": 0,
+    "skipped_source_policy": [],
+    "llm_assist_policy": {
+      "policy_version": "knowledge_llm_assist_v1",
+      "stage": "raw_wechat_message_to_rag_experience_review",
+      "requested": true,
+      "rule_fallback_allowed": true,
+      "human_approval_required": true,
+      "strict_promotion_policy": "raw WeChat messages create RAG experiences only; pending candidates require manual RAG promotion"
+    },
+    "rag_ingest": {
+      "ok": true,
+      "source": {
+        "source_id": "source_9153f1d000861c95",
+        "tenant_id": "default",
+        "layer": "tenant",
+        "source_type": "wechat_raw_message",
+        "category": "file_transfer",
+        "product_id": "",
+        "source_path": "D:\\AI\\omniauto\\runtime\\apps\\wechat_ai_customer_service\\tenants\\default\\raw_messages\\learning_batches\\raw_batch_8283404aa7ee3c21a394.txt",
+        "content_hash": "856f4f7024a9512b5b39abe3aba2095c",
+        "status": "active",
+        "created_at": "2026-05-15T21:23:33",
+        "updated_at": "2026-05-15T21:23:33"
+      },
+      "source_id": "source_9153f1d000861c95",
+      "chunk_count": 1,
+      "chunks_path": "D:\\AI\\omniauto\\apps\\wechat_ai_customer_service\\data\\tenants\\default\\rag_chunks\\source_9153f1d000861c95.json",
+      "index": {
+        "ok": true,
+        "index_path": "D:\\AI\\omniauto\\apps\\wechat_ai_customer_service\\data\\tenants\\default\\rag_index\\index.json",
+        "entry_count": 234
+      }
+    },
+    "rag_experience_id": "rag_exp_e44aba103fcce6383899",
+    "strict_promotion_policy": "rag_experience_manual_promotion_only",
+    "updated_at": "2026-05-15T21:25:08"
+  },
+  {
+    "batch_id": "raw_batch_358771b6d4c599cfcd71",
+    "tenant_id": "default",
+    "conversation_id": "conv_6a6c8916a9e214148a",
+    "message_ids": [
+      "raw_msg_3bab5cba285f00d80f3c"
+    ],
+    "reason": "customer_service_poll",
+    "source_module": "customer_service",
+    "status": "processed",
+    "created_at": "2026-05-15T21:18:40",
+    "processed_at": "2026-05-15T21:22:44",
+    "transcript_path": "D:\\AI\\omniauto\\runtime\\apps\\wechat_ai_customer_service\\tenants\\default\\raw_messages\\learning_batches\\raw_batch_358771b6d4c599cfcd71.txt",
+    "candidate_ids": [],
+    "candidate_count": 0,
+    "skipped_duplicate_count": 0,
+    "skipped_duplicates": [],
+    "skipped_source_policy_count": 0,
+    "skipped_source_policy": [],
+    "llm_assist_policy": {
+      "policy_version": "knowledge_llm_assist_v1",
+      "stage": "raw_wechat_message_to_rag_experience_review",
+      "requested": true,
+      "rule_fallback_allowed": true,
+      "human_approval_required": true,
+      "strict_promotion_policy": "raw WeChat messages create RAG experiences only; pending candidates require manual RAG promotion"
+    },
+    "rag_ingest": {
+      "ok": true,
+      "source": {
+        "source_id": "source_53c960110272136d",
+        "tenant_id": "default",
+        "layer": "tenant",
+        "source_type": "wechat_raw_message",
+        "category": "file_transfer",
+        "product_id": "",
+        "source_path": "D:\\AI\\omniauto\\runtime\\apps\\wechat_ai_customer_service\\tenants\\default\\raw_messages\\learning_batches\\raw_batch_358771b6d4c599cfcd71.txt",
+        "content_hash": "9d6ec72eb8576285d4177d7f65c0a281",
+        "status": "active",
+        "created_at": "2026-05-15T21:21:09",
+        "updated_at": "2026-05-15T21:21:09"
+      },
+      "source_id": "source_53c960110272136d",
+      "chunk_count": 1,
+      "chunks_path": "D:\\AI\\omniauto\\apps\\wechat_ai_customer_service\\data\\tenants\\default\\rag_chunks\\source_53c960110272136d.json",
+      "index": {
+        "ok": true,
+        "index_path": "D:\\AI\\omniauto\\apps\\wechat_ai_customer_service\\data\\tenants\\default\\rag_index\\index.json",
+        "entry_count": 233
+      }
+    },
+    "rag_experience_id": "rag_exp_65095358982713897339",
+    "strict_promotion_policy": "rag_experience_manual_promotion_only",
+    "updated_at": "2026-05-15T21:22:44"
+  },
+  {
+    "batch_id": "raw_batch_5981d14ee17609bfdb06",
+    "tenant_id": "default",
+    "conversation_id": "conv_6a6c8916a9e214148a",
+    "message_ids": [
+      "raw_msg_097e19a5771f0c68c7bc",
+      "raw_msg_20b1b937a0475eea302d",
+      "raw_msg_146e7dee2bad5032740d",
+      "raw_msg_c8785f05ebca0437a3bc",
+      "raw_msg_3145301967af5bd3b714",
+      "raw_msg_d27020b5a115087dacdb"
+    ],
+    "reason": "customer_service_poll",
+    "source_module": "customer_service",
+    "status": "processed",
+    "created_at": "2026-05-15T21:18:21",
+    "processed_at": "2026-05-15T21:20:24",
+    "transcript_path": "D:\\AI\\omniauto\\runtime\\apps\\wechat_ai_customer_service\\tenants\\default\\raw_messages\\learning_batches\\raw_batch_5981d14ee17609bfdb06.txt",
+    "candidate_ids": [],
+    "candidate_count": 0,
+    "skipped_duplicate_count": 0,
+    "skipped_duplicates": [],
+    "skipped_source_policy_count": 0,
+    "skipped_source_policy": [],
+    "llm_assist_policy": {
+      "policy_version": "knowledge_llm_assist_v1",
+      "stage": "raw_wechat_message_to_rag_experience_review",
+      "requested": true,
+      "rule_fallback_allowed": true,
+      "human_approval_required": true,
+      "strict_promotion_policy": "raw WeChat messages create RAG experiences only; pending candidates require manual RAG promotion"
+    },
+    "rag_ingest": {
+      "ok": true,
+      "source": {
+        "source_id": "source_3960c380a9bbb426",
+        "tenant_id": "default",
+        "layer": "tenant",
+        "source_type": "wechat_raw_message",
+        "category": "file_transfer",
+        "product_id": "",
+        "source_path": "D:\\AI\\omniauto\\runtime\\apps\\wechat_ai_customer_service\\tenants\\default\\raw_messages\\learning_batches\\raw_batch_5981d14ee17609bfdb06.txt",
+        "content_hash": "7820d0103ccf7bd27e2907a5b585776b",
+        "status": "active",
+        "created_at": "2026-05-15T21:18:39",
+        "updated_at": "2026-05-15T21:18:39"
+      },
+      "source_id": "source_3960c380a9bbb426",
+      "chunk_count": 1,
+      "chunks_path": "D:\\AI\\omniauto\\apps\\wechat_ai_customer_service\\data\\tenants\\default\\rag_chunks\\source_3960c380a9bbb426.json",
+      "index": {
+        "ok": true,
+        "index_path": "D:\\AI\\omniauto\\apps\\wechat_ai_customer_service\\data\\tenants\\default\\rag_index\\index.json",
+        "entry_count": 232
+      }
+    },
+    "rag_experience_id": "rag_exp_e7b0ef75826cb827e7d0",
+    "strict_promotion_policy": "rag_experience_manual_promotion_only",
+    "updated_at": "2026-05-15T21:20:24"
+  },
+  {
+    "batch_id": "raw_batch_64f944cf49dbf02219a2",
+    "tenant_id": "default",
+    "conversation_id": "conv_e3435f9f3d8752cff1",
+    "message_ids": [
+      "raw_msg_2e5932d9d60b4d6308fc",
+      "raw_msg_00cce42e5a6da55864ad",
+      "raw_msg_6dbeb11f6aefd78b746c",
+      "raw_msg_0496488f553b82351866"
+    ],
+    "reason": "customer_service_poll",
+    "source_module": "customer_service",
+    "status": "pending",
+    "created_at": "2026-05-15T21:17:45"
+  },
+  {
+    "batch_id": "raw_batch_26a6bed55c0103e7cd45",
+    "tenant_id": "default",
+    "conversation_id": "conv_c0a299b033a63d6dd6",
+    "message_ids": [
+      "raw_msg_e7ef1b69033f0f23d7e6",
+      "raw_msg_c60e9fcbe36f40cd5d0b",
+      "raw_msg_959ef2cd18f632e5dc1b",
+      "raw_msg_ded2d8bf6b26d5ed520a",
+      "raw_msg_785a2364b2823476213a"
+    ],
+    "reason": "customer_service_poll",
+    "source_module": "customer_service",
+    "status": "pending",
+    "created_at": "2026-05-15T21:17:41"
+  },
+  {
+    "batch_id": "raw_batch_82a231287d4085115904",
+    "tenant_id": "default",
+    "conversation_id": "conv_6a6c8916a9e214148a",
+    "message_ids": [
+      "raw_msg_f35b86b995df9bbb3c73"
+    ],
+    "reason": "customer_service_poll",
+    "source_module": "customer_service",
+    "status": "processed",
+    "created_at": "2026-05-14T04:17:19",
+    "processed_at": "2026-05-14T04:24:05",
+    "transcript_path": "D:\\AI\\omniauto\\runtime\\apps\\wechat_ai_customer_service\\tenants\\default\\raw_messages\\learning_batches\\raw_batch_82a231287d4085115904.txt",
+    "candidate_ids": [],
+    "candidate_count": 0,
+    "skipped_duplicate_count": 0,
+    "skipped_duplicates": [],
+    "skipped_source_policy_count": 0,
+    "skipped_source_policy": [],
+    "llm_assist_policy": {
+      "policy_version": "knowledge_llm_assist_v1",
+      "stage": "raw_wechat_message_to_rag_experience_review",
+      "requested": true,
+      "rule_fallback_allowed": true,
+      "human_approval_required": true,
+      "strict_promotion_policy": "raw WeChat messages create RAG experiences only; pending candidates require manual RAG promotion"
+    },
+    "rag_ingest": {
+      "ok": true,
+      "source": {
+        "source_id": "source_f5299abc48d62bd5",
+        "tenant_id": "default",
+        "layer": "tenant",
+        "source_type": "wechat_raw_message",
+        "category": "file_transfer",
+        "product_id": "",
+        "source_path": "D:\\AI\\omniauto\\runtime\\apps\\wechat_ai_customer_service\\tenants\\default\\raw_messages\\learning_batches\\raw_batch_82a231287d4085115904.txt",
+        "content_hash": "cf50175fd4ea3a17b58908a81b547f20",
+        "status": "active",
+        "created_at": "2026-05-14T04:23:31",
+        "updated_at": "2026-05-14T04:23:31"
+      },
+      "source_id": "source_f5299abc48d62bd5",
+      "chunk_count": 1,
+      "chunks_path": "D:\\AI\\omniauto\\apps\\wechat_ai_customer_service\\data\\tenants\\default\\rag_chunks\\source_f5299abc48d62bd5.json",
+      "index": {
+        "ok": true,
+        "index_path": "D:\\AI\\omniauto\\apps\\wechat_ai_customer_service\\data\\tenants\\default\\rag_index\\index.json",
+        "entry_count": 207
+      }
+    },
+    "rag_experience_id": "rag_exp_4876b6fe7892109410cc",
+    "strict_promotion_policy": "rag_experience_manual_promotion_only",
+    "updated_at": "2026-05-14T04:24:05"
+  },
+  {
+    "batch_id": "raw_batch_e667295396a3138e387c",
+    "tenant_id": "default",
+    "conversation_id": "conv_6a6c8916a9e214148a",
+    "message_ids": [
+      "raw_msg_cffda9087db232d23f88"
+    ],
+    "reason": "customer_service_poll",
+    "source_module": "customer_service",
+    "status": "processed",
+    "created_at": "2026-05-14T04:16:49",
+    "processed_at": "2026-05-14T04:23:06",
+    "transcript_path": "D:\\AI\\omniauto\\runtime\\apps\\wechat_ai_customer_service\\tenants\\default\\raw_messages\\learning_batches\\raw_batch_e667295396a3138e387c.txt",
+    "candidate_ids": [],
+    "candidate_count": 0,
+    "skipped_duplicate_count": 0,
+    "skipped_duplicates": [],
+    "skipped_source_policy_count": 0,
+    "skipped_source_policy": [],
+    "llm_assist_policy": {
+      "policy_version": "knowledge_llm_assist_v1",
+      "stage": "raw_wechat_message_to_rag_experience_review",
+      "requested": true,
+      "rule_fallback_allowed": true,
+      "human_approval_required": true,
+      "strict_promotion_policy": "raw WeChat messages create RAG experiences only; pending candidates require manual RAG promotion"
+    },
+    "rag_ingest": {
+      "ok": true,
+      "source": {
+        "source_id": "source_f131bbccc78c3aba",
+        "tenant_id": "default",
+        "layer": "tenant",
+        "source_type": "wechat_raw_message",
+        "category": "file_transfer",
+        "product_id": "",
+        "source_path": "D:\\AI\\omniauto\\runtime\\apps\\wechat_ai_customer_service\\tenants\\default\\raw_messages\\learning_batches\\raw_batch_e667295396a3138e387c.txt",
+        "content_hash": "068931653edb6b5771b71d386c165ce2",
+        "status": "active",
+        "created_at": "2026-05-14T04:22:12",
+        "updated_at": "2026-05-14T04:22:12"
+      },
+      "source_id": "source_f131bbccc78c3aba",
+      "chunk_count": 1,
+      "chunks_path": "D:\\AI\\omniauto\\apps\\wechat_ai_customer_service\\data\\tenants\\default\\rag_chunks\\source_f131bbccc78c3aba.json",
+      "index": {
+        "ok": true,
+        "index_path": "D:\\AI\\omniauto\\apps\\wechat_ai_customer_service\\data\\tenants\\default\\rag_index\\index.json",
+        "entry_count": 206
+      }
+    },
+    "rag_experience_id": "rag_exp_31e39acf6799941dd251",
+    "strict_promotion_policy": "rag_experience_manual_promotion_only",
+    "updated_at": "2026-05-14T04:23:06"
+  },
+  {
+    "batch_id": "raw_batch_390c723c4a55e8c51d9a",
+    "tenant_id": "default",
+    "conversation_id": "conv_6a6c8916a9e214148a",
+    "message_ids": [
+      "raw_msg_f8e9755585ce6653bc20"
+    ],
+    "reason": "customer_service_poll",
+    "source_module": "customer_service",
+    "status": "processed",
+    "created_at": "2026-05-14T04:16:01",
+    "processed_at": "2026-05-14T04:22:12",
+    "transcript_path": "D:\\AI\\omniauto\\runtime\\apps\\wechat_ai_customer_service\\tenants\\default\\raw_messages\\learning_batches\\raw_batch_390c723c4a55e8c51d9a.txt",
+    "candidate_ids": [],
+    "candidate_count": 0,
+    "skipped_duplicate_count": 0,
+    "skipped_duplicates": [],
+    "skipped_source_policy_count": 0,
+    "skipped_source_policy": [],
+    "llm_assist_policy": {
+      "policy_version": "knowledge_llm_assist_v1",
+      "stage": "raw_wechat_message_to_rag_experience_review",
+      "requested": true,
+      "rule_fallback_allowed": true,
+      "human_approval_required": true,
+      "strict_promotion_policy": "raw WeChat messages create RAG experiences only; pending candidates require manual RAG promotion"
+    },
+    "rag_ingest": {
+      "ok": true,
+      "source": {
+        "source_id": "source_62f4b34df2701b4d",
+        "tenant_id": "default",
+        "layer": "tenant",
+        "source_type": "wechat_raw_message",
+        "category": "file_transfer",
+        "product_id": "",
+        "source_path": "D:\\AI\\omniauto\\runtime\\apps\\wechat_ai_customer_service\\tenants\\default\\raw_messages\\learning_batches\\raw_batch_390c723c4a55e8c51d9a.txt",
+        "content_hash": "dea28e0007a6cfd30223592305ba4c8c",
+        "status": "active",
+        "created_at": "2026-05-14T04:21:18",
+        "updated_at": "2026-05-14T04:21:18"
+      },
+      "source_id": "source_62f4b34df2701b4d",
+      "chunk_count": 1,
+      "chunks_path": "D:\\AI\\omniauto\\apps\\wechat_ai_customer_service\\data\\tenants\\default\\rag_chunks\\source_62f4b34df2701b4d.json",
+      "index": {
+        "ok": true,
+        "index_path": "D:\\AI\\omniauto\\apps\\wechat_ai_customer_service\\data\\tenants\\default\\rag_index\\index.json",
+        "entry_count": 205
+      }
+    },
+    "rag_experience_id": "rag_exp_ed74df78b0eed642c887",
+    "strict_promotion_policy": "rag_experience_manual_promotion_only",
+    "updated_at": "2026-05-14T04:22:12"
+  },
+  {
+    "batch_id": "raw_batch_24e3811d05d8c7f8e8b9",
+    "tenant_id": "default",
+    "conversation_id": "conv_6a6c8916a9e214148a",
+    "message_ids": [
+      "raw_msg_2861da0e0e3648d3bf40"
+    ],
+    "reason": "customer_service_poll",
+    "source_module": "customer_service",
+    "status": "processed",
+    "created_at": "2026-05-14T04:15:41",
+    "processed_at": "2026-05-14T04:20:53",
+    "transcript_path": "D:\\AI\\omniauto\\runtime\\apps\\wechat_ai_customer_service\\tenants\\default\\raw_messages\\learning_batches\\raw_batch_24e3811d05d8c7f8e8b9.txt",
+    "candidate_ids": [],
+    "candidate_count": 0,
+    "skipped_duplicate_count": 0,
+    "skipped_duplicates": [],
+    "skipped_source_policy_count": 0,
+    "skipped_source_policy": [],
+    "llm_assist_policy": {
+      "policy_version": "knowledge_llm_assist_v1",
+      "stage": "raw_wechat_message_to_rag_experience_review",
+      "requested": true,
+      "rule_fallback_allowed": true,
+      "human_approval_required": true,
+      "strict_promotion_policy": "raw WeChat messages create RAG experiences only; pending candidates require manual RAG promotion"
+    },
+    "rag_ingest": {
+      "ok": true,
+      "source": {
+        "source_id": "source_cdcf5fff66dd7518",
+        "tenant_id": "default",
+        "layer": "tenant",
+        "source_type": "wechat_raw_message",
+        "category": "file_transfer",
+        "product_id": "",
+        "source_path": "D:\\AI\\omniauto\\runtime\\apps\\wechat_ai_customer_service\\tenants\\default\\raw_messages\\learning_batches\\raw_batch_24e3811d05d8c7f8e8b9.txt",
+        "content_hash": "5b33b0bd0f3fa024563029ac6b3759f8",
+        "status": "active",
+        "created_at": "2026-05-14T04:19:58",
+        "updated_at": "2026-05-14T04:19:58"
+      },
+      "source_id": "source_cdcf5fff66dd7518",
+      "chunk_count": 1,
+      "chunks_path": "D:\\AI\\omniauto\\apps\\wechat_ai_customer_service\\data\\tenants\\default\\rag_chunks\\source_cdcf5fff66dd7518.json",
+      "index": {
+        "ok": true,
+        "index_path": "D:\\AI\\omniauto\\apps\\wechat_ai_customer_service\\data\\tenants\\default\\rag_index\\index.json",
+        "entry_count": 204
+      }
+    },
+    "rag_experience_id": "rag_exp_c13974be0ed467180d9f",
+    "strict_promotion_policy": "rag_experience_manual_promotion_only",
+    "updated_at": "2026-05-14T04:20:53"
+  },
+  {
+    "batch_id": "raw_batch_8ce7ca9ef7d3142504a9",
+    "tenant_id": "default",
+    "conversation_id": "conv_6a6c8916a9e214148a",
+    "message_ids": [
+      "raw_msg_68841694b498ead9e29d"
+    ],
+    "reason": "customer_service_poll",
+    "source_module": "customer_service",
+    "status": "processed",
+    "created_at": "2026-05-14T04:14:53",
+    "processed_at": "2026-05-14T04:19:58",
+    "transcript_path": "D:\\AI\\omniauto\\runtime\\apps\\wechat_ai_customer_service\\tenants\\default\\raw_messages\\learning_batches\\raw_batch_8ce7ca9ef7d3142504a9.txt",
+    "candidate_ids": [],
+    "candidate_count": 0,
+    "skipped_duplicate_count": 0,
+    "skipped_duplicates": [],
+    "skipped_source_policy_count": 0,
+    "skipped_source_policy": [],
+    "llm_assist_policy": {
+      "policy_version": "knowledge_llm_assist_v1",
+      "stage": "raw_wechat_message_to_rag_experience_review",
+      "requested": true,
+      "rule_fallback_allowed": true,
+      "human_approval_required": true,
+      "strict_promotion_policy": "raw WeChat messages create RAG experiences only; pending candidates require manual RAG promotion"
+    },
+    "rag_ingest": {
+      "ok": true,
+      "source": {
+        "source_id": "source_cab26a7d672dce11",
+        "tenant_id": "default",
+        "layer": "tenant",
+        "source_type": "wechat_raw_message",
+        "category": "file_transfer",
+        "product_id": "",
+        "source_path": "D:\\AI\\omniauto\\runtime\\apps\\wechat_ai_customer_service\\tenants\\default\\raw_messages\\learning_batches\\raw_batch_8ce7ca9ef7d3142504a9.txt",
+        "content_hash": "a8bcfb92038a59c58d677d764b0a913d",
+        "status": "active",
+        "created_at": "2026-05-14T04:19:02",
+        "updated_at": "2026-05-14T04:19:02"
+      },
+      "source_id": "source_cab26a7d672dce11",
+      "chunk_count": 1,
+      "chunks_path": "D:\\AI\\omniauto\\apps\\wechat_ai_customer_service\\data\\tenants\\default\\rag_chunks\\source_cab26a7d672dce11.json",
+      "index": {
+        "ok": true,
+        "index_path": "D:\\AI\\omniauto\\apps\\wechat_ai_customer_service\\data\\tenants\\default\\rag_index\\index.json",
+        "entry_count": 203
+      }
+    },
+    "rag_experience_id": "rag_exp_12451677ce6c96ce63b3",
+    "strict_promotion_policy": "rag_experience_manual_promotion_only",
+    "updated_at": "2026-05-14T04:19:58"
+  },
+  {
+    "batch_id": "raw_batch_fe2e2d3770fcb17a8d76",
+    "tenant_id": "default",
+    "conversation_id": "conv_6a6c8916a9e214148a",
+    "message_ids": [
+      "raw_msg_558b319100f85f259cec",
+      "raw_msg_22ed0e4e1f2758b56094"
+    ],
+    "reason": "customer_service_poll",
+    "source_module": "customer_service",
+    "status": "processed",
+    "created_at": "2026-05-14T04:14:33",
+    "processed_at": "2026-05-14T04:18:36",
+    "transcript_path": "D:\\AI\\omniauto\\runtime\\apps\\wechat_ai_customer_service\\tenants\\default\\raw_messages\\learning_batches\\raw_batch_fe2e2d3770fcb17a8d76.txt",
+    "candidate_ids": [],
+    "candidate_count": 0,
+    "skipped_duplicate_count": 0,
+    "skipped_duplicates": [],
+    "skipped_source_policy_count": 0,
+    "skipped_source_policy": [],
+    "llm_assist_policy": {
+      "policy_version": "knowledge_llm_assist_v1",
+      "stage": "raw_wechat_message_to_rag_experience_review",
+      "requested": true,
+      "rule_fallback_allowed": true,
+      "human_approval_required": true,
+      "strict_promotion_policy": "raw WeChat messages create RAG experiences only; pending candidates require manual RAG promotion"
+    },
+    "rag_ingest": {
+      "ok": true,
+      "source": {
+        "source_id": "source_af48f22ca16599b2",
+        "tenant_id": "default",
+        "layer": "tenant",
+        "source_type": "wechat_raw_message",
+        "category": "file_transfer",
+        "product_id": "",
+        "source_path": "D:\\AI\\omniauto\\runtime\\apps\\wechat_ai_customer_service\\tenants\\default\\raw_messages\\learning_batches\\raw_batch_fe2e2d3770fcb17a8d76.txt",
+        "content_hash": "eac712f25ccc1645eaffaf6c10161adc",
+        "status": "active",
+        "created_at": "2026-05-14T04:17:43",
+        "updated_at": "2026-05-14T04:17:43"
+      },
+      "source_id": "source_af48f22ca16599b2",
+      "chunk_count": 1,
+      "chunks_path": "D:\\AI\\omniauto\\apps\\wechat_ai_customer_service\\data\\tenants\\default\\rag_chunks\\source_af48f22ca16599b2.json",
+      "index": {
+        "ok": true,
+        "index_path": "D:\\AI\\omniauto\\apps\\wechat_ai_customer_service\\data\\tenants\\default\\rag_index\\index.json",
+        "entry_count": 202
+      }
+    },
+    "rag_experience_id": "rag_exp_e57dcee7c512ce9d9ddd",
+    "strict_promotion_policy": "rag_experience_manual_promotion_only",
+    "updated_at": "2026-05-14T04:18:36"
+  },
+  {
+    "batch_id": "raw_batch_e81ecbbae82d2470ecfe",
+    "tenant_id": "default",
+    "conversation_id": "conv_6a6c8916a9e214148a",
+    "message_ids": [
+      "raw_msg_f8c0824adcecc2b86c08"
+    ],
+    "reason": "customer_service_poll",
+    "source_module": "customer_service",
+    "status": "processed",
+    "created_at": "2026-05-14T04:13:19",
+    "processed_at": "2026-05-14T04:17:43",
+    "transcript_path": "D:\\AI\\omniauto\\runtime\\apps\\wechat_ai_customer_service\\tenants\\default\\raw_messages\\learning_batches\\raw_batch_e81ecbbae82d2470ecfe.txt",
+    "candidate_ids": [],
+    "candidate_count": 0,
+    "skipped_duplicate_count": 0,
+    "skipped_duplicates": [],
+    "skipped_source_policy_count": 0,
+    "skipped_source_policy": [],
+    "llm_assist_policy": {
+      "policy_version": "knowledge_llm_assist_v1",
+      "stage": "raw_wechat_message_to_rag_experience_review",
+      "requested": true,
+      "rule_fallback_allowed": true,
+      "human_approval_required": true,
+      "strict_promotion_policy": "raw WeChat messages create RAG experiences only; pending candidates require manual RAG promotion"
+    },
+    "rag_ingest": {
+      "ok": true,
+      "source": {
+        "source_id": "source_53816bbbc3013eab",
+        "tenant_id": "default",
+        "layer": "tenant",
+        "source_type": "wechat_raw_message",
+        "category": "file_transfer",
+        "product_id": "",
+        "source_path": "D:\\AI\\omniauto\\runtime\\apps\\wechat_ai_customer_service\\tenants\\default\\raw_messages\\learning_batches\\raw_batch_e81ecbbae82d2470ecfe.txt",
+        "content_hash": "03c90c234664c486cb1d683d8f63fdf5",
+        "status": "active",
+        "created_at": "2026-05-14T04:16:46",
+        "updated_at": "2026-05-14T04:16:46"
+      },
+      "source_id": "source_53816bbbc3013eab",
+      "chunk_count": 1,
+      "chunks_path": "D:\\AI\\omniauto\\apps\\wechat_ai_customer_service\\data\\tenants\\default\\rag_chunks\\source_53816bbbc3013eab.json",
+      "index": {
+        "ok": true,
+        "index_path": "D:\\AI\\omniauto\\apps\\wechat_ai_customer_service\\data\\tenants\\default\\rag_index\\index.json",
+        "entry_count": 201
+      }
+    },
+    "rag_experience_id": "rag_exp_78eedbffd8a3973ce6f6",
+    "strict_promotion_policy": "rag_experience_manual_promotion_only",
+    "updated_at": "2026-05-14T04:17:43"
+  },
+  {
+    "batch_id": "raw_batch_2fa1660049c6a0875090",
+    "tenant_id": "default",
+    "conversation_id": "conv_6a6c8916a9e214148a",
+    "message_ids": [
+      "raw_msg_c5a1e9d22e43ac977ee4",
+      "raw_msg_1c6f4966b540507fd022"
+    ],
+    "reason": "customer_service_poll",
+    "source_module": "customer_service",
+    "status": "processed",
+    "created_at": "2026-05-14T04:13:01",
+    "processed_at": "2026-05-14T04:16:20",
+    "transcript_path": "D:\\AI\\omniauto\\runtime\\apps\\wechat_ai_customer_service\\tenants\\default\\raw_messages\\learning_batches\\raw_batch_2fa1660049c6a0875090.txt",
+    "candidate_ids": [],
+    "candidate_count": 0,
+    "skipped_duplicate_count": 0,
+    "skipped_duplicates": [],
+    "skipped_source_policy_count": 0,
+    "skipped_source_policy": [],
+    "llm_assist_policy": {
+      "policy_version": "knowledge_llm_assist_v1",
+      "stage": "raw_wechat_message_to_rag_experience_review",
+      "requested": true,
+      "rule_fallback_allowed": true,
+      "human_approval_required": true,
+      "strict_promotion_policy": "raw WeChat messages create RAG experiences only; pending candidates require manual RAG promotion"
+    },
+    "rag_ingest": {
+      "ok": true,
+      "source": {
+        "source_id": "source_f0b2850c7373a47e",
+        "tenant_id": "default",
+        "layer": "tenant",
+        "source_type": "wechat_raw_message",
+        "category": "file_transfer",
+        "product_id": "",
+        "source_path": "D:\\AI\\omniauto\\runtime\\apps\\wechat_ai_customer_service\\tenants\\default\\raw_messages\\learning_batches\\raw_batch_2fa1660049c6a0875090.txt",
+        "content_hash": "8d74e3c680d26dc0cff4d16048f06569",
+        "status": "active",
+        "created_at": "2026-05-14T04:15:43",
+        "updated_at": "2026-05-14T04:15:43"
+      },
+      "source_id": "source_f0b2850c7373a47e",
+      "chunk_count": 1,
+      "chunks_path": "D:\\AI\\omniauto\\apps\\wechat_ai_customer_service\\data\\tenants\\default\\rag_chunks\\source_f0b2850c7373a47e.json",
+      "index": {
+        "ok": true,
+        "index_path": "D:\\AI\\omniauto\\apps\\wechat_ai_customer_service\\data\\tenants\\default\\rag_index\\index.json",
+        "entry_count": 200
+      }
+    },
+    "rag_experience_id": "rag_exp_b9c001572f647056cdf5",
+    "strict_promotion_policy": "rag_experience_manual_promotion_only",
+    "updated_at": "2026-05-14T04:16:20"
+  },
+  {
+    "batch_id": "raw_batch_992a5cf942de70aed880",
+    "tenant_id": "default",
+    "conversation_id": "conv_6a6c8916a9e214148a",
+    "message_ids": [
+      "raw_msg_cf524f62303f370fd8bb"
+    ],
+    "reason": "customer_service_poll",
+    "source_module": "customer_service",
+    "status": "processed",
+    "created_at": "2026-05-14T04:12:32",
+    "processed_at": "2026-05-14T04:15:43",
+    "transcript_path": "D:\\AI\\omniauto\\runtime\\apps\\wechat_ai_customer_service\\tenants\\default\\raw_messages\\learning_batches\\raw_batch_992a5cf942de70aed880.txt",
+    "candidate_ids": [],
+    "candidate_count": 0,
+    "skipped_duplicate_count": 0,
+    "skipped_duplicates": [],
+    "skipped_source_policy_count": 0,
+    "skipped_source_policy": [],
+    "llm_assist_policy": {
+      "policy_version": "knowledge_llm_assist_v1",
+      "stage": "raw_wechat_message_to_rag_experience_review",
+      "requested": true,
+      "rule_fallback_allowed": true,
+      "human_approval_required": true,
+      "strict_promotion_policy": "raw WeChat messages create RAG experiences only; pending candidates require manual RAG promotion"
+    },
+    "rag_ingest": {
+      "ok": true,
+      "source": {
+        "source_id": "source_64db600443915412",
+        "tenant_id": "default",
+        "layer": "tenant",
+        "source_type": "wechat_raw_message",
+        "category": "file_transfer",
+        "product_id": "",
+        "source_path": "D:\\AI\\omniauto\\runtime\\apps\\wechat_ai_customer_service\\tenants\\default\\raw_messages\\learning_batches\\raw_batch_992a5cf942de70aed880.txt",
+        "content_hash": "4ce35eb0eb02c9921e2766577c46457d",
+        "status": "active",
+        "created_at": "2026-05-14T04:14:45",
+        "updated_at": "2026-05-14T04:14:45"
+      },
+      "source_id": "source_64db600443915412",
+      "chunk_count": 1,
+      "chunks_path": "D:\\AI\\omniauto\\apps\\wechat_ai_customer_service\\data\\tenants\\default\\rag_chunks\\source_64db600443915412.json",
+      "index": {
+        "ok": true,
+        "index_path": "D:\\AI\\omniauto\\apps\\wechat_ai_customer_service\\data\\tenants\\default\\rag_index\\index.json",
+        "entry_count": 199
+      }
+    },
+    "rag_experience_id": "rag_exp_27de9c1fea8f94e9acec",
+    "strict_promotion_policy": "rag_experience_manual_promotion_only",
+    "updated_at": "2026-05-14T04:15:43"
+  },
+  {
+    "batch_id": "raw_batch_3d02f66af93288f9c907",
+    "tenant_id": "default",
+    "conversation_id": "conv_6a6c8916a9e214148a",
+    "message_ids": [
+      "raw_msg_d170b233b783f24b0d24"
+    ],
+    "reason": "customer_service_poll",
+    "source_module": "customer_service",
+    "status": "processed",
+    "created_at": "2026-05-14T04:10:12",
+    "processed_at": "2026-05-14T04:14:16",
+    "transcript_path": "D:\\AI\\omniauto\\runtime\\apps\\wechat_ai_customer_service\\tenants\\default\\raw_messages\\learning_batches\\raw_batch_3d02f66af93288f9c907.txt",
+    "candidate_ids": [],
+    "candidate_count": 0,
+    "skipped_duplicate_count": 0,
+    "skipped_duplicates": [],
+    "skipped_source_policy_count": 0,
+    "skipped_source_policy": [],
+    "llm_assist_policy": {
+      "policy_version": "knowledge_llm_assist_v1",
+      "stage": "raw_wechat_message_to_rag_experience_review",
+      "requested": true,
+      "rule_fallback_allowed": true,
+      "human_approval_required": true,
+      "strict_promotion_policy": "raw WeChat messages create RAG experiences only; pending candidates require manual RAG promotion"
+    },
+    "rag_ingest": {
+      "ok": true,
+      "source": {
+        "source_id": "source_0af811a8d385f3aa",
+        "tenant_id": "default",
+        "layer": "tenant",
+        "source_type": "wechat_raw_message",
+        "category": "file_transfer",
+        "product_id": "",
+        "source_path": "D:\\AI\\omniauto\\runtime\\apps\\wechat_ai_customer_service\\tenants\\default\\raw_messages\\learning_batches\\raw_batch_3d02f66af93288f9c907.txt",
+        "content_hash": "2d8624db55994d16d2fac151d9f8126c",
+        "status": "active",
+        "created_at": "2026-05-14T04:13:10",
+        "updated_at": "2026-05-14T04:13:10"
+      },
+      "source_id": "source_0af811a8d385f3aa",
+      "chunk_count": 1,
+      "chunks_path": "D:\\AI\\omniauto\\apps\\wechat_ai_customer_service\\data\\tenants\\default\\rag_chunks\\source_0af811a8d385f3aa.json",
+      "index": {
+        "ok": true,
+        "index_path": "D:\\AI\\omniauto\\apps\\wechat_ai_customer_service\\data\\tenants\\default\\rag_index\\index.json",
+        "entry_count": 198
+      }
+    },
+    "rag_experience_id": "rag_exp_4bb356e5b1c2a83a79b4",
+    "strict_promotion_policy": "rag_experience_manual_promotion_only",
+    "updated_at": "2026-05-14T04:14:16"
+  },
+  {
+    "batch_id": "raw_batch_eb5fea941261bbc8770c",
+    "tenant_id": "default",
+    "conversation_id": "conv_6a6c8916a9e214148a",
+    "message_ids": [
+      "raw_msg_fdee11f29a8be6daf613",
+      "raw_msg_e9cf3916bbc6aeda7db7"
+    ],
+    "reason": "customer_service_poll",
+    "source_module": "customer_service",
+    "status": "processed",
+    "created_at": "2026-05-14T04:09:06",
+    "processed_at": "2026-05-14T04:12:46",
+    "transcript_path": "D:\\AI\\omniauto\\runtime\\apps\\wechat_ai_customer_service\\tenants\\default\\raw_messages\\learning_batches\\raw_batch_eb5fea941261bbc8770c.txt",
+    "candidate_ids": [],
+    "candidate_count": 0,
+    "skipped_duplicate_count": 0,
+    "skipped_duplicates": [],
+    "skipped_source_policy_count": 0,
+    "skipped_source_policy": [],
+    "llm_assist_policy": {
+      "policy_version": "knowledge_llm_assist_v1",
+      "stage": "raw_wechat_message_to_rag_experience_review",
+      "requested": true,
+      "rule_fallback_allowed": true,
+      "human_approval_required": true,
+      "strict_promotion_policy": "raw WeChat messages create RAG experiences only; pending candidates require manual RAG promotion"
+    },
+    "rag_ingest": {
+      "ok": true,
+      "source": {
+        "source_id": "source_cbb438e0eb1b702f",
+        "tenant_id": "default",
+        "layer": "tenant",
+        "source_type": "wechat_raw_message",
+        "category": "file_transfer",
+        "product_id": "",
+        "source_path": "D:\\AI\\omniauto\\runtime\\apps\\wechat_ai_customer_service\\tenants\\default\\raw_messages\\learning_batches\\raw_batch_eb5fea941261bbc8770c.txt",
+        "content_hash": "5a08cfaa778555078db8de788a28871c",
+        "status": "active",
+        "created_at": "2026-05-14T04:11:56",
+        "updated_at": "2026-05-14T04:11:56"
+      },
+      "source_id": "source_cbb438e0eb1b702f",
+      "chunk_count": 1,
+      "chunks_path": "D:\\AI\\omniauto\\apps\\wechat_ai_customer_service\\data\\tenants\\default\\rag_chunks\\source_cbb438e0eb1b702f.json",
+      "index": {
+        "ok": true,
+        "index_path": "D:\\AI\\omniauto\\apps\\wechat_ai_customer_service\\data\\tenants\\default\\rag_index\\index.json",
+        "entry_count": 197
+      }
+    },
+    "rag_experience_id": "rag_exp_011f56383369abe8aa38",
+    "strict_promotion_policy": "rag_experience_manual_promotion_only",
+    "updated_at": "2026-05-14T04:12:46"
+  },
+  {
+    "batch_id": "raw_batch_12956e15044016bf26c2",
+    "tenant_id": "default",
+    "conversation_id": "conv_6a6c8916a9e214148a",
+    "message_ids": [
+      "raw_msg_ebfccb0daeac2d94e3e4"
+    ],
+    "reason": "customer_service_poll",
+    "source_module": "customer_service",
+    "status": "processed",
+    "created_at": "2026-05-14T04:08:16",
+    "processed_at": "2026-05-14T04:11:56",
+    "transcript_path": "D:\\AI\\omniauto\\runtime\\apps\\wechat_ai_customer_service\\tenants\\default\\raw_messages\\learning_batches\\raw_batch_12956e15044016bf26c2.txt",
+    "candidate_ids": [],
+    "candidate_count": 0,
+    "skipped_duplicate_count": 0,
+    "skipped_duplicates": [],
+    "skipped_source_policy_count": 0,
+    "skipped_source_policy": [],
+    "llm_assist_policy": {
+      "policy_version": "knowledge_llm_assist_v1",
+      "stage": "raw_wechat_message_to_rag_experience_review",
+      "requested": true,
+      "rule_fallback_allowed": true,
+      "human_approval_required": true,
+      "strict_promotion_policy": "raw WeChat messages create RAG experiences only; pending candidates require manual RAG promotion"
+    },
+    "rag_ingest": {
+      "ok": true,
+      "source": {
+        "source_id": "source_54f61298389ead2b",
+        "tenant_id": "default",
+        "layer": "tenant",
+        "source_type": "wechat_raw_message",
+        "category": "file_transfer",
+        "product_id": "",
+        "source_path": "D:\\AI\\omniauto\\runtime\\apps\\wechat_ai_customer_service\\tenants\\default\\raw_messages\\learning_batches\\raw_batch_12956e15044016bf26c2.txt",
+        "content_hash": "5a7648a318600ee5c4dcf7f69545fc7b",
+        "status": "active",
+        "created_at": "2026-05-14T04:11:08",
+        "updated_at": "2026-05-14T04:11:08"
+      },
+      "source_id": "source_54f61298389ead2b",
+      "chunk_count": 1,
+      "chunks_path": "D:\\AI\\omniauto\\apps\\wechat_ai_customer_service\\data\\tenants\\default\\rag_chunks\\source_54f61298389ead2b.json",
+      "index": {
+        "ok": true,
+        "index_path": "D:\\AI\\omniauto\\apps\\wechat_ai_customer_service\\data\\tenants\\default\\rag_index\\index.json",
+        "entry_count": 196
+      }
+    },
+    "rag_experience_id": "rag_exp_2c527338dcf474321487",
+    "strict_promotion_policy": "rag_experience_manual_promotion_only",
+    "updated_at": "2026-05-14T04:11:56"
+  },
+  {
+    "batch_id": "raw_batch_4f449e479163ada5ddbb",
+    "tenant_id": "default",
+    "conversation_id": "conv_6a6c8916a9e214148a",
+    "message_ids": [
+      "raw_msg_f7bad3136487ea3452ec",
+      "raw_msg_b5375154b07ad2e870d5"
+    ],
+    "reason": "customer_service_poll",
+    "source_module": "customer_service",
+    "status": "processed",
+    "created_at": "2026-05-14T04:07:27",
+    "processed_at": "2026-05-14T04:10:47",
+    "transcript_path": "D:\\AI\\omniauto\\runtime\\apps\\wechat_ai_customer_service\\tenants\\default\\raw_messages\\learning_batches\\raw_batch_4f449e479163ada5ddbb.txt",
+    "candidate_ids": [],
+    "candidate_count": 0,
+    "skipped_duplicate_count": 0,
+    "skipped_duplicates": [],
+    "skipped_source_policy_count": 0,
+    "skipped_source_policy": [],
+    "llm_assist_policy": {
+      "policy_version": "knowledge_llm_assist_v1",
+      "stage": "raw_wechat_message_to_rag_experience_review",
+      "requested": true,
+      "rule_fallback_allowed": true,
+      "human_approval_required": true,
+      "strict_promotion_policy": "raw WeChat messages create RAG experiences only; pending candidates require manual RAG promotion"
+    },
+    "rag_ingest": {
+      "ok": true,
+      "source": {
+        "source_id": "source_8010aa743052b330",
+        "tenant_id": "default",
+        "layer": "tenant",
+        "source_type": "wechat_raw_message",
+        "category": "file_transfer",
+        "product_id": "",
+        "source_path": "D:\\AI\\omniauto\\runtime\\apps\\wechat_ai_customer_service\\tenants\\default\\raw_messages\\learning_batches\\raw_batch_4f449e479163ada5ddbb.txt",
+        "content_hash": "3a1c0ee43c4a1df5c5ead216dad82122",
+        "status": "active",
+        "created_at": "2026-05-14T04:09:48",
+        "updated_at": "2026-05-14T04:09:48"
+      },
+      "source_id": "source_8010aa743052b330",
+      "chunk_count": 1,
+      "chunks_path": "D:\\AI\\omniauto\\apps\\wechat_ai_customer_service\\data\\tenants\\default\\rag_chunks\\source_8010aa743052b330.json",
+      "index": {
+        "ok": true,
+        "index_path": "D:\\AI\\omniauto\\apps\\wechat_ai_customer_service\\data\\tenants\\default\\rag_index\\index.json",
+        "entry_count": 195
+      }
+    },
+    "rag_experience_id": "rag_exp_431e43510916b7f38631",
+    "strict_promotion_policy": "rag_experience_manual_promotion_only",
+    "updated_at": "2026-05-14T04:10:47"
+  },
+  {
+    "batch_id": "raw_batch_58433be5a44430c7b570",
+    "tenant_id": "default",
+    "conversation_id": "conv_6a6c8916a9e214148a",
+    "message_ids": [
+      "raw_msg_cdc441465f9b5901c1dc"
+    ],
+    "reason": "customer_service_poll",
+    "source_module": "customer_service",
+    "status": "processed",
+    "created_at": "2026-05-14T04:06:35",
+    "processed_at": "2026-05-14T04:09:48",
+    "transcript_path": "D:\\AI\\omniauto\\runtime\\apps\\wechat_ai_customer_service\\tenants\\default\\raw_messages\\learning_batches\\raw_batch_58433be5a44430c7b570.txt",
+    "candidate_ids": [],
+    "candidate_count": 0,
+    "skipped_duplicate_count": 0,
+    "skipped_duplicates": [],
+    "skipped_source_policy_count": 0,
+    "skipped_source_policy": [],
+    "llm_assist_policy": {
+      "policy_version": "knowledge_llm_assist_v1",
+      "stage": "raw_wechat_message_to_rag_experience_review",
+      "requested": true,
+      "rule_fallback_allowed": true,
+      "human_approval_required": true,
+      "strict_promotion_policy": "raw WeChat messages create RAG experiences only; pending candidates require manual RAG promotion"
+    },
+    "rag_ingest": {
+      "ok": true,
+      "source": {
+        "source_id": "source_aa2019972e5f68ac",
+        "tenant_id": "default",
+        "layer": "tenant",
+        "source_type": "wechat_raw_message",
+        "category": "file_transfer",
+        "product_id": "",
+        "source_path": "D:\\AI\\omniauto\\runtime\\apps\\wechat_ai_customer_service\\tenants\\default\\raw_messages\\learning_batches\\raw_batch_58433be5a44430c7b570.txt",
+        "content_hash": "e4c556389a8e3932ea05e33025233666",
+        "status": "active",
+        "created_at": "2026-05-14T04:08:57",
+        "updated_at": "2026-05-14T04:08:57"
+      },
+      "source_id": "source_aa2019972e5f68ac",
+      "chunk_count": 1,
+      "chunks_path": "D:\\AI\\omniauto\\apps\\wechat_ai_customer_service\\data\\tenants\\default\\rag_chunks\\source_aa2019972e5f68ac.json",
+      "index": {
+        "ok": true,
+        "index_path": "D:\\AI\\omniauto\\apps\\wechat_ai_customer_service\\data\\tenants\\default\\rag_index\\index.json",
+        "entry_count": 194
+      }
+    },
+    "rag_experience_id": "rag_exp_4d9ae5f60f988d0fc331",
+    "strict_promotion_policy": "rag_experience_manual_promotion_only",
+    "updated_at": "2026-05-14T04:09:48"
+  },
+  {
+    "batch_id": "raw_batch_ec2adbfde41c497f51b6",
+    "tenant_id": "default",
+    "conversation_id": "conv_6a6c8916a9e214148a",
+    "message_ids": [
+      "raw_msg_6a260bb05abd4ff80a9a",
+      "raw_msg_11d5d1a3cba27d7a6b9a"
+    ],
+    "reason": "customer_service_poll",
+    "source_module": "customer_service",
+    "status": "processed",
+    "created_at": "2026-05-14T04:05:42",
+    "processed_at": "2026-05-14T04:08:31",
+    "transcript_path": "D:\\AI\\omniauto\\runtime\\apps\\wechat_ai_customer_service\\tenants\\default\\raw_messages\\learning_batches\\raw_batch_ec2adbfde41c497f51b6.txt",
+    "candidate_ids": [],
+    "candidate_count": 0,
+    "skipped_duplicate_count": 0,
+    "skipped_duplicates": [],
+    "skipped_source_policy_count": 0,
+    "skipped_source_policy": [],
+    "llm_assist_policy": {
+      "policy_version": "knowledge_llm_assist_v1",
+      "stage": "raw_wechat_message_to_rag_experience_review",
+      "requested": true,
+      "rule_fallback_allowed": true,
+      "human_approval_required": true,
+      "strict_promotion_policy": "raw WeChat messages create RAG experiences only; pending candidates require manual RAG promotion"
+    },
+    "rag_ingest": {
+      "ok": true,
+      "source": {
+        "source_id": "source_110f154f74229e82",
+        "tenant_id": "default",
+        "layer": "tenant",
+        "source_type": "wechat_raw_message",
+        "category": "file_transfer",
+        "product_id": "",
+        "source_path": "D:\\AI\\omniauto\\runtime\\apps\\wechat_ai_customer_service\\tenants\\default\\raw_messages\\learning_batches\\raw_batch_ec2adbfde41c497f51b6.txt",
+        "content_hash": "8c74d199367cbfa6c16c3353360ab053",
+        "status": "active",
+        "created_at": "2026-05-14T04:07:31",
+        "updated_at": "2026-05-14T04:07:31"
+      },
+      "source_id": "source_110f154f74229e82",
+      "chunk_count": 1,
+      "chunks_path": "D:\\AI\\omniauto\\apps\\wechat_ai_customer_service\\data\\tenants\\default\\rag_chunks\\source_110f154f74229e82.json",
+      "index": {
+        "ok": true,
+        "index_path": "D:\\AI\\omniauto\\apps\\wechat_ai_customer_service\\data\\tenants\\default\\rag_index\\index.json",
+        "entry_count": 193
+      }
+    },
+    "rag_experience_id": "rag_exp_69a1c1c71178646cbd1a",
+    "strict_promotion_policy": "rag_experience_manual_promotion_only",
+    "updated_at": "2026-05-14T04:08:31"
+  },
+  {
+    "batch_id": "raw_batch_808d1b86aeab8e8dd32d",
+    "tenant_id": "default",
+    "conversation_id": "conv_6a6c8916a9e214148a",
+    "message_ids": [
+      "raw_msg_b8ab95c2aaa79d6049f0",
+      "raw_msg_5083b521b1e02bad69c2"
+    ],
+    "reason": "customer_service_poll",
+    "source_module": "customer_service",
+    "status": "processed",
+    "created_at": "2026-05-14T04:05:17",
+    "processed_at": "2026-05-14T04:07:04",
+    "transcript_path": "D:\\AI\\omniauto\\runtime\\apps\\wechat_ai_customer_service\\tenants\\default\\raw_messages\\learning_batches\\raw_batch_808d1b86aeab8e8dd32d.txt",
+    "candidate_ids": [],
+    "candidate_count": 0,
+    "skipped_duplicate_count": 0,
+    "skipped_duplicates": [],
+    "skipped_source_policy_count": 0,
+    "skipped_source_policy": [],
+    "llm_assist_policy": {
+      "policy_version": "knowledge_llm_assist_v1",
+      "stage": "raw_wechat_message_to_rag_experience_review",
+      "requested": true,
+      "rule_fallback_allowed": true,
+      "human_approval_required": true,
+      "strict_promotion_policy": "raw WeChat messages create RAG experiences only; pending candidates require manual RAG promotion"
+    },
+    "rag_ingest": {
+      "ok": true,
+      "source": {
+        "source_id": "source_62a82b0270607a8c",
+        "tenant_id": "default",
+        "layer": "tenant",
+        "source_type": "wechat_raw_message",
+        "category": "file_transfer",
+        "product_id": "",
+        "source_path": "D:\\AI\\omniauto\\runtime\\apps\\wechat_ai_customer_service\\tenants\\default\\raw_messages\\learning_batches\\raw_batch_808d1b86aeab8e8dd32d.txt",
+        "content_hash": "38629196cf778a2afce3cfd7f974a2e7",
+        "status": "active",
+        "created_at": "2026-05-14T04:06:04",
+        "updated_at": "2026-05-14T04:06:04"
+      },
+      "source_id": "source_62a82b0270607a8c",
+      "chunk_count": 1,
+      "chunks_path": "D:\\AI\\omniauto\\apps\\wechat_ai_customer_service\\data\\tenants\\default\\rag_chunks\\source_62a82b0270607a8c.json",
+      "index": {
+        "ok": true,
+        "index_path": "D:\\AI\\omniauto\\apps\\wechat_ai_customer_service\\data\\tenants\\default\\rag_index\\index.json",
+        "entry_count": 192
+      }
+    },
+    "rag_experience_id": "rag_exp_314d7089bf643f1903ae",
+    "strict_promotion_policy": "rag_experience_manual_promotion_only",
+    "updated_at": "2026-05-14T04:07:04"
+  },
+  {
+    "batch_id": "raw_batch_2afb76cca73c40909652",
+    "tenant_id": "default",
+    "conversation_id": "conv_6a6c8916a9e214148a",
+    "message_ids": [
+      "raw_msg_e8878680794264a7718c",
+      "raw_msg_8381aa80d74369ff8226",
+      "raw_msg_dcdd291272c804ba0ddd",
+      "raw_msg_6c3f99748077261f36f8",
+      "raw_msg_922485d7bcafaebe58c7",
+      "raw_msg_fd691910011b0a2dc2ba"
+    ],
+    "reason": "customer_service_poll",
+    "source_module": "customer_service",
+    "status": "processed",
+    "created_at": "2026-05-14T04:03:28",
+    "processed_at": "2026-05-14T04:04:29",
+    "transcript_path": "D:\\AI\\omniauto\\runtime\\apps\\wechat_ai_customer_service\\tenants\\default\\raw_messages\\learning_batches\\raw_batch_2afb76cca73c40909652.txt",
+    "candidate_ids": [],
+    "candidate_count": 0,
+    "skipped_duplicate_count": 0,
+    "skipped_duplicates": [],
+    "skipped_source_policy_count": 0,
+    "skipped_source_policy": [],
+    "llm_assist_policy": {
+      "policy_version": "knowledge_llm_assist_v1",
+      "stage": "raw_wechat_message_to_rag_experience_review",
+      "requested": true,
+      "rule_fallback_allowed": true,
+      "human_approval_required": true,
+      "strict_promotion_policy": "raw WeChat messages create RAG experiences only; pending candidates require manual RAG promotion"
+    },
+    "rag_ingest": {
+      "ok": true,
+      "source": {
+        "source_id": "source_c33e2548ef9fdf07",
+        "tenant_id": "default",
+        "layer": "tenant",
+        "source_type": "wechat_raw_message",
+        "category": "file_transfer",
+        "product_id": "",
+        "source_path": "D:\\AI\\omniauto\\runtime\\apps\\wechat_ai_customer_service\\tenants\\default\\raw_messages\\learning_batches\\raw_batch_2afb76cca73c40909652.txt",
+        "content_hash": "9744f77c680f06cd7e09977f6b577324",
+        "status": "active",
+        "created_at": "2026-05-14T04:03:40",
+        "updated_at": "2026-05-14T04:03:40"
+      },
+      "source_id": "source_c33e2548ef9fdf07",
+      "chunk_count": 1,
+      "chunks_path": "D:\\AI\\omniauto\\apps\\wechat_ai_customer_service\\data\\tenants\\default\\rag_chunks\\source_c33e2548ef9fdf07.json",
+      "index": {
+        "ok": true,
+        "index_path": "D:\\AI\\omniauto\\apps\\wechat_ai_customer_service\\data\\tenants\\default\\rag_index\\index.json",
+        "entry_count": 191
+      }
+    },
+    "rag_experience_id": "rag_exp_bf277712319b14e6cb65",
+    "strict_promotion_policy": "rag_experience_manual_promotion_only",
+    "updated_at": "2026-05-14T04:04:29"
+  },
+  {
     "batch_id": "raw_batch_41e3b48e3bbb17e7fb6b",
     "tenant_id": "default",
     "conversation_id": "conv_6a6c8916a9e214148a",

@@ -3,16 +3,16 @@
     "test01": {
       "username": "test01",
       "email": "test01@example.local",
-      "password_hash": "pbkdf2_sha256$120000$fba728773c0fb6023c1fd40b49c68230$TeOSZVgUeh+Ijv8nbRFSigCIM5Jj/IxvFTptafOLzsw=",
-      "initialized_at": "2026-05-10T18:30:31+00:00",
-      "updated_at": "2026-05-10T18:30:31+00:00"
+      "password_hash": "pbkdf2_sha256$120000$4e0c8b4d2e9a36f802a1a8c9c9c8fb2e$euTngRrT515boM1GuRxCPsL63zIqJVky3Lo52dd8aUY=",
+      "initialized_at": "2026-05-16T13:24:18+00:00",
+      "updated_at": "2026-05-16T13:24:18+00:00"
     },
     "guest": {
       "username": "guest",
       "email": "guest@example.local",
-      "password_hash": "pbkdf2_sha256$120000$b80286e2f8ef851d82da31e6946295ad$+VE8NH09HLoBaZYRsL3FUO0awSzWFJ5zVTWRLrv7y2o=",
-      "initialized_at": "2026-05-10T18:30:31+00:00",
-      "updated_at": "2026-05-10T18:30:32+00:00"
+      "password_hash": "pbkdf2_sha256$120000$4a1f3b789595d28cea253c8a906aafd2$MKYoqtiX9mkZMU4EGzvnYGo/ajTSjmYobGhbSOzEBMI=",
+      "initialized_at": "2026-05-16T13:24:19+00:00",
+      "updated_at": "2026-05-16T13:24:19+00:00"
     }
   }
 }
