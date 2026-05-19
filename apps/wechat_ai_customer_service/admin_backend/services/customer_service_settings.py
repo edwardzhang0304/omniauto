@@ -24,6 +24,7 @@ DEFAULT_SETTINGS = {
     "operator_alert_enabled": True,
     "identity_guard_enabled": True,
     "style_adapter_enabled": True,
+    "final_visible_llm_polish_enabled": True,
     "respond_all_unread_sessions": False,
     "session_targets_managed": False,
     "session_targets": [],
@@ -59,6 +60,7 @@ class CustomerServiceSettings:
             settings["reply_mode"] = DEFAULT_SETTINGS["reply_mode"]
         settings["identity_guard_enabled"] = bool(settings.get("identity_guard_enabled", True))
         settings["style_adapter_enabled"] = bool(settings.get("style_adapter_enabled", True))
+        settings["final_visible_llm_polish_enabled"] = bool(settings.get("final_visible_llm_polish_enabled", True))
         settings["respond_all_unread_sessions"] = bool(settings.get("respond_all_unread_sessions", False))
         settings["session_targets_managed"] = bool(settings.get("session_targets_managed", False))
         settings["session_targets"] = normalize_session_targets(settings.get("session_targets"))
@@ -70,6 +72,8 @@ class CustomerServiceSettings:
             allowed["identity_guard_enabled"] = bool(allowed.get("identity_guard_enabled", True))
         if "style_adapter_enabled" in allowed:
             allowed["style_adapter_enabled"] = bool(allowed.get("style_adapter_enabled", True))
+        if "final_visible_llm_polish_enabled" in allowed:
+            allowed["final_visible_llm_polish_enabled"] = bool(allowed.get("final_visible_llm_polish_enabled", True))
         if "respond_all_unread_sessions" in allowed:
             allowed["respond_all_unread_sessions"] = bool(allowed.get("respond_all_unread_sessions", False))
         if "session_targets_managed" in allowed:
@@ -81,6 +85,7 @@ class CustomerServiceSettings:
             settings["reply_mode"] = DEFAULT_SETTINGS["reply_mode"]
         settings["identity_guard_enabled"] = bool(settings.get("identity_guard_enabled", True))
         settings["style_adapter_enabled"] = bool(settings.get("style_adapter_enabled", True))
+        settings["final_visible_llm_polish_enabled"] = bool(settings.get("final_visible_llm_polish_enabled", True))
         settings["respond_all_unread_sessions"] = bool(settings.get("respond_all_unread_sessions", False))
         settings["session_targets_managed"] = bool(settings.get("session_targets_managed", False))
         settings["session_targets"] = normalize_session_targets(settings.get("session_targets"))

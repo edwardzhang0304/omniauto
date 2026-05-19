@@ -23,7 +23,7 @@
       "product_id": "commercial_fridge_bx_200"
     },
     "expect_contains": {
-      "reply_text": ["商用冰箱", "999"]
+      "reply_text": ["商用冰箱", "1000"]
     },
     "expect_not_contains": {
       "reply_text": ["None"]

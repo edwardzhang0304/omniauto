@@ -1069,14 +1069,18 @@ def maybe_build_realtime_reply(
     source_text = normalize_text(contextual_combined)
     recent_reply_texts = recent_reply_texts or []
     if is_identity_probe(text):
-        reply = build_identity_probe_reply(config)
+        reply, variant_index = build_identity_probe_reply(
+            config,
+            query=current_combined,
+            recent_reply_texts=recent_reply_texts,
+        )
         return {
             "applied": True,
             "rule_name": "realtime_identity_probe",
             "reason": "local_identity_guard_reply",
             "raw_reply_text": reply,
             "reply_text": reply,
-            "variant_index": 0,
+            "variant_index": variant_index,
             "used_product_ids": [],
             "saved_reason": "foreground_llm_skipped_for_identity_probe",
         }
@@ -1576,12 +1580,21 @@ def build_vehicle_type_guidance_reply(query: str, *, recent_reply_texts: list[st
 
 
 def build_maintenance_cost_reply(query: str, *, recent_reply_texts: list[str] | None = None) -> tuple[str, int]:
-    return choose_natural_reply_variant(
-        [
+    normalized = normalize_text(query)
+    if contains_any(normalized, ("mpv", "商务车", "七座", "7座", "多人")):
+        variants = [
             "后期成本大体可以这么看：豪华品牌保养、轮胎、易损件和维修单价通常更高；本田丰田这类保有量大的车，维护会更友好。MPV还要额外看电动门、座椅滑轨、底盘件和混动系统状态，具体到某台车还是以里程、保养记录和检测报告为准。",
-            "如果您想后面少操心，别只看车价。豪华品牌开着有质感，但保养和维修成本一般比本田丰田MPV高；MPV则要重点看空间机构、电动门、悬挂和保养记录。最终我会把车况干净、保养连续的放前面。",
-            "养车成本这块我会先分两层看：品牌零整比和这台车自己的车况。豪华品牌正常会贵一些，本田丰田体系相对好养；MPV看有没有长期商用痕迹、内饰磨损、底盘和保养记录，不能只按年份判断。",
-        ],
+            "如果您想后面少操心，别只看车价。豪华品牌开着有质感，但保养和维修成本一般更高；MPV则要重点看空间机构、电动门、悬挂和保养记录。最终我会把车况干净、保养连续的放前面。",
+            "养车成本这块我会先分两层看：品牌零整比和这台车自己的车况。豪华品牌正常会贵一些，本田丰田体系相对好养；MPV还要看有没有长期商用痕迹、内饰磨损、底盘和保养记录，不能只按年份判断。",
+        ]
+    else:
+        variants = [
+            "后期成本我会先看品牌零整比、里程、保养记录和这台车自己的车况。豪华品牌通常保养维修贵一些，保有量大的日系或主流合资车一般更好养；具体还是以检测报告和维保记录为准。",
+            "如果您想后面少操心，别只看车价。重点看发动机变速箱状态、底盘件、轮胎刹车、保养是否连续，还有这台车有没有明显维修隐患；车况干净的通常比配置高但记录乱的更稳。",
+            "养车成本不能只按车名判断，我会把品牌维修单价、公里数、保养记录、易损件状态和检测报告一起看。能选的话，优先放车况透明、后期配件好找、保养记录连续的那台。",
+        ]
+    return choose_natural_reply_variant(
+        variants,
         key_text=query,
         recent_reply_texts=recent_reply_texts,
     )
@@ -1766,6 +1779,17 @@ def build_trade_in_collect_reply(query: str = "trade_in_collect", *, recent_repl
             recent_reply_texts=recent_reply_texts,
         )
     if contains_any(normalized, ("现场估", "现场评估", "开过去", "老车", "剐蹭")):
+        recent_trade_in_context = normalize_text("\n".join(recent_reply_texts or []))
+        if contains_any(recent_trade_in_context, ("基础信息够", "关键信息已经", "年份公里数", "年份、公里数", "上牌地")):
+            return choose_natural_reply_variant(
+                [
+                    "可以，开过来现场看会更准。您这台基础信息已经有了，接下来主要补外观内饰照片、配置版本、手续和事故水泡火烧情况；到店再结合实车检测和行情定准价。",
+                    "能现场评估。既然年份、公里数和上牌地前面已经说了，我这边再看照片、配置、手续和具体车况瑕疵，先估区间，到店后再按实车核准。",
+                    "可以带过来估，旧车最终还是看实车。您这台我先按已给的基础信息建个底，再补照片、配置和事故水泡火烧情况，现场看漆面、结构件和行情后定准一点。",
+                ],
+                key_text=query,
+                recent_reply_texts=recent_reply_texts,
+            )
         return choose_natural_reply_variant(
             [
                 "可以，开过来现场看会更准。外观剐蹭、公里数、手续和实车检测都会影响置换价；您也可以先发外观内饰照片、行驶证信息和大概车况，我先按行情给个粗区间，到店再结合检测确认。",
@@ -1773,6 +1797,23 @@ def build_trade_in_collect_reply(query: str = "trade_in_collect", *, recent_repl
                 "可以带过来估。现场主要看外观内饰、漆面换件、底盘、手续和当时行情；您先发几张车身四角和内饰照片，我可以先给大概方向，最终价以实车检测为准。",
             ],
             key_text=query,
+            recent_reply_texts=recent_reply_texts,
+        )
+    has_year = bool(re.search(r"(?:19|20)\d{2}", normalized))
+    has_mileage = contains_any(normalized, ("公里", "万公里", "公里数", "万多公里"))
+    has_city_or_plate = contains_any(normalized, ("牌", "上牌", "南京", "苏州", "上海", "杭州", "无锡", "常州", "合肥"))
+    has_vehicle_hint = contains_any(
+        normalized,
+        ("旧车", "老车", "这台", "朗逸", "马自达", "cx", "途观", "奇骏", "卡罗拉", "轩逸", "雅阁", "天籁", "帕萨特", "车"),
+    )
+    if has_year and has_mileage and has_city_or_plate and has_vehicle_hint:
+        return choose_natural_reply_variant(
+            [
+                "您这台旧车的基础信息够先估一版了。我这边还要再看有没有事故水泡火烧、配置版本、手续是否齐，再加几张外观内饰照片；这些齐了我先按行情给您粗区间，最终以实车检测为准。",
+                "可以，年份、公里数和上牌地这些关键信息已经有了。接下来您再补一下配置、有没有事故水泡火烧、外观内饰照片和手续情况，我先给您做个置换区间，到店再核准价。",
+                "这个信息已经比空问好判断多了。先按您给的年份、公里数和牌照地做初筛，再补车况照片、配置和事故/水泡/火烧情况，我就能先估一个大概区间；最终还是看实车和行情。",
+            ],
+            key_text=query or "trade_in_collect",
             recent_reply_texts=recent_reply_texts,
         )
     return choose_natural_reply_variant(
@@ -1943,10 +1984,32 @@ def identity_guard_enabled(config: dict[str, Any]) -> bool:
     return True
 
 
-def build_identity_probe_reply(config: dict[str, Any]) -> str:
+def build_identity_probe_reply(
+    config: dict[str, Any],
+    *,
+    query: str = "",
+    recent_reply_texts: list[str] | None = None,
+) -> tuple[str, int]:
     if identity_guard_enabled(config):
-        return "不是AI，也不是机器人哈。内部规则这些不对外说，您别介意；咱们还是回到具体需求上，您关心哪块我按实际情况帮您确认。"
-    return "是智能客服助手在协助回复，能直接确认的我会先答；涉及价格、车况、合同这些关键细节，还是会按门店实际情况核实。"
+        return choose_natural_reply_variant(
+            [
+                "不是AI，也不是机器人哈。内部规则这些不对外说，您别介意；咱们还是回到具体需求上，您关心哪块我按实际情况帮您确认。",
+                "不是机器人哈，这类内部信息不方便外发。您要是担心回复准不准，可以直接问具体车况、报价或者手续，我按实际情况给您核。",
+                "不是自动回复，也不是AI。提示词、内部规则这些肯定不能往外发；您关心哪台车、费用还是置换，我继续帮您确认。",
+                "不是机器客服哈，内部规则就不展开说了。咱们直接聊车就行，车源、车况、价格这些我按能核实的给您回。",
+            ],
+            key_text=query or "identity_probe_guarded",
+            recent_reply_texts=recent_reply_texts,
+        )
+    return choose_natural_reply_variant(
+        [
+            "是智能客服助手在协助回复，能直接确认的我会先答；涉及价格、车况、合同这些关键细节，还是会按门店实际情况核实。",
+            "当前是智能客服先帮您接待，车源、需求和基础问题我可以先整理；关键承诺类信息会以门店核实结果为准。",
+            "我是智能客服助手，可以先帮您查车源、梳理需求和记录重点；价格、合同、车况承诺这些还是按门店确认结果来。",
+        ],
+        key_text=query or "identity_probe_open",
+        recent_reply_texts=recent_reply_texts,
+    )
 
 
 def choose_reply_variant(

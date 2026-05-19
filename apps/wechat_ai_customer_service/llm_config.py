@@ -255,9 +255,89 @@ def resolve_effective_llm_provider(
     return DEFAULT_LLM_PROVIDER
 
 
+def active_provider_overrides_explicit(
+    explicit_provider: Any = None,
+    effective_provider: Any | None = None,
+    *,
+    config: dict[str, str] | None = None,
+    read_secret_fn: SecretReader | None = read_secret,
+) -> bool:
+    """Return True when the global active provider intentionally overrides a module default.
+
+    Tenant configs often keep provider-scoped defaults such as
+    ``provider=deepseek`` and ``model=deepseek-v4-flash``. When the operator
+    switches the active provider to OpenAI, those provider-scoped values should
+    not keep leaking into individual modules.
+    """
+    explicit = str(explicit_provider or "").strip()
+    if not explicit or explicit.lower() == "manual_json":
+        return False
+    if read_secret_fn is not read_secret:
+        return False
+    configured = configured_llm_provider(config=config)
+    if not configured:
+        return False
+    explicit_id = normalize_llm_provider(explicit)
+    effective_id = normalize_llm_provider(effective_provider or configured)
+    return bool(effective_id == configured and explicit_id != configured)
+
+
 def llm_provider_preset(provider: Any) -> dict[str, Any]:
     provider_id = normalize_llm_provider(provider)
     return LLM_PROVIDER_PRESETS.get(provider_id, LLM_PROVIDER_PRESETS[DEFAULT_LLM_PROVIDER])
+
+
+def explicit_model_matches_provider(provider: Any, model: Any) -> bool:
+    """Guard against stale provider-scoped model names after provider switches."""
+    provider_id = normalize_llm_provider(provider)
+    if provider_id == "openai_compatible":
+        return True
+    detected = detect_provider_from_model_name(model)
+    return not detected or detected == provider_id
+
+
+def detect_provider_from_model_name(model: Any) -> str:
+    text = str(model or "").strip().lower()
+    if not text:
+        return ""
+    provider_prefixes = {
+        "deepseek": ("deepseek",),
+        "openai": ("gpt-", "o1", "o3", "o4", "o5"),
+        "qwen": ("qwen",),
+        "moonshot": ("moonshot", "kimi"),
+        "zhipu": ("glm", "charglm"),
+    }
+    for provider_id, prefixes in provider_prefixes.items():
+        if any(text.startswith(prefix) for prefix in prefixes):
+            return provider_id
+    return ""
+
+
+def explicit_base_url_matches_provider(provider: Any, base_url: Any) -> bool:
+    """Allow custom gateways, but ignore URLs that clearly belong to another provider."""
+    provider_id = normalize_llm_provider(provider)
+    if provider_id == "openai_compatible":
+        return True
+    detected = detect_provider_from_base_url(base_url)
+    return not detected or detected == provider_id
+
+
+def detect_provider_from_base_url(base_url: Any) -> str:
+    text = str(base_url or "").strip().lower()
+    if not text:
+        return ""
+    provider_domains = {
+        "deepseek": ("deepseek.com",),
+        "openai": ("openai.com",),
+        "qwen": ("dashscope.aliyuncs.com", "aliyuncs.com"),
+        "moonshot": ("moonshot.cn",),
+        "zhipu": ("bigmodel.cn",),
+        "siliconflow": ("siliconflow.cn",),
+    }
+    for provider_id, domains in provider_domains.items():
+        if any(domain in text for domain in domains):
+            return provider_id
+    return ""
 
 
 def llm_provider_options(*, config: dict[str, str] | None = None) -> list[dict[str, Any]]:
@@ -303,9 +383,9 @@ def resolve_llm_base_url(
     read_secret_fn: SecretReader | None = None,
 ) -> str:
     explicit = normalize_llm_base_url(explicit_base_url)
-    if explicit:
-        return explicit
     provider_id = normalize_llm_provider(provider or active_llm_provider(config=config))
+    if explicit and explicit_base_url_matches_provider(provider_id, explicit):
+        return explicit
     preset = llm_provider_preset(provider_id)
     names = [str(preset.get("base_url_env") or "")]
     if provider_id == "openai_compatible":
@@ -322,9 +402,9 @@ def resolve_llm_model(
     read_secret_fn: SecretReader | None = None,
 ) -> str:
     explicit = str(explicit_model or "").strip()
-    if explicit:
-        return explicit
     provider_id = normalize_llm_provider(provider or active_llm_provider(config=config))
+    if explicit and explicit_model_matches_provider(provider_id, explicit):
+        return explicit
     preset = llm_provider_preset(provider_id)
     names = [str(preset.get("model_env") or ""), str(preset.get("flash_model_env") or "")]
     if provider_id == "openai_compatible":
@@ -342,9 +422,9 @@ def resolve_llm_tier_model(
     read_secret_fn: SecretReader | None = None,
 ) -> str:
     explicit = str(explicit_model or "").strip()
-    if explicit:
-        return explicit
     provider_id = normalize_llm_provider(provider or active_llm_provider(config=config))
+    if explicit and explicit_model_matches_provider(provider_id, explicit):
+        return explicit
     preset = llm_provider_preset(provider_id)
     normalized = normalize_deepseek_model_tier(tier)
     if normalized == "pro":

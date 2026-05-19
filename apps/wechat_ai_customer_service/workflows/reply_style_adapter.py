@@ -37,6 +37,7 @@ HANDOFF_MARKERS = ("转人工", "人工客服", "真人客服", "同事联系", 
 AI_EXPOSURE_MARKERS = ("我是AI", "我是ai", "我是机器人", "智能客服", "自动回复", "机器客服")
 CONTACT_DATA_TERMS = ("电话", "手机号", "联系方式", "我叫", "联系人", "姓名", "先生", "女士")
 APPOINTMENT_TERMS = ("试驾", "到店", "看车", "订金", "定金", "留车", "预约", "周末", "周六", "周日", "上午", "下午", "几点", "安排", "过去", "来店")
+SAME_DAY_DELIVERY_TERMS = ("办手续", "直接办", "当天办", "提车", "直接提", "当天提", "临牌", "过户", "交车")
 LOCATION_CONTACT_TERMS = ("门店地址", "店地址", "地址", "导航", "位置", "在哪", "哪里", "找谁", "联系人", "对接人", "到了找")
 LOCATION_CONTACT_STRONG_TERMS = ("门店地址", "店地址", "地址", "导航", "位置", "在哪", "哪里", "找谁", "对接人", "到了找", "到店找", "跑错")
 LOCATION_VISIT_CONTEXT_TERMS = ("门店", "店里", "到店", "到了", "过去", "看车", "试驾", "来店", "导航", "地址")
@@ -283,6 +284,16 @@ def handoff_specific_reply(context: str, recent_reply_texts: list[str]) -> str:
             key_text=context,
             recent_reply_texts=recent_reply_texts,
         )[0]
+    if contains_any(clean, SAME_DAY_DELIVERY_TERMS):
+        return choose_reply_variant(
+            [
+                "这个要看车源状态、手续资料、付款方式、过户和临牌安排，不能只凭一句话保证当天提。我先把这些环节核清楚，确认能不能当天办完再回复您。",
+                "当天提车不是不能安排，但要先确认车况报告、合同资料、付款到账、过户和临牌这些节点。我先核实门店流程，确认稳了再跟您说。",
+                "您想当天办完我理解，这个我先确认车源、手续资料和过户排期，能不能当天交车要核准后再给您准话，避免您白跑或等太久。",
+            ],
+            key_text=context,
+            recent_reply_texts=recent_reply_texts,
+        )[0]
     if contains_any(clean, DOCUMENT_TERMS):
         if contains_any(clean, ("少开", "低开", "金额")):
             return choose_reply_variant(
@@ -299,6 +310,26 @@ def handoff_specific_reply(context: str, recent_reply_texts: list[str]) -> str:
                 "可以，这块我帮您问清楚。合同和发票需要按门店流程来，我把开票抬头、税号和合同资料要求核清楚后回您，避免后面填错。",
                 "这个提前问是对的，我帮您确认合同流程和开票资料要求后再回复您，省得后面资料来回补。",
                 "合同和发票这块我先确认一下门店流程。您稍等，我核实好抬头、税号和需要准备的资料后回复您。",
+            ],
+            key_text=context,
+            recent_reply_texts=recent_reply_texts,
+        )[0]
+    if contains_any(clean, PRICE_TERMS):
+        return choose_reply_variant(
+            [
+                "您想今天定，我理解，价格和金融这块我不能为了促成就随口保证。我先把车源、付款方式和负责人意见确认好，再给您明确答复。",
+                "价格我肯定帮您争取，但最低价和贷款结果不能直接口头保证。我核实一下具体车源、成交方式和负责人意见，再回复您。",
+                "这个我先帮您往下问，争取归争取，但价格、库存和金融结果都要确认过才稳。我核清楚后再给您准话。",
+            ],
+            key_text=context,
+            recent_reply_texts=recent_reply_texts,
+        )[0]
+    if contains_any(clean, SAME_DAY_DELIVERY_TERMS):
+        return choose_reply_variant(
+            [
+                "这个要看车源状态、手续资料、付款方式、过户和临牌安排，不能只凭一句话保证当天提。我先把这些环节核清楚，确认能不能当天办完再回复您。",
+                "当天提车不是不能安排，但要先确认车况报告、合同资料、付款到账、过户和临牌这些节点。我先核实门店流程，确认稳了再跟您说。",
+                "您想当天办完我理解，这个我先确认车源、手续资料和过户排期，能不能当天交车要核准后再给您准话，避免您白跑或等太久。",
             ],
             key_text=context,
             recent_reply_texts=recent_reply_texts,
@@ -320,16 +351,6 @@ def handoff_specific_reply(context: str, recent_reply_texts: list[str]) -> str:
                 f"您担心电池和三电很正常，{usage_detail}。这块不能只听一句口头保证，我先核实检测记录、电池状态和车况，请稍等，确认后再跟您说这台适不适合。",
                 f"新能源最该看的就是电池、三电和检测记录。{usage_detail}，我先核清楚实际续航、检测报告和车况，请稍等，确认好再给您更稳的判断。",
                 f"这个问题问得很关键。{usage_detail}，混动车要看电池状态、三电检测和实际用车强度，我先把这些核实清楚，请稍等，确认后再跟您说适不适合入手。",
-            ],
-            key_text=context,
-            recent_reply_texts=recent_reply_texts,
-        )[0]
-    if contains_any(clean, PRICE_TERMS):
-        return choose_reply_variant(
-            [
-                "您想今天定，我理解，价格和金融这块我不能为了促成就随口保证。我先把车源、付款方式和负责人意见确认好，再给您明确答复。",
-                "价格我肯定帮您争取，但最低价和贷款结果不能直接口头保证。我核实一下具体车源、成交方式和负责人意见，再回复您。",
-                "这个我先帮您往下问，争取归争取，但价格、库存和金融结果都要确认过才稳。我核清楚后再给您准话。",
             ],
             key_text=context,
             recent_reply_texts=recent_reply_texts,

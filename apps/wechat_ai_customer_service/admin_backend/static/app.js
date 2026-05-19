@@ -58,7 +58,9 @@ const state = {
   ragHits: [],
   ragExperiences: [],
   ragExperienceDisplayCounts: null,
+  ragExperienceGovernanceCounts: null,
   ragExperienceHiddenCount: 0,
+  ragExperienceLoadedCount: 0,
   ragExperienceDiscardedTotal: 0,
   ragExperienceTotal: 0,
   showDiscardedRagExperiences: localStorage.getItem("showDiscardedRagExperiences") !== "0",
@@ -1397,6 +1399,7 @@ function renderCustomerService(counts = {}) {
   setChecked("customer-operator-alert", settings.operator_alert_enabled !== false);
   setChecked("customer-identity-guard", settings.identity_guard_enabled !== false);
   setChecked("customer-style-adapter", settings.style_adapter_enabled !== false);
+  setChecked("customer-final-polish", settings.final_visible_llm_polish_enabled !== false);
   setChecked("customer-respond-all-unread", settings.respond_all_unread_sessions === true);
   document.getElementById("customer-service-status").textContent = item.status || "未配置";
   const enabledSessions = (state.customerServiceSessions || []).filter((session) => session.enabled);
@@ -1729,6 +1732,7 @@ async function saveCustomerServiceSettings() {
       operator_alert_enabled: document.getElementById("customer-operator-alert")?.checked,
       identity_guard_enabled: document.getElementById("customer-identity-guard")?.checked,
       style_adapter_enabled: document.getElementById("customer-style-adapter")?.checked,
+      final_visible_llm_polish_enabled: document.getElementById("customer-final-polish")?.checked,
       respond_all_unread_sessions: document.getElementById("customer-respond-all-unread")?.checked,
     }),
   });
@@ -4107,8 +4111,11 @@ async function loadRagExperiences(options = {}) {
   const filteredItems = rawItems.filter((item) => !shouldHideRagExperience(item));
   const hiddenCount = Math.max(0, rawItems.length - filteredItems.length);
   const displayCounts = normalizeRagExperienceDisplayCounts(payload.display_counts, rawItems);
+  const governanceCounts = normalizeRagExperienceGovernanceCounts(payload.governance_counts, rawItems);
   state.ragExperienceHiddenCount = hiddenCount;
+  state.ragExperienceLoadedCount = Number(payload.loaded_count ?? rawItems.length) || rawItems.length;
   state.ragExperienceDisplayCounts = displayCounts;
+  state.ragExperienceGovernanceCounts = governanceCounts;
   state.ragExperienceDiscardedTotal = displayCounts.discarded;
   state.ragExperienceTotal = displayCounts.total;
   state.ragExperiences = filteredItems;
@@ -4117,7 +4124,9 @@ async function loadRagExperiences(options = {}) {
     ...payload,
     items: filteredItems,
     ui_hidden_count: hiddenCount,
+    ui_loaded_count: state.ragExperienceLoadedCount,
     display_counts: displayCounts,
+    governance_counts: governanceCounts,
     ui_discarded_total: displayCounts.discarded,
     ui_total_count: displayCounts.total,
   });
@@ -4144,11 +4153,89 @@ function normalizeRagExperienceDisplayCounts(serverCounts = null, items = []) {
   };
   counts.accounted_total = counts.pending + counts.kept + counts.promoted + counts.discarded + counts.other;
   counts.consistent = counts.accounted_total === counts.total;
-  if (!counts.consistent && counts.total < counts.accounted_total) {
-    counts.total = counts.accounted_total;
-    counts.consistent = true;
-  }
   return counts;
+}
+
+function normalizeRagExperienceGovernanceCounts(serverCounts = null, items = []) {
+  const fallback = {
+    pending_review: 0,
+    retrievable_experience: 0,
+    style_only: 0,
+    candidate_suggested: 0,
+    candidate_created: 0,
+    auto_discarded: 0,
+    user_discarded: 0,
+    promoted: 0,
+    blocked: 0,
+    unknown: 0,
+    total: items.length,
+  };
+  for (const item of items) {
+    const effective = governanceEffectiveState(item) || "unknown";
+    if (effective in fallback) fallback[effective] += 1;
+    else fallback.unknown += 1;
+  }
+  const source = serverCounts && typeof serverCounts === "object" ? serverCounts : fallback;
+  const states = [
+    "pending_review",
+    "retrievable_experience",
+    "style_only",
+    "candidate_suggested",
+    "candidate_created",
+    "auto_discarded",
+    "user_discarded",
+    "promoted",
+    "blocked",
+    "unknown",
+  ];
+  const counts = {total: Math.max(0, Number(source.total ?? fallback.total) || 0)};
+  for (const key of states) {
+    counts[key] = Math.max(0, Number(source[key] ?? fallback[key]) || 0);
+  }
+  counts.accounted_total = states.reduce((sum, key) => sum + counts[key], 0);
+  counts.consistent = counts.accounted_total === counts.total;
+  return counts;
+}
+
+function ragGovernanceLabel(key) {
+  return {
+    pending_review: "待处理",
+    retrievable_experience: "可RAG参考",
+    style_only: "仅话术风格",
+    candidate_suggested: "建议待确认",
+    candidate_created: "已生成候选",
+    auto_discarded: "自动降噪",
+    user_discarded: "人工废弃",
+    promoted: "已转待确认",
+    blocked: "规则阻断",
+    unknown: "未知",
+  }[key] || key;
+}
+
+function ragGovernanceSummaryHtml(counts) {
+  if (!counts || !counts.total) return "";
+  const keys = [
+    "pending_review",
+    "retrievable_experience",
+    "style_only",
+    "candidate_suggested",
+    "candidate_created",
+    "auto_discarded",
+    "user_discarded",
+    "promoted",
+    "blocked",
+    "unknown",
+  ];
+  const detail = keys
+    .filter((key) => Number(counts[key] || 0) > 0 || key === "unknown")
+    .map((key) => `${ragGovernanceLabel(key)} ${Number(counts[key] || 0)}`)
+    .join(" · ");
+  return `
+    <div class="status-card ${counts.consistent ? "ok" : "warning"} rag-governance-summary">
+      <strong>治理状态对账</strong>
+      <span>${escapeHtml(detail || "暂无经验")} · 合计 ${escapeHtml(counts.accounted_total ?? 0)} / 总经验 ${escapeHtml(counts.total ?? 0)}</span>
+    </div>
+  `;
 }
 
 function ragExperienceProcessingNoticeHtml() {
@@ -4264,8 +4351,13 @@ function mergeInterpretedExperiences(items = []) {
 function renderRagExperiences(payload = {}) {
   const items = payload.items || state.ragExperiences || [];
   const hiddenCount = Number(payload.ui_hidden_count ?? state.ragExperienceHiddenCount ?? 0);
+  const loadedCount = Math.max(0, Number(payload.ui_loaded_count ?? state.ragExperienceLoadedCount ?? items.length) || 0);
   const displayCounts = normalizeRagExperienceDisplayCounts(
     payload.display_counts || state.ragExperienceDisplayCounts,
+    items
+  );
+  const governanceCounts = normalizeRagExperienceGovernanceCounts(
+    payload.governance_counts || state.ragExperienceGovernanceCounts,
     items
   );
   const relationCounts = {};
@@ -4295,6 +4387,13 @@ function renderRagExperiences(payload = {}) {
   if (cards) {
     const processingNotice = ragExperienceProcessingNoticeHtml();
     const actionNotice = ragActionNoticeHtml();
+    const governanceNotice = ragGovernanceSummaryHtml(governanceCounts);
+    const loadedNotice = displayCounts.total > loadedCount ? `
+        <div class="status-card info rag-load-scope">
+          <strong>清单分页加载</strong>
+          <span>当前已加载 ${escapeHtml(loadedCount)} / ${escapeHtml(displayCounts.total)} 条；上方统计和治理对账按全量口径计算，没有隐藏到统计之外。</span>
+        </div>
+      ` : "";
     cards.innerHTML = [
       ["待处理", displayCounts.pending],
       ["已保留为经验", displayCounts.kept],
@@ -4304,10 +4403,15 @@ function renderRagExperiences(payload = {}) {
       ["总经验", displayCounts.total],
     ]
       .map(([label, value]) => `<div class="metric-card"><span>${escapeHtml(value)}</span><label>${escapeHtml(label)}</label></div>`)
-      .join("") + actionNotice + processingNotice + (!displayCounts.consistent ? `
+      .join("") + actionNotice + processingNotice + loadedNotice + governanceNotice + (!displayCounts.consistent ? `
         <div class="status-card warning rag-count-warning">
           <strong>统计口径异常</strong>
           <span>分项合计 ${escapeHtml(displayCounts.accounted_total)}，总经验 ${escapeHtml(displayCounts.total)}。请刷新或重新加载经验清单。</span>
+        </div>
+      ` : "") + (!governanceCounts.consistent ? `
+        <div class="status-card warning rag-governance-count-warning">
+          <strong>治理对账异常</strong>
+          <span>治理状态合计 ${escapeHtml(governanceCounts.accounted_total)}，总经验 ${escapeHtml(governanceCounts.total)}。请刷新或重新加载经验清单。</span>
         </div>
       ` : "");
   }
@@ -4340,12 +4444,13 @@ function renderRagExperiences(payload = {}) {
         const experienceId = String(item.experience_id || "");
         const isExpanded = state.ragExperienceExpanded.has(experienceId);
         const interpretation = item.ai_interpretation || {};
+        const governance = experienceGovernance(item);
         const aiRecommendedPromotion = interpretation.recommended_action === "promote_to_pending" && interpretation.promotion_allowed !== false;
         canPromote = canAct && aiRecommendedPromotion && relation !== "covered_by_formal" && relation !== "conflicts_formal";
         const promoteDisabledReason = "AI 当前没有建议升级为待确认知识。";
-        const compactAction = interpretation.action_label || actionLabelFromValue(interpretation.recommended_action) || (canPromote ? "建议审核是否升级" : "建议人工查看");
+        const compactAction = governance.display_label || interpretation.action_label || actionLabelFromValue(interpretation.recommended_action) || (canPromote ? "建议审核是否升级" : "建议人工查看");
         const compactMeaning = interpretation.meaning || "等待AI重新理解后显示这条经验的大概意思。";
-        const compactReason = interpretation.action_reason || compactMeaning;
+        const compactReason = governance.reason || interpretation.action_reason || compactMeaning;
         const isInterpreting = state.ragInterpretationLoadingIds.has(experienceId);
         const activeAction = state.ragActionLoadingIds.get(experienceId) || "";
         const isActionLoading = Boolean(activeAction);
@@ -5286,6 +5391,23 @@ function experienceReviewStatus(item) {
   return String((item?.experience_review || {}).status || "");
 }
 
+function experienceGovernance(item) {
+  return item?.governance && typeof item.governance === "object" ? item.governance : {};
+}
+
+function governanceEffectiveState(item) {
+  return String(experienceGovernance(item).effective_state || "");
+}
+
+function governanceDisplayState(item, fallback = "pending") {
+  const effective = governanceEffectiveState(item);
+  if (["auto_discarded", "user_discarded", "blocked"].includes(effective)) return "discarded";
+  if (["promoted", "candidate_created"].includes(effective)) return "promoted";
+  if (["retrievable_experience", "style_only", "candidate_suggested"].includes(effective)) return "kept";
+  if (effective === "pending_review") return "pending";
+  return fallback;
+}
+
 function isAutoKeptReviewStatus(reviewStatus) {
   return reviewStatus === "auto_kept";
 }
@@ -5297,6 +5419,8 @@ function autoTriagedAsDiscard(item) {
 }
 
 function ragExperienceDisplayState(item, relationValue = "") {
+  const governance = experienceGovernance(item);
+  if (governance.effective_state) return governanceDisplayState(item, "pending");
   const status = String(item?.status || "active");
   const relation = String(relationValue || item?.formal_relation || status || "");
   const reviewStatus = experienceReviewStatus(item);
@@ -5307,6 +5431,12 @@ function ragExperienceDisplayState(item, relationValue = "") {
 }
 
 function ragExperienceRelationValue(item, relationValue = "", displayState = "") {
+  const effective = governanceEffectiveState(item);
+  if (effective === "style_only") return "style_only";
+  if (effective === "candidate_suggested" || effective === "candidate_created") return "promotion_candidate";
+  if (effective === "retrievable_experience") return "kept_experience";
+  if (["auto_discarded", "user_discarded", "blocked"].includes(effective)) return "discarded";
+  if (effective === "promoted") return "promoted";
   const relation = String(relationValue || item?.formal_relation || item?.status || "novel");
   const stateValue = displayState || ragExperienceDisplayState(item, relation);
   if (stateValue === "discarded") return "discarded";
@@ -5352,6 +5482,10 @@ function sortRagExperiencesForReview(items = []) {
 }
 
 function experienceRetrievalAllowed(item, quality = {}) {
+  const governance = experienceGovernance(item);
+  if (governance.effective_state) {
+    return Boolean(governance.retrieval_allowed) && governance.effective_state === "retrievable_experience";
+  }
   if (String(item?.status || "active") !== "active") return false;
   if (item?.source === "intake") return false;
   const reviewStatus = experienceReviewStatus(item);
@@ -5368,6 +5502,7 @@ function relationText(value) {
     conflicts_formal: "疑似冲突",
     auto_kept_experience: "已吸纳为经验（自动）",
     kept_experience: "已吸纳为经验",
+    style_only: "仅话术参考",
     promotion_candidate: "建议转待确认",
     promoted: "已转待确认",
     discarded: "已废弃",
@@ -5404,6 +5539,8 @@ function experienceStatusText(value) {
 }
 
 function experienceParticipationText(item, quality = {}) {
+  const governance = experienceGovernance(item);
+  if (governance.display_label) return String(governance.display_label || "");
   if (item.source === "intake") return "审核线索，不直接回答";
   const displayState = ragExperienceDisplayState(item, item?.formal_relation || item?.status);
   if (displayState === "discarded") return "已废弃，不参与回答";

@@ -895,6 +895,17 @@ def with_quality(item: dict[str, Any]) -> dict[str, Any]:
 def experience_is_retrievable(item: dict[str, Any]) -> bool:
     if str(item.get("status") or "active") != "active":
         return False
+    try:
+        from apps.wechat_ai_customer_service.admin_backend.services.rag_experience_governance import (
+            governance_allows_retrieval,
+        )
+
+        if not governance_allows_retrieval(item):
+            return False
+    except Exception:
+        # Keep the legacy quality gate as a safe fallback when admin services
+        # are unavailable in isolated workflow contexts.
+        pass
     if not experience_review_allows_retrieval(item):
         return False
     quality = item.get("quality") if isinstance(item.get("quality"), dict) else score_record_quality(item)

@@ -33,6 +33,7 @@ from apps.wechat_ai_customer_service.workflows.rag_experience_store import (  # 
     experience_is_retrievable,
     with_quality,
 )
+from apps.wechat_ai_customer_service.admin_backend.services.rag_experience_governance import attach_governance  # noqa: E402
 
 
 TENANT_ID = "chejin"
@@ -126,12 +127,14 @@ def check_real_chat_conversion_contract() -> bool:
     }
     exp = formal_chat_item_to_experience(item, tenant_id=TENANT_ID, migration_id="contract_probe", source_file="probe.json")
     style = formal_chat_item_to_style_example(item, tenant_id=TENANT_ID, migration_id="contract_probe", source_file="probe.json")
+    governed_exp = attach_governance(with_quality(exp or {}))
     return (
         formal_chat_item_is_real_chat(item)
         and bool(exp)
         and bool(style)
         and str(exp.get("formal_knowledge_policy") or "") == "experience_only_not_formal_knowledge"
-        and experience_is_retrievable(with_quality(exp))
+        and experience_is_retrievable(governed_exp) is False
+        and str((governed_exp.get("governance") or {}).get("effective_state") or "") == "style_only"
         and "哥" in str(style.get("service_reply") or "")
     )
 
