@@ -7,7 +7,7 @@ import json
 import os
 import re
 import time
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -180,10 +180,27 @@ class RawMessageStore:
                 for item in records
                 if all(term in str(item.get("content") or "").lower() for term in terms)
             ]
-        if start_time:
-            records = [item for item in records if message_time_text(item) >= start_time]
-        if end_time:
-            records = [item for item in records if message_time_text(item) <= end_time]
+        if start_time or end_time:
+            parsed_start = parse_time_text(start_time)
+            parsed_end = parse_time_text(end_time)
+            if parsed_start or parsed_end:
+                filtered: list[dict[str, Any]] = []
+                for item in records:
+                    parsed_message_time = parse_time_text(message_time_text(item))
+                    if parsed_message_time is None:
+                        continue
+                    if parsed_start and parsed_message_time < parsed_start:
+                        continue
+                    if parsed_end and parsed_message_time > parsed_end:
+                        continue
+                    filtered.append(item)
+                records = filtered
+            else:
+                # Backward-compatible fallback for unexpected formats.
+                if start_time:
+                    records = [item for item in records if message_time_text(item) >= start_time]
+                if end_time:
+                    records = [item for item in records if message_time_text(item) <= end_time]
         records.sort(key=lambda item: str(item.get("observed_at") or ""), reverse=True)
         clean_offset = max(0, int(offset or 0))
         clean_limit = max(1, min(int(limit or 100), 10000))
@@ -444,6 +461,27 @@ def now() -> str:
 
 def message_time_text(message: dict[str, Any]) -> str:
     return str(message.get("message_time") or message.get("observed_at") or "")
+
+
+def parse_time_text(value: str) -> datetime | None:
+    text = str(value or "").strip()
+    if not text:
+        return None
+    normalized = text.replace("T", " ")
+    if normalized.endswith("Z"):
+        normalized = normalized[:-1] + "+00:00"
+    candidates = [normalized]
+    if len(normalized) == 10:
+        candidates.extend([normalized + " 00:00:00", normalized + "T00:00:00"])
+    for candidate in candidates:
+        try:
+            parsed = datetime.fromisoformat(candidate)
+        except ValueError:
+            continue
+        if parsed.tzinfo is not None:
+            return parsed.astimezone(timezone.utc).replace(tzinfo=None)
+        return parsed
+    return None
 
 
 def postgres_store():
