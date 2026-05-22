@@ -11,6 +11,8 @@ This folder provides a stable, downloadable package in the repository.
 
 - `test02_recorder_only_20260522_145033.zip`
 - `install_seed.ps1`
+- `操作指南.md` (human-friendly Chinese guide)
+- `import_guide.json` (machine-readable guide for AI agents)
 
 Package SHA256:
 
