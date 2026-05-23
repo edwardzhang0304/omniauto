@@ -6,6 +6,7 @@ import hashlib
 import json
 import os
 import re
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -21,10 +22,15 @@ from apps.wechat_ai_customer_service.workflows.generate_review_candidates import
 
 
 MAX_RUN_RECORDS = 2000
+LLM_CACHE_VERSION = "recorder_export_llm_cache_v1"
 RUN_STAGE_LABELS = {
     "queued": "排队中",
     "preprocessing": "预处理中",
+    "scanning": "筛选候选消息",
     "extracting": "结构化抽取中",
+    "llm_extracting": "LLM语义抽取中",
+    "llm_branding": "品牌推断中",
+    "finalizing": "整理导出行",
     "reviewing": "质量复核中",
     "exporting": "生成导出文件",
     "completed": "已完成",
@@ -132,6 +138,12 @@ def now_iso() -> str:
     return datetime.now().isoformat(timespec="seconds")
 
 
+def progress_between(start: float, end: float, current: int, total: int) -> float:
+    total_safe = max(1, int(total or 0))
+    ratio = max(0.0, min(float(current or 0) / float(total_safe), 1.0))
+    return max(0.0, min(start + (end - start) * ratio, 0.99))
+
+
 def stable_digest(value: str, length: int = 16) -> str:
     return hashlib.sha256(value.encode("utf-8")).hexdigest()[:length]
 
@@ -161,6 +173,58 @@ class RecorderExportRunService:
     @property
     def reports_root(self) -> Path:
         return self.root / "reports"
+
+    @property
+    def llm_cache_root(self) -> Path:
+        return tenant_runtime_root(self.tenant_id) / "recorder" / "llm_cache" / LLM_CACHE_VERSION
+
+    def _call_deepseek_json_cached(self, prompt: dict[str, Any], *, namespace: str) -> dict[str, Any]:
+        cache_key = stable_digest(
+            json.dumps(
+                {
+                    "version": LLM_CACHE_VERSION,
+                    "namespace": str(namespace or "default"),
+                    "prompt": prompt,
+                },
+                ensure_ascii=False,
+                sort_keys=True,
+            ),
+            length=32,
+        )
+        cache_path = self.llm_cache_root / f"{cache_key}.json"
+        if cache_path.exists():
+            try:
+                cached = json.loads(cache_path.read_text(encoding="utf-8"))
+                payload = cached.get("payload") if isinstance(cached, dict) else None
+                if isinstance(payload, dict):
+                    return payload
+            except (OSError, json.JSONDecodeError):
+                pass
+        try:
+            payload = call_deepseek_json(prompt)
+        except Exception:
+            return {}
+        if not isinstance(payload, dict):
+            return {}
+        if payload:
+            try:
+                self.llm_cache_root.mkdir(parents=True, exist_ok=True)
+                temp_path = cache_path.with_suffix(".json.tmp")
+                temp_path.write_text(
+                    json.dumps(
+                        {
+                            "namespace": str(namespace or "default"),
+                            "created_at": now_iso(),
+                            "payload": payload,
+                        },
+                        ensure_ascii=False,
+                    ),
+                    encoding="utf-8",
+                )
+                os.replace(temp_path, cache_path)
+            except OSError:
+                pass
+        return payload
 
     def list_runs(self, *, status: str = "all", limit: int = 100) -> list[dict[str, Any]]:
         records = [item for item in self._read_json(self.runs_path, default=[]) if isinstance(item, dict)]
@@ -301,9 +365,24 @@ class RecorderExportRunService:
         }
         self._upsert_run(running)
         try:
-            self._update_run_progress(run_id, stage="preprocessing", processed=0, total=0)
+            self._update_run_progress(
+                run_id,
+                stage="preprocessing",
+                processed=0,
+                total=0,
+                force_percent=0.02,
+                stage_detail="读取筛选条件与原始消息",
+            )
             messages = self._load_messages_for_run(running)
-            self._update_run_progress(run_id, stage="extracting", processed=0, total=len(messages))
+            self._update_run_progress(
+                run_id,
+                stage="scanning",
+                processed=0,
+                total=len(messages),
+                force_percent=0.05,
+                stage_detail="正在筛选候选订单消息",
+                extra={"unit_label": "消息"},
+            )
             workbook_result = self._build_workbook(running, messages, run_id=run_id)
             self._update_run_progress(run_id, stage="exporting", processed=len(messages), total=len(messages), force_percent=0.95)
             report_path = self._write_report(running, messages, workbook_result)
@@ -367,6 +446,8 @@ class RecorderExportRunService:
         status = str(run.get("status") or "")
         if status not in {"queued", "running"}:
             return {"ok": True, "skipped": True, "reason": f"run_status_{status or 'unknown'}"}
+        if status == "running" and self._run_has_recent_progress(run, stale_minutes=20):
+            return {"ok": True, "skipped": True, "reason": "run_still_active_recent_progress"}
         dedupe_key = f"recorder_export_run_execute:{run_id}"
         existing = self.queue.find_active_dedupe(queue="recorder_exports", dedupe_key=dedupe_key)
         if existing:
@@ -379,6 +460,19 @@ class RecorderExportRunService:
             priority=5,
         )
         return {"ok": True, "job": job, "requeued": True}
+
+    @staticmethod
+    def _run_has_recent_progress(run: dict[str, Any], *, stale_minutes: int) -> bool:
+        progress = run.get("progress") if isinstance(run.get("progress"), dict) else {}
+        timestamp = str(progress.get("updated_at") or run.get("updated_at") or run.get("started_at") or "").strip()
+        if not timestamp:
+            return False
+        try:
+            updated_at = datetime.fromisoformat(timestamp.replace("Z", ""))
+        except ValueError:
+            return False
+        age = datetime.now() - updated_at
+        return age.total_seconds() < max(60, int(stale_minutes or 20) * 60)
 
     def _cancel_run_jobs(self, run_id: str) -> list[dict[str, Any]]:
         cancelled: list[dict[str, Any]] = []
@@ -424,6 +518,8 @@ class RecorderExportRunService:
         processed: int | None = None,
         total: int | None = None,
         force_percent: float | None = None,
+        stage_detail: str | None = None,
+        extra: dict[str, Any] | None = None,
     ) -> None:
         run = self.get_run(run_id)
         if not run:
@@ -436,18 +532,25 @@ class RecorderExportRunService:
             percent = max(0.0, min(float(force_percent), 1.0))
         elif next_total > 0:
             percent = max(0.0, min(next_processed / float(next_total), 0.99))
+        next_progress = {
+            **progress,
+            "stage": stage,
+            "stage_label": RUN_STAGE_LABELS.get(stage, stage),
+            "processed_messages": max(0, next_processed),
+            "total_messages": max(0, next_total),
+            "percent": percent,
+            "updated_at": now_iso(),
+        }
+        if stage_detail is not None:
+            next_progress["stage_detail"] = str(stage_detail)
+        elif str(progress.get("stage") or "") != stage:
+            next_progress["stage_detail"] = ""
+        if extra:
+            next_progress.update(extra)
         updated = {
             **run,
             "stage": stage,
-            "progress": {
-                **progress,
-                "stage": stage,
-                "stage_label": RUN_STAGE_LABELS.get(stage, stage),
-                "processed_messages": max(0, next_processed),
-                "total_messages": max(0, next_total),
-                "percent": percent,
-                "updated_at": now_iso(),
-            },
+            "progress": next_progress,
             "updated_at": now_iso(),
         }
         self._upsert_run(updated)
@@ -674,9 +777,11 @@ class RecorderExportRunService:
         llm_dynamic_budget_max = max(llm_budget, int(config.get("llm_dynamic_budget_max", 64) or 64))
         llm_dynamic_repair_ratio = max(0.0, min(float(config.get("llm_dynamic_repair_ratio", 0.25) or 0.25), 2.0))
         llm_dynamic_repair_max = max(llm_repair_budget, int(config.get("llm_dynamic_repair_max", 32) or 32))
+        llm_skip_strong_rule_rows = bool(config.get("llm_skip_strong_rule_rows", True))
         llm_segmentation_enabled = bool(config.get("llm_segmentation_enabled", True))
         llm_segmentation_max_segments = max(1, min(int(config.get("llm_segmentation_max_segments", 6) or 6), 12))
         llm_supplement_mode = str(config.get("llm_supplement_mode") or "missing_core_fields_only")
+        llm_parallel_workers = max(1, min(int(config.get("llm_parallel_workers", 4) or 4), 8))
         date_output_mode = str(config.get("date_output_mode") or "YYYY-MM-DD")
         extract_mode = str(config.get("extract_mode") or "llm_first").strip().lower()
         missing_quantity_strategy = str(config.get("missing_quantity_strategy") or "strict").strip().lower()
@@ -759,7 +864,15 @@ class RecorderExportRunService:
                 }
             )
             if run_id and (index % 25 == 0 or index == total_messages):
-                self._update_run_progress(run_id, stage="extracting", processed=index, total=total_messages)
+                self._update_run_progress(
+                    run_id,
+                    stage="scanning",
+                    processed=index,
+                    total=total_messages,
+                    force_percent=progress_between(0.05, 0.20, index, total_messages),
+                    stage_detail=f"正在筛选候选订单消息 {index}/{total_messages}",
+                    extra={"unit_label": "消息"},
+                )
 
         if llm_dynamic_budget_enabled and candidates:
             llm_candidate_count = sum(1 for item in candidates if item.get("looks_like_llm_candidate"))
@@ -772,8 +885,11 @@ class RecorderExportRunService:
         # Pass-2: LLM upgrade for complex / low-confidence candidates
         if llm_enabled and llm_budget > 0:
             if extract_mode in {"llm_only", "llm_first", "hybrid_llm_first"}:
+                llm_pool = [item for item in candidates if item.get("looks_like_llm_candidate") and not item.get("is_followup")]
+                if llm_skip_strong_rule_rows and extract_mode != "llm_only":
+                    llm_pool = [item for item in llm_pool if self._candidate_needs_llm_upgrade(item)]
                 llm_targets = sorted(
-                    [item for item in candidates if item.get("looks_like_llm_candidate") and not item.get("is_followup")],
+                    llm_pool,
                     key=lambda item: (int(item.get("complexity", 0) or 0), -int(item.get("index", 0) or 0)),
                     reverse=True,
                 )
@@ -790,27 +906,25 @@ class RecorderExportRunService:
                     key=lambda item: (int(item.get("complexity", 0) or 0), -int(item.get("index", 0) or 0)),
                     reverse=True,
                 )
-            for target in llm_targets:
-                if llm_extract_calls >= llm_budget:
-                    break
-                message = target.get("message") if isinstance(target.get("message"), dict) else {}
-                content = str(target.get("content") or "")
-                llm_rows = self._llm_extract_rows(
-                    message,
-                    date_output_mode=date_output_mode,
-                    use_segmentation=llm_segmentation_enabled,
-                    max_segments=llm_segmentation_max_segments,
-                    force_multi_split=bool(target.get("force_multi_split")),
+            llm_target_total = min(llm_budget, len(llm_targets))
+            if run_id:
+                self._update_run_progress(
+                    run_id,
+                    stage="llm_extracting",
+                    processed=0,
+                    total=llm_target_total,
+                    force_percent=progress_between(0.20, 0.68, 0, llm_target_total),
+                    stage_detail=f"准备进行 LLM 语义抽取，共 {llm_target_total} 次调用，并发 {min(llm_parallel_workers, max(1, llm_target_total))}",
+                    extra={"unit_label": "LLM调用"},
                 )
-                llm_extract_calls += 1
-                if llm_segmentation_enabled:
-                    llm_segment_calls += 1
+
+            def apply_llm_result(target: dict[str, Any], content: str, llm_rows: list[dict[str, Any]]) -> None:
                 if not llm_rows:
-                    continue
+                    return
                 baseline_rows = target.get("baseline_rows") if isinstance(target.get("baseline_rows"), list) else []
                 if extract_mode == "llm_only":
                     target["selected_rows"] = llm_rows
-                    continue
+                    return
                 baseline_quality = self._rows_quality_score(baseline_rows, source_text=content)
                 llm_quality = self._rows_quality_score(llm_rows, source_text=content)
                 complexity = int(target.get("complexity", 0) or 0)
@@ -847,8 +961,93 @@ class RecorderExportRunService:
                 if prefer_llm:
                     target["selected_rows"] = llm_rows
 
+            def extract_target(target: dict[str, Any]) -> tuple[dict[str, Any], str, list[dict[str, Any]], str]:
+                message = target.get("message") if isinstance(target.get("message"), dict) else {}
+                content = str(target.get("content") or "")
+                try:
+                    return (
+                        target,
+                        content,
+                        self._llm_extract_rows(
+                            message,
+                            date_output_mode=date_output_mode,
+                            use_segmentation=llm_segmentation_enabled,
+                            max_segments=llm_segmentation_max_segments,
+                            force_multi_split=bool(target.get("force_multi_split")),
+                        ),
+                        "",
+                    )
+                except Exception as exc:  # pragma: no cover - keeps one flaky LLM call from killing the export.
+                    return target, content, [], repr(exc)
+
+            limited_llm_targets = llm_targets[:llm_target_total]
+            worker_count = min(llm_parallel_workers, max(1, llm_target_total))
+            if worker_count > 1 and llm_target_total > 1:
+                with ThreadPoolExecutor(max_workers=worker_count) as executor:
+                    future_to_target = {executor.submit(extract_target, target): target for target in limited_llm_targets}
+                    for future in as_completed(future_to_target):
+                        target, content, llm_rows, llm_error = future.result()
+                        llm_extract_calls += 1
+                        if llm_segmentation_enabled:
+                            llm_segment_calls += 1
+                        if llm_error:
+                            target["llm_error"] = llm_error
+                        apply_llm_result(target, content, llm_rows)
+                        if run_id:
+                            self._update_run_progress(
+                                run_id,
+                                stage="llm_extracting",
+                                processed=llm_extract_calls,
+                                total=llm_target_total,
+                                force_percent=progress_between(0.20, 0.68, llm_extract_calls, llm_target_total),
+                                stage_detail=f"并发 LLM 语义抽取已完成 {llm_extract_calls}/{llm_target_total}",
+                                extra={"unit_label": "LLM调用"},
+                            )
+            else:
+                for target in limited_llm_targets:
+                    if run_id:
+                        next_call = llm_extract_calls + 1
+                        self._update_run_progress(
+                            run_id,
+                            stage="llm_extracting",
+                            processed=llm_extract_calls,
+                            total=llm_target_total,
+                            force_percent=progress_between(0.20, 0.68, llm_extract_calls, llm_target_total),
+                            stage_detail=f"正在调用 LLM 语义抽取 {next_call}/{llm_target_total}",
+                            extra={"unit_label": "LLM调用"},
+                        )
+                    target, content, llm_rows, llm_error = extract_target(target)
+                    llm_extract_calls += 1
+                    if llm_segmentation_enabled:
+                        llm_segment_calls += 1
+                    if llm_error:
+                        target["llm_error"] = llm_error
+                    apply_llm_result(target, content, llm_rows)
+                    if run_id:
+                        self._update_run_progress(
+                            run_id,
+                            stage="llm_extracting",
+                            processed=llm_extract_calls,
+                            total=llm_target_total,
+                            force_percent=progress_between(0.20, 0.68, llm_extract_calls, llm_target_total),
+                            stage_detail=f"LLM 语义抽取已完成 {llm_extract_calls}/{llm_target_total}",
+                            extra={"unit_label": "LLM调用"},
+                        )
+
         # Pass-3: finalize and row-level supplement
-        for target in sorted(candidates, key=lambda item: int(item.get("index", 0) or 0)):
+        finalize_targets = sorted(candidates, key=lambda item: int(item.get("index", 0) or 0))
+        finalize_total = len(finalize_targets)
+        for finalize_index, target in enumerate(finalize_targets, start=1):
+            if run_id and (finalize_index % 25 == 1 or finalize_index == finalize_total):
+                self._update_run_progress(
+                    run_id,
+                    stage="finalizing",
+                    processed=finalize_index,
+                    total=finalize_total,
+                    force_percent=progress_between(0.68, 0.86, finalize_index, finalize_total),
+                    stage_detail=f"正在整理导出行 {finalize_index}/{finalize_total}",
+                    extra={"unit_label": "候选消息"},
+                )
             message = target.get("message") if isinstance(target.get("message"), dict) else {}
             content = str(target.get("content") or "")
             message_index = int(target.get("index", 0) or 0)
@@ -865,14 +1064,35 @@ class RecorderExportRunService:
                 and selected_rows
                 and any(not str((row or {}).get("brand") or "").strip() for row in selected_rows if isinstance(row, dict))
             ):
+                next_brand_call = llm_brand_calls + 1
+                if run_id:
+                    self._update_run_progress(
+                        run_id,
+                        stage="llm_branding",
+                        processed=llm_brand_calls,
+                        total=brand_llm_inference_max_calls,
+                        force_percent=progress_between(0.86, 0.92, llm_brand_calls, brand_llm_inference_max_calls),
+                        stage_detail=f"正在进行品牌推断 {next_brand_call}/{brand_llm_inference_max_calls}",
+                        extra={"unit_label": "品牌LLM调用"},
+                    )
                 inferred_rows = self._llm_infer_brands_for_rows(
                     source_text=content,
                     rows=selected_rows,
                     min_confidence=brand_llm_inference_min_confidence,
                 )
+                llm_brand_calls += 1
+                if run_id:
+                    self._update_run_progress(
+                        run_id,
+                        stage="llm_branding",
+                        processed=llm_brand_calls,
+                        total=brand_llm_inference_max_calls,
+                        force_percent=progress_between(0.86, 0.92, llm_brand_calls, brand_llm_inference_max_calls),
+                        stage_detail=f"品牌推断已完成 {llm_brand_calls}/{brand_llm_inference_max_calls}",
+                        extra={"unit_label": "品牌LLM调用"},
+                    )
                 if inferred_rows:
                     selected_rows = inferred_rows
-                    llm_brand_calls += 1
             if not selected_rows:
                 continue
             used_spec_owners: dict[str, str] = {}
@@ -897,6 +1117,17 @@ class RecorderExportRunService:
                 if self._should_drop_order_row(finalized):
                     continue
                 if llm_enabled and finalized.get("needs_review") and llm_repair_calls < llm_repair_budget and llm_extract_calls < llm_budget:
+                    if run_id:
+                        next_repair_call = llm_repair_calls + 1
+                        self._update_run_progress(
+                            run_id,
+                            stage="reviewing",
+                            processed=llm_repair_calls,
+                            total=llm_repair_budget,
+                            force_percent=progress_between(0.92, 0.94, llm_repair_calls, llm_repair_budget),
+                            stage_detail=f"正在进行行级 LLM 修复 {next_repair_call}/{llm_repair_budget}",
+                            extra={"unit_label": "修复LLM调用"},
+                        )
                     llm_repair_calls += 1
                     llm_extract_calls += 1
                     improved = self._llm_supplement_row(
@@ -905,6 +1136,16 @@ class RecorderExportRunService:
                         date_output_mode=date_output_mode,
                         mode=llm_supplement_mode,
                     )
+                    if run_id:
+                        self._update_run_progress(
+                            run_id,
+                            stage="reviewing",
+                            processed=llm_repair_calls,
+                            total=llm_repair_budget,
+                            force_percent=progress_between(0.92, 0.94, llm_repair_calls, llm_repair_budget),
+                            stage_detail=f"行级 LLM 修复已完成 {llm_repair_calls}/{llm_repair_budget}",
+                            extra={"unit_label": "修复LLM调用"},
+                        )
                     if improved:
                         finalized = improved
                 finalized = self._finalize_order_row(finalized, message, date_output_mode=date_output_mode)
@@ -942,7 +1183,9 @@ class RecorderExportRunService:
                 stage="reviewing",
                 processed=total_messages,
                 total=total_messages,
-                force_percent=0.9,
+                force_percent=0.94,
+                stage_detail="正在汇总抽取结果并准备生成 Excel",
+                extra={"unit_label": "消息"},
             )
         return rows, {
             "llm_calls": llm_extract_calls,
@@ -950,6 +1193,35 @@ class RecorderExportRunService:
             "llm_repair_calls": llm_repair_calls,
             "llm_brand_calls": llm_brand_calls,
         }
+
+    def _candidate_needs_llm_upgrade(self, candidate: dict[str, Any]) -> bool:
+        if bool(candidate.get("force_multi_split")):
+            return True
+        complexity = int(candidate.get("complexity", 0) or 0)
+        if complexity >= 2:
+            return True
+        content = self._normalize_order_text(str(candidate.get("content") or ""))
+        if re.search(r"(这\s*\d+\s*(?:个|株|盒|瓶|支|包)|各订|分别|买二送一|赠品选择)", content):
+            return True
+        baseline_rows = candidate.get("baseline_rows") if isinstance(candidate.get("baseline_rows"), list) else []
+        if not baseline_rows:
+            return True
+        if any(bool(row.get("needs_review")) for row in baseline_rows if isinstance(row, dict)):
+            return True
+        valid_rows = [row for row in baseline_rows if isinstance(row, dict)]
+        if not valid_rows:
+            return True
+        strong_rows = 0
+        for row in valid_rows:
+            if (
+                str(row.get("product_name") or "").strip()
+                and str(row.get("quantity") or "").strip()
+                and (str(row.get("sale_price") or "").strip() or str(row.get("total_sale") or "").strip())
+            ):
+                strong_rows += 1
+        if strong_rows >= len(valid_rows):
+            return False
+        return True
 
     def _normalize_brand_aliases(self, raw_aliases: Any) -> list[str]:
         aliases: list[str] = []
@@ -1432,7 +1704,7 @@ class RecorderExportRunService:
         }
         payload: dict[str, Any] = {}
         try:
-            raw_payload = call_deepseek_json(prompt)
+            raw_payload = self._call_deepseek_json_cached(prompt, namespace="brand_inference")
             if isinstance(raw_payload, dict):
                 payload = raw_payload
         except Exception:
@@ -2731,6 +3003,8 @@ class RecorderExportRunService:
             or not str(target.get("product_name") or "").strip()
             or not str(target.get("quantity") or "").strip()
         )
+        target["confidence"] = min(float(target.get("confidence") or 0), 0.72)
+        target["needs_review"] = True
         note = "上下文确认补全数量"
         remark = str(target.get("remark") or "")
         if note not in remark:
@@ -2773,7 +3047,7 @@ class RecorderExportRunService:
                 "reason": "string",
             },
         }
-        payload = call_deepseek_json(prompt)
+        payload = self._call_deepseek_json_cached(prompt, namespace="segment_message")
         segments_raw = payload.get("segments")
         if not isinstance(segments_raw, list):
             return []
@@ -2944,10 +3218,16 @@ class RecorderExportRunService:
         *,
         scope_text: str,
         source_text: str = "",
+        strict_scope: bool = False,
     ) -> dict[str, Any]:
         output = dict(row)
+        scope_parts = [scope_text]
+        if strict_scope:
+            scope_parts.append(str(output.get("remark") or ""))
+        else:
+            scope_parts.extend([str(output.get("remark") or ""), str(output.get("evidence_text") or "")])
         scope = self._normalize_order_text(
-            f"{scope_text} {str(output.get('remark') or '')} {str(output.get('evidence_text') or '')}"
+            " ".join(item for item in scope_parts if str(item or "").strip())
         )
         if not scope:
             return output
@@ -3017,6 +3297,78 @@ class RecorderExportRunService:
             )
             if spec_candidate:
                 output["spec"] = spec_candidate
+        return output
+
+    def _sanitize_product_name(self, product_name: str, *, scope_text: str = "") -> str:
+        product = self._normalize_order_text(product_name)
+        if not product:
+            return ""
+        product = re.sub(
+            rf"\s*(?:订|已订|代付|下单|补订|再订|重订|买)\s*[-一二两俩三四五六七八九十百\d]*(?:\.\d+)?\s*(?:{ORDER_UNIT_PATTERN})?.*$",
+            "",
+            product,
+        )
+        if "元" in product or re.match(r"^\d+(?:\.\d+)?\s*[*xX×/+.-]\s*\d+(?:\.\d+)?", product):
+            product = re.sub(
+                r"\d+(?:\.\d+)?\s*[*xX×/+.-]\s*\d+(?:\.\d+)?(?:\s*=\s*\d+(?:\.\d+)?)?\s*元?.*$",
+                "",
+                product,
+            )
+        product = self._normalize_order_text(product).strip("：:，,；;。 ")
+        if not product:
+            return ""
+        if re.fullmatch(r"\d+(?:\.\d+)?\s*元?", product):
+            return ""
+        if re.fullmatch(r"\d+(?:\.\d+)?(?:\s*[*xX×/+.-]\s*\d+(?:\.\d+)?)+\s*(?:=\s*\d+(?:\.\d+)?)?\s*元?", product):
+            return ""
+        if not re.search(r"[\u4e00-\u9fa5A-Za-z]", product):
+            return ""
+        scope = self._normalize_order_text(scope_text)
+        if "元" in product and not any(token in product for token in ("试剂", "管", "盒", "瓶", "水", "膜", "板", "酶", "酸")):
+            return ""
+        return product
+
+    def _scope_supports_quantity(self, quantity: str, unit: str, *, scope_text: str) -> bool:
+        qty_value = self._to_number(quantity)
+        if qty_value <= 0:
+            return False
+        scope = self._normalize_order_text(scope_text)
+        if not scope:
+            return False
+        qty = self._format_number(qty_value)
+        unit_text = self._normalize_order_text(unit)
+        qty_pattern = re.escape(qty).replace(r"\.0", r"(?:\.0)?")
+        if unit_text and re.search(rf"(?<!\d){qty_pattern}\s*{re.escape(unit_text)}", scope):
+            return True
+        if qty_value == 1 and unit_text and re.search(rf"(?:一|1|一个)\s*{re.escape(unit_text)}", scope):
+            return True
+        if re.search(rf"[*xX×]\s*{qty_pattern}\s*=", scope):
+            return True
+        if re.search(rf"(?<!\d){qty_pattern}\s*[*xX×]\s*\d+(?:\.\d+)?\s*=", scope):
+            return True
+        if qty_value == 1 and re.search(r"(?:订|已订|买|代付|下单)\s*(?:一|1|一个)", scope):
+            return True
+        return False
+
+    def _clear_unsupported_quantity_from_scope(self, row: dict[str, Any], *, scope_text: str) -> dict[str, Any]:
+        output = dict(row)
+        quantity = str(output.get("quantity") or "").strip()
+        if not quantity:
+            return output
+        unit = self._normalize_order_text(str(output.get("unit") or ""))
+        if self._scope_supports_quantity(quantity, unit, scope_text=scope_text):
+            return output
+        output["quantity"] = ""
+        if unit and unit not in self._normalize_order_text(scope_text):
+            output["unit"] = ""
+            if str(output.get("order_unit") or "").strip() == unit:
+                output["order_unit"] = ""
+        output["needs_review"] = True
+        output["confidence"] = min(float(output.get("confidence") or 0), 0.62)
+        note = "数量超出当前产品片段，已清空"
+        remark = str(output.get("remark") or "")
+        if note not in remark:
+            output["remark"] = (remark + f" | {note}").strip(" |")
         return output
 
     def _enforce_single_use_spec_for_row(
@@ -3141,7 +3493,7 @@ class RecorderExportRunService:
         }
         payload: dict[str, Any] = {}
         try:
-            raw_payload = call_deepseek_json(prompt)
+            raw_payload = self._call_deepseek_json_cached(prompt, namespace="extract_rows")
             if isinstance(raw_payload, dict):
                 payload = raw_payload
         except Exception:
@@ -3307,7 +3659,7 @@ class RecorderExportRunService:
         }
         payload: dict[str, Any] = {}
         try:
-            raw_payload = call_deepseek_json(prompt)
+            raw_payload = self._call_deepseek_json_cached(prompt, namespace="refine_multi_rows")
             if isinstance(raw_payload, dict):
                 payload = raw_payload
         except Exception:
@@ -3558,26 +3910,34 @@ class RecorderExportRunService:
                 output["name"] = fallback_name
             if not str(output.get("owner") or "").strip():
                 output["owner"] = fallback_owner or str(output.get("name") or "")
-        backfill_scope = self._normalize_order_text(
-            str(output.get("source_scope_text") or "")
-            or str(output.get("evidence_text") or "")
+        explicit_scope = self._normalize_order_text(str(output.get("source_scope_text") or ""))
+        backfill_scope = explicit_scope or self._normalize_order_text(
+            str(output.get("evidence_text") or "")
             or str(message.get("content") or "")
         )
         output = self._backfill_row_from_scope_text(
             output,
             scope_text=backfill_scope,
             source_text=str(message.get("content") or ""),
+            strict_scope=bool(explicit_scope),
         )
         if output.get("quantity") and output.get("sale_price") and not output.get("total_sale"):
             total = self._to_number(str(output.get("quantity") or "")) * self._to_number(str(output.get("sale_price") or ""))
             if total:
                 output["total_sale"] = self._format_number(total)
         product_name = str(output.get("product_name") or "")
+        sanitized_product = self._sanitize_product_name(product_name, scope_text=backfill_scope)
+        if sanitized_product != self._normalize_order_text(product_name):
+            output["product_name"] = sanitized_product
+            output["needs_review"] = True
+            output["confidence"] = min(float(output.get("confidence") or 0), 0.78 if sanitized_product else 0.62)
+            product_name = sanitized_product
         brand_name = str(output.get("brand") or "")
         remark_text = str(output.get("remark") or "")
         evidence_text = str(output.get("evidence_text") or "")
         scope_text = self._normalize_order_text(str(output.get("source_scope_text") or ""))
-        local_context_text = self._normalize_order_text(f"{evidence_text} {remark_text} {product_name}")
+        scoped_context_text = scope_text or self._normalize_order_text(evidence_text)
+        local_context_text = self._normalize_order_text(f"{scoped_context_text} {remark_text} {product_name}")
         message_text = scope_text or local_context_text or str(message.get("content") or "")
         current_spec = self._normalize_spec_text(str(output.get("spec") or ""))
         candidate_primary = self._extract_product_spec(
@@ -3586,11 +3946,11 @@ class RecorderExportRunService:
             brand_hint=brand_name,
         )
         candidate_secondary = self._extract_product_spec(
-            self._normalize_order_text(f"{product_name} {evidence_text} {message_text}"),
+            self._normalize_order_text(f"{product_name} {scoped_context_text} {message_text}"),
             product_name=product_name,
             brand_hint=brand_name,
         )
-        context_text = self._normalize_order_text(f"{product_name} {remark_text} {evidence_text}")
+        context_text = self._normalize_order_text(f"{product_name} {remark_text} {scoped_context_text}")
         options = [current_spec, candidate_primary, candidate_secondary]
         best_spec = ""
         best_score = -1
@@ -3619,6 +3979,8 @@ class RecorderExportRunService:
             if rich_code and (not chosen_code or len(rich_code) >= len(chosen_code) + 1):
                 best_spec = rich_best
         output["spec"] = best_spec if (best_score > 0 or (best_spec and rich_candidates)) else ""
+        if explicit_scope:
+            output = self._clear_unsupported_quantity_from_scope(output, scope_text=explicit_scope)
         output["needs_review"] = bool(
             output.get("needs_review")
             or float(output.get("confidence") or 0) < 0.75
@@ -3712,7 +4074,7 @@ class RecorderExportRunService:
                 "reason": "string",
             },
         }
-        payload = call_deepseek_json(prompt)
+        payload = self._call_deepseek_json_cached(prompt, namespace="extract_single_row")
         row = payload.get("row") if isinstance(payload.get("row"), dict) else {}
         if not row:
             return None
@@ -3759,7 +4121,7 @@ class RecorderExportRunService:
                 "reason": "string",
             },
         }
-        payload = call_deepseek_json(prompt)
+        payload = self._call_deepseek_json_cached(prompt, namespace="supplement_row")
         fill = payload.get("fill") if isinstance(payload.get("fill"), dict) else {}
         if not fill:
             return None

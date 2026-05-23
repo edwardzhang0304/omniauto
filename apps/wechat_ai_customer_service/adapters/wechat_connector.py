@@ -15,8 +15,10 @@ import json
 import os
 import queue
 import subprocess
+import sys
 import threading
 import time
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -27,8 +29,11 @@ import psutil
 ROOT = Path(__file__).resolve().parents[3]
 SIDECAR_PYTHON = ROOT / "runtime/tool_envs/wxauto4-py312/Scripts/python.exe"
 SIDECAR_SCRIPT = ROOT / "apps/wechat_ai_customer_service/adapters/wxauto4_sidecar.py"
+COMPAT_SIDECAR_SCRIPT = ROOT / "apps/wechat_ai_customer_service/adapters/wechat_win32_ocr_sidecar.py"
+COMPAT_SIDECAR_PYTHON = ROOT / ".venv/Scripts/python.exe"
 WECHAT_EXE = Path(r"C:\Program Files (x86)\Tencent\Weixin\Weixin.exe")
 FILE_TRANSFER_ASSISTANT = "".join(chr(c) for c in [0x6587, 0x4EF6, 0x4F20, 0x8F93, 0x52A9, 0x624B])
+WECHAT_RPA_LOCK_PATH = ROOT / "runtime" / "wechat_rpa.lock"
 
 # Global daemon process cache to avoid repeated subprocess spawn overhead.
 _daemon_proc: subprocess.Popen | None = None
@@ -43,11 +48,77 @@ class WeChatConnectorError(RuntimeError):
 class WeChatConnector:
     sidecar_python: Path = SIDECAR_PYTHON
     sidecar_script: Path = SIDECAR_SCRIPT
+    compat_sidecar_script: Path = COMPAT_SIDECAR_SCRIPT
+    compat_sidecar_python: Path = COMPAT_SIDECAR_PYTHON
     root: Path = ROOT
     timeout_seconds: int = 120
 
     def status(self) -> dict[str, Any]:
-        return self.call_sidecar(["status"], allow_failure=True)
+        with wechat_rpa_lock("status"):
+            primary = self.call_sidecar(["status"], allow_failure=True)
+            if primary.get("ok") and primary.get("online"):
+                primary.setdefault("adapter", "wxauto4")
+                return primary
+            fallback = self.call_compat_sidecar(["status"], allow_failure=True, primary_payload=primary)
+            if fallback.get("ok") and fallback.get("online"):
+                return fallback
+            return primary
+
+    def capabilities(self) -> dict[str, Any]:
+        """Detect the active WeChat transport before starting a long-running loop."""
+        with wechat_rpa_lock("capabilities"):
+            try:
+                primary = self.call_sidecar(["status"], allow_failure=True)
+            except Exception as exc:
+                primary = {
+                    "ok": False,
+                    "online": False,
+                    "adapter": "wxauto4",
+                    "state": "primary_status_failed",
+                    "error": repr(exc),
+                }
+            if primary.get("ok") and primary.get("online"):
+                return {
+                    "ok": True,
+                    "online": True,
+                    "adapter": "wxauto4",
+                    "scheme": "wxauto4",
+                    "state": "primary_adapter_ready",
+                    "receive": {"ok": True, "method": "wxauto4.GetAllMessage"},
+                    "send": {"ok": True, "preferred_mode": "wxauto4", "method": "wxauto4.ChatBox controls"},
+                    "primary_status": primary,
+                    "message": "wxauto4 adapter is available.",
+                }
+
+            try:
+                fallback = self.call_compat_sidecar(["capabilities"], allow_failure=True, primary_payload=primary)
+            except Exception as exc:
+                fallback = {
+                    "ok": False,
+                    "online": False,
+                    "adapter": "win32_ocr",
+                    "state": "compat_capabilities_failed",
+                    "error": repr(exc),
+                }
+            if fallback.get("online"):
+                fallback.setdefault("adapter", "win32_ocr")
+                fallback.setdefault("primary_status", primary)
+                fallback.setdefault("compat_reason", "primary_adapter_failed")
+                return fallback
+
+            return {
+                "ok": False,
+                "online": False,
+                "adapter": "none",
+                "scheme": "wechat_not_ready",
+                "state": "no_supported_wechat_transport",
+                "receive": {"ok": False},
+                "send": {"ok": False},
+                "primary_status": primary,
+                "fallback_status": fallback,
+                "weixin_process_running": any_weixin_process(),
+                "message": "No logged-in WeChat main window is available.",
+            }
 
     def wait_online(self, seconds: int = 60) -> dict[str, Any]:
         deadline = time.time() + max(1, seconds)
@@ -60,14 +131,17 @@ class WeChatConnector:
         return latest
 
     def list_sessions(self, *, fresh: bool = False) -> dict[str, Any]:
-        self.require_online()
         args = ["sessions"]
         if fresh:
             args.append("--fresh")
-        return self.call_sidecar(args)
+        with wechat_rpa_lock("sessions"):
+            primary = self.call_sidecar(args, allow_failure=True)
+            if primary.get("ok"):
+                primary.setdefault("adapter", "wxauto4")
+                return primary
+            return self.call_compat_sidecar(args, allow_failure=True, primary_payload=primary)
 
     def get_messages(self, target: str, exact: bool = True, history_load_times: int = 0) -> dict[str, Any]:
-        self.require_online()
         args = ["messages", "--target", target]
         if exact:
             args.append("--exact")
@@ -78,18 +152,27 @@ class WeChatConnector:
                 load_times = 0
             if load_times:
                 args.extend(["--history-load-times", str(load_times)])
-        return self.call_sidecar(args)
+        with wechat_rpa_lock("messages"):
+            primary = self.call_sidecar(args, allow_failure=True)
+            if primary.get("ok"):
+                primary.setdefault("adapter", "wxauto4")
+                return primary
+            return self.call_compat_sidecar(args, allow_failure=True, primary_payload=primary)
 
     def send_text(self, target: str, text: str, exact: bool = True) -> dict[str, Any]:
         if not target:
             raise WeChatConnectorError("target is required")
         if not text:
             raise WeChatConnectorError("text is required")
-        self.require_online()
         args = ["send", "--target", target, "--text", text]
         if exact:
             args.append("--exact")
-        return self.call_sidecar(args)
+        with wechat_rpa_lock("send"):
+            primary = self.call_sidecar(args, allow_failure=True)
+            if primary.get("ok"):
+                primary.setdefault("adapter", "wxauto4")
+                return primary
+            return self.call_compat_sidecar(args, allow_failure=True, primary_payload=primary)
 
     def send_text_and_verify(self, target: str, text: str, exact: bool = True) -> dict[str, Any]:
         send_result = self.send_text(target, text, exact=exact)
@@ -140,6 +223,75 @@ class WeChatConnector:
             raise FileNotFoundError(str(self.sidecar_script))
         return self._call_daemon(args, allow_failure)
 
+    def call_compat_sidecar(
+        self,
+        args: list[str],
+        *,
+        allow_failure: bool = False,
+        primary_payload: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        if not self.compat_sidecar_script.exists():
+            payload = {
+                "ok": False,
+                "online": False,
+                "adapter": "win32_ocr",
+                "state": "compat_sidecar_missing",
+                "error": f"compat sidecar missing: {self.compat_sidecar_script}",
+            }
+            if primary_payload is not None:
+                payload["primary_status"] = primary_payload
+            if not allow_failure:
+                payload.setdefault("error", "compat_sidecar_missing")
+            return payload
+
+        python = self.compat_sidecar_python if self.compat_sidecar_python.exists() else Path(sys.executable)
+        cmd = [str(python), str(self.compat_sidecar_script), *compat_args(args)]
+        env = os.environ.copy()
+        env["PYTHONUTF8"] = "1"
+        env["PYTHONPATH"] = str(self.root)
+        try:
+            proc = subprocess.run(
+                cmd,
+                cwd=str(self.root),
+                env=env,
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                timeout=min(max(10, self.timeout_seconds), 120),
+            )
+        except Exception as exc:
+            payload = {"ok": False, "online": False, "adapter": "win32_ocr", "state": "compat_call_failed", "error": repr(exc)}
+            if primary_payload is not None:
+                payload["primary_status"] = primary_payload
+            return payload
+
+        payload = parse_json_object(proc.stdout)
+        if not isinstance(payload, dict):
+            payload = {
+                "ok": False,
+                "online": False,
+                "adapter": "win32_ocr",
+                "state": "compat_invalid_response",
+                "error": "compat sidecar did not return JSON",
+                "stdout": proc.stdout[-2000:],
+                "stderr": proc.stderr[-2000:],
+                "returncode": proc.returncode,
+            }
+        payload.setdefault("adapter", "win32_ocr")
+        if primary_payload is not None:
+            payload["primary_status"] = primary_payload
+            payload.setdefault("compat_reason", "primary_adapter_failed")
+        if proc.returncode != 0 and payload.get("ok"):
+            payload["returncode_warning"] = proc.returncode
+        elif proc.returncode != 0:
+            payload.setdefault("returncode", proc.returncode)
+            if proc.stderr:
+                payload.setdefault("stderr", proc.stderr[-2000:])
+        if not payload.get("ok") and not allow_failure:
+            payload.setdefault("error", "compat_command_failed")
+        return payload
+
     def _call_daemon(self, args: list[str], allow_failure: bool = False) -> dict[str, Any]:
         global _daemon_proc
         with _daemon_lock:
@@ -163,6 +315,72 @@ class WeChatConnector:
             if not payload.get("ok") and not allow_failure:
                 payload.setdefault("error", "daemon_command_failed")
             return payload
+
+
+@contextmanager
+def wechat_rpa_lock(action: str, *, timeout_seconds: float = 90.0, stale_seconds: float = 180.0):
+    """Serialize desktop WeChat RPA/OCR calls across processes.
+
+    wxauto4 and the Win32/OCR fallback both manipulate the same foreground
+    WeChat window. Without a process-wide lock, recorder screenshots can race
+    with automated sends and produce missed or partial captures.
+    """
+    if os.getenv("WECHAT_RPA_LOCK_DISABLED", "").strip().lower() in {"1", "true", "yes", "on"}:
+        yield
+        return
+    lock_path = WECHAT_RPA_LOCK_PATH
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    deadline = time.time() + max(1.0, float(timeout_seconds))
+    payload = {"pid": os.getpid(), "action": action, "created_at": time.time()}
+    acquired = False
+    while time.time() <= deadline:
+        try:
+            fd = os.open(str(lock_path), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+            try:
+                os.write(fd, json.dumps(payload, ensure_ascii=False).encode("utf-8"))
+            finally:
+                os.close(fd)
+            acquired = True
+            break
+        except FileExistsError:
+            if should_break_wechat_rpa_lock(lock_path, stale_seconds=stale_seconds):
+                try:
+                    lock_path.unlink()
+                except FileNotFoundError:
+                    pass
+                except OSError:
+                    time.sleep(0.2)
+                    continue
+            else:
+                time.sleep(0.2)
+    if not acquired:
+        raise TimeoutError(f"WeChat RPA lock timeout for action={action}")
+    try:
+        yield
+    finally:
+        try:
+            current = json.loads(lock_path.read_text(encoding="utf-8"))
+        except Exception:
+            current = {}
+        if int(current.get("pid") or 0) == os.getpid():
+            try:
+                lock_path.unlink()
+            except FileNotFoundError:
+                pass
+
+
+def should_break_wechat_rpa_lock(path: Path, *, stale_seconds: float) -> bool:
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return True
+    pid = int(payload.get("pid") or 0)
+    created_at = float(payload.get("created_at") or 0)
+    if pid and not psutil.pid_exists(pid):
+        return True
+    if created_at and time.time() - created_at > stale_seconds:
+        return True
+    return False
 
 
 def _read_json_response(proc: subprocess.Popen, timeout: int = 25) -> dict[str, Any]:
@@ -239,6 +457,11 @@ def _kill_daemon() -> None:
         _daemon_proc = None
 
 
+def reset_wxauto_sidecar_daemon() -> None:
+    """Force the cached wxauto4 sidecar to restart on the next connector call."""
+    _kill_daemon()
+
+
 def _args_to_request(args: list[str]) -> dict[str, Any]:
     request: dict[str, Any] = {"resize": True}
     if not args:
@@ -272,6 +495,50 @@ def _args_to_request(args: list[str]) -> dict[str, Any]:
             elif arg == "--exact":
                 request["exact"] = True
     return request
+
+
+def compat_args(args: list[str]) -> list[str]:
+    """Convert connector args to the one-shot Win32/OCR fallback CLI.
+
+    The compatibility sidecar does not maintain a daemon cache, so ``--fresh``
+    is implicit and omitted.
+    """
+    converted: list[str] = []
+    skip_next = False
+    for index, arg in enumerate(args):
+        if skip_next:
+            skip_next = False
+            continue
+        if arg == "--fresh":
+            continue
+        converted.append(arg)
+        if arg in {"--target", "--text", "--history-load-times"} and index + 1 < len(args):
+            converted.append(args[index + 1])
+            skip_next = True
+    return converted
+
+
+def parse_json_object(text: str) -> dict[str, Any] | None:
+    clean = str(text or "").strip()
+    if not clean:
+        return None
+    try:
+        payload = json.loads(clean)
+        return payload if isinstance(payload, dict) else None
+    except json.JSONDecodeError:
+        pass
+
+    # Some OCR libraries may print initialization lines. Parse the last JSON
+    # object from stdout instead of failing the entire fallback path.
+    start = clean.rfind("{")
+    while start >= 0:
+        candidate = clean[start:]
+        try:
+            payload = json.loads(candidate)
+            return payload if isinstance(payload, dict) else None
+        except json.JSONDecodeError:
+            start = clean.rfind("{", 0, start)
+    return None
 
 
 def any_weixin_process() -> bool:

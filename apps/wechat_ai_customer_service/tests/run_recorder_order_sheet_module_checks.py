@@ -23,6 +23,7 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from apps.wechat_ai_customer_service.admin_backend.app import create_app  # noqa: E402
+from apps.wechat_ai_customer_service.admin_backend.services import recorder_export_run_service as export_run_module  # noqa: E402
 from apps.wechat_ai_customer_service.admin_backend.services.background_handlers import handle_recorder_export_run_execute  # noqa: E402
 from apps.wechat_ai_customer_service.admin_backend.services.recorder_export_run_service import RecorderExportRunService  # noqa: E402
 from apps.wechat_ai_customer_service.admin_backend.services.work_queue import WorkQueueService  # noqa: E402
@@ -64,16 +65,21 @@ def main() -> int:
 
 
 def run_checks() -> None:
-    client = TestClient(create_app())
-    headers = {"X-Tenant-ID": TEST_TENANT}
-    seed_order_messages(client, headers)
-    bind_module(client, headers)
-    run_id = create_run(client, headers)
-    execute_run(run_id)
-    validate_export(client, headers, run_id)
-    validate_date_range_runs(client, headers)
-    validate_name_context_inference_rules()
-    validate_brand_single_use_rules()
+    original_call_deepseek_json = export_run_module.call_deepseek_json
+    export_run_module.call_deepseek_json = lambda _prompt: {}
+    try:
+        client = TestClient(create_app())
+        headers = {"X-Tenant-ID": TEST_TENANT}
+        seed_order_messages(client, headers)
+        bind_module(client, headers)
+        run_id = create_run(client, headers)
+        execute_run(run_id)
+        validate_export(client, headers, run_id)
+        validate_date_range_runs(client, headers)
+        validate_name_context_inference_rules()
+        validate_brand_single_use_rules()
+    finally:
+        export_run_module.call_deepseek_json = original_call_deepseek_json
 
 
 def seed_order_messages(client: TestClient, headers: dict[str, str]) -> None:

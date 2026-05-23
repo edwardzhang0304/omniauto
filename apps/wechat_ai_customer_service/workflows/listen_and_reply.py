@@ -1021,6 +1021,9 @@ def process_target(
         verified = connector.send_text_and_verify(target.name, handoff_reply_text, exact=target.exact)
         event["send_result"] = verified
         event["verified"] = bool(verified.get("verified"))
+        deferred = maybe_defer_transport_send_failure(target_state, message_ids, verified, event)
+        if deferred:
+            return deferred
         if not event["verified"]:
             event["action"] = "error"
             event["ok"] = False
@@ -1134,6 +1137,9 @@ def process_target(
         verified = connector.send_text_and_verify(target.name, reply_text, exact=target.exact)
         event["send_result"] = verified
         event["verified"] = bool(verified.get("verified"))
+        deferred = maybe_defer_transport_send_failure(target_state, message_ids, verified, event)
+        if deferred:
+            return deferred
         if not event["verified"]:
             event["action"] = "error"
             event["ok"] = False
@@ -1258,6 +1264,12 @@ def handle_rate_limit_block(
         "rate_limited",
         {"rate_limit": rate_check},
     )
+    if suppress_rate_limit_notice_for_transport(connector, config):
+        event["rate_limit_notice"] = {
+            "suppressed": True,
+            "reason": "fallback_transport_silent_defer",
+        }
+        return event
     if not should_send_rate_limit_notice(target_state, config, rate_check):
         return event
 
@@ -1282,10 +1294,81 @@ def handle_rate_limit_block(
         "send_result": verified,
         "verified": bool(verified.get("verified")),
     }
+    deferred = maybe_defer_transport_send_failure(target_state, message_ids, verified, event)
+    if deferred:
+        deferred["rate_limit_notice"] = event["rate_limit_notice"]
+        return deferred
     if event["rate_limit_notice"]["verified"]:
         record_rate_limit_notice(target_state, message_ids, rate_check, notice_text)
         event["action"] = "rate_limit_notice_sent"
     return event
+
+
+def suppress_rate_limit_notice_for_transport(connector: WeChatConnector, config: dict[str, Any]) -> bool:
+    settings = config.get("rate_limits", {}) or {}
+    if settings.get("notice_on_fallback_transport") is True:
+        return False
+    try:
+        status = connector.status()  # type: ignore[attr-defined]
+    except Exception:
+        return False
+    if not isinstance(status, dict):
+        return False
+    return str(status.get("adapter") or "") == "win32_ocr"
+
+
+def maybe_defer_transport_send_failure(
+    target_state: dict[str, Any],
+    message_ids: list[str],
+    verified: dict[str, Any],
+    event: dict[str, Any],
+) -> dict[str, Any] | None:
+    if verified.get("verified"):
+        return None
+    send_result = verified.get("send") if isinstance(verified.get("send"), dict) else verified
+    if not isinstance(send_result, dict):
+        return None
+    state = str(send_result.get("state") or "")
+    if state not in {
+        "send_rate_limited",
+        "send_guard_blocked",
+        "send_geometry_blocked",
+        "target_not_confirmed",
+        "send_uia_unavailable",
+    }:
+        return None
+    backoff = transport_send_backoff(send_result)
+    record_rate_limit_backoff(target_state, message_ids, backoff)
+    event["ok"] = True
+    event["action"] = "deferred"
+    event["reason"] = "transport_send_deferred"
+    event["transport_send_backoff"] = backoff
+    event["verified"] = False
+    return event
+
+
+def transport_send_backoff(send_result: dict[str, Any]) -> dict[str, Any]:
+    guard = send_result.get("guard") if isinstance(send_result.get("guard"), dict) else {}
+    rate = guard.get("rate") if isinstance(guard.get("rate"), dict) else {}
+    wait_seconds = positive_int(rate.get("wait_seconds"), default=0)
+    if wait_seconds <= 0:
+        wait_seconds = {
+            "send_rate_limited": 60,
+            "send_guard_blocked": 180,
+            "send_geometry_blocked": 180,
+            "target_not_confirmed": 120,
+            "send_uia_unavailable": 300,
+        }.get(str(send_result.get("state") or ""), 180)
+    retry_after_at = datetime.now() + timedelta(seconds=wait_seconds)
+    return {
+        "allowed": False,
+        "reason": "transport_" + str(send_result.get("state") or "send_failed"),
+        "retry_after_at": retry_after_at.isoformat(timespec="seconds"),
+        "retry_after_seconds": wait_seconds,
+        "adapter": str(send_result.get("adapter") or ""),
+        "send_state": str(send_result.get("state") or ""),
+        "transport_error": str(send_result.get("error") or ""),
+    }
 
 
 def maybe_record_rag_experience(

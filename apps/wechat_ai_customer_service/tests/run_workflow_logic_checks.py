@@ -102,6 +102,30 @@ class FakeConnector:
         return {"ok": True, "verified": True, "target": target, "exact": exact, "text": text}
 
 
+class RateLimitedTransportConnector(FakeConnector):
+    def send_text_and_verify(self, target: str, text: str, exact: bool = True) -> dict[str, Any]:
+        self.sent_texts.append(text)
+        return {
+            "ok": False,
+            "verified": False,
+            "target": target,
+            "exact": exact,
+            "text": text,
+            "send": {
+                "ok": False,
+                "adapter": "win32_ocr",
+                "state": "send_rate_limited",
+                "guard": {"rate": {"wait_seconds": 42}},
+                "error": "fallback send is rate limited",
+            },
+        }
+
+
+class FallbackTransportConnector(FakeConnector):
+    def status(self) -> dict[str, Any]:
+        return {"ok": True, "online": True, "adapter": "win32_ocr"}
+
+
 def main() -> int:
     result = run_checks()
     print(json.dumps(result, ensure_ascii=False, indent=2))
@@ -119,6 +143,8 @@ def run_checks() -> dict[str, Any]:
         check_mixed_safety_batch_forces_handoff,
         check_incomplete_customer_data_is_completed_and_written,
         check_rate_limit_notice_and_backoff,
+        check_rate_limit_notice_suppressed_on_fallback_transport,
+        check_transport_send_rate_limit_defers_without_marking_processed,
         check_auto_reply_disabled_blocks_runtime_send,
         check_customer_service_console_switches_take_effect,
         check_identity_guard_setting_controls_ai_disclosure,
@@ -556,6 +582,82 @@ def check_rate_limit_notice_and_backoff() -> None:
     assert_equal(second_event.get("action"), "skipped", "same message should be skipped while backoff is active")
     assert_equal(second_event.get("reason"), "rate_limit_backoff_active", "skip reason should be explicit")
     assert_equal(len(connector.sent_texts), 1, "backoff should prevent duplicate rate-limit notices")
+
+
+def check_rate_limit_notice_suppressed_on_fallback_transport() -> None:
+    config = load_smoke_config()
+    config.setdefault("rate_limits", {}).update(
+        {
+            "max_replies_per_10_minutes": 1,
+            "max_replies_per_hour": 100,
+            "notice_customer": True,
+        }
+    )
+    rules = load_rules(resolve_path(config.get("rules_path")))
+    target = parse_targets(config)[0]
+    connector = FallbackTransportConnector(
+        [{"id": "fallback-rate-1", "type": "text", "content": "商用冰箱多少钱？", "sender": "self"}]
+    )
+    state: dict[str, Any] = {
+        "version": 1,
+        "targets": {
+            target.name: {
+                "processed_message_ids": [],
+                "handoff_message_ids": [],
+                "sent_replies": [],
+                "reply_timestamps": [(datetime.now() - timedelta(minutes=1)).isoformat(timespec="seconds")],
+            }
+        },
+    }
+
+    event = process_target(
+        connector=connector,  # type: ignore[arg-type]
+        target=target,
+        config=config,
+        rules=rules,
+        state=state,
+        send=True,
+        write_data=False,
+        allow_fallback_send=False,
+        mark_dry_run=False,
+    )
+
+    assert_equal(event.get("action"), "blocked", "fallback transport should still block by business rate limit")
+    assert_true(event.get("rate_limit_notice", {}).get("suppressed") is True, "fallback transport should suppress extra notice send")
+    assert_equal(connector.sent_texts, [], "suppressed fallback notice should not send another WeChat message")
+
+
+def check_transport_send_rate_limit_defers_without_marking_processed() -> None:
+    config = load_smoke_config()
+    rules = load_rules(resolve_path(config.get("rules_path")))
+    target = parse_targets(config)[0]
+    connector = RateLimitedTransportConnector(
+        [{"id": "transport-1", "type": "text", "content": "商用冰箱多少钱？", "sender": "self"}]
+    )
+    state: dict[str, Any] = {"version": 1, "targets": {}}
+
+    event = process_target(
+        connector=connector,  # type: ignore[arg-type]
+        target=target,
+        config=config,
+        rules=rules,
+        state=state,
+        send=True,
+        write_data=False,
+        allow_fallback_send=False,
+        mark_dry_run=False,
+    )
+
+    target_state = state["targets"][target.name]
+    assert_equal(event.get("action"), "deferred", "transport rate limit should defer instead of erroring")
+    assert_equal(event.get("reason"), "transport_send_deferred", "defer reason should be explicit")
+    assert_true("rate_limit_backoff" in target_state, "transport defer should create backoff")
+    assert_true("transport-1" not in target_state.get("processed_message_ids", []), "deferred message must stay unprocessed for retry")
+    assert_equal(
+        event.get("transport_send_backoff", {}).get("retry_after_seconds"),
+        42,
+        "transport wait seconds should be preserved",
+    )
 
 
 def check_auto_reply_disabled_blocks_runtime_send() -> None:

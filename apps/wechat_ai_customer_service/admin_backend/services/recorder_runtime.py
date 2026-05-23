@@ -13,7 +13,10 @@ from typing import Any
 
 import psutil
 
+from apps.wechat_ai_customer_service.adapters.wechat_connector import reset_wxauto_sidecar_daemon
+from apps.wechat_ai_customer_service.adapters.wxauto_package_manager import WxautoPackageManager
 from apps.wechat_ai_customer_service.admin_backend.services.recorder_service import RecorderService
+from apps.wechat_ai_customer_service.admin_backend.services.wechat_startup_check import run_wechat_startup_self_check
 from apps.wechat_ai_customer_service.admin_backend.services.work_queue import WorkQueueService
 from apps.wechat_ai_customer_service.knowledge_paths import active_tenant_id, tenant_runtime_logs_root, tenant_runtime_root
 
@@ -58,11 +61,13 @@ class RecorderRuntime:
         pid_record = self._read_pid_record()
         pid = int(pid_record.get("pid") or 0)
         running = self._pid_alive(pid)
-        if not running and not pid_record:
-            scanned = self._scan_loop_running_pids(self.tenant_id)
-            if scanned:
-                pid = max(scanned)
-                running = True
+        scanned = set(self._scan_loop_running_pids(self.tenant_id))
+        if running:
+            scanned.add(pid)
+        elif scanned:
+            pid = max(scanned)
+            running = True
+        duplicate_loop_pids = self._independent_loop_root_pids(scanned, keep_pid=pid)
 
         worker_record = self._read_worker_pid_record()
         worker_pid = int(worker_record.get("pid") or 0)
@@ -76,12 +81,19 @@ class RecorderRuntime:
         status_payload = self._read_status_payload()
         queue_summary = WorkQueueService(tenant_id=self.tenant_id).summary()
         if not running:
+            previous_state = str(status_payload.get("state") or "")
+            previous_message = str(status_payload.get("message") or "").strip()
             status_payload["state"] = "stopped"
-            status_payload["message"] = "AI智能记录员监听已停止。"
+            if previous_state == "stopped" and previous_message:
+                status_payload["message"] = previous_message
+            else:
+                status_payload["message"] = "AI智能记录员监听已停止。"
         status_payload.update(
             {
                 "running": running,
                 "pid": pid if running else None,
+                "duplicate_loop_pids": duplicate_loop_pids,
+                "duplicate_loop_count": len(duplicate_loop_pids),
                 "worker_running": worker_running,
                 "worker_pid": worker_pid if worker_running else None,
                 "queue_summary": queue_summary,
@@ -94,7 +106,11 @@ class RecorderRuntime:
     def start(self) -> dict[str, Any]:
         current = self.status()
         if current.get("running"):
-            return {"ok": True, "message": "AI智能记录员已经在运行。", "item": self.status()}
+            deduped = self._dedupe_loop_processes(keep_pid=int(current.get("pid") or 0))
+            message = "AI智能记录员已经在运行。"
+            if deduped:
+                message = f"AI智能记录员已经在运行，已清理重复监听进程：{deduped}。"
+            return {"ok": True, "message": message, "deduped_loop_pids": deduped, "item": self.status()}
 
         settings = RecorderService(tenant_id=self.tenant_id).settings()
         if settings.get("enabled", True) is False:
@@ -118,40 +134,49 @@ class RecorderRuntime:
         if not recorder_script.exists():
             return {"ok": False, "message": f"缺少记录员脚本：{recorder_script}", "item": current}
         interval = max(5, int(settings.get("capture_interval_seconds", 30) or 30))
-        self._write_status_payload(
-            {
-                "ok": True,
-                "state": "thinking",
-                "message": "AI智能记录员正在启动。",
-                "updated_at": now_iso(),
-                "tenant_id": self.tenant_id,
+        wxauto_update = self._auto_update_wxauto4()
+        wechat_check = self._wechat_startup_self_check(wxauto_update=wxauto_update)
+        if not wechat_check.get("ok"):
+            return {
+                "ok": False,
+                "detail": str(wechat_check.get("detail") or "wechat_startup_check_failed"),
+                "message": str(wechat_check.get("message") or "微信启动前自检未通过。"),
+                "wxauto_update": wxauto_update,
+                "wechat_check": wechat_check,
+                "item": self.status(),
             }
-        )
 
         env = dict(os.environ)
         env["WECHAT_KNOWLEDGE_TENANT"] = self.tenant_id
+        env["PYTHONUTF8"] = "1"
         creationflags = 0
         if os.name == "nt":
             creationflags |= getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
             creationflags |= getattr(subprocess, "CREATE_NO_WINDOW", 0)
-        proc = subprocess.Popen(
-            [
-                str(self._python_executable()),
-                str(recorder_script),
-                "--tenant-id",
-                self.tenant_id,
-                "--forever",
-                "--interval-seconds",
-                str(interval),
-                "--discover",
-            ],
-            cwd=str(PROJECT_ROOT),
-            env=env,
-            stdin=subprocess.DEVNULL,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            creationflags=creationflags,
-        )
+        log_path = recorder_runtime_log_path(self.tenant_id)
+        log_path.parent.mkdir(parents=True, exist_ok=True)
+        log_handle = log_path.open("ab")
+        try:
+            proc = subprocess.Popen(
+                [
+                    str(self._python_executable()),
+                    str(recorder_script),
+                    "--tenant-id",
+                    self.tenant_id,
+                    "--forever",
+                    "--interval-seconds",
+                    str(interval),
+                    "--discover",
+                ],
+                cwd=str(PROJECT_ROOT),
+                env=env,
+                stdin=subprocess.DEVNULL,
+                stdout=log_handle,
+                stderr=subprocess.STDOUT,
+                creationflags=creationflags,
+            )
+        finally:
+            log_handle.close()
         self._write_pid_record(
             {
                 "pid": proc.pid,
@@ -159,9 +184,12 @@ class RecorderRuntime:
                 "script": str(recorder_script),
                 "started_at": now_iso(),
                 "interval_seconds": interval,
-                "log_path": str(recorder_runtime_log_path(self.tenant_id)),
+                "log_path": str(log_path),
+                "wxauto_update": wxauto_update,
+                "wechat_check": wechat_check,
             }
         )
+        deduped: list[int] = []
         self._write_status_payload(
             {
                 "ok": True,
@@ -170,9 +198,137 @@ class RecorderRuntime:
                 "updated_at": now_iso(),
                 "tenant_id": self.tenant_id,
                 "last_start_at": now_iso(),
+                "wxauto_update": wxauto_update,
+                "wechat_check": wechat_check,
+                "deduped_loop_pids": deduped,
             }
         )
-        return {"ok": True, "message": "AI智能记录员已启动。", "item": self.status()}
+        return {"ok": True, "message": "AI智能记录员已启动。", "wxauto_update": wxauto_update, "wechat_check": wechat_check, "deduped_loop_pids": deduped, "item": self.status()}
+
+    def _auto_update_wxauto4(self) -> dict[str, Any]:
+        self._write_status_payload(
+            {
+                "ok": True,
+                "state": "thinking",
+                "message": "正在检查 wxauto4 更新（包含 beta/rc 预发布版）。",
+                "updated_at": now_iso(),
+                "tenant_id": self.tenant_id,
+            }
+        )
+        try:
+            result = WxautoPackageManager().auto_update_on_wechat_module_start()
+        except Exception as exc:
+            result = {
+                "ok": False,
+                "enabled": True,
+                "updated": False,
+                "package": "wxauto4",
+                "reason": "update_check_exception",
+                "error": repr(exc),
+            }
+        if result.get("updated"):
+            reset_wxauto_sidecar_daemon()
+            message = "wxauto4 已自动更新（包含预发布更新策略），正在启动 AI智能记录员。"
+        elif result.get("ok"):
+            message = "wxauto4 已是当前可用版本（已检查 beta/rc），正在启动 AI智能记录员。"
+        else:
+            message = "wxauto4 更新检查失败，将继续使用当前版本并启动兼容模式。"
+        self._write_status_payload(
+            {
+                "ok": True,
+                "state": "thinking",
+                "message": message,
+                "updated_at": now_iso(),
+                "tenant_id": self.tenant_id,
+                "wxauto_update": result,
+            }
+        )
+        return result
+
+    def _wechat_startup_self_check(self, *, wxauto_update: dict[str, Any]) -> dict[str, Any]:
+        self._write_status_payload(
+            {
+                "ok": True,
+                "state": "thinking",
+                "message": "正在自检微信登录状态和当前可用适配方案。",
+                "updated_at": now_iso(),
+                "tenant_id": self.tenant_id,
+                "wxauto_update": wxauto_update,
+            }
+        )
+        check = run_wechat_startup_self_check(require_send=False, module_name="AI智能记录员")
+        self._write_status_payload(
+            {
+                "ok": True,
+                "state": "thinking" if check.get("ok") else "stopped",
+                "message": str(check.get("message") or "微信启动前自检完成。"),
+                "updated_at": now_iso(),
+                "tenant_id": self.tenant_id,
+                "wxauto_update": wxauto_update,
+                "wechat_check": check,
+            }
+        )
+        return check
+
+    def _dedupe_loop_processes(self, *, keep_pid: int) -> list[int]:
+        running_pids = set(self._scan_loop_running_pids(self.tenant_id))
+        if keep_pid and self._pid_alive(keep_pid) and not running_pids:
+            running_pids.add(keep_pid)
+        if not running_pids:
+            return []
+        keeper = self._preferred_loop_keeper(running_pids, keep_pid=keep_pid)
+        extras = self._independent_loop_root_pids(running_pids, keep_pid=keeper)
+        for item in extras:
+            if self._pid_alive(item):
+                self._terminate_tree(item)
+        existing_record = self._read_pid_record()
+        if int(existing_record.get("pid") or 0) != keeper:
+            existing_record = {}
+        self._write_pid_record(
+            {
+                **existing_record,
+                "pid": keeper,
+                "tenant_id": self.tenant_id,
+                "script": str(APP_ROOT / "workflows" / "recorder_loop.py"),
+                "started_at": str(existing_record.get("started_at") or now_iso()),
+                "log_path": str(recorder_runtime_log_path(self.tenant_id)),
+            }
+        )
+        return extras
+
+    @staticmethod
+    def _preferred_loop_keeper(running_pids: set[int], *, keep_pid: int) -> int:
+        if keep_pid in running_pids:
+            return keep_pid
+        root_pids = [pid for pid in running_pids if RecorderRuntime._loop_parent_pid(pid) not in running_pids]
+        return max(root_pids or running_pids)
+
+    @staticmethod
+    def _independent_loop_root_pids(running_pids: set[int], *, keep_pid: int) -> list[int]:
+        extras: list[int] = []
+        for pid in sorted(running_pids):
+            if pid == keep_pid:
+                continue
+            if RecorderRuntime._loop_related(pid, keep_pid):
+                continue
+            parent_pid = RecorderRuntime._loop_parent_pid(pid)
+            if parent_pid in running_pids and parent_pid != keep_pid:
+                continue
+            extras.append(pid)
+        return extras
+
+    @staticmethod
+    def _loop_parent_pid(pid: int) -> int:
+        try:
+            return int(psutil.Process(pid).ppid())
+        except (psutil.NoSuchProcess, psutil.AccessDenied):
+            return 0
+
+    @staticmethod
+    def _loop_related(left_pid: int, right_pid: int) -> bool:
+        if not left_pid or not right_pid:
+            return False
+        return RecorderRuntime._loop_parent_pid(left_pid) == right_pid or RecorderRuntime._loop_parent_pid(right_pid) == left_pid
 
     def stop(self) -> dict[str, Any]:
         loop_pids = set()
