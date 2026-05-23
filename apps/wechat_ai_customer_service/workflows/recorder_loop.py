@@ -59,7 +59,7 @@ def main() -> int:
                 ),
                 flush=True,
             )
-            time.sleep(interval)
+            time.sleep(adjusted_sleep_interval(result, interval))
 
     events: list[dict[str, Any]] = []
     if args.discover:
@@ -72,6 +72,17 @@ def main() -> int:
             time.sleep(interval)
     print(json.dumps({"ok": True, "tenant_id": tenant_id, "events": events}, ensure_ascii=False, indent=2))
     return 0
+
+
+def adjusted_sleep_interval(result: dict[str, Any], base_interval: int) -> int:
+    interval = max(1, int(base_interval or 30))
+    for item in result.get("items", []) or []:
+        if not isinstance(item, dict):
+            continue
+        recovery = item.get("capture_recovery") if isinstance(item.get("capture_recovery"), dict) else {}
+        if recovery.get("gap_risk") or recovery.get("history_load_applied"):
+            return min(interval, 5)
+    return interval
 
 
 if __name__ == "__main__":

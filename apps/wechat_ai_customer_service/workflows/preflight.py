@@ -73,11 +73,14 @@ def run_preflight(config_path: Path, extra_targets: list[str], skip_wechat: bool
         "skipped": bool(skip_wechat),
         "sidecar_python": str(connector.sidecar_python),
         "sidecar_script": str(connector.sidecar_script),
+        "compat_sidecar_script": str(connector.compat_sidecar_script),
     }
     if not connector.sidecar_python.exists():
         errors.append(f"Missing wxauto4 sidecar Python: {connector.sidecar_python}")
     if not connector.sidecar_script.exists():
         errors.append(f"Missing wxauto4 sidecar script: {connector.sidecar_script}")
+    if not connector.compat_sidecar_script.exists():
+        warnings.append(f"Missing WeChat compatibility sidecar script: {connector.compat_sidecar_script}")
 
     if not skip_wechat and not errors:
         status = connector.status()
@@ -214,6 +217,9 @@ def compact_wechat_report(wechat: dict[str, Any]) -> dict[str, Any]:
         "skipped": wechat.get("skipped", False),
         "sidecar_python": wechat.get("sidecar_python"),
         "sidecar_script": wechat.get("sidecar_script"),
+        "compat_sidecar_script": wechat.get("compat_sidecar_script"),
+        "adapter": status.get("adapter"),
+        "compat_reason": status.get("compat_reason"),
         "online": bool(status.get("online")),
         "login_window_exists": status.get("login_window_exists"),
         "my_info": status.get("my_info"),

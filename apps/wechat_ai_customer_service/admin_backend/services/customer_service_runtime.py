@@ -13,7 +13,10 @@ from typing import Any
 
 import psutil
 
+from apps.wechat_ai_customer_service.adapters.wechat_connector import reset_wxauto_sidecar_daemon
+from apps.wechat_ai_customer_service.adapters.wxauto_package_manager import WxautoPackageManager
 from apps.wechat_ai_customer_service.cloud_gate import cloud_gate_status, cloud_required_enabled
+from apps.wechat_ai_customer_service.admin_backend.services.wechat_startup_check import run_wechat_startup_self_check
 from apps.wechat_ai_customer_service.knowledge_paths import active_tenant_id, tenant_runtime_root
 from apps.wechat_ai_customer_service.sync import VpsLocalSyncService
 
@@ -229,11 +232,28 @@ class CustomerServiceRuntime:
             return {"ok": False, "message": f"缺少监听脚本：{script_path}", "item": current}
         log_path = runtime_log_path(self.tenant_id)
         log_path.parent.mkdir(parents=True, exist_ok=True)
+        wxauto_update = self._auto_update_wxauto4()
+        wechat_check = self._wechat_startup_self_check(wxauto_update=wxauto_update)
+        if not wechat_check.get("ok"):
+            return {
+                "ok": False,
+                "message": str(wechat_check.get("message") or "微信启动前自检未通过。"),
+                "detail": str(wechat_check.get("detail") or "wechat_startup_check_failed"),
+                "wxauto_update": wxauto_update,
+                "wechat_check": wechat_check,
+                "item": self.status(),
+            }
         env = dict(os.environ)
         env["WECHAT_KNOWLEDGE_TENANT"] = self.tenant_id
         if token:
             env["WECHAT_RUNTIME_SYNC_TOKEN"] = token
-        write_runtime_status("thinking", "正在启动微信自动客服监听。", tenant_id=self.tenant_id)
+        write_runtime_status(
+            "thinking",
+            "正在启动微信自动客服监听。",
+            tenant_id=self.tenant_id,
+            wxauto_update=wxauto_update,
+            wechat_check=wechat_check,
+        )
         creationflags = 0
         if os.name == "nt":
             creationflags |= getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
@@ -265,15 +285,61 @@ class CustomerServiceRuntime:
                 "config_path": str(config_path),
                 "started_at": now_iso(),
                 "log_path": str(log_path),
+                "wxauto_update": wxauto_update,
+                "wechat_check": wechat_check,
             }
         )
         # Start background worker
         worker_result = self._start_worker()
         time.sleep(0.8)
         result = {"ok": True, "message": "自动客服监听已启动。", "item": self.status()}
+        result["wxauto_update"] = wxauto_update
+        result["wechat_check"] = wechat_check
         if not worker_result.get("ok"):
             result["worker_warning"] = worker_result.get("message", "worker start warning")
         return result
+
+    def _auto_update_wxauto4(self) -> dict[str, Any]:
+        write_runtime_status("thinking", "正在检查 wxauto4 更新（包含 beta/rc 预发布版）。", tenant_id=self.tenant_id)
+        try:
+            result = WxautoPackageManager().auto_update_on_wechat_module_start()
+        except Exception as exc:
+            result = {
+                "ok": False,
+                "enabled": True,
+                "updated": False,
+                "package": "wxauto4",
+                "reason": "update_check_exception",
+                "error": repr(exc),
+            }
+        if result.get("updated"):
+            reset_wxauto_sidecar_daemon()
+        if result.get("updated"):
+            message = "wxauto4 已自动更新（包含预发布更新策略），正在启动微信自动客服监听。"
+        elif result.get("ok"):
+            message = "wxauto4 已是当前可用版本（已检查 beta/rc），正在启动微信自动客服监听。"
+        else:
+            message = "wxauto4 更新检查失败，将继续使用当前版本并启动兼容模式。"
+        write_runtime_status("thinking", message, tenant_id=self.tenant_id, wxauto_update=result)
+        return result
+
+    def _wechat_startup_self_check(self, *, wxauto_update: dict[str, Any]) -> dict[str, Any]:
+        write_runtime_status(
+            "thinking",
+            "正在自检微信登录状态和当前可用适配方案。",
+            tenant_id=self.tenant_id,
+            wxauto_update=wxauto_update,
+        )
+        check = run_wechat_startup_self_check(require_send=True, module_name="微信自动客服")
+        target_state = "thinking" if check.get("ok") else "stopped"
+        write_runtime_status(
+            target_state,
+            str(check.get("message") or "微信启动前自检完成。"),
+            tenant_id=self.tenant_id,
+            wxauto_update=wxauto_update,
+            wechat_check=check,
+        )
+        return check
 
     def _managed_listener_interval_seconds(self, config_path: Path) -> float:
         default_interval = 3.0

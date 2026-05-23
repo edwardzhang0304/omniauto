@@ -6056,7 +6056,11 @@ function recorderRunStatusLabel(status) {
   if (key === "queued") return "排队中";
   if (key === "running") return "处理中";
   if (key === "preprocessing") return "预处理中";
+  if (key === "scanning") return "筛选候选消息";
   if (key === "extracting") return "结构化抽取中";
+  if (key === "llm_extracting") return "LLM语义抽取中";
+  if (key === "llm_branding") return "品牌推断中";
+  if (key === "finalizing") return "整理导出行";
   if (key === "reviewing") return "质量复核中";
   if (key === "exporting") return "生成导出文件";
   if (key === "succeeded") return "已完成";
@@ -6142,6 +6146,8 @@ function renderRecorderExportProgress() {
     const processed = Number(progress.processed_messages ?? 0);
     const total = Number(progress.total_messages ?? 0);
     const stageLabel = recorderRunStageLabel(lead);
+    const stageDetail = String(progress.stage_detail || "").trim();
+    const unitLabel = String(progress.unit_label || "消息").trim() || "消息";
     const percent = Number(progress.percent ?? 0);
     const percentText = Number.isFinite(percent) ? `${Math.round(Math.max(0, Math.min(percent, 1)) * 100)}%` : "";
     const tone = workerRunning ? "loading" : "warning";
@@ -6149,7 +6155,8 @@ function renderRecorderExportProgress() {
       <div class="status-card ${tone}">
         <strong><span class="loading-spinner" aria-hidden="true"></span>${runningCount > 0 ? "结构化导出处理中" : "结构化导出排队中"} · ${escapeHtml(stageLabel)}</strong>
         <span>任务数：排队 ${queuedCount} · 处理中 ${runningCount}${elapsed ? ` · 已持续 ${escapeHtml(elapsed)}` : ""}</span>
-        <span>${total > 0 ? `进度：${escapeHtml(String(processed))}/${escapeHtml(String(total))}（${escapeHtml(percentText)}）` : "进度：正在初始化任务..."}</span>
+        ${stageDetail ? `<span>${escapeHtml(stageDetail)}</span>` : ""}
+        <span>${total > 0 ? `进度：${escapeHtml(unitLabel)} ${escapeHtml(String(processed))}/${escapeHtml(String(total))}（${escapeHtml(percentText)}）` : "进度：正在初始化任务..."}</span>
         <span>${escapeHtml(workerRunning ? "后台导出 worker 在线，系统正在自动处理。" : "后台导出 worker 暂未检测到在线，系统正在自动拉起。")} 队列：待执行 ${escapeHtml(String(queue.pending ?? 0))} · 执行中 ${escapeHtml(String(queue.running ?? 0))}。</span>
       </div>
     `;
@@ -6200,8 +6207,10 @@ function renderRecorderExportRuns() {
         const processed = Number(progress.processed_messages ?? 0);
         const total = Number(progress.total_messages ?? 0);
         const percent = Number(progress.percent ?? 0);
+        const stageDetail = String(progress.stage_detail || "").trim();
+        const unitLabel = String(progress.unit_label || "消息").trim() || "消息";
         const progressText = total > 0
-          ? `${processed}/${total}（${Math.round(Math.max(0, Math.min(percent, 1)) * 100)}%）`
+          ? `${unitLabel} ${processed}/${total}（${Math.round(Math.max(0, Math.min(percent, 1)) * 100)}%）`
           : "初始化中";
         const elapsed = recorderRunIsActive(status) ? formatElapsedFrom(run.started_at || run.created_at || "") : "";
         return `
@@ -6211,6 +6220,7 @@ function renderRecorderExportRuns() {
               <span class="status-chip ${statusTone}">${escapeHtml(recorderRunStatusLabel(status))}</span>
             </div>
             <span>模块：${escapeHtml(run.module_name || run.module_key || "-")} · 版本：${escapeHtml(run.module_version || "-")} · 阶段：${escapeHtml(stageLabel)} · 创建：${escapeHtml(run.created_at || "-")}${elapsed ? ` · 已持续 ${escapeHtml(elapsed)}` : ""}</span>
+            ${stageDetail ? `<span>当前步骤：${escapeHtml(stageDetail)}</span>` : ""}
             <span>输入消息：${escapeHtml(String(stats.input_message_count ?? 0))} · 导出行：${escapeHtml(String(stats.export_row_count ?? 0))} · 需复核：${escapeHtml(String(stats.needs_review_count ?? 0))} · 进度：${escapeHtml(progressText)}</span>
             <span>LLM调用：${escapeHtml(String(stats.llm_calls ?? 0))}（分段 ${escapeHtml(String(stats.llm_segment_calls ?? 0))} · 修复 ${escapeHtml(String(stats.llm_repair_calls ?? 0))}）</span>
             ${run.error ? `<span>失败原因：${escapeHtml(run.error)}</span>` : ""}

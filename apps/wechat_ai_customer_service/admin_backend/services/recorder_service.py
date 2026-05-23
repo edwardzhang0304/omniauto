@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import os
 import re
 from datetime import datetime
@@ -23,9 +24,14 @@ DEFAULT_SETTINGS = {
     "notify_on_collect": False,
     "auto_learn": True,
     "use_llm": True,
-    "capture_interval_seconds": 30,
+    "capture_interval_seconds": 5,
+    "history_backfill_enabled": True,
+    "history_backfill_load_times": 3,
+    "history_backfill_max_load_times": 5,
+    "capture_anchor_recent_limit": 80,
 }
 RECORDER_DISCOVERY_SOURCE_TYPE = "wechat_session_discovery"
+MIN_CONTENT_ONLY_ANCHOR_LENGTH = 20
 
 
 class RecorderService:
@@ -166,6 +172,7 @@ class RecorderService:
                 auto_learn=bool(settings.get("auto_learn", True)),
                 use_llm=settings.get("use_llm", True) is not False,
                 send_notification=bool(send_notifications and (settings.get("notify_on_collect") or conversation.get("notify_enabled"))),
+                settings=settings,
             )
             results.append(result)
         return {
@@ -183,19 +190,24 @@ class RecorderService:
         auto_learn: bool,
         use_llm: bool,
         send_notification: bool,
+        settings: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         target_name = str(conversation.get("target_name") or conversation.get("display_name") or "")
+        active_settings = settings if isinstance(settings, dict) else self.settings()
         payload = self.connector.get_messages(target_name, exact=conversation.get("exact", True) is not False)
         if not payload.get("ok"):
             return {"ok": False, "conversation_id": conversation.get("conversation_id"), "messages": payload}
+        recovered_payload = self._recover_capture_window(conversation, payload, settings=active_settings)
         result = self.raw_store.upsert_messages(
             conversation,
-            [item for item in payload.get("messages", []) or [] if isinstance(item, dict)],
+            [item for item in recovered_payload.get("messages", []) or [] if isinstance(item, dict)],
             source_module="smart_recorder",
             learning_enabled=conversation.get("learning_enabled", True) is not False,
             create_batch=True,
             batch_reason="recorder_capture",
         )
+        if recovered_payload.get("_capture_recovery"):
+            result["capture_recovery"] = recovered_payload["_capture_recovery"]
         if auto_learn and result.get("batch"):
             result["learning"] = self.learning.process_batch(str(result["batch"].get("batch_id") or ""), use_llm=use_llm)
         if send_notification and result.get("inserted_count"):
@@ -205,6 +217,121 @@ class RecorderService:
                 exact=conversation.get("exact", True) is not False,
             )
         return result
+
+    def _recover_capture_window(
+        self,
+        conversation: dict[str, Any],
+        payload: dict[str, Any],
+        *,
+        settings: dict[str, Any],
+    ) -> dict[str, Any]:
+        visible_messages = [item for item in payload.get("messages", []) or [] if isinstance(item, dict)]
+        metadata: dict[str, Any] = {
+            "enabled": bool(settings.get("history_backfill_enabled", True)),
+            "initial_message_count": len(visible_messages),
+            "history_load_applied": False,
+            "anchor_found": False,
+            "gap_risk": False,
+        }
+        if not metadata["enabled"]:
+            return {**payload, "_capture_recovery": {**metadata, "reason": "disabled"}}
+
+        recent_limit = bounded_int(settings.get("capture_anchor_recent_limit"), default=80, minimum=1, maximum=300)
+        anchors = self._recent_capture_anchor_keys(conversation, limit=recent_limit)
+        metadata["anchor_count"] = len(anchors)
+        if not anchors:
+            return {**payload, "_capture_recovery": {**metadata, "reason": "first_capture_no_anchor"}}
+
+        anchor_index = find_latest_anchor_index(visible_messages, anchors)
+        if anchor_index >= 0:
+            return {
+                **payload,
+                "_capture_recovery": {
+                    **metadata,
+                    "anchor_found": True,
+                    "anchor_source": "initial_window",
+                    "anchor_index": anchor_index,
+                    "final_message_count": len(visible_messages),
+                },
+            }
+
+        max_load_times = bounded_int(settings.get("history_backfill_max_load_times"), default=5, minimum=0, maximum=10)
+        load_times = bounded_int(settings.get("history_backfill_load_times"), default=3, minimum=0, maximum=max_load_times)
+        if load_times <= 0:
+            return {
+                **payload,
+                "_capture_recovery": {
+                    **metadata,
+                    "gap_risk": True,
+                    "reason": "anchor_missing_history_load_disabled",
+                    "final_message_count": len(visible_messages),
+                },
+            }
+
+        target_name = str(conversation.get("target_name") or conversation.get("display_name") or "")
+        try:
+            loaded_payload = self.connector.get_messages(
+                target_name,
+                exact=conversation.get("exact", True) is not False,
+                history_load_times=load_times,
+            )
+        except Exception as exc:
+            return {
+                **payload,
+                "_capture_recovery": {
+                    **metadata,
+                    "gap_risk": True,
+                    "reason": "history_load_exception",
+                    "error": repr(exc),
+                    "history_load_times": load_times,
+                    "final_message_count": len(visible_messages),
+                },
+            }
+
+        if not loaded_payload.get("ok"):
+            return {
+                **payload,
+                "_capture_recovery": {
+                    **metadata,
+                    "gap_risk": True,
+                    "reason": "history_load_failed",
+                    "history_load_times": load_times,
+                    "history_load_result": loaded_payload,
+                    "final_message_count": len(visible_messages),
+                },
+            }
+
+        loaded_messages = [item for item in loaded_payload.get("messages", []) or [] if isinstance(item, dict)]
+        merged_messages = merge_capture_message_windows(loaded_messages, visible_messages)
+        recovered_anchor_index = find_latest_anchor_index(merged_messages, anchors)
+        sidecar_history_load = loaded_payload.get("history_load") if isinstance(loaded_payload.get("history_load"), dict) else {}
+        recovery_meta = {
+            **metadata,
+            "history_load_applied": True,
+            "history_load_times": load_times,
+            "history_load": sidecar_history_load,
+            "loaded_message_count": len(loaded_messages),
+            "final_message_count": len(merged_messages),
+            "anchor_found": recovered_anchor_index >= 0,
+            "anchor_source": "history_backfill" if recovered_anchor_index >= 0 else "",
+            "anchor_index": recovered_anchor_index,
+            "gap_risk": recovered_anchor_index < 0,
+        }
+        if recovered_anchor_index < 0:
+            recovery_meta["reason"] = "anchor_missing_after_history_load"
+        return {**loaded_payload, "messages": merged_messages, "_capture_recovery": recovery_meta}
+
+    def _recent_capture_anchor_keys(self, conversation: dict[str, Any], *, limit: int) -> set[str]:
+        conversation_id = str(conversation.get("conversation_id") or "").strip()
+        if not conversation_id:
+            return set()
+        recent_messages = self.raw_store.list_messages_advanced(conversation_id=conversation_id, limit=limit)
+        anchors: set[str] = set()
+        for message in recent_messages:
+            anchors.update(capture_anchor_keys(message))
+            raw_payload = message.get("raw_payload") if isinstance(message.get("raw_payload"), dict) else {}
+            anchors.update(capture_anchor_keys(raw_payload))
+        return anchors
 
     def find_conversation_by_name(self, target_name: str) -> dict[str, Any] | None:
         for item in self.raw_store.list_conversations(status="all", limit=500):
@@ -313,6 +440,85 @@ def conversation_enabled_for_capture(conversation: dict[str, Any], settings: dic
     if conversation_type == "private":
         return settings.get("private_recording_enabled", True) is not False
     return False
+
+
+def merge_capture_message_windows(*windows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    seen: set[str] = set()
+    merged: list[dict[str, Any]] = []
+    for window in windows:
+        for item in window or []:
+            if not isinstance(item, dict):
+                continue
+            key = primary_capture_message_key(item)
+            if not key or key in seen:
+                continue
+            seen.add(key)
+            merged.append(item)
+    return merged
+
+
+def find_latest_anchor_index(messages: list[dict[str, Any]], anchors: set[str]) -> int:
+    if not messages or not anchors:
+        return -1
+    for index in range(len(messages) - 1, -1, -1):
+        if capture_anchor_keys(messages[index]) & anchors:
+            return index
+    return -1
+
+
+def primary_capture_message_key(message: dict[str, Any]) -> str:
+    keys = capture_anchor_keys(message)
+    for prefix in ("id:", "composite:", "semantic:", "content:"):
+        for key in sorted(keys):
+            if key.startswith(prefix):
+                return key
+    return "fallback:" + digest_anchor(
+        json.dumps(
+            {
+                "id": message.get("id") or message.get("message_id") or "",
+                "sender": message.get("sender") or message.get("sender_role") or "",
+                "type": message.get("type") or message.get("content_type") or "",
+                "time": message.get("time") or message.get("message_time") or "",
+                "content": message.get("content") or message.get("text") or "",
+            },
+            ensure_ascii=False,
+            sort_keys=True,
+        )
+    )
+
+
+def capture_anchor_keys(message: dict[str, Any]) -> set[str]:
+    message_id = str(message.get("id") or message.get("message_id") or "").strip()
+    sender = str(message.get("sender") or message.get("sender_role") or "").strip()
+    content_type = str(message.get("type") or message.get("content_type") or "").strip()
+    message_time = str(message.get("time") or message.get("message_time") or "").strip()
+    content = normalize_anchor_content(str(message.get("content") or message.get("text") or ""))
+    keys: set[str] = set()
+    if message_id:
+        keys.add(f"id:{message_id}")
+    if sender and content_type and message_time and content:
+        keys.add("composite:" + digest_anchor("|".join([sender, content_type, message_time, content])))
+    if sender and content_type and content and len(content) >= MIN_CONTENT_ONLY_ANCHOR_LENGTH:
+        keys.add("semantic:" + digest_anchor("|".join([sender, content_type, content])))
+    if len(content) >= MIN_CONTENT_ONLY_ANCHOR_LENGTH:
+        keys.add("content:" + digest_anchor(content))
+    return keys
+
+
+def normalize_anchor_content(value: str) -> str:
+    return re.sub(r"\s+", "\n", str(value or "").strip())
+
+
+def digest_anchor(value: str) -> str:
+    return hashlib.sha256(value.encode("utf-8")).hexdigest()[:32]
+
+
+def bounded_int(value: Any, *, default: int, minimum: int, maximum: int) -> int:
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        parsed = default
+    return max(minimum, min(parsed, maximum))
 
 
 def now_iso() -> str:
