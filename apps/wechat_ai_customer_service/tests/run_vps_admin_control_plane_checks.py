@@ -361,6 +361,21 @@ def check_local_node_and_command_roundtrip(client: TestClient) -> None:
     )
     assert_status(registered, 200, "register node")
     node_token = registered.json()["node"]["node_token"]
+    merged = client.post(
+        "/v1/local/nodes/register",
+        headers={"X-Enrollment-Token": "enroll-test"},
+        json={
+            "node_id": "local_tenant_a_01",
+            "display_name": "Local Tenant A 01",
+            "tenant_ids": ["local_trade_tenant"],
+            "version": "0.1.0-test",
+            "capabilities": ["backup_tenant", "backup_all", "check_update"],
+        },
+    )
+    assert_status(merged, 200, "register same node for second tenant")
+    merged_node = merged.json()["node"]
+    assert_equal(merged_node["node_token"], node_token, "same node keeps token across tenant merge")
+    assert_true({"tenant_a", "local_trade_tenant"}.issubset(set(merged_node.get("tenant_ids", []))), "same node should merge tenant scopes")
 
     heartbeat = client.post(
         "/v1/local/nodes/local_tenant_a_01/heartbeat",
@@ -704,7 +719,16 @@ def check_customer_data_shared_sync_and_full_backup_entries(client: TestClient) 
     test01_readable = client.get(f"/v1/admin/customer-data/{test01_package_id}/readable-download", headers=auth_headers(token))
     assert_status(test01_readable, 200, "test01 readable Excel download")
     test01_workbook = load_workbook(BytesIO(test01_readable.content), read_only=True)
-    assert_true("正式-商品资料" in test01_workbook.sheetnames, "test01 readable export splits product formal knowledge")
+    formal_categories = {
+        str(item.get("category_id") or "")
+        for item in bootstrapped.json()["package"]["summary"]["formal_knowledge"].get("categories", [])
+        if isinstance(item, dict)
+    }
+    if "products" in formal_categories:
+        assert_true("正式-商品资料" in test01_workbook.sheetnames, "test01 readable export splits product formal knowledge")
+    else:
+        assert_true("正式-商品资料" not in test01_workbook.sheetnames, "product data must not be mixed back into formal knowledge sheets")
+    assert_true(any(name.startswith("商品专属") for name in test01_workbook.sheetnames), "readable export keeps a separate product-specific sheet")
     assert_true("正式-政策规则" in test01_workbook.sheetnames, "test01 readable export splits policy formal knowledge")
     assert_true("原始聊天" in test01_workbook.sheetnames, "readable export includes raw message sheet")
     assert_true("待确认知识" in test01_workbook.sheetnames, "readable export includes pending candidate sheet")

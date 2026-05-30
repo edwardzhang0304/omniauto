@@ -87,7 +87,7 @@ class FakeConnector:
             "exact": exact,
             "messages": copy.deepcopy(messages),
             "history_load": {
-                "mechanism": "wxauto4.LoadMoreCache",
+                "mechanism": "rpa.history_load",
                 "requested_load_times": history_load_times,
             },
         }
@@ -246,7 +246,7 @@ def check_pressure_window_uses_rpa_history_backfill() -> dict[str, Any]:
         config={},
     )
     assert_equal(connector.history_load_calls, [3], "history backfill should call connector once")
-    assert_true((enriched.get("_history_backfill") or {}).get("mechanism") == "wxauto4.LoadMoreCache", "must use LoadMoreCache")
+    assert_true((enriched.get("_history_backfill") or {}).get("mechanism") == "rpa.history_load", "must use RPA history load")
     assert_true(selection.eligible_count >= 30, "loaded pressure window should expose older messages")
     assert_true(selection.truncated, "pressure selection should be truncated rather than over-answering")
     return {

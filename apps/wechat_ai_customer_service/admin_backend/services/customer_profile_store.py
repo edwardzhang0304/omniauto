@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import json
 import os
+import threading
+import time
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -14,6 +16,9 @@ from apps.wechat_ai_customer_service.storage import get_postgres_store, load_sto
 
 MAX_PROFILE_RECORDS = 5000
 MAX_CONVERSATION_RECORDS = 5000
+TRANSIENT_WRITE_WINERRORS = {5, 32, 33}
+TRANSIENT_WRITE_ERRNOS = {13, 16, 32}
+_PROFILE_STORE_LOCK = threading.RLock()
 
 
 def _now() -> str:
@@ -36,6 +41,18 @@ def _safe_id(value: str) -> str:
 
 def _profile_id_for(target_name: str, tenant_id: str) -> str:
     return _safe_id(f"cust_{tenant_id}_{target_name}")
+
+
+def _file_lock(path: Path) -> threading.RLock:
+    return _PROFILE_STORE_LOCK
+
+
+def _is_transient_file_error(exc: OSError) -> bool:
+    winerror = getattr(exc, "winerror", None)
+    if winerror in TRANSIENT_WRITE_WINERRORS:
+        return True
+    errno_value = getattr(exc, "errno", None)
+    return errno_value in TRANSIENT_WRITE_ERRNOS
 
 
 class CustomerProfileStore:
@@ -63,15 +80,16 @@ class CustomerProfileStore:
             db.upsert_customer_profile(self.tenant_id, profile)
             if not config.mirror_files:
                 return profile
-        profiles = self._read_json(self.profiles_path, [])
-        by_id = {str(item.get("profile_id") or ""): item for item in profiles if isinstance(item, dict)}
-        existing = by_id.get(profile["profile_id"], {})
-        merged = {**existing, **profile, "updated_at": _now()}
-        by_id[profile["profile_id"]] = merged
-        self._write_json(
-            self.profiles_path,
-            sorted(by_id.values(), key=lambda item: str(item.get("updated_at") or ""), reverse=True),
-        )
+        with _file_lock(self.profiles_path):
+            profiles = self._read_json(self.profiles_path, [])
+            by_id = {str(item.get("profile_id") or ""): item for item in profiles if isinstance(item, dict)}
+            existing = by_id.get(profile["profile_id"], {})
+            merged = {**existing, **profile, "updated_at": _now()}
+            by_id[profile["profile_id"]] = merged
+            self._write_json(
+                self.profiles_path,
+                sorted(by_id.values(), key=lambda item: str(item.get("updated_at") or ""), reverse=True),
+            )
         return merged
 
     def get_profile(self, *, target_name: str = "", profile_id: str = "") -> dict[str, Any] | None:
@@ -158,25 +176,56 @@ class CustomerProfileStore:
             deleted = db.delete_customer_profile(self.tenant_id, profile_id)
             if not config.mirror_files:
                 return deleted
-        profiles = [item for item in self._read_json(self.profiles_path, []) if isinstance(item, dict)]
-        new_profiles = [item for item in profiles if str(item.get("profile_id") or "") != profile_id]
-        if len(new_profiles) < len(profiles):
-            self._write_json(self.profiles_path, new_profiles)
-            deleted = True
+        with _file_lock(self.profiles_path):
+            profiles = [item for item in self._read_json(self.profiles_path, []) if isinstance(item, dict)]
+            new_profiles = [item for item in profiles if str(item.get("profile_id") or "") != profile_id]
+            if len(new_profiles) < len(profiles):
+                self._write_json(self.profiles_path, new_profiles)
+                deleted = True
         return deleted
 
     def increment_message_stats(self, *, target_name: str, is_reply: bool = False) -> dict[str, Any] | None:
-        profile = self.get_or_create(target_name=target_name)
-        basic = dict(profile.get("basic_info") or {})
-        basic["total_messages"] = int(basic.get("total_messages", 0) or 0) + 1
-        if is_reply:
-            basic["total_replies"] = int(basic.get("total_replies", 0) or 0) + 1
-        basic["last_contact_at"] = _now()
-        return self.upsert_profile({
-            "profile_id": profile["profile_id"],
-            "target_name": target_name,
-            "basic_info": basic,
-        })
+        db = _postgres_store()
+        config = load_storage_config()
+        if db and not config.mirror_files:
+            profile = self.get_or_create(target_name=target_name)
+            basic = dict(profile.get("basic_info") or {})
+            basic["total_messages"] = int(basic.get("total_messages", 0) or 0) + 1
+            if is_reply:
+                basic["total_replies"] = int(basic.get("total_replies", 0) or 0) + 1
+            basic["last_contact_at"] = _now()
+            return self.upsert_profile({
+                "profile_id": profile["profile_id"],
+                "target_name": target_name,
+                "basic_info": basic,
+            })
+
+        profile_id = _profile_id_for(target_name, self.tenant_id)
+        with _file_lock(self.profiles_path):
+            profiles = self._read_json(self.profiles_path, [])
+            by_id = {str(item.get("profile_id") or ""): item for item in profiles if isinstance(item, dict)}
+            existing = by_id.get(profile_id, {})
+            profile = {
+                **existing,
+                "profile_id": profile_id,
+                "target_name": target_name,
+                "display_name": str(existing.get("display_name") or target_name),
+            }
+            basic = dict(profile.get("basic_info") or {})
+            basic["total_messages"] = int(basic.get("total_messages", 0) or 0) + 1
+            if is_reply:
+                basic["total_replies"] = int(basic.get("total_replies", 0) or 0) + 1
+            basic["last_contact_at"] = _now()
+            merged = _normalize_profile({**profile, "basic_info": basic}, tenant_id=self.tenant_id)
+            merged["updated_at"] = _now()
+            by_id[profile_id] = merged
+            self._write_json(
+                self.profiles_path,
+                sorted(by_id.values(), key=lambda item: str(item.get("updated_at") or ""), reverse=True),
+            )
+        if db:
+            db.upsert_customer_profile(self.tenant_id, merged)
+        return merged
 
     # ── Conversation summary CRUD ─────────────────────────────────────────
 
@@ -188,15 +237,16 @@ class CustomerProfileStore:
             db.upsert_customer_conversation(self.tenant_id, conv)
             if not config.mirror_files:
                 return conv
-        records = self._read_json(self.conversations_path, [])
-        by_id = {str(item.get("conversation_id") or ""): item for item in records if isinstance(item, dict)}
-        existing = by_id.get(conv["conversation_id"], {})
-        merged = {**existing, **conv, "updated_at": _now()}
-        by_id[conv["conversation_id"]] = merged
-        self._write_json(
-            self.conversations_path,
-            sorted(by_id.values(), key=lambda item: str(item.get("updated_at") or ""), reverse=True),
-        )
+        with _file_lock(self.conversations_path):
+            records = self._read_json(self.conversations_path, [])
+            by_id = {str(item.get("conversation_id") or ""): item for item in records if isinstance(item, dict)}
+            existing = by_id.get(conv["conversation_id"], {})
+            merged = {**existing, **conv, "updated_at": _now()}
+            by_id[conv["conversation_id"]] = merged
+            self._write_json(
+                self.conversations_path,
+                sorted(by_id.values(), key=lambda item: str(item.get("updated_at") or ""), reverse=True),
+            )
         return merged
 
     def get_conversation_summary(self, *, conversation_id: str = "", target_name: str = "") -> dict[str, Any] | None:
@@ -231,16 +281,40 @@ class CustomerProfileStore:
     def _read_json(self, path: Path, default: Any) -> Any:
         if not path.exists():
             return default
-        try:
-            return json.loads(path.read_text(encoding="utf-8"))
-        except json.JSONDecodeError:
-            return default
+        for attempt in range(5):
+            try:
+                return json.loads(path.read_text(encoding="utf-8"))
+            except OSError as exc:
+                if not _is_transient_file_error(exc) or attempt >= 4:
+                    return default
+                time.sleep(0.03 * (attempt + 1))
+            except json.JSONDecodeError:
+                if attempt >= 4:
+                    return default
+                time.sleep(0.03 * (attempt + 1))
+        return default
 
     def _write_json(self, path: Path, payload: Any) -> None:
         path.parent.mkdir(parents=True, exist_ok=True)
-        temp = path.with_suffix(path.suffix + ".tmp")
-        temp.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
-        os.replace(temp, path)
+        text = json.dumps(payload, ensure_ascii=False, indent=2)
+        last_error: OSError | None = None
+        for attempt in range(10):
+            temp = path.with_name(f".{path.name}.{os.getpid()}.{threading.get_ident()}.{time.time_ns()}.tmp")
+            try:
+                temp.write_text(text, encoding="utf-8")
+                os.replace(temp, path)
+                return
+            except OSError as exc:
+                last_error = exc
+                try:
+                    temp.unlink()
+                except OSError:
+                    pass
+                if not _is_transient_file_error(exc) or attempt >= 9:
+                    raise
+                time.sleep(0.05 * (attempt + 1))
+        if last_error is not None:
+            raise last_error
 
 
 def _normalize_profile(record: dict[str, Any], *, tenant_id: str) -> dict[str, Any]:

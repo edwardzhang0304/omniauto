@@ -41,6 +41,10 @@ from apps.wechat_ai_customer_service.admin_backend.services.knowledge_contaminat
     rag_chunk_is_retrievable,
 )
 from apps.wechat_ai_customer_service.storage import get_postgres_store, load_storage_config  # noqa: E402
+try:  # noqa: E402
+    from apps.wechat_ai_customer_service.workflows.evidence_authority import can_authorize_reply_content
+except Exception:  # pragma: no cover - supports isolated script imports
+    can_authorize_reply_content = None  # type: ignore[assignment]
 
 
 SUPPORTED_SUFFIXES = {".txt", ".md", ".json", ".csv"}
@@ -297,16 +301,18 @@ class RagService:
         self.rebuild_index()
         return {"ok": True, "deleted_sources": len(matched), "deleted_chunks": deleted_chunks}
 
-    def iter_chunks(self) -> list[dict[str, Any]]:
+    def iter_chunks(self, *, include_experience_pool: bool = False) -> list[dict[str, Any]]:
         db = postgres_store(self.tenant_id)
         if db:
             chunks = [chunk for chunk in db.list_rag_chunks(self.tenant_id) if rag_chunk_is_retrievable(chunk)]
-            chunks.extend(self.iter_experience_chunks())
+            if include_experience_pool:
+                chunks.extend(self.iter_experience_chunks())
             if chunks:
                 return chunks
         chunks: list[dict[str, Any]] = []
         if not self.chunks_root.exists():
-            chunks.extend(self.iter_experience_chunks())
+            if include_experience_pool:
+                chunks.extend(self.iter_experience_chunks())
             return chunks
         for path in sorted(self.chunks_root.glob("source_*.json")):
             try:
@@ -316,7 +322,8 @@ class RagService:
             for chunk in payload.get("chunks", []) or []:
                 if rag_chunk_is_retrievable(chunk):
                     chunks.append(chunk)
-        chunks.extend(self.iter_experience_chunks())
+        if include_experience_pool:
+            chunks.extend(self.iter_experience_chunks())
         return chunks
 
     def iter_experience_chunks(self) -> list[dict[str, Any]]:
@@ -355,7 +362,11 @@ class RagService:
 
     def rebuild_index(self) -> dict[str, Any]:
         self.ensure_dirs()
-        chunks = self.iter_chunks()
+        chunks = [
+            chunk
+            for chunk in self.iter_chunks(include_experience_pool=False)
+            if runtime_rag_entry_allowed(chunk)
+        ]
         high_risk_terms = rag_terms("high_risk_terms")
         semantic_equivalents_map()
         entries = [build_index_entry(chunk, high_risk_terms=high_risk_terms) for chunk in chunks]
@@ -395,7 +406,7 @@ class RagService:
         entries.extend(
             build_index_entry(chunk, high_risk_terms=high_risk_terms)
             for chunk in chunks
-            if rag_chunk_is_retrievable(chunk)
+            if rag_chunk_is_retrievable(chunk) and runtime_rag_entry_allowed(chunk)
         )
         next_payload = {
             "schema_version": 1,
@@ -466,6 +477,8 @@ class RagService:
         query_profile = build_query_profile(query_text)
         hits: list[dict[str, Any]] = []
         for entry in index.get("entries", []) or []:
+            if not runtime_rag_entry_allowed(entry):
+                continue
             if product_id and str(entry.get("product_id") or "") not in {"", product_id}:
                 continue
             if category and str(entry.get("category") or "") != category:
@@ -553,7 +566,7 @@ class RagService:
                 "updated_at": "postgres",
             }
         sources = self.list_sources()
-        chunks = self.iter_chunks()
+        chunks = self.iter_chunks(include_experience_pool=False)
         index = {"entries": [], "built_at": ""}
         if self.index_path.exists():
             try:
@@ -630,7 +643,7 @@ def build_chunks(text: str, *, source: dict[str, Any], max_chars: int = 900, ove
 def build_experience_chunk_text(item: dict[str, Any]) -> str:
     hit = item.get("rag_hit", {}) or {}
     parts = [
-        f"RAG经验概括：{item.get('summary') or ''}",
+        f"AI经验池概括：{item.get('summary') or ''}",
         f"客户问法：{item.get('question') or ''}",
         f"历史回复要点：{item.get('reply_text') or ''}",
     ]
@@ -641,6 +654,31 @@ def build_experience_chunk_text(item: dict[str, Any]) -> str:
     if product_id:
         parts.append(f"关联商品：{product_id}")
     return normalize_text_block("\n".join(parts))
+
+
+def runtime_rag_entry_allowed(entry: dict[str, Any]) -> bool:
+    """Guard old indexes so AI经验池/chats cannot leak into runtime content evidence."""
+
+    source_type = str(entry.get("source_type") or "").strip()
+    category = str(entry.get("category") or "").strip()
+    layer = str(entry.get("layer") or "").strip()
+    if source_type == "rag_experience" or category == "rag_experience" or layer == "rag_experience":
+        return False
+    if source_type in {
+        "cleaned_real_chat_pack",
+        "real_chat",
+        "real_chat_style",
+        "wechat_raw_message",
+        "raw_wechat_private",
+        "raw_wechat_group",
+        "raw_wechat_file_transfer",
+        "chat_log",
+        "upload",
+    }:
+        return False
+    if can_authorize_reply_content is not None:
+        return bool(can_authorize_reply_content(entry, category_id=category, source_type=source_type))
+    return True
 
 
 def build_index_entry(chunk: dict[str, Any], *, high_risk_terms: set[str] | None = None) -> dict[str, Any]:

@@ -40,7 +40,7 @@ def main() -> int:
     parser.add_argument("--apply", action="store_true")
     args = parser.parse_args()
     report = run_cleanup(args.tenant, apply=args.apply)
-    print(json.dumps(report, ensure_ascii=False, indent=2))
+    print(json.dumps(report, ensure_ascii=True, indent=2))
     return 0 if report["ok"] else 1
 
 

@@ -8,7 +8,7 @@ from apps.wechat_ai_customer_service.adapters.wechat_connector import WeChatConn
 
 
 def run_wechat_startup_self_check(*, require_send: bool, module_name: str) -> dict[str, Any]:
-    capability = WeChatConnector().capabilities()
+    capability = WeChatConnector().capabilities(interactive=True)
     decision = evaluate_wechat_capability(
         capability,
         require_send=require_send,
@@ -32,6 +32,23 @@ def evaluate_wechat_capability(
     display = wechat_scheme_display_name(scheme)
 
     if not online:
+        failure = rpa_failure_detail_payload(capability)
+        state = str(failure.get("state") or "")
+        reason = str(failure.get("reason") or "")
+        if state == "main_window_geometry_invalid" and reason == "window_offscreen_or_minimized":
+            return {
+                "ok": False,
+                "detail": "wechat_window_minimized",
+                "scheme": scheme or "wechat_window_minimized",
+                "message": f"{module_name}启动前自检未通过：已检测到微信进程，但微信主窗口处于最小化或托盘状态，当前无法截图读取。请从任务栏点开微信后重试。",
+            }
+        if state == "blank_render_detected" or reason == "blank_render":
+            return {
+                "ok": False,
+                "detail": "wechat_blank_render",
+                "scheme": scheme or "wechat_blank_render",
+                "message": f"{module_name}启动前自检未通过：微信窗口疑似白屏或渲染卡住。请关闭当前微信窗口并从任务栏重新打开后再启动。",
+            }
         return {
             "ok": False,
             "detail": "wechat_not_ready",
@@ -60,6 +77,19 @@ def evaluate_wechat_capability(
         "scheme": scheme,
         "message": f"{module_name}启动前自检通过：当前使用{display}，可以{action}。",
     }
+
+
+def rpa_failure_detail_payload(capability: dict[str, Any]) -> dict[str, Any]:
+    """Prefer the underlying Win32/OCR failure over generic reserve wrapping."""
+    if not isinstance(capability, dict):
+        return {}
+    primary = capability.get("primary_status") if isinstance(capability.get("primary_status"), dict) else {}
+    if primary:
+        state = str(primary.get("state") or "")
+        reason = str(primary.get("reason") or "")
+        if state in {"main_window_geometry_invalid", "blank_render_detected", "login_window_detected"} or reason:
+            return primary
+    return capability
 
 
 def wechat_scheme_display_name(scheme: str) -> str:

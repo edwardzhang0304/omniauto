@@ -178,14 +178,14 @@ def hit_passes_scope_filters(hit: dict[str, Any], settings: dict[str, Any]) -> b
 
 
 def direct_reply_excluded_for_hit(hit: dict[str, Any], settings: dict[str, Any]) -> bool:
-    """RAG experience/style snippets can guide tone, but must not be pasted as customer replies."""
+    """AI experience pool and style snippets can guide tone, but must not be pasted as customer replies."""
     if settings.get("allow_experience_direct_reply") is True:
         return False
     text = str(hit.get("text") or "")
     source_type = str(hit.get("source_type") or "")
     category = str(hit.get("category") or "")
     internal_markers = (
-        "RAG经验概括",
+        "AI经验池概括",
         "实盘话术样本",
         "客户问法",
         "历史回复要点",
@@ -236,7 +236,7 @@ def clean_snippet(text: str, *, max_chars: int) -> str:
     compacted = compacted.strip(" \t\r\n-:：;；,，。")
     if len(compacted) <= max_chars:
         return compacted
-    return compacted[: max(1, max_chars - 1)].rstrip("，,。；; ") + "…"
+    return truncate_visible_text(compacted, max_chars)
 
 
 def extract_service_style_snippet(text: str) -> str:
@@ -260,7 +260,31 @@ def truncate_sentence(text: str, max_chars: int) -> str:
     compacted = re.sub(r"\s+", " ", text).strip()
     if len(compacted) <= max_chars:
         return compacted
-    return compacted[: max(1, max_chars - 1)].rstrip("，,。；; ") + "…"
+    return truncate_visible_text(compacted, max_chars)
+
+
+def truncate_visible_text(text: str, max_chars: int) -> str:
+    clean = re.sub(r"\s+", " ", str(text or "")).strip()
+    if max_chars <= 1:
+        return clean[:max_chars]
+    if len(clean) <= max_chars:
+        return clean
+    preferred = -1
+    for marker in ("。", "！", "？", "!", "?", "；", ";", "，", ","):
+        index = clean.rfind(marker, 0, max_chars)
+        if index > preferred:
+            preferred = index
+    if preferred >= 0 and preferred + 1 >= max(12, int(max_chars * 0.45)):
+        candidate = clean[: preferred + 1].strip()
+    else:
+        candidate = clean[: max(1, max_chars - 1)].strip().rstrip("，,。；;、:：")
+        if candidate and not candidate.endswith(("。", "！", "？", ".", "!", "?")):
+            candidate = candidate[: max(1, max_chars - 1)].rstrip("，,。；;、:：") + "。"
+    if candidate.endswith(("，", ",", "；", ";", "、", ":", "：")):
+        candidate = candidate.rstrip("，,。；;、:：")
+        if candidate and not candidate.endswith(("。", "！", "？", ".", "!", "?")):
+            candidate = candidate[: max(1, max_chars - 1)].rstrip("，,。；;、:：") + "。"
+    return candidate[:max_chars].strip()
 
 
 def compact_hit(hit: dict[str, Any], settings: dict[str, Any]) -> dict[str, Any]:

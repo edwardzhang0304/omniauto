@@ -49,6 +49,7 @@ const state = {
   recorderModules: [],
   recorderExportRuns: [],
   recorderRuntimeStatus: null,
+  recorderRuntimeBusy: false,
   recorderExportRunBusy: false,
   recorderExportPollingTimer: null,
   activeReferenceTab: "experiences",
@@ -85,10 +86,11 @@ const state = {
   emailChallenge: null,
   security: null,
   llmConfig: null,
+  feishuConfig: null,
   workflowOpsBusy: false,
   workflowLastResult: null,
 };
-const CUSTOMER_SERVICE_FLOAT_POSITION_KEY = "customerServiceFloatPositionV1";
+const CUSTOMER_SERVICE_FLOAT_POSITION_KEY = "customerServiceFloatPositionV2";
 const localDeviceId = getOrCreateDeviceId("localConsoleDeviceId");
 const RECORDER_EXPORT_DEFAULT_LIMIT = 10000;
 const KNOWLEDGE_LIST_PAGE_SIZE = 20;
@@ -124,7 +126,7 @@ const titles = {
   generator: "手动创建",
   recorder: "AI智能记录员",
   customer_profiles: "客户画像",
-  ai_reference: "RAG经验池",
+  ai_reference: "AI经验池",
   diagnostics: "知识检测",
   settings: "系统设置",
   versions: "备份还原",
@@ -1251,6 +1253,11 @@ function setLlmInfoText(id, value) {
   if (element) element.textContent = value || "—";
 }
 
+function setText(id, value) {
+  const element = document.getElementById(id);
+  if (element) element.textContent = value || "—";
+}
+
 function llmReasoningLabel(value) {
   const key = String(value || "");
   return LLM_REASONING_EFFORT_LABELS[key] || key || "默认（不覆盖）";
@@ -1362,6 +1369,165 @@ function toggleLlmApiKeyVisibility() {
   const isPassword = input.type === "password";
   input.type = isPassword ? "text" : "password";
   button.textContent = isPassword ? "隐藏" : "显示";
+}
+
+async function loadFeishuConfig() {
+  const payload = await apiGet("/api/system/feishu-config");
+  state.feishuConfig = payload;
+  renderFeishuConfig();
+}
+
+function renderFeishuConfig() {
+  const config = state.feishuConfig || {};
+  const summary = document.getElementById("feishu-config-summary");
+  const enabledInput = document.getElementById("feishu-enabled-input");
+  const modeSelect = document.getElementById("feishu-mode-select");
+  const receiveTypeSelect = document.getElementById("feishu-receive-id-type-select");
+  const webhookUrlInput = document.getElementById("feishu-webhook-url-input");
+  const webhookSecretInput = document.getElementById("feishu-webhook-secret-input");
+  const appIdInput = document.getElementById("feishu-app-id-input");
+  const appSecretInput = document.getElementById("feishu-app-secret-input");
+  const defaultReceiveIdsInput = document.getElementById("feishu-default-receive-ids-input");
+  const boundAccountsInput = document.getElementById("feishu-bound-accounts-input");
+  const notifyHandoffInput = document.getElementById("feishu-notify-handoff-input");
+  const notifyLogoutInput = document.getElementById("feishu-notify-logout-input");
+  if (summary) {
+    summary.innerHTML = `
+      <div><span>通知状态</span><strong>${config.enabled ? "已启用" : "未启用"}</strong></div>
+      <div><span>推送模式</span><strong>${escapeHtml(feishuModeLabel(config.mode))}</strong></div>
+      <div><span>Webhook</span><strong>${config.webhook_url_configured ? "已配置" : "未配置"}</strong></div>
+      <div><span>自建应用</span><strong>${config.app_id ? "已填写 App ID" : "未配置"}</strong></div>
+    `;
+  }
+  if (enabledInput) enabledInput.checked = !!config.enabled;
+  if (modeSelect) modeSelect.value = config.mode || "webhook";
+  if (receiveTypeSelect) receiveTypeSelect.value = config.receive_id_type || "open_id";
+  if (webhookUrlInput) {
+    webhookUrlInput.value = "";
+    webhookUrlInput.placeholder = config.webhook_url_configured ? `已保存：${config.webhook_url_masked || "****"}；留空保留` : "粘贴飞书群机器人 Webhook";
+  }
+  setText("feishu-webhook-url-current", config.webhook_url_configured ? `当前已保存：${config.webhook_url_masked || "****"}` : "当前未保存 Webhook 地址。");
+  if (webhookSecretInput) {
+    webhookSecretInput.value = "";
+    webhookSecretInput.placeholder = config.webhook_secret_configured ? "已保存签名密钥；留空保留" : "可选；开启签名校验时填写";
+  }
+  setText("feishu-webhook-secret-current", config.webhook_secret_configured ? `当前已保存：${config.webhook_secret_masked || "****"}` : "当前未保存签名密钥。");
+  if (appIdInput) appIdInput.value = config.app_id || "";
+  if (appSecretInput) {
+    appSecretInput.value = "";
+    appSecretInput.placeholder = config.app_secret_configured ? "已保存 App Secret；留空保留" : "填写 App Secret";
+  }
+  setText("feishu-app-secret-current", config.app_secret_configured ? `当前已保存：${config.app_secret_masked || "****"}` : "当前未保存 App Secret。");
+  if (defaultReceiveIdsInput) defaultReceiveIdsInput.value = (config.default_receive_ids || []).join("\n");
+  if (boundAccountsInput) boundAccountsInput.value = formatFeishuBoundAccounts(config.bound_accounts || []);
+  if (notifyHandoffInput) notifyHandoffInput.checked = config.notify_on_handoff !== false;
+  if (notifyLogoutInput) notifyLogoutInput.checked = config.notify_on_logout !== false;
+  updateFeishuInfoPanel();
+}
+
+function feishuModeLabel(mode) {
+  if (mode === "app_bot") return "自建应用机器人";
+  return "群机器人 Webhook";
+}
+
+function saveFeishuConfig(event) {
+  if (event) event.preventDefault();
+  return apiJson("/api/system/feishu-config", {
+    method: "PUT",
+    body: JSON.stringify(collectFeishuConfigPayload()),
+  }).then((payload) => {
+    if (payload.ok === false) {
+      alert(payload.detail || "保存失败");
+      return;
+    }
+    state.feishuConfig = payload;
+    renderFeishuConfig();
+    alert("飞书转人工通知配置已保存。");
+  });
+}
+
+function collectFeishuConfigPayload() {
+  return {
+    enabled: !!document.getElementById("feishu-enabled-input")?.checked,
+    mode: document.getElementById("feishu-mode-select")?.value || "webhook",
+    receive_id_type: document.getElementById("feishu-receive-id-type-select")?.value || "open_id",
+    webhook_url: document.getElementById("feishu-webhook-url-input")?.value.trim() || "",
+    webhook_secret: document.getElementById("feishu-webhook-secret-input")?.value.trim() || "",
+    app_id: document.getElementById("feishu-app-id-input")?.value.trim() || "",
+    app_secret: document.getElementById("feishu-app-secret-input")?.value.trim() || "",
+    default_receive_ids: parseLineList(document.getElementById("feishu-default-receive-ids-input")?.value || ""),
+    bound_accounts: parseFeishuBoundAccounts(document.getElementById("feishu-bound-accounts-input")?.value || ""),
+    notify_on_handoff: !!document.getElementById("feishu-notify-handoff-input")?.checked,
+    notify_on_logout: !!document.getElementById("feishu-notify-logout-input")?.checked,
+  };
+}
+
+async function testFeishuConfig(dryRun = false) {
+  if (!dryRun && !confirm("测试连接会向飞书发送一条测试通知，确认继续吗？")) return;
+  const button = document.getElementById(dryRun ? "feishu-config-test-dry" : "feishu-config-test");
+  if (button) {
+    button.disabled = true;
+    button.textContent = dryRun ? "校验中..." : "测试中...";
+  }
+  try {
+    const payload = await apiJson("/api/system/feishu-config/test", {
+      method: "POST",
+      body: JSON.stringify({...collectFeishuConfigPayload(), dry_run: dryRun}),
+    });
+    if (payload.ok) {
+      alert(dryRun ? "飞书配置干跑校验通过。" : "飞书测试消息发送成功。");
+    } else {
+      alert(`飞书测试失败：${payload.errors?.join(", ") || payload.message || payload.status || payload.error || "未知错误"}`);
+    }
+  } finally {
+    if (button) {
+      button.disabled = false;
+      button.textContent = dryRun ? "干跑校验" : "测试连接";
+    }
+  }
+}
+
+function updateFeishuInfoPanel() {
+  const payload = collectFeishuConfigPayload();
+  setText("feishu-info-enabled", payload.enabled ? "已启用" : "未启用");
+  setText("feishu-info-mode", feishuModeLabel(payload.mode));
+  setText(
+    "feishu-info-webhook",
+    state.feishuConfig?.webhook_url_configured || payload.webhook_url ? "已配置" : "未配置",
+  );
+  setText("feishu-info-app", payload.app_id ? payload.app_id : "未配置");
+  setText("feishu-info-default-targets", String(payload.default_receive_ids.length || 0));
+  setText("feishu-info-bound-targets", String(payload.bound_accounts.length || 0));
+}
+
+function parseLineList(text) {
+  return uniqueStrings(String(text || "").split(/\r?\n|,/).map((line) => line.trim()));
+}
+
+function parseFeishuBoundAccounts(text) {
+  return String(text || "")
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .map((line) => {
+      const parts = line.split("|").map((part) => part.trim()).filter(Boolean);
+      if (parts.length >= 4) {
+        return {label: parts[0], tenant_id: parts[1], receive_id_type: parts[2], receive_id: parts.slice(3).join("|"), enabled: true};
+      }
+      if (parts.length === 3) {
+        return {label: parts[0], tenant_id: "", receive_id_type: parts[1], receive_id: parts[2], enabled: true};
+      }
+      if (parts.length === 2) {
+        return {label: parts[0], tenant_id: "", receive_id_type: document.getElementById("feishu-receive-id-type-select")?.value || "open_id", receive_id: parts[1], enabled: true};
+      }
+      return {label: parts[0] || line, tenant_id: "", receive_id_type: document.getElementById("feishu-receive-id-type-select")?.value || "open_id", receive_id: parts[0] || line, enabled: true};
+    });
+}
+
+function formatFeishuBoundAccounts(items) {
+  return (items || [])
+    .map((item) => `${item.label || item.receive_id || ""} | ${item.tenant_id || ""} | ${item.receive_id_type || "open_id"} | ${item.receive_id || ""}`)
+    .join("\n");
 }
 
 async function loadCustomerService() {
@@ -1517,60 +1683,100 @@ async function refreshCustomerServiceRuntime(options = {}) {
   try {
     const payload = await apiGet("/api/customer-service/runtime/status");
     state.customerServiceRuntime = payload.item || {};
-    renderCustomerServiceRuntime();
+    if (!options.skipRender) renderCustomerServiceRuntime();
+  } catch (error) {
+    if (!options.silent) console.warn(error);
+  }
+}
+
+async function refreshRecorderRuntime(options = {}) {
+  if (!state.authToken) return;
+  try {
+    const payload = await apiGet("/api/recorder/runtime/status");
+    state.recorderRuntimeStatus = payload.item || {};
+    if (!options.skipRender) renderCustomerServiceRuntime();
   } catch (error) {
     if (!options.silent) console.warn(error);
   }
 }
 
 function renderCustomerServiceRuntime() {
-  const runtime = state.customerServiceRuntime || {};
-  const stateName = runtime.state || "stopped";
-  const stateLabel = runtimeStateLabel(stateName);
-  const stateMessage = runtime.message || "";
-  const dotClasses = `service-state-dot is-${escapeHtml(stateName)}`;
+  const customerRuntime = state.customerServiceRuntime || {};
+  const customerStateName = customerRuntime.state || "stopped";
+  const customerStateMessage = sanitizeRuntimeMessage(customerRuntime.message || "");
+  const customerVisualStateName = runtimeVisualStateName(customerStateName, Boolean(customerRuntime.running));
+  const customerVisualStateLabel = runtimeVisualStateLabel(customerVisualStateName);
+  const customerVisualStateMessage = runtimeVisualStateMessage(customerStateName, customerStateMessage, Boolean(customerRuntime.running));
+  const customerDotClasses = `service-state-dot is-${escapeHtml(customerVisualStateName)}`;
+  const recorderRuntime = state.recorderRuntimeStatus || {};
+  const recorderSettings = state.recorderSummary?.settings || {};
+  const recorderRunning = Boolean(recorderRuntime.running);
+  const recorderRawStateName = recorderRuntime.state || (recorderRunning ? "idle" : "stopped");
+  const recorderVisualStateName = runtimeVisualStateName(recorderRawStateName, recorderRunning);
+  const recorderStateLabel = recorderRuntimeFloatLabel(recorderVisualStateName);
+  const recorderDotClasses = `service-state-dot is-${escapeHtml(recorderVisualStateName)}`;
+  const anyRunning = Boolean(customerRuntime.running || recorderRunning);
+  let compositeStateName = "stopped";
+  if (customerVisualStateName === "paused" || recorderVisualStateName === "paused") {
+    compositeStateName = "paused";
+  } else if (anyRunning) {
+    compositeStateName = "idle";
+  }
+  const recorderEnabled = recorderSettings.enabled !== false;
   const panel = document.getElementById("customer-service-runtime-card");
   if (panel) {
-    panel.className = `runtime-status-card is-${stateName}`;
+    panel.className = `runtime-status-card is-${customerVisualStateName}`;
     panel.innerHTML = `
       <div class="runtime-status-main">
-        <span class="${dotClasses}"></span>
+        <span class="${customerDotClasses}"></span>
         <div>
-          <strong>${escapeHtml(stateLabel)}</strong>
-          <p>${escapeHtml(stateMessage || "等待状态更新")}</p>
-          ${runtime.last_target ? `<small>最近会话：${escapeHtml(runtime.last_target)}${runtime.model_tier ? ` · 模型：${escapeHtml(runtime.model_tier)}` : ""}${runtime.rag_hit_count !== undefined && runtime.rag_hit_count !== null ? ` · RAG命中：${escapeHtml(String(runtime.rag_hit_count))}` : ""}</small>` : ""}
+          <strong>${escapeHtml(customerVisualStateLabel)}</strong>
+          <p>${escapeHtml(customerVisualStateMessage || "等待状态更新")}</p>
+          ${customerRuntime.last_target ? `<small>最近会话：${escapeHtml(customerRuntime.last_target)}${customerRuntime.model_tier ? ` · 模型：${escapeHtml(customerRuntime.model_tier)}` : ""}${customerRuntime.rag_hit_count !== undefined && customerRuntime.rag_hit_count !== null ? ` · 知识命中：${escapeHtml(String(customerRuntime.rag_hit_count))}` : ""}</small>` : ""}
         </div>
       </div>
-      <div class="button-row compact-actions">
-        <button class="primary-button compact-button customer-runtime-start" ${!state.authToken || runtime.running || state.customerServiceRuntimeBusy ? "disabled" : ""}>启动</button>
-        <button class="secondary-button compact-button customer-runtime-stop" ${!state.authToken || !runtime.running || state.customerServiceRuntimeBusy ? "disabled" : ""}>停止</button>
-      </div>
     `;
-    panel.querySelector(".customer-runtime-start")?.addEventListener("click", () => startCustomerServiceRuntime().catch((error) => alert(error.message)));
-    panel.querySelector(".customer-runtime-stop")?.addEventListener("click", () => stopCustomerServiceRuntime().catch((error) => alert(error.message)));
   }
   const floating = document.getElementById("customer-service-float");
   if (floating) {
-    floating.className = `customer-service-float is-${stateName}`;
+    floating.className = `customer-service-float is-${compositeStateName}`;
     floating.innerHTML = `
-      <div class="float-status-line float-drag-handle" title="按住拖动浮窗位置">
-        <span class="${dotClasses}"></span>
-        <div>
-          <strong>${escapeHtml(stateLabel)}</strong>
-          <small>${escapeHtml(shortBusinessText(stateMessage || "", 58))}</small>
-        </div>
+      <div class="float-header float-drag-handle" title="按住拖动浮窗位置">
+        <span class="float-orb" aria-hidden="true">${customerServiceSpinnerSvg()}</span>
+        <strong>运行控制台</strong>
+        <span class="float-hotkey-inline">按F8启动/停止</span>
       </div>
-      <div class="float-actions">
-        <button class="primary-button iconish-button customer-runtime-start" title="启动微信自动客服" ${!state.authToken || runtime.running || state.customerServiceRuntimeBusy ? "disabled" : ""}>开</button>
-        <button class="secondary-button iconish-button customer-runtime-stop" title="停止微信自动客服" ${!state.authToken || !runtime.running || state.customerServiceRuntimeBusy ? "disabled" : ""}>停</button>
+      <div class="float-runtime-list">
+        <div class="float-runtime-row">
+          <div class="float-status-line">
+            <span class="${customerDotClasses}"></span>
+            <strong>客服 · ${escapeHtml(customerVisualStateLabel)}</strong>
+          </div>
+          <div class="float-actions">
+            <button class="primary-button iconish-button customer-runtime-start" title="启动微信自动客服" ${!state.authToken || customerRuntime.running || state.customerServiceRuntimeBusy ? "disabled" : ""}>开</button>
+            <button class="secondary-button iconish-button customer-runtime-stop" title="停止微信自动客服" ${!state.authToken || !customerRuntime.running || state.customerServiceRuntimeBusy ? "disabled" : ""}>停</button>
+          </div>
+        </div>
+        <div class="float-runtime-row">
+          <div class="float-status-line">
+            <span class="${recorderDotClasses}"></span>
+            <strong>记录 · ${escapeHtml(recorderStateLabel)}</strong>
+          </div>
+          <div class="float-actions">
+            <button class="primary-button iconish-button recorder-runtime-start" title="启动AI智能记录员监听" ${!state.authToken || !recorderEnabled || recorderRunning || state.recorderRuntimeBusy ? "disabled" : ""}>开</button>
+            <button class="secondary-button iconish-button recorder-runtime-stop" title="停止AI智能记录员监听" ${!state.authToken || !recorderRunning || state.recorderRuntimeBusy ? "disabled" : ""}>停</button>
+          </div>
+        </div>
       </div>
     `;
     floating.querySelector(".customer-runtime-start")?.addEventListener("click", () => startCustomerServiceRuntime().catch((error) => alert(error.message)));
     floating.querySelector(".customer-runtime-stop")?.addEventListener("click", () => stopCustomerServiceRuntime().catch((error) => alert(error.message)));
+    floating.querySelector(".recorder-runtime-start")?.addEventListener("click", () => startRecorderRuntime().catch((error) => alert(error.message)));
+    floating.querySelector(".recorder-runtime-stop")?.addEventListener("click", () => stopRecorderRuntime().catch((error) => alert(error.message)));
     enableCustomerServiceFloatDragging(floating);
   }
-  const otherRunning = (runtime.other_listeners || []).filter((l) => l.tenant_id !== (state.activeTenantId || "default"));
-  if (!runtime.running && otherRunning.length > 0) {
+  const otherRunning = (customerRuntime.other_listeners || []).filter((l) => l.tenant_id !== (state.activeTenantId || "default"));
+  if (!customerRuntime.running && otherRunning.length > 0) {
     const tenantNames = otherRunning.map((l) => l.tenant_id).join("、");
     const banner = document.getElementById("runtime-tenant-mismatch-banner");
     if (banner) {
@@ -1624,6 +1830,7 @@ function enableCustomerServiceFloatDragging(floating) {
   floating.addEventListener("pointerdown", (event) => {
     const target = event.target instanceof Element ? event.target : null;
     if (!target || !floating.contains(target)) return;
+    if (!target.closest(".float-drag-handle")) return;
     if (target.closest("button, a, input, textarea, select, label, [role='button'], .float-actions")) return;
     if (event.button !== 0) return;
     event.preventDefault();
@@ -1670,18 +1877,55 @@ function enableCustomerServiceFloatDragging(floating) {
 function initCustomerServiceFloat() {
   const floating = document.getElementById("customer-service-float");
   if (!floating) return;
-  const statusLine = floating.querySelector(".float-status-line");
-  if (statusLine && !statusLine.classList.contains("float-drag-handle")) {
-    statusLine.classList.add("float-drag-handle");
-    statusLine.setAttribute("title", "按住拖动浮窗位置");
+  const dragHandle = floating.querySelector(".float-header, .float-status-line, .float-drag-handle");
+  if (dragHandle && !dragHandle.classList.contains("float-drag-handle")) {
+    dragHandle.classList.add("float-drag-handle");
+    dragHandle.setAttribute("title", "按住拖动浮窗位置");
   }
   enableCustomerServiceFloatDragging(floating);
 }
 
-function runtimeStateLabel(stateName) {
-  if (stateName === "thinking") return "思考中";
-  if (stateName === "idle") return "空闲";
-  return "已停止";
+function runtimeVisualStateName(stateName, running) {
+  if (stateName === "paused") return "paused";
+  if (stateName === "stopped" || !running) return "stopped";
+  return "idle";
+}
+
+function runtimeVisualStateLabel(stateName) {
+  if (stateName === "paused") return "已暂停";
+  if (stateName === "stopped") return "已停止";
+  return "运行中";
+}
+
+function recorderRuntimeFloatLabel(stateName) {
+  if (stateName === "paused") return "已暂停";
+  if (stateName === "stopped") return "已停止";
+  return "监听中";
+}
+
+function runtimeVisualStateMessage(rawStateName, message, running) {
+  if (rawStateName === "paused") return message || "等待继续";
+  if (rawStateName === "stopped" || !running) return message || "未启动";
+  return "监听运行中";
+}
+
+function sanitizeRuntimeMessage(message) {
+  const text = String(message || "").trim();
+  if (!text) return "";
+  if (text.includes("双击停止指令")) return "已停止";
+  if (text.includes("自动客服监听已停止")) return "已停止";
+  return text;
+}
+
+function customerServiceSpinnerSvg() {
+  // Adapted from n3r4zzurr0/svg-spinners ring-resize.svg (MIT, Copyright Utkarsh Verma).
+  return `
+    <svg class="float-orb-svg" width="24" height="24" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" focusable="false">
+      <g class="float-orb-ring">
+        <circle cx="12" cy="12" r="9.5" fill="none" stroke-width="3"></circle>
+      </g>
+    </svg>
+  `;
 }
 
 async function startCustomerServiceRuntime() {
@@ -1713,8 +1957,15 @@ async function stopCustomerServiceRuntime() {
 function scheduleCustomerServiceRuntimePolling() {
   if (state.customerServiceRuntimeTimer) clearInterval(state.customerServiceRuntimeTimer);
   if (!state.authToken) return;
-  refreshCustomerServiceRuntime({silent: true});
-  state.customerServiceRuntimeTimer = setInterval(() => refreshCustomerServiceRuntime({silent: true}), 3000);
+  const refreshBothRuntimeStatuses = async () => {
+    await Promise.all([
+      refreshCustomerServiceRuntime({silent: true, skipRender: true}),
+      refreshRecorderRuntime({silent: true, skipRender: true}),
+    ]);
+    renderCustomerServiceRuntime();
+  };
+  refreshBothRuntimeStatuses().catch((error) => console.warn(error));
+  state.customerServiceRuntimeTimer = setInterval(() => refreshBothRuntimeStatuses().catch((error) => console.warn(error)), 1000);
 }
 
 async function saveCustomerServiceSettings() {
@@ -2325,7 +2576,7 @@ function knowledgeContextNoticeHtml(category, item, options = {}) {
     return `
       <div class="helper-card context-card">
         <strong>这是商品主数据，不属于普通正式知识。</strong>
-        <span>库存、价格、规格和在售状态请优先在商品库维护；RAG经验和候选知识不能反向写入这里。</span>
+        <span>库存、价格、规格和在售状态请优先在商品库维护；AI经验池和候选知识不能反向写入这里。</span>
       </div>
     `;
   }
@@ -3712,8 +3963,8 @@ async function sendGeneratorMessage() {
 
 function generatorReplyText(session) {
   if (!session) return "";
-  if (session.status === "ready") return "信息已整理完整，可以确认加入RAG经验池。";
-  if (session.status === "sent_to_rag_experience") return "这条内容已加入RAG经验池，可去“RAG经验池”查看AI建议。";
+  if (session.status === "ready") return "信息已整理完整，可以确认加入AI经验池。";
+  if (session.status === "sent_to_rag_experience") return "这条内容已加入AI经验池，可去“AI经验池”查看AI建议。";
   if (session.status === "saved") return "已经保存到正式知识库。";
   return session.question || "还需要继续补充关键信息。";
 }
@@ -3742,13 +3993,13 @@ function renderGenerator() {
   const confirmButton = document.getElementById("confirm-generator");
   chat.innerHTML = state.generatorMessages.length
     ? state.generatorMessages.map((msg) => `<div class="chat-bubble ${msg.role}">${escapeHtml(msg.content)}</div>`).join("")
-    : `<div class="empty-state">输入一段自然语言，系统会优先用大模型整理成可加入RAG经验池的结构化内容。</div>`;
+    : `<div class="empty-state">输入一段自然语言，系统会优先用大模型整理成可加入AI经验池的结构化内容。</div>`;
   const summary = document.getElementById("generator-summary");
   const session = state.generatorSession;
   if (!session) {
     summary.innerHTML = "";
     confirmButton.disabled = true;
-    confirmButton.textContent = "确认加入RAG经验池";
+    confirmButton.textContent = "确认加入AI经验池";
     return;
   }
   const warnings = session.warnings || [];
@@ -3770,7 +4021,7 @@ function renderGenerator() {
   confirmButton.disabled = !confirmReady;
   confirmButton.innerHTML = state.generatorConfirmBusy
     ? '<span class="loading-spinner button-spinner" aria-hidden="true"></span><span>确认中</span>'
-    : "确认加入RAG经验池";
+    : "确认加入AI经验池";
 }
 
 function generatorDraftEditorHtml(session) {
@@ -3823,7 +4074,7 @@ async function updateGeneratorDraft() {
 
 async function confirmGenerator() {
   if (!state.generatorSession?.session_id || state.generatorConfirmBusy) return;
-  if (!confirm("确认将这条内容加入RAG经验池吗？")) return;
+  if (!confirm("确认将这条内容加入AI经验池吗？")) return;
   state.generatorConfirmBusy = true;
   renderGenerator();
   try {
@@ -3834,7 +4085,7 @@ async function confirmGenerator() {
     state.generatorSession = payload.session;
     const experienceId = payload.session?.rag_experience_id || payload.item?.experience_id || "";
     const tip = experienceId ? `（${experienceId}）` : "";
-    state.generatorMessages.push({role: "assistant", content: `已加入RAG经验池${tip}。`});
+    state.generatorMessages.push({role: "assistant", content: `已加入AI经验池${tip}。`});
     await Promise.all([
       loadOverview().catch(console.error),
       refreshRagExperienceBadge().catch(console.error),
@@ -4160,6 +4411,7 @@ function normalizeRagExperienceGovernanceCounts(serverCounts = null, items = [])
   const fallback = {
     pending_review: 0,
     retrievable_experience: 0,
+    kept_experience: 0,
     style_only: 0,
     candidate_suggested: 0,
     candidate_created: 0,
@@ -4179,6 +4431,7 @@ function normalizeRagExperienceGovernanceCounts(serverCounts = null, items = [])
   const states = [
     "pending_review",
     "retrievable_experience",
+    "kept_experience",
     "style_only",
     "candidate_suggested",
     "candidate_created",
@@ -4200,7 +4453,8 @@ function normalizeRagExperienceGovernanceCounts(serverCounts = null, items = [])
 function ragGovernanceLabel(key) {
   return {
     pending_review: "待处理",
-    retrievable_experience: "可RAG参考",
+    retrievable_experience: "旧可检索状态",
+    kept_experience: "已入AI经验池",
     style_only: "仅话术风格",
     candidate_suggested: "建议待确认",
     candidate_created: "已生成候选",
@@ -4217,6 +4471,7 @@ function ragGovernanceSummaryHtml(counts) {
   const keys = [
     "pending_review",
     "retrievable_experience",
+    "kept_experience",
     "style_only",
     "candidate_suggested",
     "candidate_created",
@@ -4244,7 +4499,7 @@ function ragExperienceProcessingNoticeHtml() {
   return `
     <div class="status-card loading rag-background-processing">
       <strong><span class="loading-spinner" aria-hidden="true"></span>后台处理中</strong>
-      <span>AI 正在整理${count ? ` ${count} 条` : ""}RAG经验，处理完成后会自动刷新清单和统计，不会静默隐藏。</span>
+      <span>AI 正在整理${count ? ` ${count} 条` : ""}AI经验池，处理完成后会自动刷新清单和统计，不会静默隐藏。</span>
     </div>
   `;
 }
@@ -4328,7 +4583,7 @@ async function interpretRagExperience(experienceId, options = {}) {
       state.ragActionNotice = {
         tone: "ok",
         title: "AI重新评估后已吸纳为经验",
-        message: "这条经验已保留在RAG经验层，不会作为新经验继续提醒。",
+        message: "这条经验已保留在AI经验池，不会作为新经验继续提醒。",
         experienceId,
       };
     }
@@ -4396,7 +4651,7 @@ function renderRagExperiences(payload = {}) {
       ` : "";
     cards.innerHTML = [
       ["待处理", displayCounts.pending],
-      ["已保留为经验", displayCounts.kept],
+      ["已入AI经验池", displayCounts.kept],
       ["已转待确认", displayCounts.promoted],
       ["已废弃", displayCounts.discarded],
       ["其他明确状态", displayCounts.other],
@@ -4498,7 +4753,7 @@ function renderRagExperiences(payload = {}) {
                 <button class="primary-button rag-overlap-merge ${overlapMergeLoading ? "is-loading" : ""}" data-id="${escapeHtml(item.experience_id || "")}" ${isActionLoading ? "disabled" : ""}>${overlapMergeLoading ? `<span class="loading-spinner button-spinner" aria-hidden="true"></span><span>合并中</span>` : "AI分析并合并"}</button>
               ` : ""}
               ${!overlapCase && canAct ? `<button class="primary-button rag-experience-promote ${activeAction === "promote" ? "is-loading" : ""}" data-id="${escapeHtml(item.experience_id || "")}" ${isActionLoading || !canPromote ? "disabled" : ""} ${!canPromote ? `title="${escapeHtml(promoteDisabledReason)}"` : ""}>${activeAction === "promote" ? `<span class="loading-spinner button-spinner" aria-hidden="true"></span><span>升级中</span>` : "升级为待确认知识"}</button>` : ""}
-              ${!overlapCase && canAct ? `<button class="secondary-button rag-experience-keep ${activeAction === "keep" ? "is-loading" : ""}" data-id="${escapeHtml(item.experience_id || "")}" ${isActionLoading ? "disabled" : ""}>${activeAction === "keep" ? `<span class="loading-spinner button-spinner" aria-hidden="true"></span><span>保存中</span>` : "保留为经验"}</button>` : ""}
+              ${!overlapCase && canAct ? `<button class="secondary-button rag-experience-keep ${activeAction === "keep" ? "is-loading" : ""}" data-id="${escapeHtml(item.experience_id || "")}" ${isActionLoading ? "disabled" : ""}>${activeAction === "keep" ? `<span class="loading-spinner button-spinner" aria-hidden="true"></span><span>保存中</span>` : "保留到AI经验池"}</button>` : ""}
               ${!overlapCase && canAct ? `<button class="secondary-button rag-experience-discard ${activeAction === "discard" ? "is-loading" : ""}" data-id="${escapeHtml(item.experience_id || "")}" ${isActionLoading ? "disabled" : ""}>${activeAction === "discard" ? `<span class="loading-spinner button-spinner" aria-hidden="true"></span><span>废弃中</span>` : "废弃"}</button>` : ""}
               ${isHandled ? `<button class="secondary-button rag-experience-reopen ${activeAction === "reopen" ? "is-loading" : ""}" data-id="${escapeHtml(item.experience_id || "")}" ${isActionLoading ? "disabled" : ""}>${activeAction === "reopen" ? `<span class="loading-spinner button-spinner" aria-hidden="true"></span><span>恢复中</span>` : "重新待处理"}</button>` : ""}
             </div>
@@ -4911,7 +5166,7 @@ function experienceSourceMode(item, sourceData = {}) {
 }
 
 function experienceSourceChannelText(item) {
-  if (item.source !== "intake") return "客服对话回复沉淀（RAG命中后生成）";
+  if (item.source !== "intake") return "客服对话回复沉淀（AI经验池治理生成）";
   const origin = item.original_source || {};
   const sourceType = String(item.source_type || origin.type || "");
   const labels = {
@@ -5216,7 +5471,7 @@ function experienceSourceText(item, hit = {}) {
     const detail = origin.file_name || origin.conversation_id || origin.raw_batch_id || shortPath(item.source_path || origin.path || "");
     return [sourceLabels[sourceType] || sourceType, detail, `${item.candidate_count ?? 0} 条AI线索`].filter(Boolean).join(" · ");
   }
-  return [hit.category || hit.source_type || "RAG片段", hit.product_id || "未指定商品"].filter(Boolean).join(" · ");
+  return [hit.category || hit.source_type || "知识片段", hit.product_id || "未指定商品"].filter(Boolean).join(" · ");
 }
 
 function experienceUsageText(item) {
@@ -5238,22 +5493,23 @@ function readableExperienceSummary(item, hit = {}) {
     if (kind === "noise") return `从${source}识别到疑似无效内容`;
     const count = Number(item.candidate_count || 0);
     if (count > 0) return `从${source}整理出 ${count} 条可审核内容`;
-    return `从${source}保留了一条可参考经验`;
+    return `从${source}保留到AI经验池`;
   }
   const raw = String(item.summary || "").trim();
   if (!raw) return "未生成概括";
-  return shortBusinessText(raw.replace(/^Intake\s*->\s*RAG experience:\s*/i, ""), 160);
+  return shortBusinessText(raw.replace(/^Intake\s*->\s*(AI experience pool item|RAG experience):\s*/i, ""), 160);
 }
 
 function readableQualityReason(value) {
   const text = String(value || "").trim();
   const translations = {
+    "intake material is stored as AI experience pool item first": "这条内容只是先放进AI经验池，尚未允许参与回答",
     "intake material is stored as RAG experience first": "这条内容只是先放进AI经验池，尚未允许参与回答",
     "formal knowledge still requires pending-candidate review": "要变成正式知识，需要先点“升级为待确认知识”，再人工审核入库",
-    "intake experiences are not used for autonomous reply retrieval before review": "未确认前不会参与RAG经验参考，也不会自动回答客户",
-    "尚未人工确认保留在经验层": "还没有点击“保留为经验”，不会参与RAG经验参考",
-    "暂不参与 RAG 经验检索": "当前暂不参与RAG经验参考",
-    "允许参与 RAG 经验检索": "已允许作为RAG经验参考",
+    "intake experiences are not used for autonomous reply retrieval before review": "未确认前不会作为回答依据，也不会自动回答客户",
+    "尚未人工确认保留在经验层": "还没有点击“保留到AI经验池”，不会作为回答依据",
+    "暂不参与 AI经验池检索": "当前不作为回答依据",
+    "允许参与 AI经验池检索": "已保留在AI经验池，但仍不直接作为回答依据",
   };
   return translations[text] || text;
 }
@@ -5267,24 +5523,24 @@ function experienceUsageExplanation(item, quality = {}) {
   }
   const displayState = ragExperienceDisplayState(item, item?.formal_relation || item?.status);
   if (displayState === "discarded") {
-    return "这条经验已被废弃（含系统自动降噪废弃），不会参与RAG参考或自动回答。";
+    return "这条经验已被废弃（含系统自动降噪废弃），不会进入AI经验池治理或自动回答。";
   }
   if (displayState === "promoted") {
     return "这条经验已升级为待确认知识，进入后续人工审核流程。";
   }
   if (experienceReviewStatus(item) === "auto_kept") {
     if (experienceRetrievalAllowed(item, quality)) {
-      return "系统判断这条经验低风险、可复用，已自动吸纳为RAG经验。之后客户问到相近问题时，AI可以把它当辅助参考；如果你想进一步变成正式知识，先点“重新待处理”，再决定是否升级。";
+      return "系统判断这条经验低风险、可复用，已自动吸纳为AI经验池。它只用于治理、候选分发和风格学习；如果要成为回答依据，需要升级为待确认知识并人工审核。";
     }
-    return "系统已自动吸纳这条经验，但当前证据或质量还不够稳定，所以暂时不会参与RAG参考。";
+    return "系统已自动吸纳这条经验，但当前证据或质量还不够稳定，所以仅保留为AI经验池线索，不作为回答依据。";
   }
   if (experienceReviewStatus(item) !== "kept") {
-    return "这条经验还没有人工确认，系统不会拿它自动回答客户，也不会作为RAG参考。确认无误后，点“保留为经验”，它才可能作为AI参考。";
+    return "这条经验还没有人工确认，系统不会拿它自动回答客户。确认无误后，可保留到AI经验池；若要作为回答依据，仍需升级并审核进正式知识库。";
   }
   if (experienceRetrievalAllowed(item, quality)) {
-    return "你已确认保留为经验。之后客户问到相近问题时，AI可以把它作为辅助参考；如果要变成正式结构化知识，还需要点“升级为待确认知识”并人工审核入库。";
+    return "你已确认保留到AI经验池。它不会直接作为回答依据；如果要变成正式结构化知识，还需要点“升级为待确认知识”并人工审核入库。";
   }
-  return "你已确认保留为经验，但系统判断证据或质量还不够稳定，所以暂时不会参与RAG参考或自动回答。";
+  return "你已确认保留到AI经验池，但系统判断证据或质量还不够稳定，所以不会作为回答依据或自动回答。";
 }
 
 function readableExperiencePointText(value, maxLength = 420) {
@@ -5403,7 +5659,7 @@ function governanceDisplayState(item, fallback = "pending") {
   const effective = governanceEffectiveState(item);
   if (["auto_discarded", "user_discarded", "blocked"].includes(effective)) return "discarded";
   if (["promoted", "candidate_created"].includes(effective)) return "promoted";
-  if (["retrievable_experience", "style_only", "candidate_suggested"].includes(effective)) return "kept";
+  if (["retrievable_experience", "kept_experience", "style_only", "candidate_suggested"].includes(effective)) return "kept";
   if (effective === "pending_review") return "pending";
   return fallback;
 }
@@ -5434,7 +5690,7 @@ function ragExperienceRelationValue(item, relationValue = "", displayState = "")
   const effective = governanceEffectiveState(item);
   if (effective === "style_only") return "style_only";
   if (effective === "candidate_suggested" || effective === "candidate_created") return "promotion_candidate";
-  if (effective === "retrievable_experience") return "kept_experience";
+  if (effective === "retrievable_experience" || effective === "kept_experience") return "kept_experience";
   if (["auto_discarded", "user_discarded", "blocked"].includes(effective)) return "discarded";
   if (effective === "promoted") return "promoted";
   const relation = String(relationValue || item?.formal_relation || item?.status || "novel");
@@ -5484,14 +5740,9 @@ function sortRagExperiencesForReview(items = []) {
 function experienceRetrievalAllowed(item, quality = {}) {
   const governance = experienceGovernance(item);
   if (governance.effective_state) {
-    return Boolean(governance.retrieval_allowed) && governance.effective_state === "retrievable_experience";
+    return false;
   }
-  if (String(item?.status || "active") !== "active") return false;
-  if (item?.source === "intake") return false;
-  const reviewStatus = experienceReviewStatus(item);
-  if (!["kept", "auto_kept"].includes(reviewStatus)) return false;
-  if (reviewStatus === "kept" && !item?.reviewed_by_user) return false;
-  return Boolean(quality?.retrieval_allowed);
+  return false;
 }
 
 function relationText(value) {
@@ -5500,8 +5751,8 @@ function relationText(value) {
     covered_by_formal: "正式库已有",
     supports_formal: "可补充正式库",
     conflicts_formal: "疑似冲突",
-    auto_kept_experience: "已吸纳为经验（自动）",
-    kept_experience: "已吸纳为经验",
+    auto_kept_experience: "已入AI经验池（自动）",
+    kept_experience: "已入AI经验池",
     style_only: "仅话术参考",
     promotion_candidate: "建议转待确认",
     promoted: "已转待确认",
@@ -5511,13 +5762,13 @@ function relationText(value) {
 
 function actionText(value) {
   return {
-    keep_as_rag_experience: "保留为经验，作为辅助表达参考。",
+    keep_as_rag_experience: "保留到AI经验池，用于治理、候选分发或风格学习。",
     keep_low_priority_or_discard: "正式知识已经覆盖，可降低优先级或废弃。",
     keep_as_supporting_expression: "可保留为正式知识的表达补充。",
     manual_review_conflict: "疑似和正式知识冲突，建议人工检查后处理。",
     promote_to_review_candidate: "建议升级为待确认知识，由人工审核后再入库。",
-    system_auto_kept_as_experience: "系统已自动吸纳为经验，作为低风险辅助参考。",
-    kept_as_experience: "已由人工确认吸纳为经验，不再作为新经验提醒。",
+    system_auto_kept_as_experience: "系统已自动吸纳到AI经验池，但不直接作为回答依据。",
+    kept_as_experience: "已由人工确认吸纳到AI经验池，不再作为新经验提醒。",
     already_promoted: "已升级为待确认知识。",
     already_discarded: "已废弃。",
   }[value] || value || "保持观察。";
@@ -5526,7 +5777,7 @@ function actionText(value) {
 function actionLabelFromValue(value) {
   return {
     promote_to_pending: "建议升级为待确认知识",
-    keep_as_experience: "建议保留为经验",
+    keep_as_experience: "建议保留到AI经验池",
     discard: "建议废弃",
     manual_review: "建议人工检查",
     already_covered: "正式知识库可能已覆盖",
@@ -5546,11 +5797,11 @@ function experienceParticipationText(item, quality = {}) {
   if (displayState === "discarded") return "已废弃，不参与回答";
   if (displayState === "promoted") return "已升级为待确认知识，等待人工审核";
   if (isAutoKeptReviewStatus(experienceReviewStatus(item))) {
-    return experienceRetrievalAllowed(item, quality) ? "系统已自动吸纳为经验，可作为RAG参考" : "系统已自动吸纳为经验，暂不参与回答";
+    return experienceRetrievalAllowed(item, quality) ? "系统已自动吸纳到AI经验池" : "系统已自动吸纳到AI经验池，暂不作为回答依据";
   }
   const kept = experienceReviewStatus(item) === "kept";
   if (!kept) return "未确认，不参与回答";
-  return experienceRetrievalAllowed(item, quality) ? "已确认，可作为RAG参考" : "已确认，但暂不参与回答";
+  return experienceRetrievalAllowed(item, quality) ? "已确认保留到AI经验池" : "已确认，但不作为回答依据";
 }
 
 function formatBytes(value) {
@@ -5592,7 +5843,7 @@ async function runLearning() {
     const skipped = Number(payload.job?.skipped_duplicate_count || 0);
     const skippedText = skipped ? `；已自动跳过 ${skipped} 条重复内容` : "";
     const ragCount = payload.job?.rag_experience_count ?? 0;
-    renderCandidatePlaceholder("ok", "分析完成", `已整理出 ${ragCount} 条RAG经验${payload.job.candidate_count ? `，包含 ${payload.job.candidate_count} 条AI线索` : ""}${skippedText}。请到RAG经验池查看AI建议，再决定是否升级为待确认知识。`);
+    renderCandidatePlaceholder("ok", "分析完成", `已整理出 ${ragCount} 条AI经验池${payload.job.candidate_count ? `，包含 ${payload.job.candidate_count} 条AI线索` : ""}${skippedText}。请到AI经验池查看AI建议，再决定是否升级为待确认知识。`);
     selectView("rag_experiences");
     await loadRagExperiences();
   } catch (error) {
@@ -5673,7 +5924,7 @@ function setLearningBusy(isBusy, uploadCount = 0) {
     renderCandidatePlaceholder(
       "loading",
       "正在整理上传资料",
-      `正在分析 ${uploadCount} 个文件，整理出的内容会先进入RAG经验池。`
+      `正在分析 ${uploadCount} 个文件，整理出的内容会先进入AI经验池。`
     );
   }
 }
@@ -6010,9 +6261,9 @@ function renderRecorder() {
   const captureButton = document.getElementById("recorder-capture");
   if (captureButton) captureButton.disabled = !enabled;
   const startButton = document.getElementById("recorder-runtime-start");
-  if (startButton) startButton.disabled = !enabled || runtimeRunning;
+  if (startButton) startButton.disabled = !enabled || runtimeRunning || state.recorderRuntimeBusy;
   const stopButton = document.getElementById("recorder-runtime-stop");
-  if (stopButton) stopButton.disabled = !runtimeRunning;
+  if (stopButton) stopButton.disabled = !runtimeRunning || state.recorderRuntimeBusy;
   document.getElementById("recorder-cards").innerHTML = `
     <div class="metric-card"><span>${raw.group_count ?? 0}</span><label>识别群聊</label></div>
     <div class="metric-card"><span>${summary.selected_conversation_count ?? summary.selected_group_count ?? 0}</span><label>正在记录</label></div>
@@ -6025,6 +6276,7 @@ function renderRecorder() {
   renderRecorderSelectedSummary();
   renderRecorderGroupList();
   renderRecorderDetail();
+  renderCustomerServiceRuntime();
 }
 
 function renderRecorderModuleInfo() {
@@ -6484,12 +6736,13 @@ function recorderStatusText(settings = {}) {
 }
 
 function recorderRuntimeStatusText(runtime = {}, settings = {}) {
+  if (runtime.state === "paused") return runtime.message || "已暂停，等待继续";
   if (runtime.running) {
     const interval = Number(settings.capture_interval_seconds || 30);
     return `监听中（轮询间隔 ${Number.isFinite(interval) && interval > 0 ? interval : 30}s）`;
   }
-  if (settings.enabled === false) return "已停止（总开关关闭）";
-  return "未启动（可点击“启动监听”）";
+  if (settings.enabled === false) return "已停止";
+  return "未启动";
 }
 
 async function saveRecorderSettings() {
@@ -6533,17 +6786,44 @@ async function discoverRecorderSessions() {
 }
 
 async function startRecorderRuntime() {
-  const result = await apiJson("/api/recorder/runtime/start", {method: "POST", body: "{}"});
-  state.recorderRuntimeStatus = result.item || state.recorderRuntimeStatus || {};
-  await loadRecorder();
-  alert(result.message || "AI智能记录员已启动监听。");
+  state.recorderRuntimeBusy = true;
+  state.recorderRuntimeStatus = {
+    ...(state.recorderRuntimeStatus || {}),
+    running: true,
+    state: "thinking",
+    message: "AI智能记录员正在启动。",
+  };
+  renderCustomerServiceRuntime();
+  try {
+    const result = await apiJson("/api/recorder/runtime/start", {method: "POST", body: "{}"});
+    state.recorderRuntimeStatus = result.item || state.recorderRuntimeStatus || {};
+    await loadRecorder();
+  } finally {
+    state.recorderRuntimeBusy = false;
+    renderCustomerServiceRuntime();
+  }
 }
 
 async function stopRecorderRuntime() {
-  const result = await apiJson("/api/recorder/runtime/stop", {method: "POST", body: "{}"});
-  state.recorderRuntimeStatus = result.item || state.recorderRuntimeStatus || {};
-  await loadRecorder();
-  alert(result.message || "AI智能记录员已停止监听。");
+  state.recorderRuntimeBusy = true;
+  state.recorderRuntimeStatus = {
+    ...(state.recorderRuntimeStatus || {}),
+    running: false,
+    state: "stopped",
+    message: "AI智能记录员正在停止。",
+    operator_guard_running: false,
+    operator_guard_pid: null,
+    operator_guard_state: {},
+  };
+  renderCustomerServiceRuntime();
+  try {
+    const result = await apiJson("/api/recorder/runtime/stop", {method: "POST", body: "{}"});
+    state.recorderRuntimeStatus = result.item || state.recorderRuntimeStatus || {};
+    await loadRecorder();
+  } finally {
+    state.recorderRuntimeBusy = false;
+    renderCustomerServiceRuntime();
+  }
 }
 
 async function captureRecorderNow() {
@@ -7053,7 +7333,7 @@ async function clearDiagnosticNotices() {
 
 async function deleteDiagnosticTarget(target) {
   if (!target) return;
-  const label = target.startsWith("rag_exp_") ? `RAG经验 ${target}` : `知识条目 ${target}`;
+  const label = target.startsWith("rag_exp_") ? `AI经验池 ${target}` : `知识条目 ${target}`;
   if (!confirm(`确定要删除/归档 ${label} 吗？`)) return;
   const payload = await apiJson("/api/diagnostics/delete-target", {method: "POST", body: JSON.stringify({target})});
   if (payload.ok) {
@@ -7125,7 +7405,7 @@ async function openDiagnosticMerge(targetsString) {
 
 async function _loadMergeItem(target) {
   if (target.startsWith("rag_exp_")) {
-    // RAG experiences are not mergeable through this flow
+    // AI experience pool items are not mergeable through this flow.
     return null;
   }
   const parts = target.split("/");
@@ -7858,6 +8138,7 @@ async function loadViewData(view) {
       loadVersions().catch(console.error),
       refreshAccountContext().catch(console.error),
       loadLlmConfig().catch(console.error),
+      loadFeishuConfig().catch(console.error),
     ]);
   }
   if (activeView === "versions") await loadVersions();
@@ -7987,6 +8268,18 @@ document.getElementById("llm-pro-model-select")?.addEventListener("change", () =
 });
 document.getElementById("llm-api-key-input")?.addEventListener("input", updateLlmTestButtonState);
 document.getElementById("llm-insecure-tls-input")?.addEventListener("change", updateLlmInfoPanel);
+document.getElementById("feishu-config-form")?.addEventListener("submit", (event) => saveFeishuConfig(event).catch((error) => alert(error.message)));
+document.getElementById("feishu-config-test")?.addEventListener("click", () => testFeishuConfig(false).catch((error) => alert(error.message)));
+document.getElementById("feishu-config-test-dry")?.addEventListener("click", () => testFeishuConfig(true).catch((error) => alert(error.message)));
+[
+  "feishu-enabled-input",
+  "feishu-mode-select",
+  "feishu-receive-id-type-select",
+  "feishu-webhook-url-input",
+  "feishu-app-id-input",
+  "feishu-default-receive-ids-input",
+  "feishu-bound-accounts-input",
+].forEach((id) => document.getElementById(id)?.addEventListener("input", updateFeishuInfoPanel));
 document.getElementById("local-password-form")?.addEventListener("submit", (event) => changeLocalPassword(event).catch((error) => alert(error.message)));
 document.getElementById("local-email-form")?.addEventListener("submit", (event) => bindLocalEmail(event).catch((error) => alert(error.message)));
 document.getElementById("local-logout-button")?.addEventListener("click", () => logoutLocal().catch((error) => alert(error.message)));

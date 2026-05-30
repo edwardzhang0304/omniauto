@@ -22,6 +22,7 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from apps.wechat_ai_customer_service.admin_backend.app import create_app  # noqa: E402
+from apps.wechat_ai_customer_service.admin_backend.services import recorder_runtime as recorder_runtime_module  # noqa: E402
 from apps.wechat_ai_customer_service.admin_backend.services.background_handlers import handle_recorder_export_run_execute  # noqa: E402
 from apps.wechat_ai_customer_service.admin_backend.services.work_queue import WorkQueueService  # noqa: E402
 from apps.wechat_ai_customer_service.knowledge_paths import tenant_context, tenant_runtime_root  # noqa: E402
@@ -123,19 +124,48 @@ def check_runtime_lifecycle(client: TestClient, headers: dict[str, str]) -> None
     before = client.get("/api/recorder/runtime/status", headers=headers)
     assert_equal(before.status_code, 200, "runtime status before start")
 
-    started = client.post("/api/recorder/runtime/start", headers=headers, json={})
-    assert_equal(started.status_code, 200, "runtime start status")
-    started_payload = started.json()
-    assert_true(started_payload.get("ok") is True, "runtime start ok")
+    original_startup_check = recorder_runtime_module.RecorderRuntime._wechat_startup_self_check
+    original_operator_guard = recorder_runtime_module.RecorderRuntime._launch_operator_guard_for_loop
 
-    status = client.get("/api/recorder/runtime/status", headers=headers)
-    assert_equal(status.status_code, 200, "runtime status after start")
-    status_payload = status.json().get("item", {})
-    assert_true(status_payload.get("running") is True, "runtime should be running after start")
+    def fake_startup_check(self: Any, *, wxauto_update: dict[str, Any]) -> dict[str, Any]:
+        return {
+            "ok": True,
+            "detail": "phase_a_stub_wechat_ready",
+            "scheme": "win32_ocr_guarded_click",
+            "message": "Phase-A runtime test uses a deterministic WeChat startup stub.",
+            "wxauto_update": wxauto_update,
+        }
 
-    stopped = client.post("/api/recorder/runtime/stop", headers=headers, json={})
-    assert_equal(stopped.status_code, 200, "runtime stop status")
-    assert_true(stopped.json().get("ok") is True, "runtime stop ok")
+    def fake_operator_guard(self: Any, *, parent_pid: int, settings: dict[str, Any]) -> dict[str, Any]:
+        return {
+            "ok": True,
+            "enabled": True,
+            "pid": parent_pid,
+            "test_stub": True,
+            "settings": {
+                "floating_indicator_enabled": True,
+                "block_manual_input": True,
+            },
+        }
+
+    recorder_runtime_module.RecorderRuntime._wechat_startup_self_check = fake_startup_check  # type: ignore[assignment]
+    recorder_runtime_module.RecorderRuntime._launch_operator_guard_for_loop = fake_operator_guard  # type: ignore[assignment]
+    try:
+        started = client.post("/api/recorder/runtime/start", headers=headers, json={})
+        assert_equal(started.status_code, 200, "runtime start status")
+        started_payload = started.json()
+        assert_true(started_payload.get("ok") is True, f"runtime start ok: {started_payload}")
+
+        status = client.get("/api/recorder/runtime/status", headers=headers)
+        assert_equal(status.status_code, 200, "runtime status after start")
+        status_payload = status.json().get("item", {})
+        assert_true(status_payload.get("running") is True, "runtime should be running after start")
+    finally:
+        recorder_runtime_module.RecorderRuntime._wechat_startup_self_check = original_startup_check  # type: ignore[assignment]
+        recorder_runtime_module.RecorderRuntime._launch_operator_guard_for_loop = original_operator_guard  # type: ignore[assignment]
+        stopped = client.post("/api/recorder/runtime/stop", headers=headers, json={})
+        assert_equal(stopped.status_code, 200, "runtime stop status")
+        assert_true(stopped.json().get("ok") is True, "runtime stop ok")
 
 
 def check_recorder_enabled_switch(client: TestClient, headers: dict[str, str]) -> None:
@@ -202,6 +232,16 @@ def check_async_export_run(client: TestClient, headers: dict[str, str]) -> None:
     queue = WorkQueueService(tenant_id=TEST_TENANT)
     target_job = None
     for _ in range(20):
+        current_detail = client.get(f"/api/recorder/exports/runs/{run_id}", headers=headers)
+        assert_equal(current_detail.status_code, 200, "poll export run detail status")
+        current_item = current_detail.json().get("item", {})
+        if current_item.get("status") == "succeeded":
+            artifacts = current_item.get("artifacts") if isinstance(current_item.get("artifacts"), dict) else {}
+            xlsx_path = Path(str(artifacts.get("xlsx_path") or ""))
+            report_path = Path(str(artifacts.get("report_path") or ""))
+            assert_true(xlsx_path.exists(), "xlsx artifact should exist")
+            assert_true(report_path.exists(), "report artifact should exist")
+            return
         claimed = queue.claim(queue="recorder_exports", worker_id="phase-a-test", limit=50, lock_seconds=120)
         target_job = next((job for job in claimed if str((job.get("payload") or {}).get("run_id") or "") == run_id), None)
         if target_job is not None:

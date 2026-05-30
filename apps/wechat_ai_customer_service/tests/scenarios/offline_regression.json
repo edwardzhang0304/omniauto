@@ -47,7 +47,7 @@
     "expect_equal": {
       "matched": true,
       "match_type": "faq",
-      "intent": "special_invoice_rule"
+      "intent": "invoice"
     },
     "expect_contains": {
       "reply_text": ["增值税专用发票", "开具"]

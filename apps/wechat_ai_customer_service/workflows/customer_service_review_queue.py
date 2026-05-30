@@ -319,7 +319,7 @@ def print_human(payload: dict[str, Any]) -> None:
 
 
 def print_json(payload: dict[str, Any]) -> None:
-    text = json.dumps(payload, ensure_ascii=False, indent=2) + "\n"
+    text = json.dumps(payload, ensure_ascii=True, indent=2) + "\n"
     try:
         sys.stdout.write(text)
     except UnicodeEncodeError:

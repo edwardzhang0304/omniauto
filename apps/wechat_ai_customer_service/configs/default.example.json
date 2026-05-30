@@ -7,6 +7,47 @@
     "interval_seconds": 15,
     "iterations": 9999
   },
+  "transport_risk_guard": {
+    "enabled": true,
+    "counter_window_seconds": 600,
+    "login_detect_stop_threshold": 1,
+    "hard_block_stop_threshold": 1,
+    "send_input_not_ready_stop_threshold": 3,
+    "warning_cooldown_seconds": 120,
+    "cooldown_near_threshold": 2,
+    "loop_jitter_seconds": 0.6,
+    "passive_logout_probe_enabled": true,
+    "passive_logout_probe_interval_seconds": 45,
+    "passive_logout_probe_fail_stop_threshold": 1,
+    "passive_logout_probe_timeout_seconds": 12
+  },
+  "rpa_humanized_send": {
+    "enabled": true,
+    "input_method": "sendinput_unicode",
+    "typing_chunk_min_chars": 2,
+    "typing_chunk_max_chars": 6,
+    "typing_char_delay_min_ms": 50,
+    "typing_char_delay_max_ms": 180,
+    "typing_micro_pause_every_chars": 18,
+    "typing_micro_pause_min_ms": 220,
+    "typing_micro_pause_max_ms": 650,
+    "typing_typo_probability": 0.22,
+    "typing_typo_max": 1,
+    "send_pre_delay_min_ms": 280,
+    "send_pre_delay_max_ms": 1300,
+    "send_post_input_delay_min_ms": 120,
+    "send_post_input_delay_max_ms": 460,
+    "adaptive_speed_enabled": true,
+    "fast_send_confirmation_enabled": true
+  },
+  "rpa_operator_guard": {
+    "enabled": false,
+    "block_manual_input": true,
+    "floating_indicator_enabled": true,
+    "control_hotkey": "f8",
+    "esc_double_press_window_ms": 420,
+    "pause_poll_interval_ms": 550
+  },
   "state_lock": {
     "timeout_seconds": 120,
     "stale_seconds": 900
@@ -36,10 +77,13 @@
   "history_backfill": {
     "enabled": true,
     "load_times": 2,
-    "max_load_times": 5,
+    "max_load_times": 12,
     "trigger_visible_unprocessed_count": 6,
     "max_messages_after_load": 80,
-    "freshness_load_times": 2
+    "freshness_load_times": 2,
+    "gap_guard_enabled": true,
+    "block_on_gap_risk": true,
+    "first_window_gap_guard": false
   },
   "semantic_batch_planner": {
     "enabled": true,
@@ -147,10 +191,15 @@
     "model": "",
     "timeout_seconds": 4,
     "retry_count": 0,
-    "max_tokens": 260,
-    "temperature": 0.45,
+    "max_tokens": 120,
+    "temperature": 0.35,
     "max_reply_chars": 620,
-    "min_confidence": 0.25
+    "allow_send_when_unavailable": true,
+    "min_confidence": 0.25,
+    "fast_prompt_enabled": true,
+    "cache_enabled": true,
+    "cache_ttl_seconds": 86400,
+    "cache_max_entries": 512
   },
   "data_capture": {
     "enabled": true,
@@ -209,5 +258,17 @@
       "allow_self_for_test": false,
       "max_batch_messages": 8
     }
-  ]
+  ],
+  "concurrency_scheduler": {
+    "enabled": false,
+    "capture_max_sessions_per_round": 3,
+    "llm_max_concurrency": 2,
+    "send_max_replies_per_round": 1,
+    "same_session_single_inflight": true,
+    "stale_reply_policy": "discard_and_requeue",
+    "pending_session_ttl_seconds": 1800,
+    "reply_ready_ttl_seconds": 900,
+    "max_pending_sessions": 30,
+    "max_pending_messages_per_session": 80
+  }
 }

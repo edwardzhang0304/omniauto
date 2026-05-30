@@ -398,22 +398,22 @@ def _keyword_fallback_intent(combined: str) -> IntentRouteResult:
                 source="keyword_fallback",
             )
 
-    for keyword in GREETING_KEYWORDS:
-        if keyword.lower() in text:
-            return IntentRouteResult(
-                intent="greeting",
-                confidence=0.6,
-                reasoning=f"keyword_fallback: greeting keyword '{keyword}'",
-                entities={},
-                source="keyword_fallback",
-            )
-
     for keyword in PRODUCT_INQUIRY_KEYWORDS:
         if keyword.lower() in text:
             return IntentRouteResult(
                 intent="product_inquiry",
                 confidence=0.5,
                 reasoning=f"keyword_fallback: product inquiry keyword '{keyword}'",
+                entities={},
+                source="keyword_fallback",
+            )
+
+    for keyword in GREETING_KEYWORDS:
+        if keyword.lower() in text:
+            return IntentRouteResult(
+                intent="greeting",
+                confidence=0.6,
+                reasoning=f"keyword_fallback: greeting keyword '{keyword}'",
                 entities={},
                 source="keyword_fallback",
             )

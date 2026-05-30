@@ -1,12 +1,16 @@
-"""Connector wrapper for the wxauto4 WeChat sidecar.
+"""Connector wrapper for WeChat sidecars with RPA-first transport priority.
 
 The connector is the stable boundary the workflow layer should use. It keeps
-WeChat-specific Python 3.12/wxauto4 details outside the OmniAuto Python 3.13
-process and returns plain dictionaries that are easy to validate and persist.
+WeChat transport details outside the OmniAuto Python 3.13 process and returns
+plain dictionaries that are easy to validate and persist.
 
-Daemon mode caching: a single sidecar process is spawned and reused across
-multiple calls to avoid the ~2-5 second overhead of starting Python 3.12 and
-importing wxauto4 on every WeChat operation.
+Transport policy:
+1. Try Win32/OCR (pure RPA) first.
+2. Optionally fall back to wxauto4 when ``WECHAT_ENABLE_WXAUTO4=1``.
+
+wxauto4 daemon mode caching remains available as a technical reserve to avoid
+the ~2-5 second overhead of starting Python 3.12 and importing wxauto4 on
+every operation when that reserve path is enabled.
 """
 
 from __future__ import annotations
@@ -14,6 +18,8 @@ from __future__ import annotations
 import json
 import os
 import queue
+import re
+import hashlib
 import subprocess
 import sys
 import threading
@@ -38,6 +44,8 @@ WECHAT_RPA_LOCK_PATH = ROOT / "runtime" / "wechat_rpa.lock"
 # Global daemon process cache to avoid repeated subprocess spawn overhead.
 _daemon_proc: subprocess.Popen | None = None
 _daemon_lock = threading.Lock()
+_simulated_inbound_lock = threading.Lock()
+_simulated_inbound_cache: dict[str, list[dict[str, Any]]] = {}
 
 
 class WeChatConnectorError(RuntimeError):
@@ -53,58 +61,99 @@ class WeChatConnector:
     root: Path = ROOT
     timeout_seconds: int = 120
 
-    def status(self) -> dict[str, Any]:
+    def wxauto4_reserve_enabled(self) -> bool:
+        return env_flag("WECHAT_ENABLE_WXAUTO4", default=False)
+
+    def status(self, *, interactive: bool = False) -> dict[str, Any]:
         with wechat_rpa_lock("status"):
-            primary = self.call_sidecar(["status"], allow_failure=True)
+            env_overrides = interactive_rpa_probe_env() if interactive else None
+            primary = self.call_compat_sidecar(["status"], allow_failure=True, env_overrides=env_overrides)
+            primary = self._retry_recoverable_rpa_probe(
+                ["status"],
+                primary,
+                interactive=interactive,
+                action="status",
+            )
             if primary.get("ok") and primary.get("online"):
-                primary.setdefault("adapter", "wxauto4")
+                primary.setdefault("adapter", "win32_ocr")
+                primary.setdefault("transport_priority", "rpa_first")
                 return primary
-            fallback = self.call_compat_sidecar(["status"], allow_failure=True, primary_payload=primary)
-            if fallback.get("ok") and fallback.get("online"):
-                return fallback
+            reserve = self.call_reserve_sidecar(["status"], allow_failure=True, primary_payload=snapshot_payload(primary))
+            if reserve.get("ok") and reserve.get("online"):
+                reserve.setdefault("adapter", "wxauto4")
+                reserve.setdefault("transport_priority", "rpa_first")
+                reserve.setdefault("reserve_reason", "rpa_primary_unavailable")
+                return reserve
+            primary.setdefault("wxauto4_reserve_status", reserve)
+            primary.setdefault("transport_priority", "rpa_first")
             return primary
 
-    def capabilities(self) -> dict[str, Any]:
+    def capabilities(self, *, interactive: bool = False) -> dict[str, Any]:
         """Detect the active WeChat transport before starting a long-running loop."""
         with wechat_rpa_lock("capabilities"):
+            env_overrides = interactive_rpa_probe_env() if interactive else None
             try:
-                primary = self.call_sidecar(["status"], allow_failure=True)
+                primary = self.call_compat_sidecar(
+                    ["capabilities"],
+                    allow_failure=True,
+                    env_overrides=env_overrides,
+                )
             except Exception as exc:
                 primary = {
                     "ok": False,
                     "online": False,
-                    "adapter": "wxauto4",
-                    "state": "primary_status_failed",
+                    "adapter": "win32_ocr",
+                    "state": "rpa_capabilities_failed",
                     "error": repr(exc),
                 }
+            primary = self._retry_recoverable_rpa_probe(
+                ["capabilities"],
+                primary,
+                interactive=interactive,
+                action="capabilities",
+            )
             if primary.get("ok") and primary.get("online"):
+                primary.setdefault("adapter", "win32_ocr")
+                primary.setdefault("scheme", str(primary.get("scheme") or "win32_ocr_unavailable"))
+                primary.setdefault("state", str(primary.get("state") or "rpa_primary_ready"))
+                primary.setdefault("transport_priority", "rpa_first")
+                return primary
+
+            try:
+                reserve = self.call_reserve_sidecar(["status"], allow_failure=True, primary_payload=snapshot_payload(primary))
+            except Exception as exc:
+                reserve = {
+                    "ok": False,
+                    "online": False,
+                    "adapter": "wxauto4",
+                    "state": "wxauto4_reserve_status_failed",
+                    "error": repr(exc),
+                }
+            if reserve.get("online"):
                 return {
                     "ok": True,
                     "online": True,
                     "adapter": "wxauto4",
                     "scheme": "wxauto4",
-                    "state": "primary_adapter_ready",
+                    "state": "wxauto4_reserve_ready",
                     "receive": {"ok": True, "method": "wxauto4.GetAllMessage"},
                     "send": {"ok": True, "preferred_mode": "wxauto4", "method": "wxauto4.ChatBox controls"},
                     "primary_status": primary,
-                    "message": "wxauto4 adapter is available.",
+                    "reserve_status": reserve,
+                    "transport_priority": "rpa_first",
+                    "message": "RPA primary is unavailable; using wxauto4 reserve adapter.",
                 }
 
-            try:
-                fallback = self.call_compat_sidecar(["capabilities"], allow_failure=True, primary_payload=primary)
-            except Exception as exc:
-                fallback = {
-                    "ok": False,
-                    "online": False,
-                    "adapter": "win32_ocr",
-                    "state": "compat_capabilities_failed",
-                    "error": repr(exc),
-                }
-            if fallback.get("online"):
-                fallback.setdefault("adapter", "win32_ocr")
-                fallback.setdefault("primary_status", primary)
-                fallback.setdefault("compat_reason", "primary_adapter_failed")
-                return fallback
+            if rpa_payload_needs_interactive_confirmation(primary):
+                primary.setdefault("ok", False)
+                primary.setdefault("online", False)
+                primary.setdefault("adapter", "win32_ocr")
+                primary.setdefault("receive", {"ok": False})
+                primary.setdefault("send", {"ok": False})
+                primary.setdefault("reserve_status", reserve)
+                primary.setdefault("wxauto4_reserve_enabled", self.wxauto4_reserve_enabled())
+                primary.setdefault("transport_priority", "rpa_first")
+                return primary
 
             return {
                 "ok": False,
@@ -115,7 +164,9 @@ class WeChatConnector:
                 "receive": {"ok": False},
                 "send": {"ok": False},
                 "primary_status": primary,
-                "fallback_status": fallback,
+                "reserve_status": reserve,
+                "wxauto4_reserve_enabled": self.wxauto4_reserve_enabled(),
+                "transport_priority": "rpa_first",
                 "weixin_process_running": any_weixin_process(),
                 "message": "No logged-in WeChat main window is available.",
             }
@@ -135,16 +186,72 @@ class WeChatConnector:
         if fresh:
             args.append("--fresh")
         with wechat_rpa_lock("sessions"):
-            primary = self.call_sidecar(args, allow_failure=True)
+            primary = self.call_compat_sidecar(args, allow_failure=True)
             if primary.get("ok"):
-                primary.setdefault("adapter", "wxauto4")
+                primary.setdefault("adapter", "win32_ocr")
+                primary.setdefault("transport_priority", "rpa_first")
                 return primary
-            return self.call_compat_sidecar(args, allow_failure=True, primary_payload=primary)
+            reserve = self.call_reserve_sidecar(args, allow_failure=True, primary_payload=snapshot_payload(primary))
+            if reserve.get("ok"):
+                reserve.setdefault("adapter", "wxauto4")
+                reserve.setdefault("transport_priority", "rpa_first")
+                reserve.setdefault("reserve_reason", "rpa_primary_unavailable")
+                return reserve
+            primary.setdefault("wxauto4_reserve_status", reserve)
+            primary.setdefault("transport_priority", "rpa_first")
+            return primary
 
-    def get_messages(self, target: str, exact: bool = True, history_load_times: int = 0) -> dict[str, Any]:
+    def get_messages(
+        self,
+        target: str,
+        exact: bool = True,
+        history_load_times: int = 0,
+        *,
+        history_mode: str = "",
+        anchor_ids: list[str] | None = None,
+        anchor_content_keys: list[str] | None = None,
+        reply_content_keys: list[str] | None = None,
+        max_scroll_steps: int | None = None,
+        max_duration_seconds: int | None = None,
+        max_snapshots: int | None = None,
+        min_delay_ms: int | None = None,
+        max_delay_ms: int | None = None,
+        restore_to_latest: bool | None = None,
+    ) -> dict[str, Any]:
         args = ["messages", "--target", target]
         if exact:
             args.append("--exact")
+        mode = str(history_mode or "").strip()
+        if mode:
+            args.extend(["--history-mode", mode])
+        for value in anchor_ids or []:
+            clean = str(value or "").strip()
+            if clean:
+                args.extend(["--anchor-id", clean])
+        for value in anchor_content_keys or []:
+            clean = str(value or "").strip()
+            if clean:
+                args.extend(["--anchor-content-key", clean])
+        for value in reply_content_keys or []:
+            clean = str(value or "").strip()
+            if clean:
+                args.extend(["--reply-content-key", clean])
+        for key, value in (
+            ("--max-scroll-steps", max_scroll_steps),
+            ("--max-duration-seconds", max_duration_seconds),
+            ("--max-snapshots", max_snapshots),
+            ("--min-delay-ms", min_delay_ms),
+            ("--max-delay-ms", max_delay_ms),
+        ):
+            if value is None:
+                continue
+            try:
+                parsed = max(0, int(value))
+            except (TypeError, ValueError):
+                continue
+            args.extend([key, str(parsed)])
+        if restore_to_latest is not None:
+            args.append("--restore-to-latest" if restore_to_latest else "--no-restore-to-latest")
         if history_load_times:
             try:
                 load_times = max(0, int(history_load_times))
@@ -153,13 +260,33 @@ class WeChatConnector:
             if load_times:
                 args.extend(["--history-load-times", str(load_times)])
         with wechat_rpa_lock("messages"):
-            primary = self.call_sidecar(args, allow_failure=True)
+            primary = self.call_compat_sidecar(args, allow_failure=True)
             if primary.get("ok"):
-                primary.setdefault("adapter", "wxauto4")
+                primary.setdefault("adapter", "win32_ocr")
+                primary.setdefault("transport_priority", "rpa_first")
+                return inject_simulated_inbound_messages(primary, target=target)
+            if mode:
+                primary.setdefault("wxauto4_reserve_status", {"ok": False, "skipped": True, "reason": "history_mode_requires_win32_ocr"})
+                primary.setdefault("transport_priority", "rpa_first")
                 return primary
-            return self.call_compat_sidecar(args, allow_failure=True, primary_payload=primary)
+            reserve = self.call_reserve_sidecar(args, allow_failure=True, primary_payload=snapshot_payload(primary))
+            if reserve.get("ok"):
+                reserve.setdefault("adapter", "wxauto4")
+                reserve.setdefault("transport_priority", "rpa_first")
+                reserve.setdefault("reserve_reason", "rpa_primary_unavailable")
+                return inject_simulated_inbound_messages(reserve, target=target)
+            primary.setdefault("wxauto4_reserve_status", reserve)
+            primary.setdefault("transport_priority", "rpa_first")
+            return primary
 
-    def send_text(self, target: str, text: str, exact: bool = True) -> dict[str, Any]:
+    def send_text(
+        self,
+        target: str,
+        text: str,
+        exact: bool = True,
+        *,
+        skip_send_rate_guard: bool = False,
+    ) -> dict[str, Any]:
         if not target:
             raise WeChatConnectorError("target is required")
         if not text:
@@ -167,38 +294,99 @@ class WeChatConnector:
         args = ["send", "--target", target, "--text", text]
         if exact:
             args.append("--exact")
+        if skip_send_rate_guard:
+            args.append("--skip-send-rate-guard")
         with wechat_rpa_lock("send"):
-            primary = self.call_sidecar(args, allow_failure=True)
+            primary = self.call_compat_sidecar(args, allow_failure=True, env_overrides=send_rpa_env())
             if primary.get("ok"):
-                primary.setdefault("adapter", "wxauto4")
+                primary.setdefault("adapter", "win32_ocr")
+                primary.setdefault("transport_priority", "rpa_first")
                 return primary
-            return self.call_compat_sidecar(args, allow_failure=True, primary_payload=primary)
+            if rpa_payload_has_invalid_window_handle(primary):
+                primary["risk_stop_recommended"] = True
+                primary["risk_stop_reason"] = "win32_invalid_window_handle"
+                primary["risk_stop_message"] = "微信窗口句柄失效，已停止本次发送。请人工确认微信未掉线/未白屏后再恢复。"
+                primary.setdefault(
+                    "wxauto4_reserve_status",
+                    {
+                        "ok": False,
+                        "online": False,
+                        "adapter": "wxauto4",
+                        "state": "wxauto4_reserve_skipped_due_to_rpa_hard_stop",
+                    },
+                )
+                primary.setdefault("transport_priority", "rpa_first")
+                return primary
+            reserve = self.call_reserve_sidecar(args, allow_failure=True, primary_payload=snapshot_payload(primary))
+            if reserve.get("ok"):
+                reserve.setdefault("adapter", "wxauto4")
+                reserve.setdefault("transport_priority", "rpa_first")
+                reserve.setdefault("reserve_reason", "rpa_primary_unavailable")
+                return reserve
+            primary.setdefault("wxauto4_reserve_status", reserve)
+            primary.setdefault("transport_priority", "rpa_first")
+            return primary
 
-    def send_text_and_verify(self, target: str, text: str, exact: bool = True) -> dict[str, Any]:
-        send_result = self.send_text(target, text, exact=exact)
+    def send_text_and_verify(
+        self,
+        target: str,
+        text: str,
+        exact: bool = True,
+        *,
+        simulate_inbound_file_transfer: bool = False,
+    ) -> dict[str, Any]:
+        loopback_inbound = bool(simulate_inbound_file_transfer and is_file_transfer_session_alias(target))
+        send_result = self.send_text(
+            target,
+            text,
+            exact=exact,
+            skip_send_rate_guard=loopback_inbound,
+        )
         if not send_result.get("ok"):
             return {"ok": False, "send": send_result, "verified": False}
         messages: dict[str, Any] = {}
         verified = False
+        verification_mode = "messages"
+        if env_flag("WECHAT_WIN32_OCR_FAST_SEND_CONFIRMATION", default=False) and guarded_send_confirmation_fallback(
+            send_result,
+            {},
+        ):
+            if loopback_inbound:
+                enqueue_simulated_inbound_message(target=target, text=text)
+            return {
+                "ok": True,
+                "send": send_result,
+                "messages": {"ok": True, "state": "send_guard_confirmed_fast", "messages_skipped": True},
+                "verified": True,
+                "verification_mode": "send_guard_confirmed_fast",
+            }
         for attempt in range(6):
             if attempt:
                 time.sleep(1)
             messages = self.get_messages(target, exact=exact)
-            verified = any(
-                item.get("sender") == "self" and item.get("content") == text
-                for item in messages.get("messages", []) or []
-            )
+            verified = verify_send_from_messages(messages, expected_text=text)
             if verified:
                 break
+            if blind_send_without_ocr(send_result, messages):
+                break
+        if not verified and blind_send_without_ocr(send_result, messages):
+            verified = True
+            verification_mode = "blind_send_no_ocr"
+        if not verified and guarded_send_confirmation_fallback(send_result, messages):
+            verified = True
+            verification_mode = "send_guard_confirmed"
+        if verified and loopback_inbound:
+            enqueue_simulated_inbound_message(target=target, text=text)
         return {
             "ok": bool(verified),
             "send": send_result,
             "messages": messages,
             "verified": bool(verified),
+            "verification_mode": verification_mode,
         }
 
     def require_online(self) -> dict[str, Any]:
-        status = self.status()
+        status = self.status(interactive=True)
         if not status.get("ok") or not status.get("online"):
             raise WeChatConnectorError(
                 "WeChat is not online; open and log in to the main window first. "
@@ -223,12 +411,51 @@ class WeChatConnector:
             raise FileNotFoundError(str(self.sidecar_script))
         return self._call_daemon(args, allow_failure)
 
+    def call_reserve_sidecar(
+        self,
+        args: list[str],
+        *,
+        allow_failure: bool = False,
+        primary_payload: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        if not self.wxauto4_reserve_enabled():
+            payload: dict[str, Any] = {
+                "ok": False,
+                "online": False,
+                "adapter": "wxauto4",
+                "state": "wxauto4_reserve_disabled",
+                "message": "wxauto4 reserve is disabled; enable WECHAT_ENABLE_WXAUTO4=1 to use it.",
+            }
+            if primary_payload is not None:
+                payload["primary_status"] = snapshot_payload(primary_payload)
+                payload.setdefault("reserve_reason", "rpa_primary_unavailable")
+            return payload
+
+        try:
+            payload = self.call_sidecar(args, allow_failure=allow_failure)
+        except Exception as exc:
+            payload = {
+                "ok": False,
+                "online": False,
+                "adapter": "wxauto4",
+                "state": "wxauto4_reserve_call_failed",
+                "error": repr(exc),
+            }
+        payload.setdefault("adapter", "wxauto4")
+        if primary_payload is not None:
+            payload["primary_status"] = snapshot_payload(primary_payload)
+            payload.setdefault("reserve_reason", "rpa_primary_unavailable")
+        if not payload.get("ok") and not allow_failure:
+            payload.setdefault("error", "wxauto4_reserve_command_failed")
+        return payload
+
     def call_compat_sidecar(
         self,
         args: list[str],
         *,
         allow_failure: bool = False,
         primary_payload: dict[str, Any] | None = None,
+        env_overrides: dict[str, str] | None = None,
     ) -> dict[str, Any]:
         if not self.compat_sidecar_script.exists():
             payload = {
@@ -239,7 +466,7 @@ class WeChatConnector:
                 "error": f"compat sidecar missing: {self.compat_sidecar_script}",
             }
             if primary_payload is not None:
-                payload["primary_status"] = primary_payload
+                payload["primary_status"] = snapshot_payload(primary_payload)
             if not allow_failure:
                 payload.setdefault("error", "compat_sidecar_missing")
             return payload
@@ -248,7 +475,10 @@ class WeChatConnector:
         cmd = [str(python), str(self.compat_sidecar_script), *compat_args(args)]
         env = os.environ.copy()
         env["PYTHONUTF8"] = "1"
+        env["PYTHONIOENCODING"] = "utf-8"
         env["PYTHONPATH"] = str(self.root)
+        if env_overrides:
+            env.update({str(key): str(value) for key, value in env_overrides.items()})
         try:
             proc = subprocess.run(
                 cmd,
@@ -263,7 +493,7 @@ class WeChatConnector:
         except Exception as exc:
             payload = {"ok": False, "online": False, "adapter": "win32_ocr", "state": "compat_call_failed", "error": repr(exc)}
             if primary_payload is not None:
-                payload["primary_status"] = primary_payload
+                payload["primary_status"] = snapshot_payload(primary_payload)
             return payload
 
         payload = parse_json_object(proc.stdout)
@@ -280,7 +510,7 @@ class WeChatConnector:
             }
         payload.setdefault("adapter", "win32_ocr")
         if primary_payload is not None:
-            payload["primary_status"] = primary_payload
+            payload["primary_status"] = snapshot_payload(primary_payload)
             payload.setdefault("compat_reason", "primary_adapter_failed")
         if proc.returncode != 0 and payload.get("ok"):
             payload["returncode_warning"] = proc.returncode
@@ -298,7 +528,7 @@ class WeChatConnector:
             proc = _ensure_daemon(self.sidecar_python, self.sidecar_script, self.root)
 
             request = _args_to_request(args)
-            request_line = json.dumps(request, ensure_ascii=False) + "\n"
+            request_line = json.dumps(request, ensure_ascii=True) + "\n"
 
             try:
                 proc.stdin.write(request_line.encode("utf-8"))
@@ -315,6 +545,83 @@ class WeChatConnector:
             if not payload.get("ok") and not allow_failure:
                 payload.setdefault("error", "daemon_command_failed")
             return payload
+
+    def _retry_recoverable_rpa_probe(
+        self,
+        args: list[str],
+        primary: dict[str, Any],
+        *,
+        interactive: bool,
+        action: str,
+    ) -> dict[str, Any]:
+        """Retry user-initiated RPA probes when the first result is recoverable.
+
+        Passive background probes must remain non-invasive. Start buttons and
+        explicit preflight checks, however, are allowed to restore the WeChat
+        window before reporting that WeChat is unavailable.
+        """
+        if primary.get("ok") and primary.get("online"):
+            return primary
+        if not interactive:
+            return primary
+        if rpa_payload_is_blank_render(primary):
+            recovery = self.call_compat_sidecar(
+                ["recover-render"],
+                allow_failure=True,
+                env_overrides=interactive_rpa_probe_env(),
+            )
+            if recovery.get("ok") and recovery.get("online"):
+                retry = self.call_compat_sidecar(
+                    args,
+                    allow_failure=True,
+                    env_overrides=interactive_rpa_probe_env(),
+                )
+                if retry.get("ok") and retry.get("online"):
+                    retry.setdefault("adapter", "win32_ocr")
+                    retry.setdefault("transport_priority", "rpa_first")
+                    retry["rpa_recovery"] = {
+                        "ok": True,
+                        "action": action,
+                        "mode": "interactive_blank_render_tray_redraw",
+                        "initial_status": snapshot_payload(primary),
+                        "recovery_status": snapshot_payload(recovery),
+                    }
+                    return retry
+            primary["rpa_recovery"] = {
+                "ok": False,
+                "action": action,
+                "mode": "interactive_blank_render_tray_redraw",
+                "recovery_status": snapshot_payload(recovery),
+            }
+            return primary
+        if not rpa_payload_needs_interactive_confirmation(primary):
+            return primary
+
+        delay = env_float("WECHAT_RPA_INTERACTIVE_CONFIRM_DELAY_SECONDS", 0.35)
+        if delay > 0:
+            time.sleep(min(delay, 2.0))
+        retry = self.call_compat_sidecar(
+            args,
+            allow_failure=True,
+            env_overrides=interactive_rpa_probe_env(),
+        )
+        if retry.get("ok") and retry.get("online"):
+            retry.setdefault("adapter", "win32_ocr")
+            retry.setdefault("transport_priority", "rpa_first")
+            retry["rpa_recovery"] = {
+                "ok": True,
+                "action": action,
+                "mode": "interactive_confirm_after_recoverable_failure",
+                "initial_status": snapshot_payload(primary),
+            }
+            return retry
+        primary["rpa_recovery"] = {
+            "ok": False,
+            "action": action,
+            "mode": "interactive_confirm_after_recoverable_failure",
+            "confirm_status": snapshot_payload(retry),
+        }
+        return primary
 
 
 @contextmanager
@@ -434,6 +741,7 @@ def _ensure_daemon(
 
     env = os.environ.copy()
     env["PYTHONUTF8"] = "1"
+    env["PYTHONIOENCODING"] = "utf-8"
     _daemon_proc = subprocess.Popen(
         [str(sidecar_python), str(sidecar_script), "--daemon"],
         cwd=str(root),
@@ -462,6 +770,30 @@ def reset_wxauto_sidecar_daemon() -> None:
     _kill_daemon()
 
 
+def interactive_rpa_probe_env() -> dict[str, str]:
+    """Environment overrides for user-initiated startup checks.
+
+    Passive probes are intentionally safe for background health checks, but a
+    start button should actively restore the WeChat window before judging
+    whether the RPA transport is available.
+    """
+    return {
+        "WECHAT_WIN32_OCR_PASSIVE_PROBE": "0",
+        "WECHAT_WIN32_OCR_AGGRESSIVE_FOCUS": "1",
+        "WECHAT_WIN32_OCR_ATTACH_THREAD_INPUT": "1",
+    }
+
+
+def send_rpa_env() -> dict[str, str]:
+    env = interactive_rpa_probe_env()
+    env["WECHAT_WIN32_OCR_STRICT_SEND_FOCUS_GUARD"] = "1"
+    if not str(os.getenv("WECHAT_WIN32_OCR_BLANK_INPUT_FOCUS_RETRY") or "").strip():
+        env["WECHAT_WIN32_OCR_BLANK_INPUT_FOCUS_RETRY"] = "0"
+    if not str(os.getenv("WECHAT_WIN32_OCR_SEND_INPUT_CONFIRM_ATTEMPTS") or "").strip():
+        env["WECHAT_WIN32_OCR_SEND_INPUT_CONFIRM_ATTEMPTS"] = "1"
+    return env
+
+
 def _args_to_request(args: list[str]) -> dict[str, Any]:
     request: dict[str, Any] = {"resize": True}
     if not args:
@@ -485,6 +817,24 @@ def _args_to_request(args: list[str]) -> dict[str, Any]:
                     request["history_load_times"] = max(0, int(args[i + 1]))
                 except ValueError:
                     request["history_load_times"] = 0
+            elif arg == "--history-mode" and i + 1 < len(args):
+                request["history_mode"] = args[i + 1]
+            elif arg == "--anchor-id" and i + 1 < len(args):
+                request.setdefault("anchor_ids", []).append(args[i + 1])
+            elif arg == "--anchor-content-key" and i + 1 < len(args):
+                request.setdefault("anchor_content_keys", []).append(args[i + 1])
+            elif arg == "--reply-content-key" and i + 1 < len(args):
+                request.setdefault("reply_content_keys", []).append(args[i + 1])
+            elif arg in {"--max-scroll-steps", "--max-duration-seconds", "--max-snapshots", "--min-delay-ms", "--max-delay-ms"} and i + 1 < len(args):
+                key = arg.lstrip("-").replace("-", "_")
+                try:
+                    request[key] = max(0, int(args[i + 1]))
+                except ValueError:
+                    request[key] = 0
+            elif arg == "--restore-to-latest":
+                request["restore_to_latest"] = True
+            elif arg == "--no-restore-to-latest":
+                request["restore_to_latest"] = False
     elif args[0] == "send":
         request["action"] = "send"
         for i, arg in enumerate(args):
@@ -512,9 +862,25 @@ def compat_args(args: list[str]) -> list[str]:
         if arg == "--fresh":
             continue
         converted.append(arg)
-        if arg in {"--target", "--text", "--history-load-times"} and index + 1 < len(args):
+        if arg in {
+            "--target",
+            "--text",
+            "--history-load-times",
+            "--history-mode",
+            "--anchor-id",
+            "--anchor-content-key",
+            "--reply-content-key",
+            "--max-scroll-steps",
+            "--max-duration-seconds",
+            "--max-snapshots",
+            "--min-delay-ms",
+            "--max-delay-ms",
+        } and index + 1 < len(args):
             converted.append(args[index + 1])
             skip_next = True
+    artifact_dir = str(os.getenv("WECHAT_WIN32_OCR_ARTIFACT_DIR") or "").strip()
+    if artifact_dir and "--artifact-dir" not in converted:
+        converted.extend(["--artifact-dir", artifact_dir])
     return converted
 
 
@@ -549,3 +915,267 @@ def any_weixin_process() -> bool:
         except (psutil.NoSuchProcess, psutil.AccessDenied):
             continue
     return False
+
+
+def env_flag(name: str, *, default: bool = False) -> bool:
+    raw = os.getenv(name, "")
+    if raw is None or raw.strip() == "":
+        return bool(default)
+    return raw.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def env_float(name: str, default: float) -> float:
+    raw = os.getenv(name, "")
+    if raw is None or raw.strip() == "":
+        return float(default)
+    try:
+        return float(raw)
+    except ValueError:
+        return float(default)
+
+
+def rpa_payload_needs_interactive_confirmation(payload: dict[str, Any]) -> bool:
+    """Return True for RPA failures that a foreground restore can fix."""
+    if not isinstance(payload, dict):
+        return False
+    if payload.get("ok") and payload.get("online"):
+        return False
+    if rpa_payload_is_blank_render(payload):
+        return True
+
+    state = str(payload.get("state") or "").strip()
+    reason = str(payload.get("reason") or "").strip()
+    scheme = str(payload.get("scheme") or "").strip()
+    if state == "main_window_geometry_invalid" and reason in {
+        "window_offscreen_or_minimized",
+        "window_too_small_for_capture",
+    }:
+        return True
+    if scheme == "win32_ocr_window_geometry_invalid" and reason in {
+        "window_offscreen_or_minimized",
+        "window_too_small_for_capture",
+    }:
+        return True
+
+    geometry = payload.get("geometry") if isinstance(payload.get("geometry"), dict) else {}
+    if geometry:
+        left = int(geometry.get("left") or 0)
+        top = int(geometry.get("top") or 0)
+        width = int(geometry.get("width") or 0)
+        height = int(geometry.get("height") or 0)
+        if left <= -30000 or top <= -30000:
+            return True
+        if 0 < width < 420 or 0 < height < 260:
+            return True
+
+    probe = payload.get("window_probe") if isinstance(payload.get("window_probe"), dict) else {}
+    if state == "main_window_not_found" and int(probe.get("main_count") or 0) > 0:
+        return True
+    return False
+
+
+def rpa_payload_is_blank_render(payload: dict[str, Any]) -> bool:
+    if not isinstance(payload, dict):
+        return False
+    state = str(payload.get("state") or "").strip()
+    reason = str(payload.get("reason") or "").strip()
+    scheme = str(payload.get("scheme") or "").strip()
+    if state == "blank_render_detected" or reason == "blank_render" or scheme == "win32_ocr_blank_render":
+        return True
+    primary = payload.get("primary_status") if isinstance(payload.get("primary_status"), dict) else {}
+    if primary:
+        return rpa_payload_is_blank_render(primary)
+    return False
+
+
+def rpa_payload_has_invalid_window_handle(payload: dict[str, Any]) -> bool:
+    if not isinstance(payload, dict):
+        return False
+    state = str(payload.get("state") or "").strip()
+    error_text = str(payload.get("error") or "").strip().lower()
+    if state != "win32_ocr_failed":
+        return False
+    return "getwindowrect" in error_text or "无效的窗口句柄" in error_text or "invalid window handle" in error_text
+
+
+def snapshot_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    """Create a shallow copy suitable for diagnostics without cyclic references."""
+    if not isinstance(payload, dict):
+        return {}
+    return dict(payload)
+
+
+def verify_send_from_messages(messages_payload: dict[str, Any], *, expected_text: str) -> bool:
+    messages = messages_payload.get("messages", []) if isinstance(messages_payload, dict) else []
+    if not isinstance(messages, list):
+        return False
+    expected = str(expected_text or "")
+    expected_compact = compact_text(expected)
+    if not expected_compact:
+        return False
+
+    normalized_messages: list[tuple[str, str]] = []
+    for item in messages:
+        if not isinstance(item, dict):
+            continue
+        sender = str(item.get("sender") or "")
+        content = str(item.get("content") or "")
+        compact = compact_text(content)
+        if compact:
+            normalized_messages.append((sender, compact))
+
+    # Strict path: exact content from self sender.
+    if any(sender == "self" and content == expected for sender, content in ((str(i.get("sender") or ""), str(i.get("content") or "")) for i in messages if isinstance(i, dict))):
+        return True
+    if any(sender == "self" and compact == expected_compact for sender, compact in normalized_messages):
+        return True
+
+    # Relaxed path for Win32/OCR: sender side may drift to unknown and long
+    # messages may split into multiple bubbles. Keep this scoped by requiring
+    # all non-empty expected lines to be found in recent message contents.
+    if any(compact == expected_compact for _sender, compact in normalized_messages):
+        return True
+    expected_lines = [compact_text(line) for line in expected.splitlines() if compact_text(line)]
+    if len(expected_lines) <= 1:
+        return False
+    for line in expected_lines:
+        if not any(line in compact for _sender, compact in normalized_messages):
+            return False
+    return True
+
+
+def compact_text(value: str) -> str:
+    return re.sub(r"\s+", "", str(value or ""))
+
+
+def is_file_transfer_session_alias(target: str) -> bool:
+    clean = re.sub(r"\s+", "", str(target or ""))
+    if not clean:
+        return False
+    if clean in {FILE_TRANSFER_ASSISTANT, "仅传输文件"}:
+        return True
+    english = re.sub(r"[^a-z]", "", clean.lower())
+    return english in {"filetransferassistant", "filetransfer", "transferassistant"}
+
+
+def simulated_inbound_session_key(target: str) -> str:
+    return compact_text(target).lower()
+
+
+def build_simulated_inbound_message(target: str, text: str) -> dict[str, Any]:
+    content = str(text or "").strip()
+    digest = hashlib.sha1(f"{target}|{content}|{time.time()}".encode("utf-8")).hexdigest()[:16]
+    return {
+        "id": f"win32_loopback:{digest}",
+        "type": "text",
+        "sender": "unknown",
+        "sender_role": "unknown",
+        "content": content,
+        "time": "",
+        "source_adapter": "win32_loopback",
+        "loopback_fallback": True,
+        "ocr_confidence": 0.0,
+    }
+
+
+def enqueue_simulated_inbound_message(*, target: str, text: str) -> None:
+    content = str(text or "").strip()
+    if not content:
+        return
+    key = simulated_inbound_session_key(target)
+    if not key:
+        return
+    with _simulated_inbound_lock:
+        queue = _simulated_inbound_cache.get(key, [])
+        queue.append(build_simulated_inbound_message(target=target, text=content))
+        if len(queue) > 20:
+            queue = queue[-20:]
+        _simulated_inbound_cache[key] = queue
+
+
+def pop_simulated_inbound_message(target: str) -> dict[str, Any] | None:
+    key = simulated_inbound_session_key(target)
+    if not key:
+        return None
+    with _simulated_inbound_lock:
+        queue = _simulated_inbound_cache.get(key, [])
+        if not queue:
+            return None
+        message = queue.pop(0)
+        if queue:
+            _simulated_inbound_cache[key] = queue
+        else:
+            _simulated_inbound_cache.pop(key, None)
+        return message
+
+
+def inject_simulated_inbound_messages(payload: dict[str, Any], *, target: str) -> dict[str, Any]:
+    if not is_file_transfer_session_alias(target):
+        return payload
+    state = str(payload.get("state") or "")
+    if state in {"messages_blocked", "login_window_detected", "wechat_not_ready"}:
+        return payload
+    messages = payload.get("messages")
+    synthetic = pop_simulated_inbound_message(target)
+    if not synthetic:
+        return payload
+    merged = list(messages) if isinstance(messages, list) else []
+    merged.append(synthetic)
+    next_payload = dict(payload)
+    next_payload["messages"] = merged
+    next_payload["state"] = "messages_ocr_loopback"
+    next_payload["loopback_fallback"] = {
+        "applied": True,
+        "source": "file_transfer_simulated_inbound",
+        "count": len(merged),
+    }
+    return next_payload
+
+
+def blind_send_without_ocr(send_result: dict[str, Any], messages: dict[str, Any]) -> bool:
+    if not isinstance(send_result, dict):
+        return False
+    send_meta = send_result.get("send_result")
+    guard = send_meta.get("post_send_guard") if isinstance(send_meta, dict) else {}
+    guard_reason = str(guard.get("reason") or "")
+    if guard_reason != "target_confirm_skipped_no_ocr":
+        return False
+    if not isinstance(messages, dict):
+        return True
+    msg_state = str(messages.get("state") or "")
+    if msg_state in {"messages_ocr_unavailable", "messages_blocked", "login_window_detected"}:
+        return True
+    message_list = messages.get("messages")
+    if isinstance(message_list, list) and len(message_list) == 0:
+        return True
+    return False
+
+
+def guarded_send_confirmation_fallback(send_result: dict[str, Any], messages: dict[str, Any]) -> bool:
+    if not isinstance(send_result, dict):
+        return False
+    if send_result.get("ok") is not True:
+        return False
+    send_meta = send_result.get("send_result")
+    if not isinstance(send_meta, dict) or send_meta.get("ok") is not True:
+        return False
+    post_guard = send_meta.get("post_send_guard")
+    if not isinstance(post_guard, dict) or post_guard.get("ok") is not True:
+        return False
+    if str(post_guard.get("reason") or "") != "target_confirmed":
+        return False
+    click_meta = send_meta.get("click")
+    if not isinstance(click_meta, dict):
+        return False
+    paste_meta = click_meta.get("paste")
+    if not isinstance(paste_meta, dict) or paste_meta.get("ok") is not True:
+        return False
+    confirmed_by = str(paste_meta.get("confirmed_by") or "")
+    if confirmed_by not in {"ocr_input_area", "clipboard_copyback"}:
+        return False
+    if not isinstance(messages, dict):
+        return True
+    message_state = str(messages.get("state") or "")
+    if message_state in {"messages_blocked", "login_window_detected", "wechat_not_ready"}:
+        return False
+    return True

@@ -1,0 +1,40 @@
+{
+  "id": "wfr_20260524_052227_r1_b",
+  "customer_message": "wfrq_20260524_052227_r1_b 你能保证我征信一般也一定贷下来吗？",
+  "service_reply": "金融审批不能保证通过，需要人工顾问一对一核实资质后再给方案。",
+  "intent_tags": [
+    "金融风险",
+    "转人工"
+  ],
+  "tone_tags": [
+    "谨慎说明"
+  ],
+  "scenario": "金融边界",
+  "hit_count": 7,
+  "schema_version": 1,
+  "category_id": "chats",
+  "source": {
+    "type": "workflow_import"
+  },
+  "data": {
+    "customer_message": "wfrq_20260524_052227_r1_b 你能保证我征信一般也一定贷下来吗？",
+    "service_reply": "金融审批不能保证通过，需要人工顾问一对一核实资质后再给方案。",
+    "intent_tags": [],
+    "tone_tags": [],
+    "additional_details": {
+      "workflow_import": "金融审批不能保证通过，需要人工顾问一对一核实资质后再给方案。"
+    }
+  },
+  "runtime": {
+    "allow_auto_reply": true,
+    "requires_handoff": false,
+    "risk_level": "normal"
+  },
+  "metadata": {
+    "created_at": "2026-05-24T05:22:27",
+    "updated_at": "2026-05-24T05:22:32",
+    "created_by": "workflow_import",
+    "updated_by": "workflow_import"
+  },
+  "status": "active"
+}

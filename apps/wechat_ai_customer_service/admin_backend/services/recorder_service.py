@@ -6,6 +6,7 @@ import json
 import hashlib
 import os
 import re
+import time
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -39,6 +40,7 @@ class RecorderService:
         self.raw_store = RawMessageStore(tenant_id=tenant_id)
         self.learning = RawMessageLearningService(tenant_id=tenant_id)
         self.connector = WeChatConnector()
+        self._last_idle_foreground_refresh_at = 0.0
 
     @property
     def settings_path(self) -> Path:
@@ -165,6 +167,17 @@ class RecorderService:
             for item in self.list_conversations(status="active")
             if item.get("selected_by_user") and conversation_enabled_for_capture(item, settings)
         ]
+        if not conversations:
+            idle_refresh = self._refresh_wechat_foreground_when_idle()
+            return {
+                "ok": True,
+                "enabled": True,
+                "message": "当前没有勾选监听会话，本轮不采集。",
+                "conversation_count": 0,
+                "inserted_count": 0,
+                "items": [],
+                "idle_foreground_refresh": idle_refresh,
+            }
         results = []
         for conversation in conversations:
             result = self.capture_conversation(
@@ -181,6 +194,44 @@ class RecorderService:
             "conversation_count": len(conversations),
             "inserted_count": sum(int(item.get("inserted_count", 0) or 0) for item in results),
             "items": results,
+        }
+
+    def _refresh_wechat_foreground_when_idle(self) -> dict[str, Any]:
+        enabled = env_flag("WECHAT_RECORDER_IDLE_FOREGROUND_REFRESH", default=True)
+        if not enabled:
+            return {"attempted": False, "enabled": False}
+        interval_seconds = bounded_float(
+            os.getenv("WECHAT_RECORDER_IDLE_FOREGROUND_REFRESH_INTERVAL_SECONDS"),
+            default=6.0,
+            minimum=2.0,
+            maximum=60.0,
+        )
+        now = time.time()
+        if now - float(self._last_idle_foreground_refresh_at or 0.0) < interval_seconds:
+            return {
+                "attempted": False,
+                "enabled": True,
+                "reason": "interval_not_reached",
+                "interval_seconds": interval_seconds,
+            }
+        self._last_idle_foreground_refresh_at = now
+        try:
+            payload = self.connector.call_compat_sidecar(["sessions"], allow_failure=True)
+        except Exception as exc:
+            return {
+                "attempted": True,
+                "enabled": True,
+                "ok": False,
+                "error": repr(exc),
+                "interval_seconds": interval_seconds,
+            }
+        return {
+            "attempted": True,
+            "enabled": True,
+            "ok": bool(payload.get("ok")),
+            "online": bool(payload.get("online")),
+            "state": str(payload.get("state") or ""),
+            "interval_seconds": interval_seconds,
         }
 
     def capture_conversation(
@@ -519,6 +570,21 @@ def bounded_int(value: Any, *, default: int, minimum: int, maximum: int) -> int:
     except (TypeError, ValueError):
         parsed = default
     return max(minimum, min(parsed, maximum))
+
+
+def bounded_float(value: Any, *, default: float, minimum: float, maximum: float) -> float:
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError):
+        parsed = float(default)
+    return max(float(minimum), min(float(parsed), float(maximum)))
+
+
+def env_flag(name: str, *, default: bool = False) -> bool:
+    raw = os.getenv(name, "")
+    if raw is None or str(raw).strip() == "":
+        return bool(default)
+    return str(raw).strip().lower() in {"1", "true", "yes", "on"}
 
 
 def now_iso() -> str:

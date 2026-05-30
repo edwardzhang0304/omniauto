@@ -49,6 +49,7 @@ def main() -> int:
         check_location_contact_handoff_keeps_specific_context,
         check_new_energy_handoff_not_misclassified_by_mileage,
         check_new_energy_handoff_does_not_invent_commute_distance,
+        check_new_energy_over_transfer_does_not_become_same_day_delivery,
         check_guard_rejects_new_protected_numbers,
         check_source_channel_inference_prefers_realtime,
         check_local_settings_can_disable_style_adapter,
@@ -354,6 +355,25 @@ def check_new_energy_handoff_does_not_invent_commute_distance() -> bool:
         and "40公里" not in text
         and "通勤距离我记下" not in text
         and "每天通勤" not in text
+    )
+
+
+def check_new_energy_over_transfer_does_not_become_same_day_delivery() -> bool:
+    result = adapt_reply_style(
+        config=style_config(identity_guard=True),
+        customer_message="想看新能源，每天通勤70公里，电池能不能保证没问题？异地过户麻烦吗？周日能看车最好。",
+        reply_text="这个问题需要转人工客服处理。",
+        source_channel="handoff",
+        evidence_pack={},
+        recent_reply_texts=[],
+        needs_handoff=True,
+    )
+    text = str(result.get("reply_text") or "")
+    return (
+        result.get("applied") is True
+        and any(term in text for term in ("电池", "三电", "检测", "续航"))
+        and "70公里" in text
+        and not any(term in text for term in ("当天提", "当天办完", "临牌"))
     )
 
 

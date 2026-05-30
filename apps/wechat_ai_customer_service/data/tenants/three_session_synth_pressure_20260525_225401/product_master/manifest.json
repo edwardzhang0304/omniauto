@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "authority": "product_master",
+  "category_id": "products",
+  "tenant_id": "three_session_synth_pressure_20260525_225401",
+  "updated_at": "2026-05-25T22:54:42",
+  "items_path": "items",
+  "compatibility": {
+    "legacy_read_fallback": "knowledge_bases/products",
+    "new_writes_to_legacy": false
+  }
+}

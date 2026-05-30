@@ -57,13 +57,13 @@ def build_customer_readable_workbook(package: dict[str, Any], package_path: Path
     )
     write_sheet(
         workbook,
-        "RAG资料",
+        "AI经验池资料",
         ["资料ID", "分类", "商品ID", "标题", "正文/摘要", "来源文件"],
         data["rag_sources"],
     )
     write_sheet(
         workbook,
-        "RAG经验",
+        "AI经验池",
         ["经验ID", "状态", "客户问法", "回复要点", "命中资料", "质量", "使用次数", "来源文件"],
         data["rag_experience"],
     )
@@ -292,8 +292,8 @@ def write_intro(sheet: Worksheet, package: dict[str, Any], data: dict[str, list[
         ["备份编号", package.get("backup_id") or ""],
         ["正式知识条数", len(data["formal"])],
         ["商品专属知识条数", len(data["product"])],
-        ["RAG资料条数", len(data["rag_sources"])],
-        ["RAG经验条数", len(data["rag_experience"])],
+        ["AI经验池资料条数", len(data["rag_sources"])],
+        ["AI经验池条数", len(data["rag_experience"])],
         ["原始聊天条数", len(data["raw_messages"])],
         ["待确认知识条数", len(data["review_candidates"])],
         ["导入资料条数", len(data["uploads"])],

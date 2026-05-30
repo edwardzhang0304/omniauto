@@ -160,9 +160,9 @@ def check_internal_ai_metadata_does_not_create_pollution_block() -> bool:
     governed = attach_governance(item)
     governance = governed.get("governance", {})
     return (
-        governance.get("effective_state") == "retrievable_experience"
-        and governance.get("retrieval_allowed") is True
-        and governance_allows_retrieval(governed) is True
+        governance.get("effective_state") == "kept_experience"
+        and governance.get("retrieval_allowed") is False
+        and governance_allows_retrieval(governed) is False
     )
 
 
@@ -185,7 +185,7 @@ def check_internal_ai_risk_notes_do_not_create_product_fact_block() -> bool:
     )
     governed = attach_governance(item)
     governance = governed.get("governance", {})
-    return governance.get("effective_state") == "retrievable_experience" and governance.get("retrieval_allowed") is True
+    return governance.get("effective_state") == "kept_experience" and governance.get("retrieval_allowed") is False
 
 
 def check_cached_ai_discard_without_persisted_triage_stays_pending() -> bool:

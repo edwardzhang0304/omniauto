@@ -3,11 +3,12 @@
 from __future__ import annotations
 
 import hashlib
+import csv
 import json
 import os
 import re
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
@@ -39,6 +40,7 @@ RUN_STAGE_LABELS = {
 ORDER_HEADERS = [
     "",
     "日期",
+    "时间",
     "姓名",
     "责任人（老板）",
     "收货人",
@@ -56,7 +58,7 @@ ORDER_HEADERS = [
     "备注",
 ]
 NAME_OWNER_RE = re.compile(r"(?P<name>[\u4e00-\u9fa5A-Za-z0-9]{1,24})[-—](?P<owner>[\u4e00-\u9fa5A-Za-z0-9]{1,24})老师")
-ORDER_UNIT_PATTERN = r"盒|箱|袋|瓶|套|个|包|桶|台|件|支|根|片|株|卷|张|箱装|包/盒|公斤|斤|份|块|提|板|把|组|升"
+ORDER_UNIT_PATTERN = r"盒|箱|袋|瓶|套|个|包|桶|台|件|支|根|片|株|卷|张|双|箱装|包/盒|公斤|斤|份|块|提|板|把|组|升"
 QTY_UNIT_RE = re.compile(rf"(?P<qty>\d+(?:\.\d+)?)\s*(?P<unit>{ORDER_UNIT_PATTERN})")
 QTY_CN_UNIT_RE = re.compile(rf"(?:各)?(?:订|买|代付)?\s*(?P<qty_cn>[一二两俩三四五六七八九十百半])\s*(?P<unit>{ORDER_UNIT_PATTERN})")
 PRICE_RE = re.compile(r"(?P<price>\d+(?:\.\d+)?)\s*元")
@@ -80,6 +82,7 @@ INVENTORY_STATUS_RE = re.compile(
 )
 SHORT_OFFICE_PRODUCT_HINT_RE = re.compile(r"(硒鼓|墨盒|碳粉|打印纸|a4纸|复印纸|标签纸|胶带|电池|文件夹|订书钉|打印机)", re.IGNORECASE)
 BRAND_INHERIT_BLOCK_RE = re.compile(r"(娃哈哈|矿泉水|饮用水|会员|打印纸|复印纸|喷壶|办公|快递|运费)", re.IGNORECASE)
+UTC8 = timezone(timedelta(hours=8))
 PRODUCT_BRAND_CONTEXT_HINT_RE = re.compile(
     r"(离心管|透析袋|试剂|培养基|蛋白|抗体|细胞|缓冲液|滤膜|枪头|吸头|培养皿|孔板|货号|型号|md\d+|cat\.?\s*no\.?)",
     re.IGNORECASE,
@@ -251,7 +254,7 @@ class RecorderExportRunService:
         cancelled_jobs = self._cancel_run_jobs(target_run_id)
         artifacts = target.get("artifacts") if isinstance(target.get("artifacts"), dict) else {}
         deleted_files = 0
-        for key in ("xlsx_path", "report_path"):
+        for key in ("xlsx_path", "csv_path", "report_path"):
             if self._safe_delete_artifact(str(artifacts.get(key) or "")):
                 deleted_files += 1
 
@@ -321,6 +324,7 @@ class RecorderExportRunService:
             },
             "artifacts": {
                 "xlsx_path": "",
+                "csv_path": "",
                 "report_path": "",
             },
             "error": "",
@@ -401,6 +405,7 @@ class RecorderExportRunService:
                 },
                 "artifacts": {
                     "xlsx_path": str(workbook_result.get("xlsx_path") or ""),
+                    "csv_path": str(workbook_result.get("csv_path") or ""),
                     "report_path": str(report_path),
                 },
                 "progress": {
@@ -603,8 +608,10 @@ class RecorderExportRunService:
         module_key = str(run.get("module_key") or "")
         if module_key == "raw_message_log_v1":
             path = self._build_raw_message_workbook(run, messages)
+            csv_path = self._build_raw_message_csv(run, messages)
             return {
                 "xlsx_path": str(path),
+                "csv_path": str(csv_path),
                 "export_row_count": len(messages),
                 "needs_review_count": 0,
                 "skipped_count": 0,
@@ -613,9 +620,11 @@ class RecorderExportRunService:
         if module_key == "order_sheet_lab_v1":
             extracted, extraction_meta = self._extract_order_rows(run, messages, run_id=run_id)
             path = self._build_order_sheet_workbook(run, extracted)
+            csv_path = self._build_order_sheet_csv(run, extracted)
             needs_review = sum(1 for item in extracted if item.get("needs_review"))
             return {
                 "xlsx_path": str(path),
+                "csv_path": str(csv_path),
                 "export_row_count": len(extracted),
                 "needs_review_count": needs_review,
                 "skipped_count": max(0, len(messages) - len(extracted)),
@@ -658,6 +667,27 @@ class RecorderExportRunService:
         workbook.save(output_path)
         return output_path
 
+    def _build_raw_message_csv(self, run: dict[str, Any], messages: list[dict[str, Any]]) -> Path:
+        self.files_root.mkdir(parents=True, exist_ok=True)
+        output_path = self.files_root / f"{run['run_id']}.csv"
+        headers = ["会话ID", "会话类型", "发送人", "消息类型", "消息时间", "消息内容", "原始消息ID"]
+        with output_path.open("w", encoding="utf-8-sig", newline="") as handle:
+            writer = csv.writer(handle)
+            writer.writerow(headers)
+            for item in messages:
+                writer.writerow(
+                    [
+                        item.get("conversation_id") or "",
+                        item.get("conversation_type") or "",
+                        item.get("sender") or item.get("sender_role") or "",
+                        item.get("content_type") or "",
+                        item.get("message_time") or item.get("observed_at") or "",
+                        item.get("content") or "",
+                        item.get("raw_message_id") or "",
+                    ]
+                )
+        return output_path
+
     def _build_order_sheet_workbook(self, run: dict[str, Any], rows: list[dict[str, Any]]) -> Path:
         workbook = Workbook()
         sheet = workbook.active
@@ -672,6 +702,7 @@ class RecorderExportRunService:
             values = [
                 "",
                 item.get("date") or "",
+                item.get("time") or "",
                 item.get("name") or "",
                 item.get("owner") or "",
                 item.get("receiver") or "",
@@ -693,7 +724,7 @@ class RecorderExportRunService:
                 cell = sheet.cell(row=row_index, column=column, value=value)
                 if row_fill is not None:
                     cell.fill = row_fill
-        widths = [8, 10, 14, 16, 14, 12, 12, 32, 10, 10, 18, 12, 12, 12, 12, 12, 28]
+        widths = [8, 10, 10, 14, 16, 14, 12, 12, 32, 10, 10, 18, 12, 12, 12, 12, 12, 28]
         for idx, width in enumerate(widths, start=1):
             sheet.column_dimensions[sheet.cell(row=1, column=idx).column_letter].width = width
 
@@ -709,7 +740,7 @@ class RecorderExportRunService:
             meta.cell(row=index, column=1, value=key).font = Font(bold=True)
             meta.cell(row=index, column=2, value=value)
         meta.cell(row=8, column=1, value="抽取结果（完整）").font = Font(bold=True)
-        report_headers = ["日期", "姓名", "责任人", "货品", "数量", "单位", "售价", "总售价", "置信度", "需复核", "记录类型", "证据消息ID", "证据片段"]
+        report_headers = ["日期", "时间", "姓名", "责任人", "货品", "数量", "单位", "售价", "总售价", "置信度", "需复核", "记录类型", "证据消息ID", "证据片段"]
         for column, header in enumerate(report_headers, start=1):
             cell = meta.cell(row=9, column=column, value=header)
             cell.font = Font(bold=True)
@@ -717,6 +748,7 @@ class RecorderExportRunService:
         for row_index, item in enumerate(rows[:100], start=10):
             values = [
                 item.get("date") or "",
+                item.get("time") or "",
                 item.get("name") or "",
                 item.get("owner") or "",
                 item.get("product_name") or "",
@@ -732,12 +764,43 @@ class RecorderExportRunService:
             ]
             for column, value in enumerate(values, start=1):
                 meta.cell(row=row_index, column=column, value=value)
-        for idx, width in enumerate([10, 14, 14, 24, 10, 10, 10, 10, 10, 10, 12, 24, 42], start=1):
+        for idx, width in enumerate([10, 10, 14, 14, 24, 10, 10, 10, 10, 10, 10, 12, 24, 42], start=1):
             meta.column_dimensions[meta.cell(row=9, column=idx).column_letter].width = width
 
         self.files_root.mkdir(parents=True, exist_ok=True)
         output_path = self.files_root / f"{run['run_id']}.xlsx"
         workbook.save(output_path)
+        return output_path
+
+    def _build_order_sheet_csv(self, run: dict[str, Any], rows: list[dict[str, Any]]) -> Path:
+        self.files_root.mkdir(parents=True, exist_ok=True)
+        output_path = self.files_root / f"{run['run_id']}.csv"
+        with output_path.open("w", encoding="utf-8-sig", newline="") as handle:
+            writer = csv.writer(handle)
+            writer.writerow(ORDER_HEADERS)
+            for item in rows:
+                writer.writerow(
+                    [
+                        "",
+                        item.get("date") or "",
+                        item.get("time") or "",
+                        item.get("name") or "",
+                        item.get("owner") or "",
+                        item.get("receiver") or "",
+                        item.get("campus") or "",
+                        item.get("order_unit") or "",
+                        item.get("product_name") or "",
+                        item.get("quantity") or "",
+                        item.get("unit") or "",
+                        item.get("spec") or "",
+                        item.get("brand") or "",
+                        item.get("cost_price") or "",
+                        item.get("sale_price") or "",
+                        item.get("total_cost") or "",
+                        item.get("total_sale") or "",
+                        item.get("remark") or "",
+                    ]
+                )
         return output_path
 
     def _write_report(self, run: dict[str, Any], messages: list[dict[str, Any]], workbook_result: dict[str, Any]) -> Path:
@@ -749,6 +812,11 @@ class RecorderExportRunService:
             "module_version": run.get("module_version"),
             "message_count": len(messages),
             "artifact": str(workbook_result.get("xlsx_path") or ""),
+            "csv_artifact": str(workbook_result.get("csv_path") or ""),
+            "artifacts": {
+                "xlsx_path": str(workbook_result.get("xlsx_path") or ""),
+                "csv_path": str(workbook_result.get("csv_path") or ""),
+            },
             "stats": {
                 "export_row_count": int(workbook_result.get("export_row_count", 0) or 0),
                 "needs_review_count": int(workbook_result.get("needs_review_count", 0) or 0),
@@ -2541,7 +2609,7 @@ class RecorderExportRunService:
             return ""
         if re.match(r"^[\u4e00-\u9fa5]{2,4}\]?$", candidate) and "老师" in str(text or ""):
             # Avoid dropping short real product names (e.g. 深孔板/滤膜/灯管).
-            if not re.search(r"(管|板|膜|液|剂|盒|瓶|皿|枪|吸头|培养|试|酸|钠|胶|粉|纸|架|刷|离心|灯)", candidate) and not SHORT_OFFICE_PRODUCT_HINT_RE.search(candidate):
+            if not re.search(r"(管|板|膜|液|剂|盒|瓶|皿|枪|吸头|培养|试|酸|钠|胶|粉|纸|架|刷|离心|灯|机|仪|泵|炉|箱|柜|秤|天平)", candidate) and not SHORT_OFFICE_PRODUCT_HINT_RE.search(candidate):
                 return ""
         if re.fullmatch(r"\d+(?:\.\d+)?(?:\s*[*xX×/+.-]\s*\d+(?:\.\d+)?)+\s*(?:=\s*\d+(?:\.\d+)?)?\s*元?", candidate):
             return ""
@@ -2680,16 +2748,58 @@ class RecorderExportRunService:
         if not match:
             single = re.search(r"(?P<name>[\u4e00-\u9fa5A-Za-z0-9]{1,24})老师", sanitized_text)
             if single:
-                name = str(single.group("name") or "")
+                name = self._sanitize_person_name(str(single.group("name") or ""))
                 return name, name
             # Fallback: many orders end with a plain contact name line like "冯世浩".
             tail_name = re.search(r"(?:^|[\r\n\s])(?P<name>[\u4e00-\u9fa5]{2,4})\s*$", str(sanitized_text or ""))
             if tail_name and self._looks_like_order_message(str(sanitized_text or "")):
-                name = str(tail_name.group("name") or "")
+                name = self._sanitize_person_name(str(tail_name.group("name") or ""))
                 if name and name not in {"老师", "同学", "客户"}:
                     return name, ""
             return "", ""
-        return str(match.group("name") or ""), str(match.group("owner") or "")
+        name = self._sanitize_person_name(str(match.group("name") or ""))
+        owner = self._sanitize_person_name(str(match.group("owner") or ""))
+        return name, owner
+
+    def _sanitize_person_name(self, value: str) -> str:
+        text = self._normalize_order_text(str(value or ""))
+        if not text:
+            return ""
+        text = re.sub(r"@[^\s，,。；;：:\r\n]+", " ", text)
+        text = re.sub(r"\d+(?:\.\d+)?\s*元", " ", text)
+        text = re.sub(r"\d+(?:\.\d+)?\s*(?:折|折后|\\/|\\*)", " ", text)
+        text = re.sub(rf"\d+(?:\.\d+)?\s*(?:{ORDER_UNIT_PATTERN})", " ", text)
+        text = re.sub(r"(?:订|代付|下单|补订|再订|买|各订|已订|货号|型号|规格|老师)$", " ", text)
+        text = self._normalize_order_text(text)
+        chinese_candidates = re.findall(r"[\u4e00-\u9fa5]{2,4}", text)
+        stopwords = {
+            "老师",
+            "同学",
+            "客户",
+            "试剂",
+            "溶液",
+            "细胞",
+            "培养",
+            "离心",
+            "蛋白",
+            "抗体",
+            "普通",
+            "麦克林",
+            "阿拉丁",
+            "索莱宝",
+            "碧云天",
+            "康宁",
+            "赛宁",
+            "国药",
+            "探索",
+        }
+        for candidate in reversed(chinese_candidates):
+            if candidate and candidate not in stopwords and not any(marker in candidate for marker in ("试剂", "溶液", "细胞", "培养", "离心")):
+                return candidate
+        ascii_candidate = re.sub(r"[^A-Za-z]", "", text).strip()
+        if 2 <= len(ascii_candidate) <= 16 and not re.search(r"(?:订|元|ml|mg|kg|g|sku|id)", ascii_candidate, flags=re.IGNORECASE):
+            return ascii_candidate
+        return ""
 
     @staticmethod
     def _message_contains_at_mention(text: str) -> bool:
@@ -2721,7 +2831,7 @@ class RecorderExportRunService:
         try:
             parsed = datetime.fromisoformat(normalized)
             if parsed.tzinfo is not None:
-                parsed = parsed.astimezone().replace(tzinfo=None)
+                parsed = parsed.astimezone(UTC8).replace(tzinfo=None)
             return parsed
         except ValueError:
             pass
@@ -2731,6 +2841,15 @@ class RecorderExportRunService:
             except ValueError:
                 continue
         return None
+
+    def _extract_time_code(self, value: str) -> str:
+        text = str(value or "").strip()
+        if not re.search(r"\d{1,2}:\d{2}", text):
+            return ""
+        parsed = self._parse_datetime_text(text)
+        if not parsed:
+            return ""
+        return parsed.strftime("%H:%M:%S")
 
     def _infer_name_owner_from_recent_messages(
         self,
@@ -3288,6 +3407,22 @@ class RecorderExportRunService:
         if total_sale_value <= 0 and sale_price_value > 0 and qty_value > 0:
             total_sale_value = sale_price_value * qty_value
             output["total_sale"] = self._format_number(total_sale_value)
+        if qty_value <= 0 and (sale_price_value > 0 or total_sale_value > 0):
+            if any(term in scope for term in ORDER_ACTION_TERMS) or NAME_OWNER_RE.search(scope):
+                output["quantity"] = "1"
+                qty_value = 1.0
+                if not str(output.get("unit") or "").strip():
+                    output["unit"] = str(output.get("order_unit") or "") or "个"
+                if not str(output.get("order_unit") or "").strip():
+                    output["order_unit"] = str(output.get("unit") or "") or "个"
+                if total_sale_value <= 0 and sale_price_value > 0:
+                    total_sale_value = sale_price_value
+                    output["total_sale"] = self._format_number(total_sale_value)
+                note = "数量策略: 默认1"
+                remark = str(output.get("remark") or "")
+                if note not in remark:
+                    output["remark"] = (remark + f" | {note}").strip(" |")
+                output["needs_review"] = True
         current_spec = self._normalize_spec_text(str(output.get("spec") or ""))
         if not current_spec:
             spec_candidate = self._extract_product_spec(
@@ -3342,6 +3477,8 @@ class RecorderExportRunService:
             return True
         if qty_value == 1 and unit_text and re.search(rf"(?:一|1|一个)\s*{re.escape(unit_text)}", scope):
             return True
+        if qty_value == 1 and unit_text and re.search(rf"(?:订|已订|买|代付|下单)\s*(?:一|1|一个|[-—－–ー])?\s*{re.escape(unit_text)}", scope):
+            return True
         if re.search(rf"[*xX×]\s*{qty_pattern}\s*=", scope):
             return True
         if re.search(rf"(?<!\d){qty_pattern}\s*[*xX×]\s*\d+(?:\.\d+)?\s*=", scope):
@@ -3357,6 +3494,21 @@ class RecorderExportRunService:
             return output
         unit = self._normalize_order_text(str(output.get("unit") or ""))
         if self._scope_supports_quantity(quantity, unit, scope_text=scope_text):
+            return output
+        if (
+            self._to_number(quantity) == 1
+            and "数量策略: 默认1" in str(output.get("remark") or "")
+            and str(output.get("product_name") or "").strip()
+            and (
+                PRICE_RE.search(self._normalize_order_text(scope_text))
+                or self._extract_formula_total(self._normalize_order_text(scope_text))
+            )
+        ):
+            if not unit:
+                output["unit"] = str(output.get("order_unit") or "") or "个"
+            if not str(output.get("order_unit") or "").strip():
+                output["order_unit"] = str(output.get("unit") or "") or "个"
+            output["needs_review"] = True
             return output
         output["quantity"] = ""
         if unit and unit not in self._normalize_order_text(scope_text):
@@ -3729,11 +3881,15 @@ class RecorderExportRunService:
                 return True
             if quantity <= 0 and total <= 0 and sale_price <= 0 and "赠" not in f"{product}{remark}":
                 return True
-        if not product and quantity <= 0 and total <= 0 and sale_price <= 0:
+        if not product:
+            return True
+        if product and not name and quantity <= 0 and total <= 0 and sale_price <= 0:
             return True
         if len(product) <= 2 and total <= 0 and sale_price <= 0:
             return True
         if product in {"都", "这个", "那个", "再加干冰费", "急用", "麻烦给订上", "麻烦给订上[抱拳"}:
+            return True
+        if product in {"书", "打印纸", "a4打印纸", "a4纸"} or any(term in product.lower() for term in ("打印纸", "a4打印")):
             return True
         if product.lower() in {"μ", "ul", "μl", "μl。", "ul。"}:
             return True
@@ -3748,8 +3904,6 @@ class RecorderExportRunService:
         if re.search(r"(现货|不供货|先带走|已带走|加干冰费|麻烦给订上|急用)", product):
             if total <= 0 and sale_price <= 0 and ("订" not in remark or quantity <= 0):
                 return True
-        if not product and total <= 0 and sale_price <= 0:
-            return True
         if product in NON_ORDER_PRODUCT_HINTS:
             return True
         if any(term in product for term in SUMMARY_OR_PROMO_TERMS) and "订" not in remark and quantity <= 0:
@@ -3769,6 +3923,7 @@ class RecorderExportRunService:
     def _empty_order_row(self) -> dict[str, Any]:
         return {
             "date": "",
+            "time": "",
             "name": "",
             "owner": "",
             "receiver": "",
@@ -3838,6 +3993,47 @@ class RecorderExportRunService:
             return "other"
         return "order_item"
 
+    def _infer_default_unit_for_product(self, product_name: str) -> str:
+        product = self._normalize_order_text(product_name)
+        if not product:
+            return "个"
+        if re.search(r"(试剂盒|ELISA|kit|Kit)", product, flags=re.IGNORECASE):
+            return "盒"
+        if "一双" in product or "手套" in product:
+            return "双"
+        if any(term in product for term in ("滤纸", "打印纸")):
+            return "包"
+        if any(term in product for term in ("乳液", "液", "乙醇", "乙腈", "甲醇", "正己烷")):
+            return "瓶"
+        if any(term in product for term in ("管", "抗体", "蛋白", "烧杯", "针头")):
+            return "个"
+        return "个"
+
+    def _default_single_quantity_for_priced_row(self, row: dict[str, Any]) -> dict[str, Any]:
+        output = dict(row)
+        product = str(output.get("product_name") or "").strip()
+        if not product:
+            return output
+        sale_price = self._to_number(str(output.get("sale_price") or ""))
+        total_sale = self._to_number(str(output.get("total_sale") or ""))
+        if sale_price <= 0 and total_sale <= 0:
+            return output
+        if not str(output.get("quantity") or "").strip():
+            output["quantity"] = "1"
+            output["needs_review"] = True
+            note = "数量策略: 默认1"
+            remark = str(output.get("remark") or "")
+            if note not in remark:
+                output["remark"] = (remark + f" | {note}").strip(" |")
+        if not str(output.get("unit") or "").strip():
+            output["unit"] = str(output.get("order_unit") or "") or self._infer_default_unit_for_product(product)
+            output["needs_review"] = True
+        if not str(output.get("order_unit") or "").strip():
+            output["order_unit"] = str(output.get("unit") or "") or "个"
+        if not str(output.get("total_sale") or "").strip() and sale_price > 0 and self._to_number(str(output.get("quantity") or "")) > 0:
+            output["total_sale"] = self._format_number(sale_price * self._to_number(str(output.get("quantity") or "")))
+        return output
+
     def _apply_missing_quantity_strategy(
         self,
         row: dict[str, Any],
@@ -3899,17 +4095,38 @@ class RecorderExportRunService:
                 output[key] = ""
         output["confidence"] = self._coerce_confidence(output.get("confidence"))
         fallback_date = self._extract_date_code(str(message.get("message_time") or message.get("observed_at") or ""))
+        fallback_time = self._extract_time_code(str(message.get("message_time") or message.get("observed_at") or ""))
         output["date"] = self._normalize_order_date(
             output.get("date"),
             fallback_date=fallback_date,
             date_output_mode=date_output_mode,
         )
+        if not str(output.get("time") or "").strip() and fallback_time:
+            output["time"] = fallback_time
         if not str(output.get("name") or "").strip() or not str(output.get("owner") or "").strip():
             fallback_name, fallback_owner = self._extract_name_owner(str(message.get("content") or ""))
             if not str(output.get("name") or "").strip() and fallback_name:
                 output["name"] = fallback_name
             if not str(output.get("owner") or "").strip():
                 output["owner"] = fallback_owner or str(output.get("name") or "")
+        raw_name = str(output.get("name") or "").strip()
+        raw_owner = str(output.get("owner") or "").strip()
+        clean_name = self._sanitize_person_name(raw_name)
+        clean_owner = self._sanitize_person_name(raw_owner)
+        if clean_name and clean_name != raw_name:
+            output["name"] = clean_name
+            output["needs_review"] = True
+        elif raw_name and not clean_name and (PRICE_RE.search(raw_name) or re.search(r"\d", raw_name) or any(marker in raw_name for marker in ("订", "代付", "货号", "型号"))):
+            output["name"] = ""
+            output["needs_review"] = True
+        if clean_owner and clean_owner != raw_owner:
+            output["owner"] = clean_owner
+            output["needs_review"] = True
+        elif raw_owner and not clean_owner and (PRICE_RE.search(raw_owner) or re.search(r"\d", raw_owner) or any(marker in raw_owner for marker in ("订", "代付", "货号", "型号"))):
+            output["owner"] = ""
+            output["needs_review"] = True
+        if not str(output.get("owner") or "").strip() and str(output.get("name") or "").strip():
+            output["owner"] = str(output.get("name") or "")
         explicit_scope = self._normalize_order_text(str(output.get("source_scope_text") or ""))
         backfill_scope = explicit_scope or self._normalize_order_text(
             str(output.get("evidence_text") or "")
@@ -3981,6 +4198,7 @@ class RecorderExportRunService:
         output["spec"] = best_spec if (best_score > 0 or (best_spec and rich_candidates)) else ""
         if explicit_scope:
             output = self._clear_unsupported_quantity_from_scope(output, scope_text=explicit_scope)
+        output = self._default_single_quantity_for_priced_row(output)
         output["needs_review"] = bool(
             output.get("needs_review")
             or float(output.get("confidence") or 0) < 0.75

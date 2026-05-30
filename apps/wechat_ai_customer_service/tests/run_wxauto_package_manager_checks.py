@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 import sys
 from typing import Any
@@ -91,6 +92,54 @@ def test_update_runs_for_prerelease_available() -> None:
     assert_true(manager.upgrade_called, "upgrade should be called for newer beta version")
 
 
+def test_auto_update_is_disabled_when_reserve_is_off() -> None:
+    previous_reserve = os.environ.pop("WECHAT_ENABLE_WXAUTO4", None)
+    previous_update = os.environ.pop("WECHAT_WXAUTO_AUTO_UPDATE", None)
+    try:
+        manager = FakeManager(installed="41.1.2", latest="41.1.3")
+        result = manager.auto_update_on_wechat_module_start()
+        assert_true(result["ok"], f"disabled reserve should still be a safe ok result: {result}")
+        assert_true(result["enabled"] is False, f"reserve-disabled result should not enable wxauto4: {result}")
+        assert_true(result["reason"] == "wxauto4_reserve_disabled", f"unexpected disable reason: {result}")
+        assert_true(manager.upgrade_called is False, "upgrade must not run while wxauto4 reserve is disabled")
+    finally:
+        if previous_reserve is not None:
+            os.environ["WECHAT_ENABLE_WXAUTO4"] = previous_reserve
+        if previous_update is not None:
+            os.environ["WECHAT_WXAUTO_AUTO_UPDATE"] = previous_update
+
+
+def test_auto_update_requires_update_flag_when_reserve_is_on() -> None:
+    previous_reserve = os.environ.get("WECHAT_ENABLE_WXAUTO4")
+    previous_update = os.environ.get("WECHAT_WXAUTO_AUTO_UPDATE")
+    try:
+        os.environ["WECHAT_ENABLE_WXAUTO4"] = "1"
+        os.environ["WECHAT_WXAUTO_AUTO_UPDATE"] = "0"
+        manager = FakeManager(installed="41.1.2", latest="41.1.3")
+        disabled = manager.auto_update_on_wechat_module_start()
+        assert_true(disabled["enabled"] is False, f"auto-update flag should disable update: {disabled}")
+        assert_true(
+            disabled["reason"] == "disabled_by_WECHAT_WXAUTO_AUTO_UPDATE",
+            f"unexpected disabled reason: {disabled}",
+        )
+        assert_true(manager.upgrade_called is False, "upgrade must not run when auto-update flag is off")
+
+        os.environ["WECHAT_WXAUTO_AUTO_UPDATE"] = "1"
+        manager = FakeManager(installed="41.1.2", latest="41.1.3")
+        enabled = manager.auto_update_on_wechat_module_start()
+        assert_true(enabled["updated"] is True, f"explicit reserve should allow update path: {enabled}")
+        assert_true(manager.upgrade_called is True, "upgrade should run only after reserve and update flags are on")
+    finally:
+        if previous_reserve is None:
+            os.environ.pop("WECHAT_ENABLE_WXAUTO4", None)
+        else:
+            os.environ["WECHAT_ENABLE_WXAUTO4"] = previous_reserve
+        if previous_update is None:
+            os.environ.pop("WECHAT_WXAUTO_AUTO_UPDATE", None)
+        else:
+            os.environ["WECHAT_WXAUTO_AUTO_UPDATE"] = previous_update
+
+
 def main() -> int:
     tests = [
         test_parse_latest_version,
@@ -99,6 +148,8 @@ def main() -> int:
         test_update_skips_when_latest,
         test_update_runs_when_newer_available,
         test_update_runs_for_prerelease_available,
+        test_auto_update_is_disabled_when_reserve_is_off,
+        test_auto_update_requires_update_flag_when_reserve_is_on,
     ]
     passed = 0
     for test in tests:

@@ -2,9 +2,21 @@
 
 当前最新版说明请优先阅读应用 README：[`../README.md`](../README.md)。
 
-本目录现在只保留历史归档和归档索引，避免阶段性方案、旧架构描述、旧验收报告与当前版本混在一起。
+当前 RPA 控制层优化说明：
+
+- [`rpa_backend_state_machine_optimization.md`](rpa_backend_state_machine_optimization.md)
+- [`rpa_backend_state_machine_test_plan.md`](rpa_backend_state_machine_test_plan.md)
+- [`rpa_low_disturbance_listener_design.md`](rpa_low_disturbance_listener_design.md)
+
+当前知识与 RAG 架构说明：
+
+- [`product_master_formal_knowledge_common_sense_refactor_design.md`](product_master_formal_knowledge_common_sense_refactor_design.md)
+- [`authority_gated_rag_ai_experience_pool_design.md`](authority_gated_rag_ai_experience_pool_design.md)
+- [`authority_gated_rag_implementation_plan.md`](authority_gated_rag_implementation_plan.md)
+- [`authority_gated_rag_migration_and_audit.md`](authority_gated_rag_migration_and_audit.md)
+- [`authority_gated_rag_acceptance_test_plan.md`](authority_gated_rag_acceptance_test_plan.md)
+
+历史归档用于追溯开发过程，不作为当前功能和架构的最终依据。
 
 - 历史归档索引：[`history/INDEX.md`](history/INDEX.md)
 - 历史文档目录：[`history/`](history/)
-
-归档文档用于追溯开发过程，不作为当前功能和架构的最终依据。

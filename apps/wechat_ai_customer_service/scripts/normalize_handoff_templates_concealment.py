@@ -112,7 +112,7 @@ def main() -> int:
         if result["changed"]:
             stats["changed"] += 1
 
-    print(json.dumps(stats, ensure_ascii=False, indent=2))
+    print(json.dumps(stats, ensure_ascii=True, indent=2))
     return 0
 
 

@@ -1,4 +1,4 @@
-"""Audit RAG experience governance inputs without mutating data."""
+"""Audit AI experience pool item governance inputs without mutating data."""
 
 from __future__ import annotations
 
@@ -30,7 +30,7 @@ KNOWN_TOP_LEVEL_STATUSES = {"active", "discarded", "promoted"}
 def main() -> int:
     args = parse_args()
     report = build_report(args.tenant, sample_limit=args.sample_limit)
-    text = json.dumps(report, ensure_ascii=False, indent=2)
+    text = json.dumps(report, ensure_ascii=True, indent=2)
     if args.output:
         output = Path(args.output)
         output.parent.mkdir(parents=True, exist_ok=True)

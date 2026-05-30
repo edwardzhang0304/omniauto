@@ -172,7 +172,7 @@ def main() -> int:
     industry_id = str(args.industry_id).strip() or "used_car"
     input_file = Path(str(args.input_file)).expanduser().resolve()
     if not input_file.exists():
-        print(json.dumps({"ok": False, "message": f"input_file not found: {input_file}"}, ensure_ascii=False))
+        print(json.dumps({"ok": False, "message": f"input_file not found: {input_file}"}, ensure_ascii=True))
         return 2
 
     batch_id = str(args.batch_id).strip() or f"chejin_realchat_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
@@ -394,7 +394,7 @@ def main() -> int:
             }
 
         write_json(report_path, summary)
-        print(json.dumps(summary, ensure_ascii=False))
+        print(json.dumps(summary, ensure_ascii=True))
     return 0
 
 def apply_real_chat_learning_layers(

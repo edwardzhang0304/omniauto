@@ -70,12 +70,23 @@ BASE_ARTIFACT_ROOT = PROJECT_ROOT / "runtime" / "apps" / "wechat_ai_customer_ser
 @dataclass
 class FakeConnector:
     messages: list[dict[str, Any]]
+    history_messages: list[dict[str, Any]] | None = None
 
     def __post_init__(self) -> None:
         self.sent_texts: list[str] = []
+        self.history_load_calls: list[int] = []
 
-    def get_messages(self, target: str, exact: bool = True) -> dict[str, Any]:
-        return {"ok": True, "target": target, "exact": exact, "messages": self.messages}
+    def get_messages(self, target: str, exact: bool = True, history_load_times: int = 0) -> dict[str, Any]:
+        if history_load_times:
+            self.history_load_calls.append(history_load_times)
+        messages = self.history_messages if history_load_times and self.history_messages is not None else self.messages
+        return {
+            "ok": True,
+            "target": target,
+            "exact": exact,
+            "history_load": {"requested_load_times": history_load_times, "mechanism": "fake.rpa_history_load"} if history_load_times else None,
+            "messages": messages,
+        }
 
     def send_text_and_verify(self, target: str, text: str, exact: bool = True) -> dict[str, Any]:
         self.sent_texts.append(text)
@@ -210,7 +221,10 @@ def check_material_upload_learning(client: TestClient, headers: dict[str, str], 
         for item in job.get("skipped_duplicates", []) or []
     ]
     generated_or_deduped_count = len(matching_candidates) + len(skipped_duplicates)
-    assert_true(all(item["found"] for item in policy_rag_checks), "safe policy materials should remain searchable in RAG")
+    assert_true(
+        not any(item["found"] for item in policy_rag_checks),
+        "uploaded policy materials should enter AI experience pool/candidate flow before becoming runtime evidence",
+    )
     assert_true(
         not any(
             hit.get("category") in {"products", "chats"}
@@ -221,7 +235,7 @@ def check_material_upload_learning(client: TestClient, headers: dict[str, str], 
     )
     assert_true(
         generated_or_deduped_count >= 2 or all(int(job.get("candidate_count") or 0) == 0 for job in jobs),
-        "uploaded materials should either dedupe old candidates or stay in RAG-only learning under the unified promotion chain",
+        "uploaded materials should either dedupe old candidates or stay in AI experience pool learning under the unified promotion chain",
     )
     return {
         "name": "material_upload_learning",
@@ -236,7 +250,7 @@ def check_material_upload_learning(client: TestClient, headers: dict[str, str], 
             }
             for item in jobs
         ],
-        "promotion_policy": "safe policies may enter RAG; product facts and raw chats must not bypass product master/RAG experience governance",
+        "promotion_policy": "uploaded materials enter AI experience pool/candidate governance first; product facts and raw chats must not bypass product master/formal authority",
         "policy_rag_checks": policy_rag_checks,
         "blocked_rag_checks": blocked_rag_checks,
         "matching_candidates": matching_candidates,
@@ -849,7 +863,9 @@ def run_service_case(
     write_data: bool = False,
 ) -> dict[str, Any]:
     message_id = f"{case_id}-{datetime.now().timestamp()}"
-    connector = FakeConnector([{"id": message_id, "type": "text", "sender": "self", "content": content}])
+    current_message = {"id": message_id, "type": "text", "sender": "self", "content": content}
+    fake_history = state.setdefault("_fake_history", [])
+    connector = FakeConnector([current_message], [*fake_history, current_message])
     event = process_target(
         connector=connector,
         target=target,
@@ -867,6 +883,7 @@ def run_service_case(
         assert_true(expect_contains in reply_text, f"{case_id} reply should contain {expect_contains}: {reply_text}")
     if expect_handoff:
         assert_true(bool((event.get("decision") or {}).get("need_handoff")) or event.get("action") in {"handoff", "handoff_sent"}, f"{case_id} should hand off")
+    fake_history.append(current_message)
     return {
         "case": case_id,
         "ok": True,

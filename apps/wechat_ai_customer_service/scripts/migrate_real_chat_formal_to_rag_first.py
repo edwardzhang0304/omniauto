@@ -38,7 +38,7 @@ def main() -> int:
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args()
     result = migrate_real_chat_formal_to_rag_first(tenant_id=str(args.tenant_id or DEFAULT_TENANT_ID), dry_run=bool(args.dry_run))
-    print(json.dumps(result, ensure_ascii=False, indent=2))
+    print(json.dumps(result, ensure_ascii=True, indent=2))
     return 0 if result.get("ok") else 1
 
 

@@ -24,10 +24,15 @@ class SessionState:
     name: str
     last_content_digest: str = ""
     last_message_time: str = ""
+    last_unread_badge: str = ""
     unread_detected: bool = False
     priority_score: int = 0
     first_seen_at: str = ""
     last_seen_at: str = ""
+    pending_since: str = ""
+    last_detected_at: str = ""
+    last_dispatched_at: str = ""
+    conversation_type: str = "unknown"
 
 
 @dataclass
@@ -83,10 +88,15 @@ class SessionMonitor:
                 name=str(name),
                 last_content_digest=str(data.get("last_content_digest") or ""),
                 last_message_time=str(data.get("last_message_time") or ""),
+                last_unread_badge=str(data.get("last_unread_badge") or ""),
                 unread_detected=bool(data.get("unread_detected", False)),
                 priority_score=int(data.get("priority_score", 0) or 0),
                 first_seen_at=str(data.get("first_seen_at") or ""),
                 last_seen_at=str(data.get("last_seen_at") or ""),
+                pending_since=str(data.get("pending_since") or ""),
+                last_detected_at=str(data.get("last_detected_at") or ""),
+                last_dispatched_at=str(data.get("last_dispatched_at") or ""),
+                conversation_type=str(data.get("conversation_type") or "unknown"),
             )
             for name, data in raw.items()
             if isinstance(data, dict)
@@ -101,10 +111,15 @@ class SessionMonitor:
                 name: {
                     "last_content_digest": s.last_content_digest,
                     "last_message_time": s.last_message_time,
+                    "last_unread_badge": s.last_unread_badge,
                     "unread_detected": s.unread_detected,
                     "priority_score": s.priority_score,
                     "first_seen_at": s.first_seen_at,
                     "last_seen_at": s.last_seen_at,
+                    "pending_since": s.pending_since,
+                    "last_detected_at": s.last_detected_at,
+                    "last_dispatched_at": s.last_dispatched_at,
+                    "conversation_type": s.conversation_type,
                 }
                 for name, s in self._sessions.items()
             },
@@ -121,7 +136,6 @@ class SessionMonitor:
 
         sessions_data = result.get("sessions", []) or []
         now_iso = datetime.now().isoformat(timespec="seconds")
-        now_ts = time.time()
         active: list[ActiveTarget] = []
 
         for raw in sessions_data:
@@ -139,8 +153,10 @@ class SessionMonitor:
 
             content = str(raw.get("content") or "").strip()
             msg_time = str(raw.get("time") or "").strip()
+            unread_badge = str(raw.get("unread_badge") or raw.get("unread") or "").strip()
             digest = _digest(content) if content else ""
             conversation_type = _infer_conversation_type(name, raw)
+            has_signal = bool(digest or msg_time or unread_badge)
 
             existing = self._sessions.get(name)
             if existing is None:
@@ -149,12 +165,16 @@ class SessionMonitor:
                     name=name,
                     last_content_digest=digest,
                     last_message_time=msg_time,
-                    unread_detected=bool(digest),
-                    priority_score=50 if digest else 0,
+                    last_unread_badge=unread_badge,
+                    unread_detected=has_signal,
+                    priority_score=50 if has_signal else 0,
                     first_seen_at=now_iso,
                     last_seen_at=now_iso,
+                    pending_since=now_iso if has_signal else "",
+                    last_detected_at=now_iso if has_signal else "",
+                    conversation_type=conversation_type,
                 )
-                if digest:
+                if has_signal:
                     active.append(ActiveTarget(
                         name=name,
                         exact=True,
@@ -173,6 +193,8 @@ class SessionMonitor:
                 elif msg_time and msg_time != existing.last_message_time:
                     # Time changed even if digest same (same content sent again)
                     changed = True
+                elif unread_badge and unread_badge != existing.last_unread_badge:
+                    changed = True
 
                 if changed:
                     # Bump priority based on how long since last contact
@@ -184,9 +206,14 @@ class SessionMonitor:
                         pass
                     priority = min(100, 50 + age_seconds // 60)
                     existing.unread_detected = True
+                    if not existing.pending_since:
+                        existing.pending_since = now_iso
+                    existing.last_detected_at = now_iso
                     existing.priority_score = priority
                     existing.last_content_digest = digest
                     existing.last_message_time = msg_time
+                    existing.last_unread_badge = unread_badge
+                    existing.conversation_type = conversation_type
                     existing.last_seen_at = now_iso
                     active.append(ActiveTarget(
                         name=name,
@@ -198,8 +225,23 @@ class SessionMonitor:
                     ))
                 else:
                     existing.last_seen_at = now_iso
-                    existing.unread_detected = False
-                    existing.priority_score = max(0, existing.priority_score - 5)
+                    existing.conversation_type = conversation_type
+                    if existing.last_unread_badge and not unread_badge:
+                        existing.last_unread_badge = ""
+                    if existing.unread_detected:
+                        # No change in the session-list preview does not mean this
+                        # pending session was handled. Keep it active until the
+                        # workflow explicitly calls reset_unread after processing.
+                        active.append(ActiveTarget(
+                            name=name,
+                            exact=True,
+                            priority_score=max(1, existing.priority_score),
+                            unread_detected=True,
+                            session_age_seconds=_age_seconds(existing.pending_since or existing.last_detected_at or existing.last_seen_at),
+                            conversation_type=conversation_type,
+                        ))
+                    else:
+                        existing.priority_score = max(0, existing.priority_score - 5)
 
         self._save_state()
 
@@ -229,20 +271,56 @@ class SessionMonitor:
                 "priority_score": s.priority_score,
                 "first_seen_at": s.first_seen_at,
                 "last_seen_at": s.last_seen_at,
+                "pending_since": s.pending_since,
+                "last_detected_at": s.last_detected_at,
+                "last_dispatched_at": s.last_dispatched_at,
+                "conversation_type": s.conversation_type,
             }
             for s in self._sessions.values()
         ]
+
+    def pending_targets(self, *, limit: int | None = None) -> list[ActiveTarget]:
+        """Return all sessions still waiting for workflow processing."""
+        active = [
+            ActiveTarget(
+                name=s.name,
+                exact=True,
+                priority_score=max(1, s.priority_score),
+                unread_detected=True,
+                session_age_seconds=_age_seconds(s.pending_since or s.last_detected_at or s.last_seen_at),
+                conversation_type=s.conversation_type or "unknown",
+            )
+            for s in self._sessions.values()
+            if s.unread_detected
+        ]
+        active.sort(key=lambda t: (-t.priority_score, -t.session_age_seconds))
+        if limit is None:
+            return active
+        return active[: max(0, int(limit))]
 
     def reset_unread(self, name: str) -> None:
         """Mark a session as read after processing."""
         if name in self._sessions:
             self._sessions[name].unread_detected = False
             self._sessions[name].priority_score = 0
+            self._sessions[name].pending_since = ""
+            self._sessions[name].last_unread_badge = ""
+            self._sessions[name].last_dispatched_at = datetime.now().isoformat(timespec="seconds")
             self._save_state()
 
 
 def _digest(value: str) -> str:
     return hashlib.sha256(str(value).encode("utf-8")).hexdigest()[:32]
+
+
+def _age_seconds(value: str) -> int:
+    if not value:
+        return 0
+    try:
+        base = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        return max(0, int((datetime.now() - base).total_seconds()))
+    except Exception:
+        return 0
 
 
 def _infer_conversation_type(name: str, session: dict[str, Any]) -> str:

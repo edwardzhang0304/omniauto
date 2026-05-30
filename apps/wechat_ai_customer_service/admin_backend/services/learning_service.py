@@ -1,4 +1,4 @@
-"""Learning jobs that turn raw uploads into RAG experiences."""
+"""Learning jobs that turn raw uploads into AI experience pool items."""
 
 from __future__ import annotations
 

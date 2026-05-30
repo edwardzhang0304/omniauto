@@ -957,22 +957,34 @@ class NodeService:
         tenant_ids = [active_tenant_id(item) for item in payload.get("tenant_ids", []) if str(item).strip()]
         if not tenant_ids:
             tenant_ids = [active_tenant_id(payload.get("tenant_id"))]
-        token = "node_" + secrets.token_urlsafe(24)
-        record = {
-            "node_id": node_id,
-            "display_name": str(payload.get("display_name") or node_id),
-            "tenant_ids": tenant_ids,
-            "status": "online",
-            "version": str(payload.get("version") or ""),
-            "capabilities": payload.get("capabilities") if isinstance(payload.get("capabilities"), list) else [],
-            "node_token": token,
-            "registered_at": now_iso(),
-            "last_seen_at": now_iso(),
-            "metadata": payload.get("metadata") if isinstance(payload.get("metadata"), dict) else {},
-        }
 
         def mutate(state: dict[str, Any]) -> dict[str, Any]:
-            for tenant_id in tenant_ids:
+            existing = state.get("local_nodes", {}).get(node_id)
+            existing_record = existing if isinstance(existing, dict) else {}
+            merged_tenant_ids = list(
+                dict.fromkeys(
+                    [
+                        active_tenant_id(item)
+                        for item in [*existing_record.get("tenant_ids", []), *tenant_ids]
+                        if str(item).strip()
+                    ]
+                )
+            )
+            token = str(existing_record.get("node_token") or "") or "node_" + secrets.token_urlsafe(24)
+            now = now_iso()
+            record = {
+                "node_id": node_id,
+                "display_name": str(payload.get("display_name") or existing_record.get("display_name") or node_id),
+                "tenant_ids": merged_tenant_ids,
+                "status": "online",
+                "version": str(payload.get("version") or existing_record.get("version") or ""),
+                "capabilities": payload.get("capabilities") if isinstance(payload.get("capabilities"), list) else existing_record.get("capabilities", []),
+                "node_token": token,
+                "registered_at": str(existing_record.get("registered_at") or now),
+                "last_seen_at": now,
+                "metadata": payload.get("metadata") if isinstance(payload.get("metadata"), dict) else existing_record.get("metadata", {}),
+            }
+            for tenant_id in merged_tenant_ids:
                 ensure_tenant_exists(state, tenant_id)
             state["local_nodes"][node_id] = record
             append_audit(state, actor_id=actor_id, action="register_node", target_type="local_node", target_id=node_id)

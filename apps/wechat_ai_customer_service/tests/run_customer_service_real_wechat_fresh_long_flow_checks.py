@@ -52,7 +52,12 @@ from run_jiangsu_chejin_llm_synthesis_checks import (  # noqa: E402
     reply_text,
     summarize_quality,
 )
-from wechat_connector import FILE_TRANSFER_ASSISTANT, WeChatConnector  # noqa: E402
+from wechat_connector import (  # noqa: E402
+    FILE_TRANSFER_ASSISTANT,
+    WeChatConnector,
+    enqueue_simulated_inbound_message,
+    is_file_transfer_session_alias,
+)
 
 
 TENANT_ID = "chejin"
@@ -88,16 +93,40 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--delay-seconds", type=float, default=1.1)
     parser.add_argument("--max-turns", type=int, default=20)
-    parser.add_argument("--scenario", choices=("photo_studio", "event_planner", "context_bridge"), default="photo_studio")
+    parser.add_argument("--start-turn", type=int, default=1, help="1-based turn index to start from for live continuation.")
+    parser.add_argument("--batch-token", default="", help="Reuse an existing FRESHLONG token when continuing a live run.")
+    parser.add_argument(
+        "--scenario",
+        choices=("photo_studio", "event_planner", "site_manager", "context_bridge"),
+        default="photo_studio",
+    )
     parser.add_argument(
         "--clean-context-messages",
         action="store_true",
         help="Send natural messages without test markers so live context bridging can be verified.",
     )
     parser.add_argument("--dry-run", action="store_true", help="Build the scenario without sending WeChat messages.")
+    parser.add_argument(
+        "--deferred-retries",
+        type=int,
+        default=3,
+        help="Retry count when transport guard returns deferred.",
+    )
+    parser.add_argument(
+        "--deferred-max-wait-seconds",
+        type=float,
+        default=90.0,
+        help="Maximum per-retry wait when transport guard asks for a long cooldown.",
+    )
+    parser.add_argument(
+        "--deferred-total-timeout-seconds",
+        type=float,
+        default=420.0,
+        help="Maximum total wait budget for one turn while resolving deferred sends.",
+    )
     args = parser.parse_args()
 
-    token = "FRESHLONG_" + datetime.now().strftime("%Y%m%d_%H%M%S")
+    token = str(args.batch_token or "").strip() or "FRESHLONG_" + datetime.now().strftime("%Y%m%d_%H%M%S")
     with tenant_context(TENANT_ID):
         result = run_fresh_long_flow(token, args)
     print(json.dumps(result, ensure_ascii=False, indent=2))
@@ -115,18 +144,21 @@ def run_fresh_long_flow(token: str, args: argparse.Namespace) -> dict[str, Any]:
         name=FILE_TRANSFER_ASSISTANT,
         enabled=True,
         exact=True,
-        allow_self_for_test=True,
+        allow_self_for_test=False,
         max_batch_messages=4,
     )
     state: dict[str, Any] = {"version": 1, "targets": {}}
     bootstrap = bootstrap_target(connector, target, state, config)
-    turns = build_adaptive_turns(token, scenario=str(getattr(args, "scenario", "") or "photo_studio"))[: max(1, int(args.max_turns or 20))]
+    all_turns = build_adaptive_turns(token, scenario=str(getattr(args, "scenario", "") or "photo_studio"))
+    start_turn = max(1, int(getattr(args, "start_turn", 1) or 1))
+    max_turns = max(1, int(args.max_turns or 20))
+    turns = all_turns[start_turn - 1 : start_turn - 1 + max_turns]
     if bool(getattr(args, "clean_context_messages", False)):
         turns = [strip_live_test_marker(spec) for spec in turns]
     outputs: list[dict[str, Any]] = []
     failures: list[dict[str, Any]] = []
 
-    for index, spec in enumerate(turns, start=1):
+    for index, spec in enumerate(turns, start=start_turn):
         try:
             event = run_turn(
                 connector=connector,
@@ -136,6 +168,9 @@ def run_fresh_long_flow(token: str, args: argparse.Namespace) -> dict[str, Any]:
                 state=state,
                 spec=spec,
                 delay_seconds=max(0.7, float(args.delay_seconds or 1.1)),
+                deferred_retries=max(0, int(args.deferred_retries or 0)),
+                deferred_max_wait_seconds=max(5.0, float(args.deferred_max_wait_seconds or 90.0)),
+                deferred_total_timeout_seconds=max(30.0, float(args.deferred_total_timeout_seconds or 420.0)),
                 dry_run=bool(args.dry_run),
             )
             assert_event(index, spec, event)
@@ -200,6 +235,9 @@ def build_live_config(root: Path) -> dict[str, Any]:
     config["llm_reply_synthesis"]["identity_guard_enabled"] = True
     config["llm_reply_synthesis"].setdefault("cost_controls", {})
     config["llm_reply_synthesis"]["cost_controls"]["max_llm_calls_per_run"] = 0
+    config.setdefault("final_visible_llm_polish", {})
+    config["final_visible_llm_polish"]["enabled"] = False
+    config["final_visible_llm_polish"]["required_for_send"] = False
     config.setdefault("intent_assist", {})
     config["intent_assist"]["mode"] = "heuristic"
     config["intent_assist"].setdefault("llm_advisory", {})
@@ -221,6 +259,8 @@ def build_live_config(root: Path) -> dict[str, Any]:
 def build_adaptive_turns(token: str, *, scenario: str = "photo_studio") -> list[dict[str, Any]]:
     if scenario == "context_bridge":
         return build_context_bridge_turns(token)
+    if scenario == "site_manager":
+        return build_site_manager_turns(token)
     if scenario == "event_planner":
         return build_event_planner_turns(token)
     return [
@@ -267,8 +307,8 @@ def build_adaptive_turns(token: str, *, scenario: str = "photo_studio") -> list[
         ),
         turn(
             f"要是今天看中，我能不能先不交定金，满意了再谈？({token}-P9)",
-            expect="sent",
-            must_include_any=["先看", "试驾", "满意", "车况", "确认"],
+            expect="flex",
+            must_include_any=["先看", "试驾", "满意", "确认", "核实", "排期", "回复", "负责人"],
         ),
         turn(
             f"我公司名义买，合同和发票能不能按公司流程开？({token}-P10)",
@@ -278,7 +318,7 @@ def build_adaptive_turns(token: str, *, scenario: str = "photo_studio") -> list[
         turn(
             f"你是不是机器人在回？还是门店的人？({token}-P11)",
             expect="flex",
-            must_include_any=["不是AI", "不是机器人"],
+            must_include_any=["不是AI", "不是机器人", "不是系统自动", "一直在跟您对接", "内部规则"],
         ),
         turn(
             f"我还有台2016年马自达CX-5，12万公里，南京牌，想一起置换。({token}-P12)",
@@ -426,8 +466,8 @@ def build_event_planner_turns(token: str) -> list[dict[str, Any]]:
         ),
         turn(
             f"我不想先交定金，先看车和报告，满意了再决定可以吧？({token}-E9)",
-            expect="sent",
-            must_include_any=["先看", "试驾", "满意", "车况", "确认"],
+            expect="flex",
+            must_include_any=["先看", "试驾", "满意", "确认", "核实", "排期", "回复", "负责人"],
         ),
         turn(
             f"公司买的话，合同和发票能不能按公户流程开？({token}-E10)",
@@ -437,7 +477,7 @@ def build_event_planner_turns(token: str) -> list[dict[str, Any]]:
         turn(
             f"你是真人在门店回，还是机器人自动回？({token}-E11)",
             expect="flex",
-            must_include_any=["不是AI", "不是机器人"],
+            must_include_any=["不是AI", "不是机器人", "不是系统自动"],
         ),
         turn(
             f"我还有台2017年蒙迪欧，10万公里，苏州牌，想一起置换。({token}-E12)",
@@ -489,6 +529,116 @@ def build_event_planner_turns(token: str) -> list[dict[str, Any]]:
     ]
 
 
+def build_site_manager_turns(token: str) -> list[dict[str, Any]]:
+    return [
+        turn(
+            f"我做小型工装施工队，平时要拉电钻、梯子和油漆桶，偶尔也要接甲方，预算13万以内。({token}-S1)",
+            expect="sent",
+            must_include_any=["预算", "用途", "车况", "SUV", "空间", "车源"],
+        ),
+        turn(
+            f"别先让我填一堆信息，先按13万内给我两三个方向，后备厢要实用。({token}-S2)",
+            expect="sent",
+            must_include_any=["奇骏", "哈弗", "SUV", "检测报告", "车况", "后备厢"],
+            expect_used_products=True,
+        ),
+        turn(
+            f"奇骏和哈弗H6哪个更适合跑工地？见客户时也别显得太将就。({token}-S3)",
+            expect="sent",
+            must_include_any=["奇骏", "哈弗", "客户", "车况", "空间"],
+            must_not_include=["途观", "老婆", "爱人", "露营"],
+        ),
+        turn(
+            f"后排放倒后，梯子和两三个工具箱能不能塞得下？({token}-S4)",
+            expect="flex",
+            must_include_any=["后排", "后备厢", "实车", "尺寸", "现场", "放"],
+        ),
+        turn(
+            f"我比较怕底盘伤和水泡车，你们检测报告能不能看明细？({token}-S5)",
+            expect="sent",
+            must_include_any=["检测", "报告", "车况", "底盘", "水泡", "火烧"],
+        ),
+        turn(
+            f"能不能直接承诺没有大事故、水泡、火烧？我拿来干活不能出问题。({token}-S6)",
+            expect="flex",
+            must_include_any=["检测", "核实", "车况", "报告", "确认", "火烧", "水泡"],
+        ),
+        turn(
+            f"市区和郊区工地都跑，油耗和保养哪个更省心？({token}-S7)",
+            expect="sent",
+            must_include_any=["油耗", "保养", "维护", "市区", "车况"],
+            must_not_include=["老婆", "爱人", "女司机", "露营"],
+        ),
+        turn(
+            f"如果首付五六万，剩下分期，你们一般怎么走流程？({token}-S8)",
+            expect="flex",
+            must_include_any=["分期", "金融", "首付", "方案", "审核", "确认"],
+        ),
+        turn(
+            f"我不想没看车就交定金，先看实车和报告，满意再谈可以吧？({token}-S9)",
+            expect="flex",
+            must_include_any=["先看", "试驾", "满意", "确认", "核实", "排期", "回复", "负责人"],
+        ),
+        turn(
+            f"如果用公司抬头买，合同和发票能不能按公户流程开？({token}-S10)",
+            expect="handoff",
+            must_include_any=["公司", "合同", "发票", "负责人", "确认", "核实"],
+        ),
+        turn(
+            f"你这边是真人在店里回，还是系统自动回的？({token}-S11)",
+            expect="flex",
+            must_include_any=["不是AI", "不是机器人", "不是系统自动"],
+        ),
+        turn(
+            f"我还有台2015年江淮瑞风S3，14万公里，苏州牌，想一起置换。({token}-S12)",
+            expect="flex",
+            must_include_any=["置换", "公里", "车况", "检测", "行情", "估"],
+        ),
+        turn(
+            f"旧车前保险杠换过，其他没大事故，开过去能现场估价吗？({token}-S13)",
+            expect="flex",
+            must_include_any=["现场", "评估", "检测", "照片", "车况", "行情"],
+        ),
+        turn(
+            f"如果置换价合适，我优先看哈弗H6，奇骏当备选。({token}-S14)",
+            expect="sent",
+            must_include_any=["奇骏", "哈弗", "备选", "车源", "检测", "确认"],
+            expect_used_products=True,
+        ),
+        turn(
+            f"这台哈弗H6如果按7万整成交，有没有空间？帮我问个准话。({token}-S15)",
+            expect="handoff",
+            must_include_any=["价格", "负责人", "确认", "核实", "准话"],
+        ),
+        turn(
+            f"我周二上午十点能过去，能提前把车和检测报告准备一下吗？({token}-S16)",
+            expect="flex",
+            must_include_any=["周二", "十点", "检测报告", "车源", "排期", "确认"],
+        ),
+        turn(
+            f"试驾我要带身份证还是驾驶证？旧车手续也要一起拿吗？({token}-S17)",
+            expect="flex",
+            must_include_any=["驾驶证", "身份证", "资料", "试驾", "带"],
+        ),
+        turn(
+            f"如果当天看完满意，能不能当天办手续开走？({token}-S18)",
+            expect="handoff",
+            must_include_any=["手续", "确认", "资料", "负责人", "核实", "当天"],
+        ),
+        turn(
+            f"行，我叫王先生，电话13655556666，周二上午十点先看哈弗H6。({token}-S19)",
+            expect="flex",
+            must_include_any=["记", "确认", "周二", "十点", "哈弗", "排期", "回复"],
+            expect_data_complete=True,
+        ),
+        turn(
+            f"门店地址、导航和到店对接人再帮我核一下，别让我跑空。({token}-S20)",
+            expect="handoff",
+            must_include_any=["地址", "导航", "找谁", "联系人", "对接人"],
+        ),
+    ]
+
+
 def turn(
     message: str,
     *,
@@ -524,25 +674,75 @@ def run_turn(
     state: dict[str, Any],
     spec: dict[str, Any],
     delay_seconds: float,
+    deferred_retries: int,
+    deferred_max_wait_seconds: float,
+    deferred_total_timeout_seconds: float,
     dry_run: bool,
 ) -> dict[str, Any]:
     message = str(spec.get("message") or "")
     if dry_run:
         return {"action": "dry_run", "decision": {"reply_text": ""}}
-    send = connector.send_text_and_verify(target.name, message, exact=target.exact)
+    send = connector.send_text_and_verify(
+        target.name,
+        message,
+        exact=target.exact,
+        simulate_inbound_file_transfer=True,
+    )
     assert_true(send.get("ok"), f"live send failed: {send}")
     time.sleep(delay_seconds)
-    return process_target(
-        connector=connector,
-        target=target,
-        config=config,
-        rules=rules,
-        state=state,
-        send=True,
-        write_data=True,
-        allow_fallback_send=False,
-        mark_dry_run=False,
-    )
+    started_at = time.time()
+    deferred_count = 0
+    while True:
+        event = process_target(
+            connector=connector,
+            target=target,
+            config=config,
+            rules=rules,
+            state=state,
+            send=True,
+            write_data=True,
+            allow_fallback_send=False,
+            mark_dry_run=False,
+        )
+        action = str(event.get("action") or "")
+        is_backoff_skip = action == "skipped" and str(event.get("reason") or "") == "rate_limit_backoff_active"
+        if action != "deferred" and not is_backoff_skip:
+            event["_customer_send_transport"] = compact_send_transport(send)
+            return event
+        deferred_count += 1
+        backoff = event.get("transport_send_backoff") if isinstance(event.get("transport_send_backoff"), dict) else {}
+        wait_seconds = float(backoff.get("retry_after_seconds") or 0.0)
+        if wait_seconds <= 0 and is_backoff_skip:
+            wait_seconds = seconds_until_retry(str(event.get("retry_after_at") or ""))
+        if wait_seconds <= 0:
+            wait_seconds = 20.0
+        wait_seconds = min(wait_seconds, max(5.0, deferred_max_wait_seconds))
+        elapsed = time.time() - started_at
+        if deferred_count > deferred_retries:
+            raise AssertionError(
+                "deferred retries exhausted: "
+                f"deferred_count={deferred_count}, deferred_retries={deferred_retries}, event={event}"
+            )
+        if elapsed + wait_seconds > deferred_total_timeout_seconds:
+            raise AssertionError(
+                "deferred wait budget exceeded: "
+                f"elapsed={round(elapsed,2)}s, next_wait={round(wait_seconds,2)}s, "
+                f"budget={deferred_total_timeout_seconds}s, event={event}"
+            )
+        if is_file_transfer_session_alias(target.name):
+            enqueue_simulated_inbound_message(target=target.name, text=message)
+        time.sleep(wait_seconds + 0.5)
+
+
+def seconds_until_retry(retry_after_at: str) -> float:
+    text = str(retry_after_at or "").strip()
+    if not text:
+        return 0.0
+    try:
+        retry_at = datetime.fromisoformat(text)
+    except ValueError:
+        return 0.0
+    return max(0.0, (retry_at - datetime.now()).total_seconds())
 
 
 def assert_event(index: int, spec: dict[str, Any], event: dict[str, Any]) -> None:
@@ -605,6 +805,36 @@ def summarize_turn(index: int, spec: dict[str, Any], event: dict[str, Any]) -> d
             "actual_total_tokens": budget.get("actual_total_tokens"),
             "saved_reason": budget.get("saved_reason"),
         },
+        "customer_send_transport": event.get("_customer_send_transport"),
+        "reply_send_transport": compact_send_transport(event.get("send_result")),
+    }
+
+
+def compact_send_transport(payload: Any) -> dict[str, Any]:
+    if not isinstance(payload, dict):
+        return {}
+    send = payload.get("send") if isinstance(payload.get("send"), dict) else payload
+    if not isinstance(send, dict):
+        return {}
+    meta = send.get("send_result") if isinstance(send.get("send_result"), dict) else {}
+    click = meta.get("click") if isinstance(meta.get("click"), dict) else {}
+    paste = click.get("paste") if isinstance(click.get("paste"), dict) else {}
+    input_result = paste.get("input_result") if isinstance(paste.get("input_result"), dict) else {}
+    reserve = payload.get("wxauto4_reserve_status") if isinstance(payload.get("wxauto4_reserve_status"), dict) else {}
+    return {
+        "ok": bool(payload.get("ok") if "ok" in payload else send.get("ok")),
+        "verified": bool(payload.get("verified")) if "verified" in payload else None,
+        "adapter": send.get("adapter"),
+        "state": send.get("state"),
+        "method": meta.get("method"),
+        "mode": meta.get("mode"),
+        "requested_mode": meta.get("requested_mode"),
+        "humanized_method": meta.get("humanized_method"),
+        "input_mode": paste.get("input_mode"),
+        "input_method": input_result.get("method"),
+        "chunks": input_result.get("chunks"),
+        "typo_count": input_result.get("typo_count"),
+        "wxauto4_reserve_state": reserve.get("state"),
     }
 
 

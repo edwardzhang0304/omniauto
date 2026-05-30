@@ -47,7 +47,7 @@ def main() -> int:
     if logs:
         payload["library_stdout"] = logs
 
-    print(json.dumps(payload, ensure_ascii=False, indent=2))
+    print(json.dumps(payload, ensure_ascii=True, indent=2))
     return 0 if payload.get("ok") else 1
 
 
@@ -65,12 +65,12 @@ def run_daemon() -> int:
         try:
             request = json.loads(line)
         except json.JSONDecodeError:
-            print(json.dumps({"ok": False, "error": "invalid_json"}, ensure_ascii=False))
+            print(json.dumps({"ok": False, "error": "invalid_json"}, ensure_ascii=True))
             sys.stdout.flush()
             continue
 
         if request.get("action") == "exit":
-            print(json.dumps({"ok": True, "state": "exiting"}, ensure_ascii=False))
+            print(json.dumps({"ok": True, "state": "exiting"}, ensure_ascii=True))
             sys.stdout.flush()
             return 0
 
@@ -90,7 +90,7 @@ def run_daemon() -> int:
                 "state": "main_window_not_found",
                 "window_probe": window_probe,
                 "error": "No visible WeChat main window was found.",
-            }, ensure_ascii=False))
+            }, ensure_ascii=True))
             sys.stdout.flush()
             continue
 
@@ -108,7 +108,7 @@ def run_daemon() -> int:
                     "connect_error": repr(exc),
                     "window_probe": window_probe,
                     "error": "Visible WeChat window exists, but wxauto4 could not attach to it.",
-                }, ensure_ascii=False))
+                }, ensure_ascii=True))
                 sys.stdout.flush()
                 continue
 
@@ -134,7 +134,7 @@ def run_daemon() -> int:
         if logs:
             payload["library_stdout"] = logs
 
-        print(json.dumps(payload, ensure_ascii=False))
+        print(json.dumps(payload, ensure_ascii=True))
         sys.stdout.flush()
 
     return 0

@@ -77,8 +77,8 @@ def _ensure_cloud_snapshot() -> None:
                         {
                             "id": "rag_participation",
                             "title": "RAG参与理解",
-                            "description": "RAG经验可以辅助理解和表达，但不能单独授权敏感承诺。",
-                            "instruction": "RAG经验必须积极参与理解和表达；如果使用了RAG，请在used_evidence里写入rag:chunk_id。RAG可以帮助解释、归纳、补充话术，但不能单独授权价格、库存、审批、合同、商品状态保证、售后赔付等敏感承诺。",
+                            "description": "AI经验池可以辅助理解和表达，但不能单独授权敏感承诺。",
+                            "instruction": "AI经验池必须积极参与理解和表达；如果使用了RAG，请在used_evidence里写入rag:chunk_id。RAG可以帮助解释、归纳、补充话术，但不能单独授权价格、库存、审批、合同、商品状态保证、售后赔付等敏感承诺。",
                             "enabled": True,
                         },
                         {
@@ -302,7 +302,7 @@ def check_rag_evidence_is_explicit_prompt_material() -> None:
     payload = json.dumps(prompt["user"], ensure_ascii=False)
     assert_true("rag:rag_chunk_used_car_family" in payload or "rag_chunk_used_car_family" in payload, "prompt should include RAG chunk id")
     assert_true("家庭用车经验" in payload, "prompt should include RAG text")
-    assert_true("RAG经验必须积极参与" in json.dumps(prompt, ensure_ascii=False), "prompt rules should emphasize RAG participation")
+    assert_true("AI经验池必须积极参与" in json.dumps(prompt, ensure_ascii=False), "prompt rules should emphasize RAG participation")
 
 
 def check_synthesis_prompt_is_domain_neutral() -> None:

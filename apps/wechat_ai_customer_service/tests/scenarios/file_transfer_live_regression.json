@@ -15,7 +15,7 @@
     "name": "product_quote_no_quantity",
     "messages": ["商用冰箱多少钱？"],
     "expect_action": "sent",
-    "expect_reply_contains": ["商用冰箱 BX-200", "999", "950"]
+    "expect_reply_contains": ["商用冰箱 BX-200", "1000", "950"]
   },
   {
     "name": "quantity_quote_with_shipping_city",

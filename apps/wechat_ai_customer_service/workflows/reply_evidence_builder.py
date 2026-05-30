@@ -1,9 +1,9 @@
 """Evidence packaging for guarded LLM reply synthesis.
 
 This module is intentionally additive. It reuses the existing structured
-knowledge and RAG resolver output, then packages it for an LLM that can write a
+knowledge and runtime-allowed retrieval output, then packages it for an LLM that can write a
 natural WeChat reply. The package is audit-friendly so operators can verify
-that RAG and formal knowledge actually participated.
+that product master, formal knowledge and current conversation facts actually participated.
 """
 
 from __future__ import annotations
@@ -16,6 +16,14 @@ from admin_backend.services.raw_message_store import RawMessageStore
 from apps.wechat_ai_customer_service.admin_backend.services.conversation_history import assemble_conversation_history
 from knowledge_loader import build_evidence_pack
 from knowledge_runtime import KnowledgeRuntime
+from evidence_authority import (
+    PRODUCT_MASTER_CATEGORY_ID,
+    annotate_authority,
+    authority_order_payload,
+    can_authorize_reply_content,
+    dedupe_authoritative_products,
+)
+from llm_common_sense_layer import build_common_sense_guidance, common_sense_prompt_fragment
 
 
 DEFAULT_MAX_HISTORY_MESSAGES = 40
@@ -56,6 +64,12 @@ def build_reply_evidence_pack(
         max_rag_hits=int(settings.get("max_rag_hits", DEFAULT_MAX_RAG_HITS) or DEFAULT_MAX_RAG_HITS),
         max_rag_text_chars=int(settings.get("max_rag_text_chars", DEFAULT_MAX_TEXT_CHARS) or DEFAULT_MAX_TEXT_CHARS),
         max_catalog_candidates=int(settings.get("max_catalog_candidates", 8) or 8),
+    )
+    common_sense = common_sense_prompt_fragment(
+        build_common_sense_guidance(
+            customer_message=combined,
+            conversation_context=context,
+        )
     )
     relax_soft_synthesis_safety(compact_knowledge)
     history = recent_history(
@@ -103,15 +117,20 @@ def build_reply_evidence_pack(
         "data_capture": compact_mapping(data_capture, max_text_chars=500),
         "intent_assist": compact_mapping(intent_assist, max_text_chars=900),
         "knowledge": compact_knowledge,
+        "authority_order": authority_order_payload(),
+        "common_sense": common_sense,
         "knowledge_error": knowledge_error,
         "evidence_ids": evidence_ids,
         "safety": compact_knowledge.get("safety", {}),
         "intent_tags": compact_knowledge.get("intent_tags", []),
         "customer_profile": _compact_profile(customer_profile),
+        "ai_experience_pool": compact_knowledge.get("ai_experience_pool", {}),
         "rag": compact_knowledge.get("rag_evidence", {}),
         "audit_summary": {
             "structured_evidence_count": structured_evidence_count(compact_knowledge),
+            "runtime_rag_hit_count": len((compact_knowledge.get("rag_evidence", {}) or {}).get("hits", []) or []),
             "rag_hit_count": len((compact_knowledge.get("rag_evidence", {}) or {}).get("hits", []) or []),
+            "excluded_ai_experience_pool_hit_count": int((compact_knowledge.get("ai_experience_pool", {}) or {}).get("excluded_hit_count") or 0),
             "rag_chunk_ids": [
                 str(item.get("chunk_id") or "")
                 for item in (compact_knowledge.get("rag_evidence", {}) or {}).get("hits", []) or []
@@ -199,7 +218,29 @@ def compact_knowledge_pack(
     rag_evidence = pack.get("rag_evidence", {}) or {}
     catalog_candidates = catalog_product_candidates(text, limit=max_catalog_candidates)
     item_limit = max(1, max_catalog_candidates)
+    products = [
+        annotate_authority(compact_mapping(item, max_text_chars=420), category_id=PRODUCT_MASTER_CATEGORY_ID)
+        for item in (evidence.get("products", []) or [])[:item_limit]
+    ]
+    catalog_candidates = [
+        annotate_authority(item, category_id=PRODUCT_MASTER_CATEGORY_ID)
+        for item in catalog_candidates
+        if isinstance(item, dict)
+    ]
+    product_master = dedupe_authoritative_products(products, catalog_candidates)[:item_limit]
+    faq = [
+        annotate_authority(compact_mapping(item, max_text_chars=360), category_id="faq")
+        for item in (evidence.get("faq", []) or [])[:item_limit]
+    ]
+    product_scoped = [
+        annotate_authority(compact_mapping(item, max_text_chars=360), category_id=str(item.get("category_id") or "product_faq"))
+        for item in (evidence.get("product_scoped", []) or [])[:item_limit]
+        if isinstance(item, dict)
+    ]
+    policies = compact_mapping(evidence.get("policies", {}) or {}, max_text_chars=700)
+    rag_evidence = compact_rag_evidence(rag_evidence, max_hits=max_rag_hits, max_text_chars=max_rag_text_chars)
     return {
+        "authority_order": authority_order_payload(),
         "intent_tags": list(pack.get("intent_tags", []) or []),
         "selected_items": [
             compact_mapping(item, max_text_chars=400)
@@ -207,20 +248,41 @@ def compact_knowledge_pack(
             if isinstance(item, dict)
         ],
         "evidence": {
-            "products": [compact_mapping(item, max_text_chars=420) for item in (evidence.get("products", []) or [])[:item_limit]],
-            "faq": [compact_mapping(item, max_text_chars=360) for item in (evidence.get("faq", []) or [])[:item_limit]],
-            "policies": compact_mapping(evidence.get("policies", {}) or {}, max_text_chars=700),
-            "product_scoped": [
-                compact_mapping(item, max_text_chars=360)
-                for item in (evidence.get("product_scoped", []) or [])[:item_limit]
-            ],
+            "products": products,
+            "faq": faq,
+            "policies": policies,
+            "product_scoped": product_scoped,
             "catalog_candidates": catalog_candidates,
             "style_examples": [
                 compact_mapping(item, max_text_chars=260)
                 for item in (evidence.get("style_examples", []) or [])[: min(item_limit, 2)]
             ],
         },
-        "rag_evidence": compact_rag_evidence(rag_evidence, max_hits=max_rag_hits, max_text_chars=max_rag_text_chars),
+        "product_master": {
+            "authority_level": "product_master",
+            "can_authorize_product_facts": True,
+            "items": product_master,
+        },
+        "formal_knowledge": {
+            "authority_level": "formal_knowledge",
+            "can_authorize_product_facts": False,
+            "faq": faq,
+            "policies": policies,
+            "product_scoped": product_scoped,
+        },
+        "ai_experience_pool": {
+            "authority_level": "ai_experience_pool",
+            "can_authorize_product_facts": False,
+            "can_authorize_reply_content": False,
+            "usage": "governance_and_distribution_only",
+            "excluded_hit_count": int(rag_evidence.get("excluded_hit_count") or 0),
+            "source": {
+                "enabled": rag_evidence.get("enabled", True),
+                "reason": rag_evidence.get("reason") or "ai_experience_pool_not_runtime_content_basis",
+                "hits": [],
+            },
+        },
+        "rag_evidence": rag_evidence,
         "safety": compact_mapping(pack.get("safety", {}) or {}, max_text_chars=700),
         "matched_categories": list(pack.get("matched_categories", []) or []),
     }
@@ -228,8 +290,12 @@ def compact_knowledge_pack(
 
 def compact_rag_evidence(rag_evidence: dict[str, Any], *, max_hits: int, max_text_chars: int = DEFAULT_MAX_TEXT_CHARS) -> dict[str, Any]:
     hits = []
+    excluded_hit_count = 0
     for item in rag_evidence.get("hits", []) or []:
         if not isinstance(item, dict):
+            continue
+        if not can_authorize_reply_content(item, category_id=str(item.get("category") or ""), source_type=str(item.get("source_type") or "")):
+            excluded_hit_count += 1
             continue
         hits.append(
             {
@@ -254,6 +320,7 @@ def compact_rag_evidence(rag_evidence: dict[str, Any], *, max_hits: int, max_tex
         "confidence": rag_evidence.get("confidence", 0.0),
         "rag_can_authorize": bool(rag_evidence.get("rag_can_authorize", False)),
         "structured_priority": rag_evidence.get("structured_priority", True),
+        "excluded_hit_count": excluded_hit_count,
         "hits": hits,
     }
 
@@ -272,7 +339,8 @@ def collect_evidence_ids(pack: dict[str, Any]) -> list[str]:
     for item in evidence.get("catalog_candidates", []) or []:
         append_id(ids, "catalog_product", item.get("id"))
     for item in (pack.get("rag_evidence", {}) or {}).get("hits", []) or []:
-        append_id(ids, "rag", item.get("chunk_id") or item.get("source_id"))
+        if can_authorize_reply_content(item, category_id=str(item.get("category") or ""), source_type=str(item.get("source_type") or "")):
+            append_id(ids, "rag", item.get("chunk_id") or item.get("source_id"))
     return ids
 
 
@@ -296,12 +364,12 @@ def structured_evidence_count(pack: dict[str, Any]) -> int:
 
 
 def relax_soft_synthesis_safety(pack: dict[str, Any]) -> None:
-    """Let the additive synthesis layer use catalog/RAG evidence for soft scenes.
+    """Let the additive synthesis layer use catalog and allowed retrieval evidence for soft scenes.
 
     The base safety layer may mark a broad natural-language question as
     `no_relevant_business_evidence` before catalog candidates are attached. For
     soft selection questions this module can now provide formal catalog
-    candidates plus RAG experience. We only relax that narrow no-evidence marker;
+    candidates plus runtime-allowed retrieval evidence. We only relax that narrow no-evidence marker;
     authority, price, finance, after-sales, or policy reasons remain untouched.
     """
     intent_tags = {str(item) for item in pack.get("intent_tags", []) or [] if str(item)}
@@ -406,6 +474,8 @@ def catalog_product_payload(item: dict[str, Any]) -> dict[str, Any]:
     data = item.get("data", {}) or {}
     return {
         "id": item.get("id"),
+        "category_id": PRODUCT_MASTER_CATEGORY_ID,
+        "authority_level": "product_master",
         "name": data.get("name"),
         "sku": data.get("sku"),
         "category": data.get("category"),

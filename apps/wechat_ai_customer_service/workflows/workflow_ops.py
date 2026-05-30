@@ -31,7 +31,7 @@ def main() -> int:
             source_files=args.source_files,
             strict_mode=args.strict_mode,
         )
-        print(json.dumps(result, ensure_ascii=False, indent=2))
+        print(json.dumps(result, ensure_ascii=True, indent=2))
         return 0 if result.get("ok") else 1
 
     if args.command == "import":
@@ -41,7 +41,7 @@ def main() -> int:
                 industry_id=args.industry_id,
                 input_file=args.input_file,
             )
-            print(json.dumps(result, ensure_ascii=False, indent=2))
+            print(json.dumps(result, ensure_ascii=True, indent=2))
             return 0 if result.get("ok") else 1
         result = service.apply_import(
             tenant_id=args.tenant_id,
@@ -50,7 +50,7 @@ def main() -> int:
             input_file=args.input_file,
             release_version=args.release_version,
         )
-        print(json.dumps(result, ensure_ascii=False, indent=2))
+        print(json.dumps(result, ensure_ascii=True, indent=2))
         return 0 if result.get("ok") else 1
 
     if args.command == "eval":
@@ -62,7 +62,7 @@ def main() -> int:
             suite_file=args.suite_file,
             metrics_gate=gate,
         )
-        print(json.dumps(result, ensure_ascii=False, indent=2))
+        print(json.dumps(result, ensure_ascii=True, indent=2))
         return 0 if result.get("ok") else 1
 
     if args.command == "release":
@@ -75,7 +75,7 @@ def main() -> int:
                 industry_id=args.industry_id,
                 metrics_gate=parse_metrics_gate(args.metrics_gate),
             )
-            print(json.dumps(result, ensure_ascii=False, indent=2))
+            print(json.dumps(result, ensure_ascii=True, indent=2))
             return 0 if result.get("ok") else 1
         if args.approve:
             result = service.approve_release(
@@ -83,7 +83,7 @@ def main() -> int:
                 approved_by=args.approved_by or os.getenv("USERNAME", "admin"),
                 approval_note=args.approval_note,
             )
-            print(json.dumps(result, ensure_ascii=False, indent=2))
+            print(json.dumps(result, ensure_ascii=True, indent=2))
             return 0 if result.get("ok") else 1
         if args.rollback:
             result = service.rollback_release(
@@ -91,12 +91,12 @@ def main() -> int:
                 rollback_to_version=args.rollback_to_version,
                 reason=args.reason,
             )
-            print(json.dumps(result, ensure_ascii=False, indent=2))
+            print(json.dumps(result, ensure_ascii=True, indent=2))
             return 0 if result.get("ok") else 1
-        print(json.dumps({"ok": False, "message": "specify --create / --approve / --rollback"}, ensure_ascii=False, indent=2))
+        print(json.dumps({"ok": False, "message": "specify --create / --approve / --rollback"}, ensure_ascii=True, indent=2))
         return 1
 
-    print(json.dumps({"ok": False, "message": f"unsupported command: {args.command}"}, ensure_ascii=False, indent=2))
+    print(json.dumps({"ok": False, "message": f"unsupported command: {args.command}"}, ensure_ascii=True, indent=2))
     return 1
 
 

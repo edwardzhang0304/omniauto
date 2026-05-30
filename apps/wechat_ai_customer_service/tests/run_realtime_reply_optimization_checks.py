@@ -3,8 +3,12 @@
 from __future__ import annotations
 
 import json
+import os
+import shutil
 import sys
 import tempfile
+import threading
+import time
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -19,19 +23,53 @@ for path in (PROJECT_ROOT, APP_ROOT, WORKFLOWS_ROOT, ADAPTERS_ROOT, SCRIPTS_ROOT
     if str(path) not in sys.path:
         sys.path.insert(0, str(path))
 
-from apps.wechat_ai_customer_service.knowledge_paths import tenant_context  # noqa: E402
+from apps.wechat_ai_customer_service.knowledge_paths import tenant_context, tenant_runtime_root  # noqa: E402
+from apps.wechat_ai_customer_service.admin_backend.services import recorder_runtime  # noqa: E402
+from customer_intent_assist import analyze_intent  # noqa: E402
 from knowledge_loader import build_evidence_pack  # noqa: E402
 from rag_answer_layer import extract_service_style_snippet  # noqa: E402
 from realtime_reply_router import (  # noqa: E402
     build_need_summary,
+    can_override_current_reply,
+    current_reply_has_substantive_body,
     decide_realtime_reply_route,
+    extract_budget_range_wan,
     extract_budget_wan,
     initial_token_budget,
     maybe_build_realtime_reply,
+    rank_product_candidates,
     reply_similarity,
 )
 from listen_and_reply import build_realtime_context_combined, recent_customer_visible_reply_texts  # noqa: E402
-from run_customer_service_listener import run_once  # noqa: E402
+from llm_reply_synthesis import normalize_advisor_synthesis_reply  # noqa: E402
+from recorder_loop import RecorderLoopControl  # noqa: E402
+from apps.wechat_ai_customer_service.admin_backend.services import customer_service_runtime  # noqa: E402
+from run_customer_service_listener import (  # noqa: E402
+    apply_operator_command,
+    apply_rpa_humanized_send_env,
+    create_runtime_transport_handoff_case,
+    evaluate_passive_logout_probe,
+    evaluate_runtime_target_guard,
+    evaluate_transport_risk,
+    estimate_managed_once_timeout_seconds,
+    managed_once_timeout_seconds,
+    normalize_operator_guard_settings,
+    normalize_rpa_humanized_send_settings,
+    normalize_runtime_target_guard_settings,
+    normalize_transport_risk_settings,
+    passive_probe_recalibration_due,
+    read_operator_control_state,
+    run_once,
+    sync_operator_mode,
+    verify_operator_guard_bootstrap,
+    write_operator_control_state,
+)
+from run_rpa_operator_guard import (  # noqa: E402
+    INDICATOR_THEMES,
+    indicator_state_snapshot,
+    normalize_indicator_backend,
+    write_runtime_status_hint,
+)
 
 
 TENANT_ID = "chejin"
@@ -60,6 +98,8 @@ def main() -> int:
         check_business_equipment_followup_direction_uses_candidates(),
         check_business_equipment_cargo_space_question_stays_local(),
         check_business_vehicle_compare_does_not_leak_unasked_tiguan(),
+        check_highway_trade_in_first_need_uses_catalog_candidates(),
+        check_highway_resale_followup_uses_contextual_catalog_candidates(),
         check_city_business_guidance_does_not_leak_spouse_context(),
         check_maintenance_cost_reply_avoids_unasked_mpv_context(),
         check_vehicle_condition_disclosure_question_stays_local(),
@@ -67,20 +107,41 @@ def main() -> int:
         check_trade_in_condition_with_specific_vehicle_preference_uses_candidates(),
         check_specific_price_approval_requires_handoff(),
         check_same_day_delivery_after_testdrive_requires_handoff(),
+        check_visit_material_question_preempts_vehicle_compare(),
         check_store_arrival_contact_requires_handoff(),
         check_split_need_burst_recommends_candidates_under_strict_budget(),
         check_short_strict_budget_cap_keeps_within_wording(),
         check_chinese_budget_range_prefers_longest_match(),
+        check_numeric_budget_range_is_preserved_in_summary(),
+        check_budget_range_recommendation_prefers_in_range_catalog(),
+        check_explicit_which_two_sources_uses_catalog_candidates(),
+        check_explicit_camry_accord_suv_question_gives_clear_priority(),
+        check_unrelated_ev_compare_uses_common_sense_advisor(),
+        check_mpv_family_compare_does_not_leak_business_cargo_context(),
+        check_explicit_mpv_need_filters_non_mpv_catalog_candidates(),
+        check_pre_purchase_maintenance_guidance_is_not_after_sales_handoff(),
+        check_common_sense_advisor_trims_unasked_inventory_details(),
+        check_advisor_postprocess_covers_all_listed_options(),
+        check_advisor_postprocess_demotes_over_budget_first_choice(),
+        check_recommendation_reply_is_concise(),
         check_realtime_context_bridge_uses_prior_need_for_followup_candidates(),
         check_recent_reply_requirement_context_keeps_strict_budget_when_marked_history_is_skipped(),
         check_context_bridge_current_visit_question_preempts_old_recommendation_need(),
+        check_context_bridge_vehicle_availability_visit_confirmation_stays_appointment_style(),
         check_context_bridge_current_compare_question_preempts_candidate_refresh(),
+        check_context_bridge_fresh_need_reset_drops_previous_flow_messages(),
+        check_existing_two_vehicle_compare_uses_recent_catalog_options_without_llm(),
         check_realtime_context_bridge_skips_unrelated_or_test_marked_history(),
         check_identity_probe_uses_local_denial_without_foreground_llm(),
         check_repeated_identity_probe_uses_reply_variants(),
         check_generic_recommendation_avoids_overused_random_push_phrase(),
         check_explicit_first_request_can_recommend_vehicle_sources(),
+        check_explicit_two_vehicle_request_preempts_common_sense_compare(),
+        check_generic_price_handoff_does_not_block_explicit_vehicle_candidates(),
+        check_prefix_only_reply_does_not_block_explicit_vehicle_candidates(),
+        check_recommendation_with_monthly_payment_context_still_uses_candidates(),
         check_specific_finance_question_does_not_force_vehicle_sources(),
+        check_finance_owner_question_does_not_refresh_vehicle_candidates(),
         check_safe_no_deposit_report_visit_stays_local(),
         check_greeting_with_business_context_is_not_pure_greeting(),
         check_followup_can_recommend_vehicle_sources(),
@@ -94,6 +155,41 @@ def main() -> int:
         check_repeated_recommendation_structure_is_diverse(),
         check_high_risk_skips_foreground_llm(),
         check_rag_metadata_cleanup(),
+        check_listener_transport_risk_login_stop(),
+        check_listener_transport_risk_quick_login_probe_stop(),
+        check_listener_transport_risk_invalid_hwnd_stop(),
+        check_listener_transport_risk_abnormal_window_stop(),
+        check_listener_transport_risk_send_input_threshold_stop(),
+        check_listener_transport_risk_warning_cooldown(),
+        check_listener_transport_risk_stale_hits_do_not_stop_without_new_signal(),
+        check_runtime_target_guard_blocks_disallowed_event(),
+        check_runtime_target_guard_allows_allowed_scheduler_event(),
+        check_listener_humanized_send_env_mapping(),
+        check_listener_operator_guard_settings_normalization(),
+        check_operator_guard_indicator_three_color_mapping(),
+        check_operator_guard_indicator_backend_defaults_to_layered(),
+        check_operator_guard_runtime_status_hint(),
+        check_listener_operator_guard_control_flow(),
+        check_listener_operator_guard_waits_for_delayed_ready_state(),
+        check_listener_operator_guard_rejects_stale_state(),
+        check_customer_service_status_suppresses_stale_operator_guard(),
+        check_runtime_worker_cmdline_tenant_exact_match(),
+        check_recorder_runtime_status_accepts_paused(),
+        check_recorder_operator_guard_launch_flow(),
+        check_recorder_loop_operator_control_commands(),
+        check_frontend_recorder_runtime_uses_actual_state(),
+        check_sidecar_open_chat_avoids_ctrl_a_selection(),
+        check_sidecar_history_scroll_avoids_click_drag(),
+        check_listener_passive_logout_probe_stop(),
+        check_listener_passive_blank_probe_stop(),
+        check_listener_passive_auxiliary_shell_probe_stop(),
+        check_listener_passive_empty_ocr_triggers_recalibration(),
+        check_listener_passive_recalibration_respects_cooldown(),
+        check_runtime_transport_logout_creates_handoff_stub(),
+        check_listener_status_atomic_write_retries_transient_lock(),
+        check_listener_rpa_watchdog_timeout_estimate(),
+        check_listener_rpa_watchdog_covers_long_humanized_typing(),
+        check_listener_watchdog_env_override(),
         check_listener_watchdog_timeout(),
     ]
     failures = [item for item in results if not item.get("ok")]
@@ -300,27 +396,28 @@ def check_business_vehicle_compare_does_not_leak_unasked_tiguan() -> dict[str, A
     recent = [
         "从14万以内、工作室用车/偶尔接客户、后备厢和装载实用这个条件看，奇骏和哈弗H6可以先排在前面。"
     ]
-    route = decide_realtime_reply_route(
-        config=config,
-        combined=message,
-        decision=Decision(),
-        intent_result=Intent(),
-        intent_assist={"intent": "product_inquiry", "evidence": {"safety": {"must_handoff": False, "reasons": []}}},
-        rag_reply={},
-        llm_reply={},
-        product_knowledge={},
-        data_capture={},
-        evidence_pack={},
-        recent_reply_texts=recent,
-    )
-    reply = maybe_build_realtime_reply(
-        config=config,
-        route=route,
-        combined=message,
-        evidence_pack={},
-        current_reply_text="",
-        recent_reply_texts=recent,
-    )
+    with tenant_context(TENANT_ID):
+        route = decide_realtime_reply_route(
+            config=config,
+            combined=message,
+            decision=Decision(),
+            intent_result=Intent(),
+            intent_assist={"intent": "product_inquiry", "evidence": {"safety": {"must_handoff": False, "reasons": []}}},
+            rag_reply={},
+            llm_reply={},
+            product_knowledge={},
+            data_capture={},
+            evidence_pack={},
+            recent_reply_texts=recent,
+        )
+        reply = maybe_build_realtime_reply(
+            config=config,
+            route=route,
+            combined=message,
+            evidence_pack={},
+            current_reply_text="",
+            recent_reply_texts=recent,
+        )
     text = str(reply.get("reply_text") or "")
     forbidden = ("途观", "老婆", "爱人", "女司机", "露营")
     ok = (
@@ -328,9 +425,97 @@ def check_business_vehicle_compare_does_not_leak_unasked_tiguan() -> dict[str, A
         and reply.get("applied") is True
         and "奇骏" in text
         and ("H6" in text or "哈弗" in text)
+        and any(marker in text for marker in ("先看奇骏", "奇骏优先", "奇骏放前面", "奇骏排前面"))
         and not any(marker in text for marker in forbidden)
     )
     return {"name": "business_vehicle_compare_does_not_leak_unasked_tiguan", "ok": ok, "route": route, "reply": reply}
+
+
+def check_highway_trade_in_first_need_uses_catalog_candidates() -> dict[str, Any]:
+    config = {"realtime_reply": {"enabled": True}, "llm_reply_synthesis": {"enabled": True}}
+    message = "刚加好友，我想换台跑高速稳一点的车，父母偶尔坐，预算13万以内，也想问置换。"
+    with tenant_context(TENANT_ID):
+        evidence_pack = build_evidence_pack(message, context={})
+        route = decide_realtime_reply_route(
+            config=config,
+            combined=message,
+            decision=Decision(),
+            intent_result=Intent(),
+            intent_assist={"intent": "product_inquiry", "evidence": {"safety": {"must_handoff": False, "reasons": []}}},
+            rag_reply={},
+            llm_reply={},
+            product_knowledge={},
+            data_capture={},
+            evidence_pack=evidence_pack,
+            recent_reply_texts=[],
+        )
+        reply = maybe_build_realtime_reply(
+            config=config,
+            route=route,
+            combined=message,
+            evidence_pack=evidence_pack,
+            current_reply_text="",
+            recent_reply_texts=[],
+        )
+    text = str(reply.get("reply_text") or "")
+    ok = (
+        route.get("reason") == "detailed_vehicle_need_ready_for_candidates"
+        and reply.get("applied") is True
+        and bool(reply.get("used_product_ids"))
+        and any(marker in text for marker in ("13万", "高速", "父母", "置换", "车况", "检测"))
+        and "参数" not in text
+        and "只看后排" not in text
+    )
+    return {"name": "highway_trade_in_first_need_uses_catalog_candidates", "ok": ok, "route": route, "reply": reply}
+
+
+def check_highway_resale_followup_uses_contextual_catalog_candidates() -> dict[str, Any]:
+    config = {"realtime_reply": {"enabled": True}, "llm_reply_synthesis": {"enabled": True}}
+    state = {
+        "sent_replies": [
+            {
+                "processed_at": datetime.now().isoformat(),
+                "message_contents": ["刚加好友，我想换台跑高速稳一点的车，父母偶尔坐，预算13万以内，也想问置换。"],
+                "reply_text": "按13万以内、高速稳、父母偶尔坐和置换一起看，可以先缩到两台，车况确认后再谈置换。",
+            }
+        ]
+    }
+    current = "更在意后排舒服和以后再卖别亏太多，按刚才需求你会怎么排？"
+    combined = build_realtime_context_combined(current, state)
+    recent = recent_customer_visible_reply_texts(state)
+    with tenant_context(TENANT_ID):
+        evidence_pack = build_evidence_pack(combined, context={})
+        route = decide_realtime_reply_route(
+            config=config,
+            combined=combined,
+            decision=Decision(),
+            intent_result=Intent(),
+            intent_assist={"intent": "product_inquiry", "evidence": {"safety": {"must_handoff": False, "reasons": []}}},
+            rag_reply={},
+            llm_reply={},
+            product_knowledge={},
+            data_capture={},
+            evidence_pack=evidence_pack,
+            recent_reply_texts=recent,
+        )
+        reply = maybe_build_realtime_reply(
+            config=config,
+            route=route,
+            combined=combined,
+            evidence_pack=evidence_pack,
+            current_reply_text="",
+            recent_reply_texts=recent,
+        )
+    text = str(reply.get("reply_text") or "")
+    ok = (
+        "近期客户需求" in combined
+        and route.get("reason") == "detailed_vehicle_need_ready_for_candidates"
+        and reply.get("applied") is True
+        and bool(reply.get("used_product_ids"))
+        and any(marker in text for marker in ("后排", "舒服", "保值", "车况", "检测", "13万"))
+        and "只看后排" not in text
+    )
+    return {"name": "highway_resale_followup_uses_contextual_catalog_candidates", "ok": ok, "combined": combined, "route": route, "reply": reply}
 
 
 def check_city_business_guidance_does_not_leak_spouse_context() -> dict[str, Any]:
@@ -518,26 +703,34 @@ def check_trade_in_condition_with_specific_vehicle_preference_uses_candidates() 
 
 
 def check_specific_price_approval_requires_handoff() -> dict[str, Any]:
-    message = "这台途观L价格15.8，你帮我问问15整能不能谈？"
-    route = decide_realtime_reply_route(
-        config={"realtime_reply": {"enabled": True}, "llm_reply_synthesis": {"enabled": True}},
-        combined=message,
-        decision=Decision(),
-        intent_result=Intent(),
-        intent_assist={"intent": "quote_request", "evidence": {"safety": {"must_handoff": False, "reasons": []}}},
-        rag_reply={},
-        llm_reply={},
-        product_knowledge={},
-        data_capture={},
-        evidence_pack={},
-        recent_reply_texts=["途观L可以优先看，价格再结合车况和置换确认。"],
-    )
-    ok = (
+    messages = [
+        "这台途观L价格15.8，你帮我问问15整能不能谈？",
+        "那台哈弗H6标7.28，你帮我问问7万能不能谈？",
+    ]
+    routes = []
+    for message in messages:
+        routes.append(
+            decide_realtime_reply_route(
+                config={"realtime_reply": {"enabled": True}, "llm_reply_synthesis": {"enabled": True}},
+                combined=message,
+                decision=Decision(),
+                intent_result=Intent(),
+                intent_assist={"intent": "quote_request", "evidence": {"safety": {"must_handoff": False, "reasons": []}}},
+                rag_reply={},
+                llm_reply={},
+                product_knowledge={},
+                data_capture={},
+                evidence_pack={},
+                recent_reply_texts=["途观L可以优先看，价格再结合车况和置换确认。"],
+            )
+        )
+    ok = all(
         route.get("level") == "L0"
         and route.get("reason") == "deterministic_handoff_or_high_risk_boundary"
         and route.get("foreground_llm_allowed") is False
+        for route in routes
     )
-    return {"name": "specific_price_approval_requires_handoff", "ok": ok, "route": route}
+    return {"name": "specific_price_approval_requires_handoff", "ok": ok, "routes": routes}
 
 
 def check_same_day_delivery_after_testdrive_requires_handoff() -> dict[str, Any]:
@@ -561,6 +754,45 @@ def check_same_day_delivery_after_testdrive_requires_handoff() -> dict[str, Any]
         and route.get("foreground_llm_allowed") is False
     )
     return {"name": "same_day_delivery_after_testdrive_requires_handoff", "ok": ok, "route": route}
+
+
+def check_visit_material_question_preempts_vehicle_compare() -> dict[str, Any]:
+    message = "去之前我要带身份证、驾驶证还是旧车手续？"
+    recent = [
+        "按13万以内、长途/后排舒适、兼顾置换，我会看2019款宝马320Li和2020款奇骏。",
+        "好的王先生，周二上午十点您到店，旧车置换我也一起备注。",
+    ]
+    config = {"realtime_reply": {"enabled": True}, "llm_reply_synthesis": {"enabled": True}}
+    route = decide_realtime_reply_route(
+        config=config,
+        combined=message,
+        decision=Decision(),
+        intent_result=Intent(),
+        intent_assist={"intent": "policy_inquiry", "evidence": {"safety": {"must_handoff": False, "reasons": []}}},
+        rag_reply={},
+        llm_reply={},
+        product_knowledge={},
+        data_capture={},
+        evidence_pack={},
+        recent_reply_texts=recent,
+    )
+    reply = maybe_build_realtime_reply(
+        config=config,
+        route=route,
+        combined=message,
+        evidence_pack={},
+        current_reply_text="",
+        recent_reply_texts=recent,
+    )
+    text = str(reply.get("reply_text") or "")
+    ok = (
+        route.get("reason") == "common_testdrive_materials_can_use_local_style"
+        and route.get("foreground_llm_allowed") is False
+        and reply.get("rule_name") == "realtime_testdrive_materials"
+        and all(marker in text for marker in ("身份证", "驾驶证"))
+        and any(marker in text for marker in ("旧车", "行驶证", "登记证书", "手续"))
+    )
+    return {"name": "visit_material_question_preempts_vehicle_compare", "ok": ok, "route": route, "reply": reply}
 
 
 def check_store_arrival_contact_requires_handoff() -> dict[str, Any]:
@@ -643,6 +875,397 @@ def check_chinese_budget_range_prefers_longest_match() -> dict[str, Any]:
     parsed = {text: extract_budget_wan(f"预算{text}，想买个家用车") for text in cases}
     ok = all(abs(parsed[text] - expected) < 0.01 for text, expected in cases.items())
     return {"name": "chinese_budget_range_prefers_longest_match", "ok": ok, "parsed": parsed}
+
+
+def check_numeric_budget_range_is_preserved_in_summary() -> dict[str, Any]:
+    message = "你好，我预算12到15万，想买省心家用二手车，主要上下班和接娃。"
+    budget_range = extract_budget_range_wan(message)
+    summary = build_need_summary(message)
+    ok = budget_range == (12.0, 15.0) and "12-15万" in summary and "15万左右" not in summary
+    return {"name": "numeric_budget_range_is_preserved_in_summary", "ok": ok, "range": budget_range, "summary": summary}
+
+
+def check_budget_range_recommendation_prefers_in_range_catalog() -> dict[str, Any]:
+    message = "你好，我预算12到15万，想买省心家用二手车，主要上下班和接娃，南京能看车吗？"
+    low_evidence = {
+        "evidence": {
+            "products": [
+                {
+                    "id": "chejin_mazda3_2020_20l",
+                    "name": "2020款马自达3昂克赛拉2.0L 自动质雅版",
+                    "category": "二手车/紧凑型轿车",
+                    "price": 9.58,
+                    "stock": 1,
+                    "specs": "一手车，公里数少，适合年轻家庭通勤。",
+                },
+                {
+                    "id": "chejin_crider_2019_180turbo",
+                    "name": "2019款本田凌派180TURBO CVT舒适版",
+                    "category": "二手车/紧凑型轿车",
+                    "price": 5.88,
+                    "stock": 1,
+                    "specs": "空间宽敞，燃油经济性不错。",
+                },
+            ]
+        }
+    }
+    with tenant_context(TENANT_ID):
+        candidates = rank_product_candidates(
+            message,
+            low_evidence,
+            allow_catalog_fallback=True,
+            allow_broad_fallback=True,
+        )
+        route = decide_realtime_reply_route(
+            config={"realtime_reply": {"enabled": True}},
+            combined=message,
+            decision=Decision(),
+            intent_result=Intent(),
+            intent_assist={"intent": "product_inquiry", "evidence": {"safety": {"must_handoff": False}}},
+            rag_reply={},
+            llm_reply={},
+            product_knowledge={},
+            data_capture={},
+            evidence_pack=low_evidence,
+            recent_reply_texts=[],
+        )
+        reply = maybe_build_realtime_reply(
+            config={"realtime_reply": {"enabled": True}},
+            route=route,
+            combined=message,
+            evidence_pack=low_evidence,
+            current_reply_text="",
+            recent_reply_texts=[],
+        )
+    top_ids = [str(item.get("id") or "") for item in candidates[:2]]
+    text = str(reply.get("reply_text") or "")
+    ok = (
+        reply.get("applied") is True
+        and top_ids
+        and "chejin_mazda3_2020_20l" not in top_ids
+        and "chejin_crider_2019_180turbo" not in top_ids
+        and "9.58万" not in text
+        and "5.88万" not in text
+        and any(price in text for price in ("12.8万", "13.8万", "14.5万", "15.5万", "15.8万"))
+    )
+    return {
+        "name": "budget_range_recommendation_prefers_in_range_catalog",
+        "ok": ok,
+        "top_ids": top_ids,
+        "reply": reply,
+    }
+
+
+def check_explicit_which_two_sources_uses_catalog_candidates() -> dict[str, Any]:
+    message = "我预算12到15万，想买台省心点的家用车，车况透明、油耗别太高，你按现在商品库建议先看哪两台？"
+    config = {"realtime_reply": {"enabled": True}, "llm_reply_synthesis": {"enabled": True}}
+    with tenant_context(TENANT_ID):
+        evidence_pack = build_evidence_pack(message, context={})
+        route = decide_realtime_reply_route(
+            config=config,
+            combined=message,
+            decision=Decision(),
+            intent_result=Intent(),
+            intent_assist={"intent": "product_inquiry", "evidence": {"safety": {"must_handoff": False}}},
+            rag_reply={},
+            llm_reply={},
+            product_knowledge={},
+            data_capture={},
+            evidence_pack=evidence_pack,
+            recent_reply_texts=[],
+        )
+        reply = maybe_build_realtime_reply(
+            config=config,
+            route=route,
+            combined=message,
+            evidence_pack=evidence_pack,
+            current_reply_text="",
+            recent_reply_texts=[],
+        )
+    text = str(reply.get("reply_text") or "")
+    used_ids = set(reply.get("used_product_ids") or [])
+    ok = (
+        route.get("reason") in {"explicit_vehicle_candidates_requested", "detailed_vehicle_need_ready_for_candidates"}
+        and reply.get("rule_name") == "realtime_local_recommendation"
+        and len(used_ids) >= 2
+        and {"chejin_bmw320_2019_m", "chejin_audi_a4l_2018_40tfsi"} <= used_ids
+        and "12.8万" in text
+        and "14.5万" in text
+        and "奇骏" not in text
+        and "哪两台不要" not in text
+    )
+    return {"name": "explicit_which_two_sources_uses_catalog_candidates", "ok": ok, "route": route, "reply": reply}
+
+
+def check_explicit_camry_accord_suv_question_gives_clear_priority() -> dict[str, Any]:
+    message = "如果优先车况透明、油耗别高，你会建议我先看凯美瑞、雅阁还是SUV？"
+    config = {"realtime_reply": {"enabled": True}, "llm_reply_synthesis": {"enabled": True}}
+    route = decide_realtime_reply_route(
+        config=config,
+        combined=message,
+        decision=Decision(),
+        intent_result=Intent(),
+        intent_assist={"intent": "product_inquiry", "evidence": {"safety": {"must_handoff": False}}},
+        rag_reply={},
+        llm_reply={},
+        product_knowledge={},
+        data_capture={},
+        evidence_pack={},
+        recent_reply_texts=[],
+    )
+    reply = maybe_build_realtime_reply(
+        config=config,
+        route=route,
+        combined=message,
+        evidence_pack={},
+        current_reply_text="",
+        recent_reply_texts=[],
+    )
+    text = str(reply.get("reply_text") or "")
+    ok = (
+        route.get("reason") == "common_vehicle_compare_can_use_local_style"
+        and route.get("foreground_llm_allowed") is True
+        and route.get("advisor_mode") == "clear_common_sense_recommendation"
+        and reply.get("rule_name") == "realtime_vehicle_compare_guidance"
+        and any(marker in text for marker in ("先看", "排前面", "先按"))
+        and any(marker in text for marker in ("SUV先放备选", "SUV做备选", "再对比SUV"))
+        and len(text) <= 140
+    )
+    return {"name": "explicit_camry_accord_suv_question_gives_clear_priority", "ok": ok, "route": route, "reply": reply}
+
+
+def check_unrelated_ev_compare_uses_common_sense_advisor() -> dict[str, Any]:
+    message = "如果在比亚迪海豚、欧拉好猫、大众ID.3里面选，你建议我先看哪一类？不想太贵，也不想后期维修麻烦。"
+    config = {"realtime_reply": {"enabled": True}, "llm_reply_synthesis": {"enabled": True}}
+    route = decide_realtime_reply_route(
+        config=config,
+        combined=message,
+        decision=Decision(),
+        intent_result=Intent(),
+        intent_assist={"intent": "product_inquiry", "evidence": {"safety": {"must_handoff": False}}},
+        rag_reply={},
+        llm_reply={},
+        product_knowledge={},
+        data_capture={},
+        evidence_pack={},
+        recent_reply_texts=[],
+    )
+    ok = (
+        route.get("reason") == "common_vehicle_compare_can_use_local_style"
+        and route.get("foreground_llm_allowed") is True
+        and route.get("advisor_mode") == "clear_common_sense_recommendation"
+    )
+    return {"name": "unrelated_ev_compare_uses_common_sense_advisor", "ok": ok, "route": route}
+
+
+def check_mpv_family_compare_does_not_leak_business_cargo_context() -> dict[str, Any]:
+    config = {"realtime_reply": {"enabled": True}, "llm_reply_synthesis": {"enabled": True}}
+    message = "GL8和奥德赛这种，哪个更适合家用？我不想商务味太重。"
+    route = decide_realtime_reply_route(
+        config=config,
+        combined=message,
+        decision=Decision(),
+        intent_result=Intent(),
+        intent_assist={"intent": "product_inquiry", "evidence": {"safety": {"must_handoff": False}}},
+        rag_reply={},
+        llm_reply={},
+        product_knowledge={},
+        data_capture={},
+        evidence_pack={},
+        recent_reply_texts=[],
+    )
+    reply = maybe_build_realtime_reply(
+        config=config,
+        route=route,
+        combined=message,
+        evidence_pack={},
+        current_reply_text="",
+        recent_reply_texts=[],
+    )
+    text = str(reply.get("reply_text") or "")
+    ok = (
+        route.get("reason") == "common_vehicle_compare_can_use_local_style"
+        and reply.get("applied") is True
+        and "GL8" in text
+        and "奥德赛" in text
+        and any(marker in text for marker in ("家用", "家庭", "商务感", "商务味"))
+        and "物料" not in text
+        and "活动" not in text
+        and "接客户" not in text
+    )
+    return {"name": "mpv_family_compare_does_not_leak_business_cargo_context", "ok": ok, "route": route, "reply": reply}
+
+
+def check_explicit_mpv_need_filters_non_mpv_catalog_candidates() -> dict[str, Any]:
+    config = {"realtime_reply": {"enabled": True}, "llm_reply_synthesis": {"enabled": True}}
+    message = "刚加好友，家里两个孩子，老人也经常一起坐，想看MPV或大七座，预算18万以内。"
+    with tenant_context(TENANT_ID):
+        evidence_pack = build_evidence_pack(message, context={})
+        ranked = rank_product_candidates(message, evidence_pack, allow_catalog_fallback=True, allow_broad_fallback=True)
+        route = decide_realtime_reply_route(
+            config=config,
+            combined=message,
+            decision=Decision(),
+            intent_result=Intent(),
+            intent_assist={"intent": "product_inquiry", "evidence": {"safety": {"must_handoff": False}}},
+            rag_reply={},
+            llm_reply={},
+            product_knowledge={},
+            data_capture={},
+            evidence_pack=evidence_pack,
+            recent_reply_texts=[],
+        )
+        reply = maybe_build_realtime_reply(
+            config=config,
+            route=route,
+            combined=message,
+            evidence_pack=evidence_pack,
+            current_reply_text="",
+            recent_reply_texts=[],
+        )
+    ranked_text = "\n".join(str(item.get("name") or "") for item in ranked[:5])
+    text = str(reply.get("reply_text") or "")
+    ok = (
+        route.get("reason") in {"explicit_vehicle_candidates_requested", "detailed_vehicle_need_ready_for_candidates"}
+        and reply.get("applied") is True
+        and bool(reply.get("used_product_ids"))
+        and "GL8" in text
+        and "ES6" not in text
+        and "蔚来" not in text
+        and "ES6" not in ranked_text
+        and "蔚来" not in ranked_text
+    )
+    return {
+        "name": "explicit_mpv_need_filters_non_mpv_catalog_candidates",
+        "ok": ok,
+        "route": route,
+        "reply": reply,
+        "ranked": ranked[:5],
+    }
+
+
+def check_pre_purchase_maintenance_guidance_is_not_after_sales_handoff() -> dict[str, Any]:
+    message = "如果在比亚迪海豚、欧拉好猫、大众ID.3里面选，你建议我先看哪一类？不想太贵，也不想后期维修麻烦。"
+    intent = analyze_intent(message)
+    with tenant_context(TENANT_ID):
+        evidence_pack = build_evidence_pack(message, context={})
+    safety = evidence_pack.get("safety") if isinstance(evidence_pack.get("safety"), dict) else {}
+    tags = set(evidence_pack.get("intent_tags") or [])
+    safety_reasons = {str(item) for item in safety.get("reasons", []) or [] if str(item)}
+    ok = (
+        intent.intent != "after_sales_policy"
+        and "after_sales" not in tags
+        and "scene_product" in tags
+        and safety_reasons <= {"no_relevant_business_evidence", "auto_reply_disabled"}
+    )
+    return {
+        "name": "pre_purchase_maintenance_guidance_is_not_after_sales_handoff",
+        "ok": ok,
+        "intent": intent.intent,
+        "tags": sorted(tags),
+        "safety": safety,
+    }
+
+
+def check_common_sense_advisor_trims_unasked_inventory_details() -> dict[str, Any]:
+    message = "如果优先车况透明、油耗别高，你会建议我先看凯美瑞、雅阁还是SUV？"
+    draft = (
+        "如果您更看重车况透明、油耗别太高，我建议先看凯美瑞/雅阁这类中级轿车，再考虑SUV。"
+        "我们这边有21年凯美瑞2.0（4.8万公里，南京现车），车况以268项检测报告和合同为准，也支持第三方检测；"
+        "方便的话我给您安排到店看车时间？"
+    )
+    cleaned = normalize_advisor_synthesis_reply(
+        draft,
+        evidence_pack={"current_message": message},
+        settings={"advisor_mode": "clear_common_sense_recommendation"},
+    )
+    ok = (
+        "先看凯美瑞" in cleaned
+        and "SUV" in cleaned
+        and "南京现车" not in cleaned
+        and "4.8万公里" not in cleaned
+        and "安排到店" not in cleaned
+        and len(cleaned) < len(draft)
+    )
+    return {"name": "common_sense_advisor_trims_unasked_inventory_details", "ok": ok, "cleaned": cleaned}
+
+
+def check_advisor_postprocess_covers_all_listed_options() -> dict[str, Any]:
+    ev_message = "预算8到10万，纯电上下班和接娃用；海豚、欧拉好猫、ID.3这三个你给我排个优先级吧，我更在意省心、别太贵、后期少维修。"
+    ev_draft = "按您8-10万、偏省心/别太贵/后期少维修：优先海豚；备选欧拉好猫。"
+    ev_cleaned = normalize_advisor_synthesis_reply(
+        ev_draft,
+        evidence_pack={"current_message": ev_message},
+        settings={"advisor_mode": "clear_common_sense_recommendation"},
+    )
+    mpv_message = "我预算18到22万，想买兼顾商务接待和家用长途的二手MPV；GL8、奥德赛、塞纳三款怎么排优先级？"
+    mpv_draft = "按您18-22万、想兼顾舒适/油耗/省心的需求：优先考虑奥德赛混动；其次GL8。"
+    mpv_cleaned = normalize_advisor_synthesis_reply(
+        mpv_draft,
+        evidence_pack={"current_message": mpv_message},
+        settings={"advisor_mode": "clear_common_sense_recommendation"},
+    )
+    small_car_message = "我预算5到7万，想给家里老人买台二手小车，Polo、飞度、致炫这三款怎么选？主要要省油、好停、后期省心，别推荐太贵的。"
+    small_car_draft = "按您5-7万、给老人用“省油/好停/省心”优先级：致炫＞飞度。"
+    small_car_cleaned = normalize_advisor_synthesis_reply(
+        small_car_draft,
+        evidence_pack={"current_message": small_car_message},
+        settings={"advisor_mode": "clear_common_sense_recommendation"},
+    )
+    ok = (
+        all(term in ev_cleaned for term in ("海豚", "欧拉好猫", "ID.3"))
+        and all(term in mpv_cleaned for term in ("GL8", "奥德赛", "塞纳"))
+        and all(term in small_car_cleaned for term in ("Polo", "飞度", "致炫"))
+        and "我预算5到7万" not in small_car_cleaned
+        and "家里老人" not in small_car_cleaned
+        and "想给家" not in small_car_cleaned
+        and "备选" in ev_cleaned
+        and "备选" in mpv_cleaned
+        and "备选" in small_car_cleaned
+    )
+    return {
+        "name": "advisor_postprocess_covers_all_listed_options",
+        "ok": ok,
+        "ev_cleaned": ev_cleaned,
+        "mpv_cleaned": mpv_cleaned,
+        "small_car_cleaned": small_car_cleaned,
+    }
+
+
+def check_advisor_postprocess_demotes_over_budget_first_choice() -> dict[str, Any]:
+    message = "我预算18到22万，想买兼顾商务接待和家用长途的二手MPV；GL8、奥德赛、塞纳这三款你建议怎么排？"
+    draft = "按您更看重舒适省油省心，建议优先：塞纳＞奥德赛＞GL8。塞纳舒适和长途综合最好但您18-22万预算大概率够不到。"
+    cleaned = normalize_advisor_synthesis_reply(
+        draft,
+        evidence_pack={"current_message": message},
+        settings={"advisor_mode": "clear_common_sense_recommendation"},
+    )
+    ok = (
+        "先看奥德赛、GL8" in cleaned
+        and "塞纳" in cleaned
+        and "超预算备选" in cleaned
+        and "优先：塞纳" not in cleaned
+    )
+    return {"name": "advisor_postprocess_demotes_over_budget_first_choice", "ok": ok, "cleaned": cleaned}
+
+
+def check_recommendation_reply_is_concise() -> dict[str, Any]:
+    message = "你好，我预算12到15万，想买省心家用二手车，主要上下班和接娃，南京能看车吗？"
+    products = [
+        {"id": "a4l", "name": "2018款奥迪A4L 40TFSI 时尚型", "category": "二手车/中型轿车", "price": 14.5, "stock": 1},
+        {"id": "crown", "name": "2018款丰田皇冠2.0T 运动版", "category": "二手车/中大型轿车", "price": 13.8, "stock": 1},
+    ]
+    reply = maybe_build_realtime_reply(
+        config={"realtime_reply": {"enabled": True}},
+        route={"enabled": True, "level": "L1", "reason": "detailed_vehicle_need_ready_for_candidates"},
+        combined=message,
+        evidence_pack={"evidence": {"products": products}},
+        current_reply_text="",
+        recent_reply_texts=[],
+    )
+    text = str(reply.get("reply_text") or "")
+    ok = reply.get("applied") is True and len(text) <= 115 and "另外" not in text and "我再帮你把优先顺序细化" not in text
+    return {"name": "recommendation_reply_is_concise", "ok": ok, "reply_text": text, "chars": len(text)}
 
 
 def check_realtime_context_bridge_uses_prior_need_for_followup_candidates() -> dict[str, Any]:
@@ -799,6 +1422,48 @@ def check_context_bridge_current_visit_question_preempts_old_recommendation_need
     return {"name": "context_bridge_current_visit_question_preempts_old_recommendation_need", "ok": ok, "route": route, "reply": reply}
 
 
+def check_context_bridge_vehicle_availability_visit_confirmation_stays_appointment_style() -> dict[str, Any]:
+    config = {"realtime_reply": {"enabled": True}, "llm_reply_synthesis": {"enabled": True}}
+    combined = (
+        "近期客户需求：\n"
+        "- 想换台跑高速稳一点的车，父母偶尔坐，预算13万以内，也想问置换。\n"
+        "- 旧车是2018年朗逸，8万多公里，南京牌，想一起置换。\n"
+        "当前客户问题：如果置换价合适，我周二上午十点能过去看车，先确认车还在不在。"
+    )
+    route = decide_realtime_reply_route(
+        config=config,
+        combined=combined,
+        decision=Decision(),
+        intent_result=Intent(),
+        intent_assist={"intent": "product_inquiry", "evidence": {"safety": {"must_handoff": False}}},
+        rag_reply={},
+        llm_reply={},
+        product_knowledge={},
+        data_capture={},
+        evidence_pack={},
+        recent_reply_texts=["置换可以先把旧车年份、公里数和南京牌信息记下来。"],
+    )
+    reply = maybe_build_realtime_reply(
+        config=config,
+        route=route,
+        combined=combined,
+        evidence_pack={},
+        current_reply_text="",
+        recent_reply_texts=["置换可以先把旧车年份、公里数和南京牌信息记下来。"],
+    )
+    text = str(reply.get("reply_text") or "")
+    ok = (
+        route.get("level") == "L1"
+        and route.get("reason") == "common_visit_timing_can_use_local_style"
+        and reply.get("applied") is True
+        and not reply.get("used_product_ids")
+        and any(marker in text for marker in ("周二", "十点", "上午"))
+        and any(marker in text for marker in ("车还在", "车源", "排期", "确认"))
+        and "置换" in text
+    )
+    return {"name": "context_bridge_vehicle_availability_visit_confirmation_stays_appointment_style", "ok": ok, "route": route, "reply": reply}
+
+
 def check_context_bridge_current_compare_question_preempts_candidate_refresh() -> dict[str, Any]:
     config = {"realtime_reply": {"enabled": True}, "llm_reply_synthesis": {"enabled": True}}
     combined = (
@@ -836,6 +1501,101 @@ def check_context_bridge_current_compare_question_preempts_candidate_refresh() -
         and any(marker in text for marker in ("停车", "好停", "好开", "车况", "试"))
     )
     return {"name": "context_bridge_current_compare_question_preempts_candidate_refresh", "ok": ok, "route": route, "reply": reply}
+
+
+def check_context_bridge_fresh_need_reset_drops_previous_flow_messages() -> dict[str, Any]:
+    config = {"realtime_reply": {"enabled": True}, "llm_reply_synthesis": {"enabled": True}}
+    mixed_visible_batch = (
+        "GL8和奥德赛都可以对比着看。偏家用的话我会更看重舒适、省油和第三排乘坐感受。\n"
+        "儿童座椅接口、保养记录这些到店能一起看吗？(OLD-MPV-E6)\n"
+        "刚加上，我自己开公司，平时跑客户接待用，预算10到12万，想要体面一点又别太费油。(NEW-BIZ-F1)"
+    )
+    combined = build_realtime_context_combined(mixed_visible_batch, {"sent_replies": []})
+    with tenant_context(TENANT_ID):
+        evidence_pack = build_evidence_pack(combined, context={})
+        route = decide_realtime_reply_route(
+            config=config,
+            combined=combined,
+            decision=Decision(),
+            intent_result=Intent(),
+            intent_assist={"intent": "product_inquiry", "evidence": {"safety": {"must_handoff": False}}},
+            rag_reply={},
+            llm_reply={},
+            product_knowledge={},
+            data_capture={},
+            evidence_pack=evidence_pack,
+            recent_reply_texts=[],
+        )
+        reply = maybe_build_realtime_reply(
+            config=config,
+            route=route,
+            combined=combined,
+            evidence_pack=evidence_pack,
+            current_reply_text="",
+            recent_reply_texts=[],
+        )
+    text = str(reply.get("reply_text") or "")
+    ok = (
+        combined.startswith("刚加上")
+        and "OLD-MPV" not in combined
+        and route.get("level") == "L1"
+        and route.get("reason") == "detailed_vehicle_need_ready_for_candidates"
+        and reply.get("applied") is True
+        and bool(reply.get("used_product_ids"))
+        and "MPV" not in text
+        and "奥德赛" not in text
+        and "赛那" not in text
+        and "28.5万" not in text
+    )
+    return {
+        "name": "context_bridge_fresh_need_reset_drops_previous_flow_messages",
+        "ok": ok,
+        "combined": combined,
+        "route": route,
+        "reply": reply,
+    }
+
+
+def check_existing_two_vehicle_compare_uses_recent_catalog_options_without_llm() -> dict[str, Any]:
+    config = {"realtime_reply": {"enabled": True}, "llm_reply_synthesis": {"enabled": True}}
+    combined = "当前客户问题：这两台里哪台更适合新手停车？我爱人倒车不太熟。"
+    recent = [
+        "按您9万以内、自动挡、优先倒车影像，先重点看2020款哈弗H6 2.0GDIT 自动冠军版和2020款大众高尔夫280TSI DSG舒适型。",
+        "按您刚才的要求直接先给您挑两台：2018款大众Polo 1.5L 自动安驾版（4.58万）和2020款哈弗H6 2.0GDIT 自动冠军版（7.28万）可先看；车况确认后再谈贷款/置换。"
+    ]
+    with tenant_context(TENANT_ID):
+        route = decide_realtime_reply_route(
+            config=config,
+            combined=combined,
+            decision=Decision(),
+            intent_result=Intent(),
+            intent_assist={"intent": "product_inquiry", "evidence": {"safety": {"must_handoff": False}}},
+            rag_reply={},
+            llm_reply={},
+            product_knowledge={},
+            data_capture={},
+            evidence_pack={},
+            recent_reply_texts=recent,
+        )
+        reply = maybe_build_realtime_reply(
+            config=config,
+            route=route,
+            combined=combined,
+            evidence_pack={},
+            current_reply_text="",
+            recent_reply_texts=recent,
+        )
+    text = str(reply.get("reply_text") or "")
+    ok = (
+        route.get("reason") == "common_vehicle_compare_can_use_local_style"
+        and route.get("foreground_llm_allowed") is False
+        and reply.get("applied") is True
+        and "Polo" in text
+        and ("哈弗" in text or "H6" in text)
+        and "领动" not in text
+        and "高尔夫" not in text
+    )
+    return {"name": "existing_two_vehicle_compare_uses_recent_catalog_options_without_llm", "ok": ok, "route": route, "reply": reply}
 
 
 def check_realtime_context_bridge_skips_unrelated_or_test_marked_history() -> dict[str, Any]:
@@ -1014,6 +1774,134 @@ def check_explicit_first_request_can_recommend_vehicle_sources() -> dict[str, An
     return {"name": "explicit_first_request_can_recommend_vehicle_sources", "ok": ok, "route": route, "reply": reply}
 
 
+def check_explicit_two_vehicle_request_preempts_common_sense_compare() -> dict[str, Any]:
+    config = {"realtime_reply": {"enabled": True}, "llm_reply_synthesis": {"enabled": True}}
+    message = "我预算8万左右，日常通勤接娃，想要省油好开，先推荐两台看看。"
+    with tenant_context(TENANT_ID):
+        evidence_pack = build_evidence_pack(message, context={})
+        route = decide_realtime_reply_route(
+            config=config,
+            combined=message,
+            decision=Decision(),
+            intent_result=Intent(),
+            intent_assist={"intent": "product_inquiry", "evidence": {"safety": {"must_handoff": False}}},
+            rag_reply={},
+            llm_reply={},
+            product_knowledge={},
+            data_capture={},
+            evidence_pack=evidence_pack,
+            recent_reply_texts=[],
+        )
+        reply = maybe_build_realtime_reply(
+            config=config,
+            route=route,
+            combined=message,
+            evidence_pack=evidence_pack,
+            current_reply_text="",
+            recent_reply_texts=[],
+        )
+    used_ids = reply.get("used_product_ids") or []
+    text = str(reply.get("reply_text") or "")
+    ok = (
+        route.get("reason") == "explicit_vehicle_candidates_requested"
+        and reply.get("rule_name") == "realtime_local_recommendation"
+        and len(used_ids) >= 2
+        and "两台" not in text[:10]
+        and "方向" not in text[:20]
+    )
+    return {"name": "explicit_two_vehicle_request_preempts_common_sense_compare", "ok": ok, "route": route, "reply": reply}
+
+
+def check_generic_price_handoff_does_not_block_explicit_vehicle_candidates() -> dict[str, Any]:
+    config = {"realtime_reply": {"enabled": True}, "llm_reply_synthesis": {"enabled": True}}
+    message = "我预算8万左右，想买省油好开的二手车，日常通勤接娃，先推荐两台看看。"
+    generic_handoffs = [
+        "价格和优惠我会帮您核，但超出公开规则的部分不能直接口头答应。我先把数量、库存和负责人意见确认好，再给您明确答复。",
+        "价格我肯定帮您争取，但最低价或破例优惠不能直接口头保证。我核实一下商品、数量和负责人意见，再回复您。",
+        "这个我先帮您往下问，争取归争取，但价格、库存和审批结果都要确认过才稳。我核清楚后再给您准话。",
+        "[车金实盘] 价格这块我会尽量帮您争取，但最低价或额外优惠这边先不方便口头承诺。我先核实下具体情况并跟负责人确认，确认后马上回复您。",
+    ]
+    replies: list[dict[str, Any]] = []
+    with tenant_context(TENANT_ID):
+        evidence_pack = build_evidence_pack(message, context={})
+        route = decide_realtime_reply_route(
+            config=config,
+            combined=message,
+            decision=Decision(),
+            intent_result=Intent(),
+            intent_assist={"intent": "product_inquiry", "evidence": {"safety": {"must_handoff": False}}},
+            rag_reply={},
+            llm_reply={},
+            product_knowledge={},
+            data_capture={},
+            evidence_pack=evidence_pack,
+            recent_reply_texts=[],
+        )
+        for generic_handoff in generic_handoffs:
+            replies.append(
+                maybe_build_realtime_reply(
+                    config=config,
+                    route=route,
+                    combined=message,
+                    evidence_pack=evidence_pack,
+                    current_reply_text=generic_handoff,
+                    recent_reply_texts=[],
+                )
+            )
+    ok = (
+        route.get("reason") == "explicit_vehicle_candidates_requested"
+        and all(can_override_current_reply(item) for item in generic_handoffs)
+        and all(reply.get("applied") is True for reply in replies)
+        and all(reply.get("rule_name") == "realtime_local_recommendation" for reply in replies)
+        and all(len(reply.get("used_product_ids") or []) >= 2 for reply in replies)
+        and all("价格和优惠" not in str(reply.get("reply_text") or "") for reply in replies)
+    )
+    return {"name": "generic_price_handoff_does_not_block_explicit_vehicle_candidates", "ok": ok, "route": route, "replies": replies}
+
+
+def check_prefix_only_reply_does_not_block_explicit_vehicle_candidates() -> dict[str, Any]:
+    config = {
+        "reply": {"prefix": "[车金实盘] "},
+        "realtime_reply": {"enabled": True},
+        "llm_reply_synthesis": {"enabled": True},
+    }
+    message = "我预算6万左右，想买一台好停车、省油、给家里老人日常代步的二手小车，南京能看车的话，先帮我缩两台就行。"
+    with tenant_context(TENANT_ID):
+        evidence_pack = build_evidence_pack(message, context={})
+        route = decide_realtime_reply_route(
+            config=config,
+            combined=message,
+            decision=Decision(),
+            intent_result=Intent(),
+            intent_assist={"intent": "product_inquiry", "evidence": {"safety": {"must_handoff": False}}},
+            rag_reply={},
+            llm_reply={},
+            product_knowledge={},
+            data_capture={},
+            evidence_pack=evidence_pack,
+            recent_reply_texts=[],
+        )
+        reply = maybe_build_realtime_reply(
+            config=config,
+            route=route,
+            combined=message,
+            evidence_pack=evidence_pack,
+            current_reply_text="[车金实盘] ",
+            recent_reply_texts=[],
+        )
+    text = str(reply.get("reply_text") or "")
+    ok = (
+        route.get("reason") == "explicit_vehicle_candidates_requested"
+        and current_reply_has_substantive_body("[车金实盘] ", config) is False
+        and reply.get("applied") is True
+        and reply.get("rule_name") == "realtime_local_recommendation"
+        and len(reply.get("used_product_ids") or []) >= 2
+        and "价格和优惠" not in text
+        and "负责人意见" not in text
+    )
+    return {"name": "prefix_only_reply_does_not_block_explicit_vehicle_candidates", "ok": ok, "route": route, "reply": reply}
+
+
 def check_specific_finance_question_does_not_force_vehicle_sources() -> dict[str, Any]:
     message = "具体贷款流程怎么走？"
     route = decide_realtime_reply_route(
@@ -1031,6 +1919,89 @@ def check_specific_finance_question_does_not_force_vehicle_sources() -> dict[str
     )
     ok = route.get("reason") != "explicit_vehicle_candidates_requested"
     return {"name": "specific_finance_question_does_not_force_vehicle_sources", "ok": ok, "route": route}
+
+
+def check_finance_owner_question_does_not_refresh_vehicle_candidates() -> dict[str, Any]:
+    config = {"realtime_reply": {"enabled": True}, "llm_reply_synthesis": {"enabled": True}}
+    message = "如果当天看着合适，后面贷款方案是谁给我算？"
+    with tenant_context(TENANT_ID):
+        evidence_pack = build_evidence_pack(message, context={})
+        route = decide_realtime_reply_route(
+            config=config,
+            combined=message,
+            decision=Decision(),
+            intent_result=Intent(),
+            intent_assist={"intent": "policy_inquiry", "evidence": {"safety": {"must_handoff": False}}},
+            rag_reply={},
+            llm_reply={},
+            product_knowledge={},
+            data_capture={},
+            evidence_pack=evidence_pack,
+            recent_reply_texts=[
+                "您周一上午11点到店的话，我先帮您核车源、试驾和置换排期。",
+                "预算10到12万，客户接待和通勤可以先看奇骏和宝马3系。",
+            ],
+        )
+        reply = maybe_build_realtime_reply(
+            config=config,
+            route=route,
+            combined=message,
+            evidence_pack=evidence_pack,
+            current_reply_text="",
+            recent_reply_texts=[],
+        )
+    text = str(reply.get("reply_text") or "")
+    leaked_vehicle_terms = ("马自达", "凯美瑞", "GL8", "奥德赛", "赛那", "MPV", "奇骏", "宝马")
+    ok = (
+        route.get("reason") == "common_finance_guidance_can_use_local_style"
+        and reply.get("applied") is True
+        and reply.get("rule_name") == "realtime_finance_guidance"
+        and not (reply.get("used_product_ids") or [])
+        and any(term in text for term in ("贷款", "金融", "月供", "首付", "资方", "测算"))
+        and not any(term in text for term in leaked_vehicle_terms)
+    )
+    return {
+        "name": "finance_owner_question_does_not_refresh_vehicle_candidates",
+        "ok": ok,
+        "route": route,
+        "reply": reply,
+    }
+
+
+def check_recommendation_with_monthly_payment_context_still_uses_candidates() -> dict[str, Any]:
+    config = {"realtime_reply": {"enabled": True}, "llm_reply_synthesis": {"enabled": True}}
+    message = "刚才说到首付月供，我预算大概15万，想月供别太高，能不能推荐两台更稳的？"
+    with tenant_context(TENANT_ID):
+        evidence_pack = build_evidence_pack(message, context={})
+        route = decide_realtime_reply_route(
+            config=config,
+            combined=message,
+            decision=Decision(),
+            intent_result=Intent(),
+            intent_assist={"intent": "product_inquiry", "evidence": {"safety": {"must_handoff": False}}},
+            rag_reply={},
+            llm_reply={},
+            product_knowledge={},
+            data_capture={},
+            evidence_pack=evidence_pack,
+            recent_reply_texts=[],
+        )
+        reply = maybe_build_realtime_reply(
+            config=config,
+            route=route,
+            combined=message,
+            evidence_pack=evidence_pack,
+            current_reply_text="",
+            recent_reply_texts=[],
+        )
+    text = str(reply.get("reply_text") or "")
+    ok = (
+        route.get("reason") == "explicit_vehicle_candidates_requested"
+        and reply.get("applied") is True
+        and bool(reply.get("used_product_ids"))
+        and any(term in text for term in ("凯美瑞", "凌派", "思域", "车况", "检测报告"))
+    )
+    return {"name": "recommendation_with_monthly_payment_context_still_uses_candidates", "ok": ok, "route": route, "reply": reply}
 
 
 def check_safe_no_deposit_report_visit_stays_local() -> dict[str, Any]:
@@ -1484,6 +2455,1091 @@ def check_rag_metadata_cleanup() -> dict[str, Any]:
     return {"name": "rag_metadata_cleanup", "ok": ok, "cleaned": cleaned}
 
 
+def check_listener_transport_risk_login_stop() -> dict[str, Any]:
+    settings = normalize_transport_risk_settings(
+        {
+            "enabled": True,
+            "counter_window_seconds": 600,
+            "login_detect_stop_threshold": 1,
+            "hard_block_stop_threshold": 1,
+            "send_input_not_ready_stop_threshold": 3,
+        }
+    )
+    result = {
+        "ok": False,
+        "events": [
+            {
+                "ok": False,
+                "action": "error",
+                "messages": {"ok": False, "state": "login_window_detected", "reason": "login_or_qr"},
+            }
+        ],
+    }
+    verdict = evaluate_transport_risk(result, guard_state={}, settings=settings, now_ts=100.0)
+    ok = bool(verdict.get("stop")) and verdict.get("reason") == "wechat_login_window_detected"
+    return {"name": "listener_transport_risk_login_stop", "ok": ok, "verdict": verdict}
+
+
+def check_listener_transport_risk_quick_login_probe_stop() -> dict[str, Any]:
+    settings = normalize_transport_risk_settings(
+        {
+            "enabled": True,
+            "counter_window_seconds": 600,
+            "login_detect_stop_threshold": 1,
+            "hard_block_stop_threshold": 1,
+            "send_input_not_ready_stop_threshold": 3,
+        }
+    )
+    result = {
+        "ok": False,
+        "events": [
+            {
+                "ok": False,
+                "action": "error",
+                "send_result": {
+                    "send": {
+                        "state": "target_not_confirmed",
+                        "window_probe": {"quick_login": {"detected": True}},
+                        "error": "WeChat quick-login view detected; enter WeChat before sending.",
+                    }
+                },
+            }
+        ],
+    }
+    verdict = evaluate_transport_risk(result, guard_state={}, settings=settings, now_ts=120.0)
+    ok = bool(verdict.get("stop")) and verdict.get("reason") == "wechat_login_window_detected"
+    return {"name": "listener_transport_risk_quick_login_probe_stop", "ok": ok, "verdict": verdict}
+
+
+def check_listener_transport_risk_invalid_hwnd_stop() -> dict[str, Any]:
+    settings = normalize_transport_risk_settings(
+        {
+            "enabled": True,
+            "counter_window_seconds": 600,
+            "login_detect_stop_threshold": 1,
+            "hard_block_stop_threshold": 1,
+            "send_input_not_ready_stop_threshold": 3,
+        }
+    )
+    result = {
+        "ok": False,
+        "events": [
+            {
+                "ok": False,
+                "action": "error",
+                "send_result": {
+                    "send": {
+                        "ok": False,
+                        "state": "win32_ocr_failed",
+                        "error": "error(1400, 'GetWindowRect', '无效的窗口句柄。')",
+                        "risk_stop_recommended": True,
+                    }
+                },
+            }
+        ],
+    }
+    verdict = evaluate_transport_risk(result, guard_state={}, settings=settings, now_ts=140.0)
+    ok = bool(verdict.get("stop")) and verdict.get("reason") == "wechat_hard_block_detected"
+    return {"name": "listener_transport_risk_invalid_hwnd_stop", "ok": ok, "verdict": verdict}
+
+
+def check_listener_transport_risk_abnormal_window_stop() -> dict[str, Any]:
+    settings = normalize_transport_risk_settings(
+        {
+            "enabled": True,
+            "counter_window_seconds": 600,
+            "login_detect_stop_threshold": 1,
+            "hard_block_stop_threshold": 1,
+            "send_input_not_ready_stop_threshold": 3,
+        }
+    )
+    result = {
+        "ok": False,
+        "events": [
+            {
+                "ok": False,
+                "action": "error",
+                "receive_result": {
+                    "ok": False,
+                    "state": "blank_render_detected",
+                    "reason": "blank_render",
+                },
+            }
+        ],
+    }
+    verdict = evaluate_transport_risk(result, guard_state={}, settings=settings, now_ts=160.0)
+    ok = (
+        bool(verdict.get("stop"))
+        and verdict.get("reason") == "wechat_abnormal_window_detected"
+        and bool((verdict.get("signals") or {}).get("abnormal_window_detected"))
+    )
+    return {"name": "listener_transport_risk_abnormal_window_stop", "ok": ok, "verdict": verdict}
+
+
+def check_listener_transport_risk_send_input_threshold_stop() -> dict[str, Any]:
+    settings = normalize_transport_risk_settings(
+        {
+            "enabled": True,
+            "counter_window_seconds": 600,
+            "login_detect_stop_threshold": 1,
+            "hard_block_stop_threshold": 1,
+            "send_input_not_ready_stop_threshold": 3,
+        }
+    )
+    sample = {
+        "ok": True,
+        "events": [
+            {
+                "ok": False,
+                "action": "error",
+                "send_result": {"send": {"state": "send_input_not_ready", "reason": "paste_not_confirmed"}},
+            }
+        ],
+    }
+    state: dict[str, Any] = {}
+    first = evaluate_transport_risk(sample, guard_state=state, settings=settings, now_ts=200.0)
+    state = first.get("state", {})
+    second = evaluate_transport_risk(sample, guard_state=state, settings=settings, now_ts=205.0)
+    state = second.get("state", {})
+    third = evaluate_transport_risk(sample, guard_state=state, settings=settings, now_ts=210.0)
+    ok = (
+        bool(first.get("stop")) is False
+        and bool(second.get("stop")) is False
+        and bool(third.get("stop")) is True
+        and third.get("reason") == "wechat_send_input_not_ready_repeated"
+    )
+    return {
+        "name": "listener_transport_risk_send_input_threshold_stop",
+        "ok": ok,
+        "first": first,
+        "second": second,
+        "third": third,
+    }
+
+
+def check_listener_transport_risk_warning_cooldown() -> dict[str, Any]:
+    settings = normalize_transport_risk_settings(
+        {
+            "enabled": True,
+            "counter_window_seconds": 600,
+            "login_detect_stop_threshold": 1,
+            "hard_block_stop_threshold": 1,
+            "send_input_not_ready_stop_threshold": 3,
+            "warning_cooldown_seconds": 120,
+            "cooldown_near_threshold": 2,
+            "loop_jitter_seconds": 0.6,
+        }
+    )
+    sample = {
+        "ok": True,
+        "events": [
+            {
+                "ok": False,
+                "action": "error",
+                "send_result": {"send": {"state": "send_input_not_ready", "reason": "paste_not_confirmed"}},
+            }
+        ],
+    }
+    state: dict[str, Any] = {}
+    first = evaluate_transport_risk(sample, guard_state=state, settings=settings, now_ts=300.0)
+    state = first.get("state", {})
+    second = evaluate_transport_risk(sample, guard_state=state, settings=settings, now_ts=305.0)
+    ok = (
+        bool(first.get("stop")) is False
+        and bool(second.get("stop")) is False
+        and float(first.get("cooldown_seconds") or 0) >= 30
+        and float(second.get("cooldown_seconds") or 0) >= 120
+    )
+    return {"name": "listener_transport_risk_warning_cooldown", "ok": ok, "first": first, "second": second}
+
+
+def check_listener_transport_risk_stale_hits_do_not_stop_without_new_signal() -> dict[str, Any]:
+    settings = normalize_transport_risk_settings(
+        {
+            "enabled": True,
+            "counter_window_seconds": 600,
+            "login_detect_stop_threshold": 1,
+            "hard_block_stop_threshold": 1,
+            "send_input_not_ready_stop_threshold": 3,
+        }
+    )
+    stale_state = {
+        "login_hits": [1000.0],
+        "hard_block_hits": [],
+        "send_input_not_ready_hits": [1000.0, 1010.0, 1020.0],
+    }
+    clean_result = {"ok": True, "events": [{"ok": True, "action": "skipped"}]}
+    verdict = evaluate_transport_risk(clean_result, guard_state=stale_state, settings=settings, now_ts=1050.0)
+    ok = bool(verdict.get("stop")) is False
+    return {"name": "listener_transport_risk_stale_hits_do_not_stop_without_new_signal", "ok": ok, "verdict": verdict}
+
+
+def check_runtime_target_guard_blocks_disallowed_event() -> dict[str, Any]:
+    settings = normalize_runtime_target_guard_settings(
+        {
+            "enabled": True,
+            "allowed_targets": ["许聪"],
+            "enforce_runtime_targets": True,
+        }
+    )
+    result = {
+        "ok": True,
+        "events": [
+            {"ok": True, "target": "许聪", "action": "skipped"},
+            {"ok": True, "target": "新数据测试昨天19:23", "action": "skipped"},
+        ],
+    }
+    verdict = evaluate_runtime_target_guard(result, settings=settings)
+    ok = (
+        bool(verdict.get("stop"))
+        and verdict.get("reason") == "runtime_disallowed_target_detected"
+        and "新数据测试昨天19:23" in set(verdict.get("disallowed_targets") or [])
+    )
+    return {"name": "runtime_target_guard_blocks_disallowed_event", "ok": ok, "verdict": verdict}
+
+
+def check_runtime_target_guard_allows_allowed_scheduler_event() -> dict[str, Any]:
+    settings = normalize_runtime_target_guard_settings(
+        {
+            "enabled": True,
+            "allowed_targets": ["许聪"],
+            "enforce_runtime_targets": True,
+        }
+    )
+    result = {
+        "ok": True,
+        "scheduler_enabled": True,
+        "events": [{"ok": True, "target": "许聪", "action": "reply_sent"}],
+        "active_session_signals": [{"target": "许聪", "reason": "unread"}],
+    }
+    verdict = evaluate_runtime_target_guard(result, settings=settings)
+    ok = bool(verdict.get("ok")) and not bool(verdict.get("stop"))
+    return {"name": "runtime_target_guard_allows_allowed_scheduler_event", "ok": ok, "verdict": verdict}
+
+
+def check_listener_humanized_send_env_mapping() -> dict[str, Any]:
+    normalized = normalize_rpa_humanized_send_settings(
+        {
+            "enabled": True,
+            "input_method": "uia_chunks",
+            "typing_chunk_min_chars": 2,
+            "typing_chunk_max_chars": 4,
+            "typing_char_delay_min_ms": 120,
+            "typing_char_delay_max_ms": 30,
+            "typing_micro_pause_min_ms": 500,
+            "typing_micro_pause_max_ms": 120,
+            "typing_typo_probability": 0.12,
+            "typing_typo_max": 1,
+            "send_pre_delay_min_ms": 900,
+            "send_pre_delay_max_ms": 200,
+            "send_post_input_delay_min_ms": 350,
+            "send_post_input_delay_max_ms": 80,
+            "send_trigger_mode": "click_only",
+            "send_input_confirm_attempts": 1,
+            "send_rate_min_interval_seconds": 90,
+            "send_rate_burst_window_seconds": 600,
+            "send_rate_burst_limit": 2,
+        }
+    )
+    mapped = apply_rpa_humanized_send_env({}, normalized)
+    ok = (
+        mapped.get("WECHAT_WIN32_OCR_HUMANIZED_INPUT_ENABLED") == "1"
+        and mapped.get("WECHAT_WIN32_OCR_HUMANIZED_INPUT_METHOD") == "uia_chunks"
+        and mapped.get("WECHAT_WIN32_OCR_HUMANIZED_TYPING_CHUNK_MIN_CHARS") == "2"
+        and mapped.get("WECHAT_WIN32_OCR_HUMANIZED_TYPING_CHUNK_MAX_CHARS") == "4"
+        and mapped.get("WECHAT_WIN32_OCR_HUMANIZED_TYPING_CHAR_DELAY_MIN_MS") == "120"
+        and mapped.get("WECHAT_WIN32_OCR_HUMANIZED_TYPING_CHAR_DELAY_MAX_MS") == "120"
+        and mapped.get("WECHAT_WIN32_OCR_HUMANIZED_SEND_PRE_DELAY_MAX_MS") == "900"
+        and mapped.get("WECHAT_WIN32_OCR_HUMANIZED_SEND_POST_INPUT_DELAY_MAX_MS") == "350"
+        and mapped.get("WECHAT_WIN32_OCR_SEND_TRIGGER_MODE") == "click_only"
+        and mapped.get("WECHAT_WIN32_OCR_SEND_INPUT_CONFIRM_ATTEMPTS") == "1"
+        and mapped.get("WECHAT_WIN32_OCR_SEND_MIN_INTERVAL_SECONDS") == "90"
+        and mapped.get("WECHAT_WIN32_OCR_SEND_BURST_LIMIT") == "2"
+    )
+    return {
+        "name": "listener_humanized_send_env_mapping",
+        "ok": ok,
+        "normalized": normalized,
+        "mapped_subset": {k: mapped.get(k) for k in sorted(mapped.keys()) if "HUMANIZED" in k},
+    }
+
+
+def check_listener_operator_guard_settings_normalization() -> dict[str, Any]:
+    normalized = normalize_operator_guard_settings(
+        {
+            "enabled": True,
+            "block_manual_input": True,
+            "floating_indicator_enabled": False,
+            "esc_double_press_window_ms": 10,
+            "pause_poll_interval_ms": 99999,
+        }
+    )
+    ok = (
+        normalized.get("enabled") is True
+        and normalized.get("block_manual_input") is True
+        and normalized.get("floating_indicator_enabled") is False
+        and normalized.get("esc_double_press_window_ms") == 180
+        and normalized.get("pause_poll_interval_ms") == 3000
+    )
+    return {"name": "listener_operator_guard_settings_normalization", "ok": ok, "normalized": normalized}
+
+
+def check_operator_guard_indicator_three_color_mapping() -> dict[str, Any]:
+    cases = [
+        indicator_state_snapshot(mode="running", runtime_state="idle", locked=True),
+        indicator_state_snapshot(mode="running", runtime_state="idle", locked=False),
+        indicator_state_snapshot(mode="paused", runtime_state="idle", locked=False),
+        indicator_state_snapshot(mode="running", runtime_state="thinking", locked=True),
+        indicator_state_snapshot(mode="stopped", runtime_state="stopped", locked=False),
+    ]
+    themes = [item[0] for item in cases]
+    ok = (
+        tuple(INDICATOR_THEMES) == ("blue", "yellow", "red")
+        and themes == ["blue", "blue", "yellow", "blue", "red"]
+        and "green" not in set(themes)
+    )
+    return {"name": "operator_guard_indicator_three_color_mapping", "ok": ok, "themes": themes}
+
+
+def check_operator_guard_indicator_backend_defaults_to_layered() -> dict[str, Any]:
+    values = {
+        "default": normalize_indicator_backend(None),
+        "empty": normalize_indicator_backend(""),
+        "invalid": normalize_indicator_backend("classic"),
+        "explicit_tk": normalize_indicator_backend("tk"),
+        "explicit_auto": normalize_indicator_backend("auto"),
+    }
+    ok = (
+        values["default"] == "layered"
+        and values["empty"] == "layered"
+        and values["invalid"] == "layered"
+        and values["explicit_tk"] == "tk"
+        and values["explicit_auto"] == "auto"
+    )
+    return {"name": "operator_guard_indicator_backend_defaults_to_layered", "ok": ok, "values": values}
+
+
+def check_operator_guard_runtime_status_hint() -> dict[str, Any]:
+    tenant_id = "operator_guard_runtime_status_hint_test"
+    with tempfile.TemporaryDirectory() as tmp:
+        status_path = Path(tmp) / "runtime_status.json"
+        customer_service_runtime.atomic_write_json(
+            status_path,
+            {
+                "ok": True,
+                "state": "idle",
+                "message": "running",
+                "tenant_id": tenant_id,
+                "kept": "value",
+            },
+        )
+        write_runtime_status_hint(status_path, tenant_id=tenant_id, state="paused", message="已暂停，等待继续。")
+        paused = json.loads(status_path.read_text(encoding="utf-8"))
+        write_runtime_status_hint(status_path, tenant_id=tenant_id, state="idle", message="监听运行中。")
+        resumed = json.loads(status_path.read_text(encoding="utf-8"))
+        write_runtime_status_hint(status_path, tenant_id=tenant_id, state="stopped", message="已停止。")
+        stopped = json.loads(status_path.read_text(encoding="utf-8"))
+    ok = (
+        paused.get("state") == "paused"
+        and resumed.get("state") == "idle"
+        and stopped.get("state") == "stopped"
+        and stopped.get("kept") == "value"
+    )
+    return {
+        "name": "operator_guard_runtime_status_hint",
+        "ok": ok,
+        "paused_state": paused.get("state"),
+        "resumed_state": resumed.get("state"),
+        "stopped_state": stopped.get("state"),
+        "kept": stopped.get("kept"),
+    }
+
+
+def check_listener_operator_guard_control_flow() -> dict[str, Any]:
+    with tempfile.TemporaryDirectory() as tmp:
+        path = Path(tmp) / "operator_control.json"
+        state = read_operator_control_state(path, tenant_id="listener_test")
+        pause_request = dict(state)
+        pause_request["command"] = {
+            "id": 1,
+            "action": "pause",
+            "status": "pending",
+            "source": "test",
+            "requested_at": datetime.now().isoformat(timespec="seconds"),
+            "applied_at": "",
+            "message": "pause",
+        }
+        paused = apply_operator_command(pause_request, action="pause", message="paused")
+        write_operator_control_state(path, paused)
+        resumed = sync_operator_mode(path, tenant_id="listener_test", mode="running", message="resumed")
+        final_state = read_operator_control_state(path, tenant_id="listener_test")
+    ok = (
+        state.get("mode") == "running"
+        and paused.get("mode") == "paused"
+        and str((paused.get("command") or {}).get("status")) == "applied"
+        and resumed.get("mode") == "running"
+        and final_state.get("mode") == "running"
+    )
+    return {
+        "name": "listener_operator_guard_control_flow",
+        "ok": ok,
+        "initial_mode": state.get("mode"),
+        "paused_mode": paused.get("mode"),
+        "final_mode": final_state.get("mode"),
+    }
+
+
+def check_listener_operator_guard_waits_for_delayed_ready_state() -> dict[str, Any]:
+    with tempfile.TemporaryDirectory() as tmp:
+        path = Path(tmp) / "operator_guard.state.json"
+        current_pid = os.getpid()
+
+        def writer() -> None:
+            time.sleep(0.08)
+            customer_service_runtime.atomic_write_json(
+                path,
+                {
+                    "phase": "starting",
+                    "pid": current_pid,
+                    "parent_pid": current_pid,
+                    "hooks_installed": False,
+                    "reason": "indicator_initializing",
+                },
+            )
+            time.sleep(0.18)
+            customer_service_runtime.atomic_write_json(
+                path,
+                {
+                    "phase": "running",
+                    "pid": current_pid,
+                    "parent_pid": current_pid,
+                    "hooks_installed": True,
+                    "reason": "hooks_installed",
+                },
+            )
+
+        thread = threading.Thread(target=writer, daemon=True)
+        thread.start()
+        result = verify_operator_guard_bootstrap(
+            current_pid,
+            path,
+            timeout_seconds=1.2,
+            expected_parent_pid=current_pid,
+        )
+        thread.join(timeout=1.0)
+    ok = result.get("ok") is True and result.get("reason") == "guard_ready"
+    return {
+        "name": "listener_operator_guard_waits_for_delayed_ready_state",
+        "ok": ok,
+        "result": result,
+    }
+
+
+def check_listener_operator_guard_rejects_stale_state() -> dict[str, Any]:
+    with tempfile.TemporaryDirectory() as tmp:
+        path = Path(tmp) / "operator_guard.state.json"
+        current_pid = os.getpid()
+        customer_service_runtime.atomic_write_json(
+            path,
+            {
+                "phase": "running",
+                "pid": current_pid + 99999,
+                "hooks_installed": True,
+            },
+        )
+        stale = verify_operator_guard_bootstrap(current_pid, path, timeout_seconds=0.22)
+        customer_service_runtime.atomic_write_json(
+            path,
+            {
+                "phase": "running",
+                "pid": current_pid + 99998,
+                "parent_pid": current_pid,
+                "hooks_installed": True,
+            },
+        )
+        child_wrapper = verify_operator_guard_bootstrap(
+            current_pid + 99997,
+            path,
+            timeout_seconds=0.22,
+            expected_parent_pid=current_pid,
+        )
+        customer_service_runtime.atomic_write_json(
+            path,
+            {
+                "phase": "running",
+                "pid": current_pid,
+                "hooks_installed": True,
+            },
+        )
+        fresh = verify_operator_guard_bootstrap(current_pid, path, timeout_seconds=0.22)
+    ok = (
+        stale.get("ok") is False
+        and stale.get("reason") == "guard_state_pid_mismatch"
+        and child_wrapper.get("ok") is True
+        and fresh.get("ok") is True
+    )
+    return {
+        "name": "listener_operator_guard_rejects_stale_state",
+        "ok": ok,
+        "stale": stale,
+        "child_wrapper": child_wrapper,
+        "fresh": fresh,
+    }
+
+
+def check_customer_service_status_suppresses_stale_operator_guard() -> dict[str, Any]:
+    tenant_id = "customer_service_guard_stale_status_test"
+    runtime_root = tenant_runtime_root(tenant_id) / "customer_service"
+    try:
+        if runtime_root.exists():
+            shutil.rmtree(runtime_root)
+        runtime_root.mkdir(parents=True, exist_ok=True)
+        customer_service_runtime.atomic_write_json(
+            customer_service_runtime.runtime_status_path(tenant_id),
+            {
+                "ok": True,
+                "state": "stopped",
+                "message": "已停止。",
+                "tenant_id": tenant_id,
+            },
+        )
+        customer_service_runtime.atomic_write_json(
+            customer_service_runtime.runtime_operator_guard_pid_path(tenant_id),
+            {
+                "pid": os.getpid() + 99999,
+                "tenant_id": tenant_id,
+            },
+        )
+        customer_service_runtime.atomic_write_json(
+            customer_service_runtime.runtime_operator_guard_state_path(tenant_id),
+            {
+                "phase": "running",
+                "pid": os.getpid() + 99999,
+                "hooks_installed": True,
+                "floating_indicator_active": True,
+            },
+        )
+        status = customer_service_runtime.CustomerServiceRuntime(tenant_id=tenant_id).status()
+        pid_path_exists = customer_service_runtime.runtime_operator_guard_pid_path(tenant_id).exists()
+        state_path_exists = customer_service_runtime.runtime_operator_guard_state_path(tenant_id).exists()
+    finally:
+        if runtime_root.exists():
+            shutil.rmtree(runtime_root)
+    ok = (
+        status.get("operator_guard_running") is False
+        and status.get("operator_guard_pid") is None
+        and status.get("operator_guard_state") == {}
+        and not pid_path_exists
+        and not state_path_exists
+    )
+    return {
+        "name": "customer_service_status_suppresses_stale_operator_guard",
+        "ok": ok,
+        "operator_guard_running": status.get("operator_guard_running"),
+        "operator_guard_pid": status.get("operator_guard_pid"),
+        "operator_guard_state": status.get("operator_guard_state"),
+        "pid_path_exists": pid_path_exists,
+        "state_path_exists": state_path_exists,
+    }
+
+
+def check_runtime_worker_cmdline_tenant_exact_match() -> dict[str, Any]:
+    customer_cmd = [
+        "python.exe",
+        "background_worker.py",
+        "--tenant-id",
+        "chejin_usedcar_regression",
+        "--queue",
+        "customer_service",
+    ]
+    customer_exact_cmd = [
+        "python.exe",
+        "background_worker.py",
+        "--tenant-id=chejin",
+        "--queue=customer_service",
+    ]
+    recorder_cmd = [
+        "python.exe",
+        "background_worker.py",
+        "--tenant-id",
+        "test02_extra",
+        "--queue",
+        "recorder_exports",
+    ]
+    ok = (
+        customer_service_runtime.CustomerServiceRuntime._cmdline_option_equals(
+            customer_cmd, "--tenant-id", "chejin"
+        )
+        is False
+        and customer_service_runtime.CustomerServiceRuntime._cmdline_option_equals(
+            customer_exact_cmd, "--tenant-id", "chejin"
+        )
+        is True
+        and customer_service_runtime.CustomerServiceRuntime._cmdline_option_equals(
+            customer_cmd, "--queue", "customer_service"
+        )
+        is True
+        and recorder_runtime.RecorderRuntime._cmdline_option_equals(recorder_cmd, "--tenant-id", "test02")
+        is False
+        and recorder_runtime.RecorderRuntime._cmdline_option_equals(
+            recorder_cmd, "--queue", "recorder_exports"
+        )
+        is True
+    )
+    return {"name": "runtime_worker_cmdline_tenant_exact_match", "ok": ok}
+
+
+def check_recorder_operator_guard_launch_flow() -> dict[str, Any]:
+    from unittest.mock import patch
+
+    tenant_id = "recorder_operator_guard_test"
+    parent_pid = os.getpid()
+    runtime_root = tenant_runtime_root(tenant_id) / "recorder"
+    try:
+        if runtime_root.exists():
+            shutil.rmtree(runtime_root)
+        runtime = recorder_runtime.RecorderRuntime(tenant_id=tenant_id)
+        with patch.object(
+            recorder_runtime,
+            "launch_operator_guard",
+            return_value={"ok": True, "enabled": True, "pid": parent_pid + 10, "script_path": "guard.py"},
+        ), patch.object(
+            recorder_runtime,
+            "verify_operator_guard_bootstrap",
+            return_value={
+                "ok": True,
+                "reason": "guard_ready",
+                "pid": parent_pid + 10,
+                "state_pid": parent_pid + 11,
+                "state_parent_pid": parent_pid,
+                "state": {"phase": "running", "pid": parent_pid + 11, "parent_pid": parent_pid, "hooks_installed": True},
+            },
+        ):
+            result = runtime._launch_operator_guard_for_loop(parent_pid=parent_pid, settings={})
+        pid_record_path = recorder_runtime.recorder_operator_guard_pid_path(tenant_id)
+        pid_record = json.loads(pid_record_path.read_text(encoding="utf-8"))
+    finally:
+        if runtime_root.exists():
+            shutil.rmtree(runtime_root)
+    ok = (
+        result.get("ok") is True
+        and result.get("enabled") is True
+        and (result.get("settings") or {}).get("enabled") is True
+        and pid_record.get("pid") == parent_pid + 11
+        and pid_record.get("launcher_pid") == parent_pid + 10
+    )
+    return {
+        "name": "recorder_operator_guard_launch_flow",
+        "ok": ok,
+        "result": result,
+        "pid_record": pid_record,
+    }
+
+
+def check_recorder_runtime_status_accepts_paused() -> dict[str, Any]:
+    tenant_id = "recorder_runtime_paused_status_test"
+    runtime_root = tenant_runtime_root(tenant_id) / "recorder"
+    try:
+        if runtime_root.exists():
+            shutil.rmtree(runtime_root)
+        runtime_root.mkdir(parents=True, exist_ok=True)
+        recorder_runtime.atomic_write_json(
+            recorder_runtime.recorder_runtime_status_path(tenant_id),
+            {
+                "ok": True,
+                "state": "paused",
+                "message": "AI智能记录员已暂停，等待恢复。",
+                "tenant_id": tenant_id,
+            },
+        )
+        payload = recorder_runtime.RecorderRuntime(tenant_id=tenant_id)._read_status_payload()
+    finally:
+        if runtime_root.exists():
+            shutil.rmtree(runtime_root)
+    ok = payload.get("state") == "paused"
+    return {
+        "name": "recorder_runtime_status_accepts_paused",
+        "ok": ok,
+        "state": payload.get("state"),
+        "message": payload.get("message"),
+    }
+
+
+def check_recorder_loop_operator_control_commands() -> dict[str, Any]:
+    tenant_id = "recorder_loop_control_test"
+    with tempfile.TemporaryDirectory() as tmp:
+        path = Path(tmp) / "operator_control.json"
+        status_path = Path(tmp) / "runtime_status.json"
+        write_operator_control_state(path, empty_operator_control_state_for_test(tenant_id))
+        customer_service_runtime.atomic_write_json(
+            status_path,
+            {
+                "ok": True,
+                "state": "idle",
+                "message": "AI智能记录员正在运行。",
+                "tenant_id": tenant_id,
+            },
+        )
+        control = RecorderLoopControl(path, tenant_id=tenant_id, pause_poll_seconds=0.01, status_path=status_path)
+
+        pause_payload = read_operator_control_state(path, tenant_id=tenant_id)
+        pause_payload["command"] = {
+            "id": 1,
+            "action": "pause",
+            "status": "pending",
+            "source": "test",
+            "requested_at": datetime.now().isoformat(timespec="seconds"),
+            "applied_at": "",
+            "message": "pause",
+        }
+        write_operator_control_state(path, pause_payload)
+        pause_action = control.poll()
+        paused = read_operator_control_state(path, tenant_id=tenant_id)
+        paused_status = json.loads(status_path.read_text(encoding="utf-8"))
+
+        resume_payload = dict(paused)
+        resume_payload["command"] = {
+            "id": 2,
+            "action": "resume",
+            "status": "pending",
+            "source": "test",
+            "requested_at": datetime.now().isoformat(timespec="seconds"),
+            "applied_at": "",
+            "message": "resume",
+        }
+        write_operator_control_state(path, resume_payload)
+        resume_action = control.poll()
+        resumed = read_operator_control_state(path, tenant_id=tenant_id)
+        resumed_status = json.loads(status_path.read_text(encoding="utf-8"))
+
+        stop_payload = dict(resumed)
+        stop_payload["command"] = {
+            "id": 3,
+            "action": "stop",
+            "status": "pending",
+            "source": "test",
+            "requested_at": datetime.now().isoformat(timespec="seconds"),
+            "applied_at": "",
+            "message": "stop",
+        }
+        write_operator_control_state(path, stop_payload)
+        stop_action = control.poll()
+        stopped = read_operator_control_state(path, tenant_id=tenant_id)
+        stopped_status = json.loads(status_path.read_text(encoding="utf-8"))
+
+    ok = (
+        pause_action == "pause"
+        and paused.get("mode") == "paused"
+        and paused_status.get("state") == "paused"
+        and str((paused.get("command") or {}).get("status")) == "applied"
+        and resume_action == "resume"
+        and resumed.get("mode") == "running"
+        and resumed_status.get("state") == "idle"
+        and stop_action == "stop"
+        and stopped.get("mode") == "stopped"
+        and stopped_status.get("state") == "stopped"
+    )
+    return {
+        "name": "recorder_loop_operator_control_commands",
+        "ok": ok,
+        "pause_action": pause_action,
+        "paused_mode": paused.get("mode"),
+        "paused_runtime_state": paused_status.get("state"),
+        "resume_action": resume_action,
+        "resumed_mode": resumed.get("mode"),
+        "resumed_runtime_state": resumed_status.get("state"),
+        "stop_action": stop_action,
+        "stopped_mode": stopped.get("mode"),
+        "stopped_runtime_state": stopped_status.get("state"),
+    }
+
+
+def empty_operator_control_state_for_test(tenant_id: str) -> dict[str, Any]:
+    return {
+        "version": 1,
+        "tenant_id": tenant_id,
+        "mode": "running",
+        "command": {
+            "id": 0,
+            "action": "none",
+            "status": "idle",
+            "source": "",
+            "requested_at": "",
+            "applied_at": "",
+            "message": "",
+        },
+        "updated_at": datetime.now().isoformat(timespec="seconds"),
+    }
+
+
+def check_frontend_recorder_runtime_uses_actual_state() -> dict[str, Any]:
+    source = (APP_ROOT / "admin_backend" / "static" / "app.js").read_text(encoding="utf-8")
+    uses_runtime_state = "const recorderRawStateName = recorderRuntime.state" in source
+    uses_visual_state = "runtimeVisualStateName(recorderRawStateName, recorderRunning)" in source
+    avoids_hardcoded_idle = 'const recorderStateName = recorderRunning ? "idle" : "stopped";' not in source
+    fast_runtime_polling = "setInterval(() => refreshBothRuntimeStatuses().catch((error) => console.warn(error)), 1000)" in source
+    ok = uses_runtime_state and uses_visual_state and avoids_hardcoded_idle and fast_runtime_polling
+    return {
+        "name": "frontend_recorder_runtime_uses_actual_state",
+        "ok": ok,
+        "uses_runtime_state": uses_runtime_state,
+        "uses_visual_state": uses_visual_state,
+        "avoids_hardcoded_idle": avoids_hardcoded_idle,
+        "fast_runtime_polling": fast_runtime_polling,
+    }
+
+
+def check_sidecar_open_chat_avoids_ctrl_a_selection() -> dict[str, Any]:
+    sidecar_path = ADAPTERS_ROOT / "wechat_win32_ocr_sidecar.py"
+    source = sidecar_path.read_text(encoding="utf-8")
+    start = source.find("def open_chat(")
+    end = source.find("def ensure_target_ready_for_send(", start if start >= 0 else 0)
+    snippet = source[start:end] if start >= 0 and end > start else ""
+    helper_used = "clear_sidebar_search_box_without_select_all(" in snippet
+    has_ctrl_a = 'hotkey(win32con.VK_CONTROL, ord("A"))' in snippet
+    ok = bool(snippet) and helper_used and not has_ctrl_a
+    return {
+        "name": "sidecar_open_chat_avoids_ctrl_a_selection",
+        "ok": ok,
+        "helper_used": helper_used,
+        "has_ctrl_a": has_ctrl_a,
+        "sidecar_path": str(sidecar_path),
+    }
+
+
+def check_sidecar_history_scroll_avoids_click_drag() -> dict[str, Any]:
+    sidecar_path = ADAPTERS_ROOT / "wechat_win32_ocr_sidecar.py"
+    source = sidecar_path.read_text(encoding="utf-8")
+    start = source.find("def scroll_chat_history(")
+    end = source.find("def capture_wechat(", start if start >= 0 else 0)
+    snippet = source[start:end] if start >= 0 and end > start else ""
+    has_client_click = "client_click(" in snippet
+    has_mouse_down = "MOUSEEVENTF_LEFTDOWN" in snippet
+    uses_wheel_message = "WM_MOUSEWHEEL" in snippet
+    ok = bool(snippet) and (not has_client_click) and (not has_mouse_down) and uses_wheel_message
+    return {
+        "name": "sidecar_history_scroll_avoids_click_drag",
+        "ok": ok,
+        "has_client_click": has_client_click,
+        "has_mouse_down": has_mouse_down,
+        "uses_wheel_message": uses_wheel_message,
+        "sidecar_path": str(sidecar_path),
+    }
+
+
+def check_listener_passive_logout_probe_stop() -> dict[str, Any]:
+    settings = normalize_transport_risk_settings(
+        {
+            "enabled": True,
+            "counter_window_seconds": 600,
+            "passive_logout_probe_enabled": True,
+            "passive_logout_probe_fail_stop_threshold": 1,
+        }
+    )
+    probe = {
+        "attempted": True,
+        "ok": True,
+        "timed_out": False,
+        "login_detected": True,
+        "detection_reason": "login_window_detected",
+        "status_payload": {"state": "login_window_detected", "online": False},
+    }
+    verdict = evaluate_passive_logout_probe(probe, guard_state={}, settings=settings, now_ts=1060.0)
+    ok = bool(verdict.get("stop")) and verdict.get("reason") == "wechat_logout_detected_by_passive_probe"
+    return {"name": "listener_passive_logout_probe_stop", "ok": ok, "verdict": verdict}
+
+
+def check_runtime_transport_logout_creates_handoff_stub() -> dict[str, Any]:
+    with tempfile.TemporaryDirectory() as tmp:
+        handoff_path = Path(tmp) / "handoff_cases.json"
+        verdict = {
+            "stop": True,
+            "reason": "wechat_logout_detected_by_passive_probe",
+            "message": "被动探针检测到微信掉线或登录页，已自动停机保护。",
+        }
+        created = create_runtime_transport_handoff_case(
+            tenant_id="runtime_logout_handoff_test",
+            reason="wechat_logout_detected_by_passive_probe",
+            message="被动探针检测到微信掉线或登录页，已自动停机保护。",
+            source="passive_logout_probe",
+            verdict=verdict,
+            handoff_path=handoff_path,
+            now_text="2026-05-26T01:30:00",
+            dispatch_handoff_fn=lambda case: {
+                "enabled": False,
+                "status": "not_configured",
+                "adapter": "feishu",
+                "reason": "feishu_handoff_notify_disabled",
+                "case_id": case.get("case_id"),
+            },
+        )
+        duplicate = create_runtime_transport_handoff_case(
+            tenant_id="runtime_logout_handoff_test",
+            reason="wechat_logout_detected_by_passive_probe",
+            message="被动探针检测到微信掉线或登录页，已自动停机保护。",
+            source="passive_logout_probe",
+            verdict=verdict,
+            handoff_path=handoff_path,
+            now_text="2026-05-26T01:30:12",
+            dispatch_handoff_fn=lambda case: {
+                "enabled": False,
+                "status": "not_configured",
+                "adapter": "feishu",
+                "reason": "feishu_handoff_notify_disabled",
+                "case_id": case.get("case_id"),
+            },
+        )
+        case = created.get("case") if isinstance(created.get("case"), dict) else {}
+        operator_alert = case.get("operator_alert") if isinstance(case.get("operator_alert"), dict) else {}
+        dispatch = operator_alert.get("dispatch") if isinstance(operator_alert.get("dispatch"), dict) else {}
+        case_payload = case.get("payload") if isinstance(case.get("payload"), dict) else {}
+        payload = case_payload.get("payload") if isinstance(case_payload.get("payload"), dict) else {}
+        ok = (
+            bool(created.get("ok"))
+            and case.get("status") == "open"
+            and case.get("reason") == "wechat_logout_detected_by_passive_probe"
+            and payload.get("kind") == "runtime_transport_risk_handoff"
+            and payload.get("requires_handoff") is True
+            and dispatch.get("adapter") == "feishu"
+            and dispatch.get("status") in {"not_configured", "deduped_skip"}
+            and bool((duplicate.get("case") or {}).get("deduped")) is True
+        )
+        return {
+            "name": "runtime_transport_logout_creates_handoff_stub",
+            "ok": ok,
+            "created": created,
+            "duplicate": duplicate,
+        }
+
+
+def check_listener_passive_blank_probe_stop() -> dict[str, Any]:
+    settings = normalize_transport_risk_settings(
+        {
+            "enabled": True,
+            "counter_window_seconds": 600,
+            "passive_logout_probe_enabled": True,
+            "passive_logout_probe_fail_stop_threshold": 1,
+        }
+    )
+    probe = {
+        "attempted": True,
+        "ok": True,
+        "timed_out": False,
+        "login_detected": True,
+        "blank_detected": True,
+        "detection_reason": "blank_render_detected",
+        "status_payload": {"state": "blank_render_detected", "online": False, "reason": "blank_render"},
+    }
+    verdict = evaluate_passive_logout_probe(probe, guard_state={}, settings=settings, now_ts=1060.0)
+    ok = bool(verdict.get("stop")) and verdict.get("reason") == "wechat_blank_render_detected_by_passive_probe"
+    return {"name": "listener_passive_blank_probe_stop", "ok": ok, "verdict": verdict}
+
+
+def check_listener_passive_auxiliary_shell_probe_stop() -> dict[str, Any]:
+    settings = normalize_transport_risk_settings(
+        {
+            "enabled": True,
+            "counter_window_seconds": 600,
+            "passive_logout_probe_enabled": True,
+            "passive_logout_probe_fail_stop_threshold": 1,
+        }
+    )
+    probe = {
+        "attempted": True,
+        "ok": True,
+        "timed_out": False,
+        "login_detected": True,
+        "auxiliary_shell_detected": True,
+        "detection_reason": "auxiliary_shell_window_detected",
+        "status_payload": {"state": "auxiliary_shell_window_detected", "online": False, "reason": "auxiliary_shell_window"},
+    }
+    verdict = evaluate_passive_logout_probe(probe, guard_state={}, settings=settings, now_ts=1060.0)
+    ok = bool(verdict.get("stop")) and verdict.get("reason") == "wechat_auxiliary_shell_detected_by_passive_probe"
+    return {"name": "listener_passive_auxiliary_shell_probe_stop", "ok": ok, "verdict": verdict}
+
+
+def check_listener_passive_empty_ocr_triggers_recalibration() -> dict[str, Any]:
+    settings = normalize_transport_risk_settings(
+        {
+            "enabled": True,
+            "counter_window_seconds": 600,
+            "passive_probe_empty_ocr_fail_enabled": True,
+            "passive_probe_empty_ocr_min_count": 1,
+            "passive_probe_recalibrate_enabled": True,
+            "passive_probe_recalibrate_fail_threshold": 2,
+            "passive_probe_recalibrate_cooldown_seconds": 45,
+        }
+    )
+    probe = {
+        "attempted": True,
+        "ok": True,
+        "timed_out": False,
+        "login_detected": False,
+        "status_payload": {"ok": True, "online": True, "state": "main_window_compat", "ocr_count": 0},
+    }
+    first = evaluate_passive_logout_probe(probe, guard_state={}, settings=settings, now_ts=1000.0)
+    second = evaluate_passive_logout_probe(probe, guard_state=first.get("state"), settings=settings, now_ts=1010.0)
+    due = passive_probe_recalibration_due(second, settings=settings, now_ts=1010.0)
+    ok = (
+        first.get("empty_ocr_failure") is True
+        and first.get("failures") == 1
+        and second.get("failures") == 2
+        and due.get("due") is True
+        and due.get("reason") == "passive_probe_failure_threshold"
+    )
+    return {"name": "listener_passive_empty_ocr_triggers_recalibration", "ok": ok, "first": first, "second": second, "due": due}
+
+
+def check_listener_passive_recalibration_respects_cooldown() -> dict[str, Any]:
+    settings = normalize_transport_risk_settings(
+        {
+            "enabled": True,
+            "passive_probe_recalibrate_enabled": True,
+            "passive_probe_recalibrate_fail_threshold": 2,
+            "passive_probe_recalibrate_cooldown_seconds": 45,
+        }
+    )
+    verdict = {
+        "stop": False,
+        "failures": 2,
+        "state": {
+            "passive_logout_probe_failures": [1000.0, 1010.0],
+            "last_interactive_calibration_at": 1005.0,
+        },
+    }
+    due = passive_probe_recalibration_due(verdict, settings=settings, now_ts=1020.0)
+    later = passive_probe_recalibration_due(verdict, settings=settings, now_ts=1060.0)
+    ok = due.get("due") is False and due.get("reason") == "cooldown" and later.get("due") is True
+    return {"name": "listener_passive_recalibration_respects_cooldown", "ok": ok, "due": due, "later": later}
+
+
+def check_listener_status_atomic_write_retries_transient_lock() -> dict[str, Any]:
+    from unittest.mock import patch
+
+    with tempfile.TemporaryDirectory() as tmp:
+        path = Path(tmp) / "operator_control.json"
+        attempts = {"count": 0}
+        real_replace = customer_service_runtime.os.replace
+
+        def flaky_replace(source: str | Path, destination: str | Path) -> None:
+            attempts["count"] += 1
+            if attempts["count"] == 1:
+                error = PermissionError(13, "Access denied")
+                error.winerror = 5
+                raise error
+            real_replace(source, destination)
+
+        with patch.object(customer_service_runtime.os, "replace", side_effect=flaky_replace):
+            write_operator_control_state(path, {"tenant_id": "listener_test", "mode": "running"})
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    ok = attempts["count"] == 2 and payload.get("mode") == "running"
+    return {
+        "name": "listener_status_atomic_write_retries_transient_lock",
+        "ok": ok,
+        "attempts": attempts["count"],
+    }
+
+
 def check_listener_watchdog_timeout() -> dict[str, Any]:
     with tempfile.TemporaryDirectory() as tmp:
         log_path = Path(tmp) / "listener.log"
@@ -1497,6 +3553,79 @@ def check_listener_watchdog_timeout() -> dict[str, Any]:
         log_text = log_path.read_text(encoding="utf-8")
     ok = result.get("watchdog_timeout") is True and "managed_listener_watchdog_timeout" in log_text
     return {"name": "listener_watchdog_timeout", "ok": ok, "result": result}
+
+
+def check_listener_rpa_watchdog_timeout_estimate() -> dict[str, Any]:
+    payload = {
+        "realtime_reply": {
+            "watchdog_timeout_seconds": 25,
+            "allow_foreground_llm": True,
+            "foreground_llm_timeout_seconds": 8,
+        },
+        "history_backfill": {"enabled": True, "load_times": 2},
+        "intent_router": {"llm": {"enabled": True, "timeout_seconds": 2}},
+        "llm_reply_synthesis": {"enabled": True, "timeout_seconds": 12, "max_reply_chars": 620},
+        "reply_style_adapter": {"max_reply_chars": 620},
+        "rpa_humanized_send": {
+            "enabled": True,
+            "typing_char_delay_max_ms": 180,
+            "typing_micro_pause_every_chars": 18,
+            "typing_micro_pause_max_ms": 650,
+        },
+        "semantic_batch_planner": {"enabled": True},
+    }
+    timeout = estimate_managed_once_timeout_seconds(payload)
+    return {"name": "listener_rpa_watchdog_timeout_estimate", "ok": timeout >= 75.0, "timeout": timeout}
+
+
+def check_listener_rpa_watchdog_covers_long_humanized_typing() -> dict[str, Any]:
+    payload = {
+        "realtime_reply": {
+            "watchdog_timeout_seconds": 25,
+            "allow_foreground_llm": True,
+            "foreground_llm_timeout_seconds": 8,
+        },
+        "history_backfill": {"enabled": True, "load_times": 2},
+        "intent_router": {"llm": {"enabled": True, "timeout_seconds": 2}},
+        "llm_reply_synthesis": {"enabled": True, "timeout_seconds": 12, "max_reply_chars": 620},
+        "final_visible_llm_polish": {"enabled": True, "timeout_seconds": 4, "max_reply_chars": 620},
+        "reply_style_adapter": {"max_reply_chars": 620},
+        "rpa_humanized_send": {
+            "enabled": True,
+            "typing_char_delay_max_ms": 180,
+            "typing_micro_pause_every_chars": 18,
+            "typing_micro_pause_max_ms": 650,
+            "send_pre_delay_max_ms": 1300,
+            "send_post_input_delay_max_ms": 460,
+            "typing_typo_max": 1,
+        },
+        "semantic_batch_planner": {"enabled": True},
+    }
+    timeout = estimate_managed_once_timeout_seconds(payload)
+    return {
+        "name": "listener_rpa_watchdog_covers_long_humanized_typing",
+        "ok": timeout >= 210.0,
+        "timeout": timeout,
+    }
+
+
+def check_listener_watchdog_env_override() -> dict[str, Any]:
+    previous = os.environ.get("WECHAT_LISTENER_ONCE_TIMEOUT_SECONDS")
+    with tempfile.TemporaryDirectory() as tmp:
+        config_path = Path(tmp) / "listener.json"
+        config_path.write_text(
+            json.dumps({"realtime_reply": {"watchdog_timeout_seconds": 25}}, ensure_ascii=False),
+            encoding="utf-8",
+        )
+        try:
+            os.environ["WECHAT_LISTENER_ONCE_TIMEOUT_SECONDS"] = "33"
+            timeout = managed_once_timeout_seconds(config_path)
+        finally:
+            if previous is None:
+                os.environ.pop("WECHAT_LISTENER_ONCE_TIMEOUT_SECONDS", None)
+            else:
+                os.environ["WECHAT_LISTENER_ONCE_TIMEOUT_SECONDS"] = previous
+    return {"name": "listener_watchdog_env_override", "ok": timeout == 33.0, "timeout": timeout}
 
 
 if __name__ == "__main__":

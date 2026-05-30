@@ -2,7 +2,7 @@
 
 The style memory is deliberately fact-light: it retrieves reusable service
 wording patterns, not product facts. Runtime callers still use the ordinary
-product/policy/RAG evidence layers for what to say.
+product, formal knowledge and current-conversation evidence layers for what to say.
 """
 
 from __future__ import annotations
@@ -101,7 +101,7 @@ def normalize_style_example(
         or raw.get("text")
         or ""
     )
-    service_reply = clean_style_reply(raw_reply)
+    service_reply = sanitize_style_reply(clean_style_reply(raw_reply))
     if not service_reply or len(service_reply) < 6:
         return None
     if looks_like_product_master_data(service_reply):
@@ -118,6 +118,10 @@ def normalize_style_example(
         "source_id": str(raw.get("source_id") or source_id or ""),
         "customer_message": compact_text(raw_customer, 180),
         "service_reply": compact_text(service_reply, 240),
+        "runtime_usage": {
+            "can_affect_style": True,
+            "can_authorize_reply_content": False,
+        },
         "intent_tags": [str(item) for item in raw.get("intent_tags", []) or [] if str(item)],
         "tone_tags": [str(item) for item in raw.get("tone_tags", []) or [] if str(item)],
         "risk_tags": style_risk_tags(service_reply),
@@ -131,7 +135,7 @@ def load_persisted_style_examples(customer_message: str, *, tenant_id: str, limi
     """Load optional future tenant style-memory files.
 
     The first implementation works without this file because current evidence
-    packs already include formal chat items and RAG hits. This loader makes the
+    packs already include formal chat items and allowed retrieval hits. This loader makes the
     module reusable for future one-click imports that write a dedicated style
     memory index.
     """
@@ -169,7 +173,7 @@ def load_persisted_style_examples(customer_message: str, *, tenant_id: str, limi
 
 
 def load_governed_rag_style_examples(customer_message: str, *, tenant_id: str, limit: int) -> list[dict[str, Any]]:
-    """Load style-only RAG experiences as a fallback style memory source."""
+    """Load style-only AI experience pool items as a fallback style memory source."""
 
     try:
         from apps.wechat_ai_customer_service.admin_backend.services.rag_experience_governance import attach_governance
@@ -231,6 +235,21 @@ def clean_style_reply(text: str) -> str:
     if clean and not clean.endswith(("。", "？", "！", "…")):
         clean += "。"
     return clean
+
+
+def sanitize_style_reply(text: str) -> str:
+    """Remove time-sensitive facts so real chat examples only teach wording."""
+
+    clean = str(text or "")
+    clean = re.sub(r"1[3-9]\d{9}", "{手机号}", clean)
+    clean = re.sub(r"\b[A-HJ-NPR-Z0-9]{17}\b", "{车架号}", clean, flags=re.I)
+    clean = re.sub(r"\d+(?:\.\d+)?\s*(?:万公里|w公里|W公里|公里)", "{公里数}", clean)
+    clean = re.sub(r"\d+(?:\.\d+)?\s*(?:万|w|W|元|块)", "{价格}", clean)
+    clean = re.sub(r"(?:19|20)\d{2}\s*款", "{年份}款", clean)
+    clean = re.sub(r"(?:19|20)\d{2}\s*年\s*\d{1,2}\s*月\s*上牌", "{上牌时间}", clean)
+    clean = re.sub(r"(?:19|20)\d{2}\s*年", "{年份}", clean)
+    clean = clean.replace("包过", "需要核实").replace("保证无事故", "以检测报告为准")
+    return re.sub(r"\s+", " ", clean).strip()
 
 
 def looks_like_product_master_data(text: str) -> bool:

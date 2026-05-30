@@ -32,7 +32,7 @@ PRODUCT_SCOPED_POLICY_MAP = {
 
 def main() -> int:
     result = migrate()
-    print(json.dumps(result, ensure_ascii=False, indent=2))
+    print(json.dumps(result, ensure_ascii=True, indent=2))
     return 0 if result.get("ok") else 1
 
 

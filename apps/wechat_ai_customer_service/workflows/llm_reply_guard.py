@@ -80,7 +80,14 @@ def guard_synthesized_reply(
     reply = str(candidate.get("reply") or "").strip()
     safety = evidence_pack.get("safety", {}) or {}
     if isinstance(safety, dict) and safety.get("must_handoff"):
-        return handoff_decision("existing_safety_requires_handoff", candidate)
+        reasons = {str(item) for item in safety.get("reasons", []) or [] if str(item)}
+        advisor_mode = str(settings.get("advisor_mode") or "")
+        soft_advisor_only = advisor_mode == "clear_common_sense_recommendation" and reasons <= {
+            "no_relevant_business_evidence",
+            "auto_reply_disabled",
+        }
+        if not soft_advisor_only:
+            return handoff_decision("existing_safety_requires_handoff", candidate)
 
     risk_tags = normalize_risk_tags(candidate.get("risk_tags", []) or [])
     has_internal_probe = request_has_internal_probe(evidence_pack)
@@ -179,6 +186,14 @@ def guard_synthesized_reply(
 
     if has_sales_followup_commitment(reply, platform_rules):
         return handoff_decision("sales_followup_requires_handoff", candidate)
+
+    fact_authority = validate_reply_fact_authority(reply, evidence_pack)
+    if not fact_authority.get("ok"):
+        return handoff_decision(
+            str(fact_authority.get("reason") or "unsupported_product_fact_without_authority"),
+            candidate,
+            include_candidate_reply=False,
+        )
 
     if settings.get("require_evidence", True) is not False:
         candidate = enrich_candidate_evidence(candidate=candidate, evidence_pack=evidence_pack)
@@ -341,6 +356,133 @@ def has_structured_evidence(evidence_pack: dict[str, Any]) -> bool:
         or evidence.get("product_scoped")
         or evidence.get("catalog_candidates")
     )
+
+
+def validate_reply_fact_authority(reply: str, evidence_pack: dict[str, Any]) -> dict[str, Any]:
+    """Block concrete product facts that are not backed by authoritative evidence."""
+
+    text = str(reply or "")
+    if not text:
+        return {"ok": True}
+    product_items = collect_product_evidence_items(evidence_pack)
+    current_message = customer_context_text(evidence_pack)
+    reply_prices = set(extract_price_mentions(text))
+    customer_prices = set(extract_price_mentions(current_message))
+    non_customer_prices = sorted(price for price in reply_prices if not price_matches_any(price, customer_prices))
+    if non_customer_prices and not product_items:
+        return {
+            "ok": False,
+            "reason": "unsupported_price_without_product_master",
+            "unsupported_prices": non_customer_prices,
+        }
+    if non_customer_prices and product_items:
+        authorized_prices = collect_product_authorized_price_mentions(product_items)
+        conflicting_prices = sorted(price for price in non_customer_prices if not price_matches_any(price, authorized_prices))
+        if conflicting_prices:
+            return {
+                "ok": False,
+                "reason": "product_price_conflicts_with_product_master",
+                "unsupported_prices": conflicting_prices,
+                "authorized_prices": sorted(authorized_prices),
+            }
+    fact_terms = ("现车", "库存", "表显", "公里", "车况", "检测报告", "原版原漆", "一手车", "到店可看")
+    if any(term in text for term in fact_terms) and not product_items:
+        return {"ok": False, "reason": "unsupported_product_fact_without_product_master"}
+    return {"ok": True}
+
+
+def collect_product_evidence_items(evidence_pack: dict[str, Any]) -> list[dict[str, Any]]:
+    knowledge = evidence_pack.get("knowledge") if isinstance(evidence_pack.get("knowledge"), dict) else {}
+    evidence = knowledge.get("evidence") if isinstance(knowledge.get("evidence"), dict) else {}
+    product_master = knowledge.get("product_master") if isinstance(knowledge.get("product_master"), dict) else {}
+    items: list[dict[str, Any]] = []
+    for bucket in (
+        evidence.get("products", []),
+        evidence.get("catalog_candidates", []),
+        product_master.get("items", []),
+    ):
+        for item in bucket or []:
+            if isinstance(item, dict):
+                items.append(item)
+    return items
+
+
+def extract_price_mentions(text: str) -> list[str]:
+    pattern = r"\d+(?:\.\d+)?\s*万(?!\s*(?:公里|km|KM|里))"
+    return [match.group(0).replace(" ", "") for match in re.finditer(pattern, str(text or ""))]
+
+
+def customer_context_text(evidence_pack: dict[str, Any]) -> str:
+    conversation = evidence_pack.get("conversation") if isinstance(evidence_pack.get("conversation"), dict) else {}
+    parts = [
+        str(evidence_pack.get("current_message") or ""),
+        str(conversation.get("history_text") or ""),
+        str(conversation.get("current_batch_text") or ""),
+        str(conversation.get("conversation_summary") or ""),
+    ]
+    return "\n".join(part for part in parts if part)
+
+
+def collect_product_authorized_price_mentions(product_items: list[dict[str, Any]]) -> set[str]:
+    mentions: set[str] = set()
+    for item in product_items:
+        for payload in (item, item.get("data") if isinstance(item.get("data"), dict) else {}):
+            if not isinstance(payload, dict):
+                continue
+            for key in ("price", "unit_price", "sale_price", "listing_price", "guide_price", "quoted_price", "current_price"):
+                mentions.update(price_mentions_from_value(payload.get(key)))
+            tiers = payload.get("price_tiers")
+            if isinstance(tiers, list):
+                for row in tiers:
+                    if isinstance(row, dict):
+                        mentions.update(price_mentions_from_value(row.get("unit_price")))
+    return mentions
+
+
+def price_mentions_from_value(value: Any) -> set[str]:
+    if value is None or value == "":
+        return set()
+    if isinstance(value, (int, float)):
+        return {format_wan_price(float(value))}
+    text = str(value)
+    extracted = set(extract_price_mentions(text))
+    if extracted:
+        return extracted
+    try:
+        return {format_wan_price(float(text.replace(",", "").strip()))}
+    except ValueError:
+        return set()
+
+
+def format_wan_price(value: float) -> str:
+    wan_value = value / 10000.0 if value > 1000 else value
+    text = f"{wan_value:.2f}".rstrip("0").rstrip(".")
+    return f"{text}万"
+
+
+def price_matches_any(price: str, allowed_prices: set[str]) -> bool:
+    price_value = price_to_float(price)
+    if price_value is None:
+        return price in allowed_prices
+    for allowed in allowed_prices:
+        allowed_value = price_to_float(allowed)
+        if allowed_value is None:
+            if price == allowed:
+                return True
+            continue
+        if abs(price_value - allowed_value) <= 0.03:
+            return True
+    return False
+
+
+def price_to_float(price: str) -> float | None:
+    match = re.search(r"(\d+(?:\.\d+)?)\s*万", str(price or ""))
+    if not match:
+        return None
+    try:
+        return float(match.group(1))
+    except ValueError:
+        return None
 
 
 def candidate_evidence_declared(candidate: dict[str, Any]) -> bool:

@@ -246,8 +246,9 @@ def cloud_gate_status() -> dict[str, Any]:
 def _effective_online_freshness_seconds(snapshot: dict[str, Any]) -> int:
     """Keep strict-online freshness aligned with cloud snapshot refresh cadence.
 
-    If snapshot refresh is configured slower than the default online freshness window,
-    use the larger window so clients are not falsely locked between planned refreshes.
+    If snapshot refresh/TTL is configured slower than the default online freshness
+    window, use the larger window so clients are not falsely locked while the
+    cloud lease is still valid and the live VPS/node probes are healthy.
     """
     base = cloud_online_freshness_seconds()
     policy = snapshot.get("cache_policy") if isinstance(snapshot.get("cache_policy"), dict) else {}
@@ -260,7 +261,7 @@ def _effective_online_freshness_seconds(snapshot: dict[str, Any]) -> int:
     if refresh_after > 0:
         base = max(base, refresh_after + 30)
     if ttl_seconds > 0:
-        base = min(base, ttl_seconds)
+        base = max(base, ttl_seconds)
     return max(30, min(3600, base))
 
 

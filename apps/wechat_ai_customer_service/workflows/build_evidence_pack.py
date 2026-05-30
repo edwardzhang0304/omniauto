@@ -24,7 +24,7 @@ def main() -> int:
 
     context = json.loads(args.context_json) if args.context_json else {}
     pack = build_evidence_pack(args.text, manifest_path=args.manifest, context=context)
-    print(json.dumps(pack, ensure_ascii=False, indent=2))
+    print(json.dumps(pack, ensure_ascii=True, indent=2))
     return 0
 
 

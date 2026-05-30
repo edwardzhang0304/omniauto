@@ -33,7 +33,7 @@ def handle_experience_interpretation(payload: dict[str, Any]) -> dict[str, Any]:
 
 
 def handle_rag_quality_audit(payload: dict[str, Any]) -> dict[str, Any]:
-    """Run AI review on a RAG experience."""
+    """Run AI review on a AI experience pool item."""
     experience_id = str(payload.get("experience_id") or "").strip()
     tenant_id = active_tenant_id(payload.get("tenant_id"))
     use_llm = payload.get("use_llm", True) is not False

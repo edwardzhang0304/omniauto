@@ -134,7 +134,7 @@ class RawMessageLearningService:
                 "requested": bool(use_llm),
                 "rule_fallback_allowed": True,
                 "human_approval_required": True,
-                    "strict_promotion_policy": "raw WeChat messages create review-only RAG experiences; retrievable chunks are created only after manual keep/promotion",
+                    "strict_promotion_policy": "raw WeChat messages create review-only AI experience pool items; retrievable chunks are created only after manual keep/promotion",
                 },
                 "rag_ingest": rag_ingest,
                 "rag_experience_id": experience.get("experience_id"),

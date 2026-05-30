@@ -71,19 +71,24 @@ def run_preflight(config_path: Path, extra_targets: list[str], skip_wechat: bool
     connector = WeChatConnector()
     wechat: dict[str, Any] = {
         "skipped": bool(skip_wechat),
+        "wxauto4_reserve_enabled": connector.wxauto4_reserve_enabled(),
         "sidecar_python": str(connector.sidecar_python),
         "sidecar_script": str(connector.sidecar_script),
         "compat_sidecar_script": str(connector.compat_sidecar_script),
     }
-    if not connector.sidecar_python.exists():
-        errors.append(f"Missing wxauto4 sidecar Python: {connector.sidecar_python}")
-    if not connector.sidecar_script.exists():
-        errors.append(f"Missing wxauto4 sidecar script: {connector.sidecar_script}")
     if not connector.compat_sidecar_script.exists():
-        warnings.append(f"Missing WeChat compatibility sidecar script: {connector.compat_sidecar_script}")
+        errors.append(f"Missing primary WeChat RPA sidecar script: {connector.compat_sidecar_script}")
+    if wechat["wxauto4_reserve_enabled"]:
+        if not connector.sidecar_python.exists():
+            warnings.append(f"Missing wxauto4 reserve sidecar Python: {connector.sidecar_python}")
+        if not connector.sidecar_script.exists():
+            warnings.append(f"Missing wxauto4 reserve sidecar script: {connector.sidecar_script}")
 
     if not skip_wechat and not errors:
-        status = connector.status()
+        # Preflight is user-triggered, so it should recover a minimized/tray
+        # WeChat window instead of preserving the background health check's
+        # passive semantics.
+        status = connector.status(interactive=True)
         wechat["status"] = status
         if not status.get("ok") or not status.get("online"):
             errors.append("WeChat is not connected to a logged-in main window.")
@@ -114,6 +119,7 @@ def run_preflight(config_path: Path, extra_targets: list[str], skip_wechat: bool
         "configured_targets": configured_targets,
         "target_reports": target_reports,
         "review_queue_counts": queue_counts,
+        "rpa_humanized_send": config.get("rpa_humanized_send", {}),
         "wechat": compact_wechat_report(wechat),
         "recommended_next_steps": recommended_next_steps(passed, warnings, target_reports, config_path),
     }
@@ -218,6 +224,7 @@ def compact_wechat_report(wechat: dict[str, Any]) -> dict[str, Any]:
         "sidecar_python": wechat.get("sidecar_python"),
         "sidecar_script": wechat.get("sidecar_script"),
         "compat_sidecar_script": wechat.get("compat_sidecar_script"),
+        "wxauto4_reserve_enabled": bool(wechat.get("wxauto4_reserve_enabled")),
         "adapter": status.get("adapter"),
         "compat_reason": status.get("compat_reason"),
         "online": bool(status.get("online")),
@@ -337,7 +344,7 @@ def print_human(payload: dict[str, Any]) -> None:
 
 
 def print_json(payload: dict[str, Any]) -> None:
-    text = json.dumps(payload, ensure_ascii=False, indent=2) + "\n"
+    text = json.dumps(payload, ensure_ascii=True, indent=2) + "\n"
     try:
         sys.stdout.write(text)
     except UnicodeEncodeError:

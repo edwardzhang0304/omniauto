@@ -28,16 +28,16 @@ def main() -> int:
     store = get_postgres_store(tenant_id=tenant_id, config=config)
     availability = store.availability()
     if args.command == "status":
-        print(json.dumps({"ok": availability.ok, "reason": availability.reason, "schema": config.postgres_schema}, ensure_ascii=False, indent=2))
+        print(json.dumps({"ok": availability.ok, "reason": availability.reason, "schema": config.postgres_schema}, ensure_ascii=True, indent=2))
         return 0
     if not availability.ok:
-        print(json.dumps({"ok": False, "message": availability.reason}, ensure_ascii=False, indent=2))
+        print(json.dumps({"ok": False, "message": availability.reason}, ensure_ascii=True, indent=2))
         return 2
     if args.command == "init":
-        print(json.dumps(store.initialize_schema(), ensure_ascii=False, indent=2))
+        print(json.dumps(store.initialize_schema(), ensure_ascii=True, indent=2))
         return 0
     if args.command == "counts":
-        print(json.dumps({"ok": True, "tenant_id": tenant_id, "counts": store.counts(tenant_id)}, ensure_ascii=False, indent=2))
+        print(json.dumps({"ok": True, "tenant_id": tenant_id, "counts": store.counts(tenant_id)}, ensure_ascii=True, indent=2))
         return 0
     if args.command == "parity":
         from apps.wechat_ai_customer_service.workflows.migrate_file_storage_to_postgres import (  # noqa: WPS433
@@ -48,7 +48,7 @@ def main() -> int:
         plan = collect_file_storage(tenant_id)
         counts = store.counts(tenant_id)
         report = build_parity_report(plan, counts)
-        print(json.dumps({"ok": report["ok"], "tenant_id": tenant_id, "counts": counts, "parity": report}, ensure_ascii=False, indent=2))
+        print(json.dumps({"ok": report["ok"], "tenant_id": tenant_id, "counts": counts, "parity": report}, ensure_ascii=True, indent=2))
         return 0 if report["ok"] else 3
     return 1
 

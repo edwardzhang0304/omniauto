@@ -25,6 +25,43 @@ PACKAGE_NAME = "wxauto4"
 DEFAULT_INCLUDE_PRERELEASE = True
 
 
+def wxauto4_reserve_enabled() -> bool:
+    """Return whether the wxauto4 reserve path is explicitly enabled."""
+    return env_flag("WECHAT_ENABLE_WXAUTO4", default=False)
+
+
+def wxauto_auto_update_enabled() -> bool:
+    """Return whether wxauto4 package auto-update is allowed when reserve is on."""
+    return env_flag("WECHAT_WXAUTO_AUTO_UPDATE", default=True)
+
+
+def wxauto4_module_update_enabled() -> bool:
+    """Only update wxauto4 when the reserve transport is explicitly enabled."""
+    return wxauto4_reserve_enabled() and wxauto_auto_update_enabled()
+
+
+def wxauto4_module_update_disabled_result(
+    *,
+    package_name: str = PACKAGE_NAME,
+    reason: str | None = None,
+) -> dict[str, Any]:
+    reserve_enabled = wxauto4_reserve_enabled()
+    auto_update_enabled = wxauto_auto_update_enabled()
+    if reason is None:
+        reason = "disabled_by_WECHAT_WXAUTO_AUTO_UPDATE" if reserve_enabled else "wxauto4_reserve_disabled"
+    return {
+        "ok": True,
+        "enabled": False,
+        "updated": False,
+        "package": package_name,
+        "reason": reason,
+        "reserve_enabled": reserve_enabled,
+        "auto_update_enabled": auto_update_enabled,
+        "technical_reserve": True,
+        "checked_at": now_iso(),
+    }
+
+
 def now_iso() -> str:
     return datetime.now().isoformat(timespec="seconds")
 
@@ -60,15 +97,8 @@ class WxautoPackageManager:
         return self.auto_update_on_wechat_module_start()
 
     def auto_update_on_wechat_module_start(self) -> dict[str, Any]:
-        if str(os.getenv("WECHAT_WXAUTO_AUTO_UPDATE", "1")).strip().lower() in {"0", "false", "no", "off"}:
-            result = {
-                "ok": True,
-                "enabled": False,
-                "updated": False,
-                "package": self.package_name,
-                "reason": "disabled_by_WECHAT_WXAUTO_AUTO_UPDATE",
-                "checked_at": now_iso(),
-            }
+        if not wxauto4_module_update_enabled():
+            result = wxauto4_module_update_disabled_result(package_name=self.package_name)
             self.write_status(result)
             return result
         result = self.check_and_update()
@@ -274,7 +304,7 @@ def parse_json_object(text: str) -> dict[str, Any] | None:
 
 def main() -> int:
     result = WxautoPackageManager().auto_update_on_customer_service_start()
-    print(json.dumps(result, ensure_ascii=False, indent=2))
+    print(json.dumps(result, ensure_ascii=True, indent=2))
     return 0 if result.get("ok") else 1
 
 

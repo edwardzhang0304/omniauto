@@ -312,7 +312,7 @@ class RagExperienceStore:
         candidate_ids: list[str] | None = None,
         original_source: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
-        """Record uploaded or captured source material as a review-only RAG experience."""
+        """Record uploaded or captured source material as a review-only AI experience pool item."""
         now_text = now()
         candidate_ids = [str(item) for item in candidate_ids or [] if str(item)]
         rag_ingest = rag_ingest or {}
@@ -594,7 +594,7 @@ def new_rag_review_state(now_text: str) -> dict[str, Any]:
 
 
 def ensure_review_state(item: dict[str, Any], *, default_now: str | None = None) -> tuple[dict[str, Any], bool]:
-    """Backfill missing review_state for historical RAG experiences.
+    """Backfill missing review_state for historical AI experience pool items.
 
     Compatibility rule:
     - Active + pending/unreviewed experiences default to NEW.
@@ -661,7 +661,7 @@ def ensure_review_state(item: dict[str, Any], *, default_now: str | None = None)
 
 
 def _apply_creation_audit(record: dict[str, Any]) -> None:
-    """Apply real-time LLM quality gate to a newly created RAG experience.
+    """Apply real-time LLM quality gate to a newly created AI experience pool item.
 
     Modifies the record in place. By default it only annotates the review
     outcome so retrieval remains stable and human review can decide whether
@@ -720,14 +720,14 @@ def summarize_intake_experience(source_type: str, category: str, evidence_excerp
     source_label = source_type or "intake"
     category_label = category or "unknown"
     excerpt = truncate(normalize_space(evidence_excerpt), 96)
-    return f"RAG经验：{source_label}/{category_label}，摘要={excerpt}"
+    return f"AI经验池：{source_label}/{category_label}，摘要={excerpt}"
 
 
 def intake_auto_triage_decision(record: dict[str, Any], *, existing_records: list[dict[str, Any]]) -> dict[str, Any]:
     """Decide whether a new intake record should be auto-discarded.
 
     Rule intent:
-    - Product-master facts from intake are not reviewed in RAG experience queue.
+    - Product-master facts from intake are not reviewed in AI experience pool item queue.
     - Low-value noise is auto-discarded.
     - Highly duplicated intake records are auto-discarded.
     """
@@ -740,7 +740,7 @@ def intake_auto_triage_decision(record: dict[str, Any], *, existing_records: lis
         return {
             "auto_discard": True,
             "reason_code": "product_master_manual_intake_only",
-            "reason": "商品资料属于权威主数据，RAG经验层不做人工复核，自动降噪处理。",
+            "reason": "商品资料属于权威主数据，AI经验池不做人工复核，自动降噪处理。",
         }
     evidence = normalize_space(str(record.get("evidence_excerpt") or record.get("reply_text") or ""))
     candidate_count = int(coerce_float(record.get("candidate_count"), 0))
@@ -893,27 +893,13 @@ def with_quality(item: dict[str, Any]) -> dict[str, Any]:
 
 
 def experience_is_retrievable(item: dict[str, Any]) -> bool:
-    if str(item.get("status") or "active") != "active":
-        return False
-    try:
-        from apps.wechat_ai_customer_service.admin_backend.services.rag_experience_governance import (
-            governance_allows_retrieval,
-        )
-
-        if not governance_allows_retrieval(item):
-            return False
-    except Exception:
-        # Keep the legacy quality gate as a safe fallback when admin services
-        # are unavailable in isolated workflow contexts.
-        pass
-    if not experience_review_allows_retrieval(item):
-        return False
-    quality = item.get("quality") if isinstance(item.get("quality"), dict) else score_record_quality(item)
-    return bool(quality.get("retrieval_allowed"))
+    # AI经验池 is a governance/distribution pool. Runtime content evidence must
+    # come from product master, formal knowledge, or current conversation facts.
+    return False
 
 
 def experience_review_allows_retrieval(item: dict[str, Any]) -> bool:
-    """Only approved reply experiences can participate in automatic retrieval."""
+    """Legacy approval helper kept for quality scoring and old data audits."""
     if str(item.get("source") or "") == "intake":
         return False
     review = item.get("experience_review") if isinstance(item.get("experience_review"), dict) else {}
@@ -952,7 +938,7 @@ def score_intake_experience_quality(item: dict[str, Any]) -> dict[str, Any]:
         "band": "medium" if score >= 0.62 else "low",
         "retrieval_allowed": False,
         "reasons": [
-            "intake material is stored as RAG experience first",
+            "intake material is stored as AI experience pool first",
             "formal knowledge still requires pending-candidate review",
             "intake experiences are not used for autonomous reply retrieval before review",
         ],
@@ -1035,7 +1021,7 @@ def score_experience_quality(item: dict[str, Any]) -> dict[str, Any]:
     )
     quality_allows_retrieval = not blockers and enough_hit_score and score >= QUALITY_RETRIEVAL_MIN_SCORE
     review_allows_retrieval = experience_review_allows_retrieval(item)
-    retrieval_allowed = quality_allows_retrieval and review_allows_retrieval
+    retrieval_allowed = False
     if blockers:
         band = "blocked"
     elif score >= 0.72:
@@ -1045,8 +1031,8 @@ def score_experience_quality(item: dict[str, Any]) -> dict[str, Any]:
     else:
         band = "low"
     if quality_allows_retrieval and not review_allows_retrieval:
-        reasons.append("尚未人工确认保留在经验层")
-    reasons.append("允许参与 RAG 经验检索" if retrieval_allowed else "暂不参与 RAG 经验检索")
+        reasons.append("尚未人工确认保留在AI经验池")
+    reasons.append("AI经验池不直接参与客户回复内容检索")
     return {
         "score": score,
         "band": band,

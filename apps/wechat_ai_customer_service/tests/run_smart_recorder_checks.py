@@ -41,6 +41,7 @@ def main() -> int:
             cleanup_runtime()
             results = [
                 check_raw_message_store_and_learning(candidate_ids),
+                check_ocr_near_duplicate_deduplication(),
                 check_raw_wechat_product_master_is_blocked(),
                 check_rag_product_master_promotion_is_blocked(),
                 check_upload_learning_uses_rag_experience(candidate_ids),
@@ -116,6 +117,82 @@ def check_raw_message_store_and_learning(candidate_ids: list[str]) -> dict[str, 
             f"promotion failure should be explainable when auto review discarded the experience: {promoted}",
         )
     return {"name": "raw_message_store_and_learning", "ok": True, "candidate_ids": candidate_ids}
+
+
+def check_ocr_near_duplicate_deduplication() -> dict[str, Any]:
+    store = RawMessageStore()
+    conversation = {
+        "target_name": "OCR近重复测试",
+        "display_name": "OCR近重复测试",
+        "conversation_type": "file_transfer",
+        "selected_by_user": True,
+        "learning_enabled": False,
+        "source": {"type": "test"},
+    }
+    clean = {
+        "type": "text",
+        "sender": "self",
+        "sender_role": "self",
+        "source_adapter": "win32_ocr",
+        "content": "记录员实盘验收04REC30T190006R04客户问置\n换补贴，旧车是2018款SUV。",
+    }
+    noisy = {
+        **clean,
+        "content": "记录员实盘验收04REC30T190006R04客户问置\n换补贴，I旧车是2018款SUV。",
+    }
+    first = store.upsert_messages(
+        conversation,
+        [clean],
+        source_module="smart_recorder",
+        learning_enabled=False,
+        create_batch=False,
+    )
+    duplicate = store.upsert_messages(
+        conversation,
+        [noisy],
+        source_module="smart_recorder",
+        learning_enabled=False,
+        create_batch=False,
+    )
+    assert_equal(first["inserted_count"], 1, "clean OCR message should insert once")
+    assert_equal(duplicate["inserted_count"], 0, "near-duplicate OCR message should not insert")
+    assert_equal(duplicate["duplicate_count"], 1, "near-duplicate OCR message should be reported as duplicate")
+    listed = store.list_messages_advanced(conversation_id=first["conversation"]["conversation_id"], query="REC30T190006R04", limit=20)
+    assert_equal(len(listed), 1, "near-duplicate OCR message should keep one raw record")
+    fragment = {
+        "type": "text",
+        "sender": "self",
+        "sender_role": "self",
+        "source_adapter": "win32_ocr",
+        "observed_at": "2026-05-24T20:00:00",
+        "content": "老师LABTDEDUP-L20",
+    }
+    full = {
+        **fragment,
+        "observed_at": "2026-05-24T20:00:07",
+        "content": "LABTDEDUP-L20密理博UFC901096超滤管[15ml10KD]订2根共计101*8=808元顾欣-陈秋平老师LABTDEDUP-L20",
+    }
+    fragment_insert = store.upsert_messages(
+        conversation,
+        [fragment],
+        source_module="smart_recorder",
+        learning_enabled=False,
+        create_batch=False,
+    )
+    full_duplicate = store.upsert_messages(
+        conversation,
+        [full],
+        source_module="smart_recorder",
+        learning_enabled=False,
+        create_batch=False,
+    )
+    assert_equal(fragment_insert["inserted_count"], 1, "OCR fragment should insert before the full bubble is visible")
+    assert_equal(full_duplicate["inserted_count"], 0, "full OCR bubble should merge with its earlier fragment")
+    assert_equal(full_duplicate["duplicate_count"], 1, "full OCR bubble should be reported as duplicate of fragment")
+    merged = store.list_messages_advanced(conversation_id=fragment_insert["conversation"]["conversation_id"], query="LABTDEDUP-L20", limit=20)
+    assert_equal(len(merged), 1, "partial OCR fragment should not leave a second raw record")
+    assert_true("UFC901096" in str(merged[0].get("content") or ""), "merged OCR record should keep the more complete content")
+    return {"name": "ocr_near_duplicate_deduplication", "ok": True}
 
 
 def check_raw_wechat_product_master_is_blocked() -> dict[str, Any]:

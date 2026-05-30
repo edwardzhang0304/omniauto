@@ -1,8 +1,8 @@
-"""LLM-powered knowledge base and RAG experience quality audit.
+"""LLM-powered knowledge base and AI experience pool item quality audit.
 
 This module uses a DeepSeek model to detect semantic duplicates,
 logic errors, and scenario-inappropriate content across both formal
-knowledge bases and the RAG experience layer.
+knowledge bases and the AI experience pool item layer.
 """
 
 from __future__ import annotations
@@ -34,7 +34,7 @@ LLM_MAX_TOKENS = 4096
 
 
 def audit_knowledge_and_rag(tenant_id: str, max_items_per_batch: int = MAX_ITEMS_PER_BATCH) -> list[dict[str, Any]]:
-    """Run LLM audit over all active knowledge items and RAG experiences.
+    """Run LLM audit over all active knowledge items and AI experience pool items.
 
     Returns a list of diagnostic issues with action_type, involved_targets,
     and llm_reasoning fields.  If API key is missing or the call fails,
@@ -72,7 +72,7 @@ def audit_knowledge_and_rag(tenant_id: str, max_items_per_batch: int = MAX_ITEMS
 
 
 def auto_dedup_rag_experiences(tenant_id: str, max_items_per_batch: int = MAX_ITEMS_PER_BATCH) -> dict[str, Any]:
-    """Automatically detect and discard duplicate RAG experiences.
+    """Automatically detect and discard duplicate AI experience pool items.
 
     This is meant to run without manual confirmation. Duplicate RAG
     experiences are discarded silently (the one with lower reply_count
@@ -84,7 +84,7 @@ def auto_dedup_rag_experiences(tenant_id: str, max_items_per_batch: int = MAX_IT
     store = RagExperienceStore()
     experiences = store.list(status="active", limit=500)
     if not experiences:
-        return {"ok": True, "message": "No active RAG experiences", "discarded": []}
+        return {"ok": True, "message": "No active AI experience pool items", "discarded": []}
 
     entries = [_serialize_rag_experience(e) for e in experiences]
     batches = _batch_entries(entries, max_items_per_batch)
@@ -125,7 +125,7 @@ def auto_dedup_rag_experiences(tenant_id: str, max_items_per_batch: int = MAX_IT
 
     return {
         "ok": True,
-        "message": f"Auto-dedup discarded {len(discarded)} RAG experience(s)",
+        "message": f"Auto-dedup discarded {len(discarded)} AI experience pool item(s)",
         "discarded": discarded,
         "duplicate_groups": [f.get("involved_targets", []) for f in duplicates],
     }
@@ -136,7 +136,7 @@ def has_llm_config() -> bool:
 
 
 def _collect_entries() -> list[dict[str, Any]]:
-    """Gather all active knowledge items and RAG experiences into a flat list."""
+    """Gather all active knowledge items and AI experience pool items into a flat list."""
     entries: list[dict[str, Any]] = []
     entries.extend(_collect_knowledge_entries())
     entries.extend(_collect_rag_entries())
@@ -237,7 +237,7 @@ def _call_llm_audit_batch(batch: list[dict[str, Any]], rag_only_mode: bool = Fal
     base_url = resolve_deepseek_base_url(read_secret_fn=read_secret)
     model = resolve_deepseek_tier_model(tier="flash", read_secret_fn=read_secret)
 
-    scope_hint = "RAG经验" if rag_only_mode else "知识库条目和RAG经验"
+    scope_hint = "AI经验池" if rag_only_mode else "知识库条目和AI经验池"
     system_content = (
         "你是微信AI客服知识库的质量审计专家。你的任务是从提供的条目中找出问题。"
         "你必须只输出合法的JSON对象，不要输出markdown代码块或其他格式。"
@@ -249,7 +249,7 @@ def _call_llm_audit_batch(batch: list[dict[str, Any]], rag_only_mode: bool = Fal
             "1. 语义重复：不同条目表达同一业务含义，建议合并（merge）。",
             "2. 逻辑错误：价格自相矛盾、政策前后冲突、话术与商品属性明显不符，建议删除（delete）或修改（review）。",
             "3. 场景不适用：内容与当前业务场景明显不匹配（如二手车业务出现'7天无理由退货'），建议删除（delete）或修改（review）。",
-            "4. RAG经验质量问题：RAG经验与正式知识严重冲突或本身质量极低，建议删除（delete）或 review。",
+            "4. AI经验池质量问题：AI经验池与正式知识严重冲突或本身质量极低，建议删除（delete）或 review。",
             "只对确实有问题且你有信心的条目输出；不要编造问题。",
             "每条finding必须包含 type、severity、involved_targets、reason、action。",
         ],
@@ -349,7 +349,7 @@ def _finding_to_issue(finding: dict[str, Any]) -> dict[str, Any]:
         "semantic_duplicate": "LLM：语义重复",
         "logic_error": "LLM：逻辑错误",
         "inappropriate": "LLM：场景不适用",
-        "rag_quality_low": "LLM：RAG经验质量低",
+        "rag_quality_low": "LLM：AI经验池质量低",
     }
 
     primary_target = targets[0]
@@ -416,7 +416,7 @@ def _parse_json_object(value: str) -> dict[str, Any] | None:
 
 
 def audit_single_rag_experience(record: dict[str, Any]) -> dict[str, Any] | None:
-    """Lightweight LLM quality gate for a single RAG experience at creation time.
+    """Lightweight LLM quality gate for a single AI experience pool item at creation time.
 
     Returns {"action": "keep"|"delete", "reason": "..."} or None on failure.
     The caller should treat None as "keep" to avoid blocking the hot path.
@@ -453,7 +453,7 @@ def audit_single_rag_experience(record: dict[str, Any]) -> dict[str, Any] | None
     )
 
     system_content = (
-        "你是微信AI客服RAG经验的质量守门员。你的任务是判断一条刚生成的RAG经验是否应该被保留。"
+        "你是微信AI客服AI经验池的质量守门员。你的任务是判断一条刚生成的AI经验池是否应该被保留。"
         "你必须只输出合法的JSON对象，不要输出markdown代码块或其他格式。"
     )
 
@@ -463,7 +463,7 @@ def audit_single_rag_experience(record: dict[str, Any]) -> dict[str, Any] | None
         "且内容是真实的客户咨询（如车型推荐、省油需求、购车预算、售后问题等），建议 keep。"
         "这类对话即使表达不够 polished，只要信息有价值就应该保留。",
         "2. 【纯商品目录复制】如果内容只是从商品库/知识库复制的结构化数据（包含 name/sku/price/category 等字段），"
-        "且没有客户互动问答，建议 delete。这类内容和正式知识库完全重复，不需要作为RAG经验保留。",
+        "且没有客户互动问答，建议 delete。这类内容和正式知识库完全重复，不需要作为AI经验池保留。",
         "3. 【纯系统提示/日志】如果内容只是系统时间戳、self: 自动回复记录、打招呼、转账通知等内部日志，"
         "没有客户实际提问和客服有意义的回复，建议 delete。",
         "4. 【纯噪音】如果内容是纯噪音、测试消息、无意义重复、只有表情，建议 delete。",
@@ -473,7 +473,7 @@ def audit_single_rag_experience(record: dict[str, Any]) -> dict[str, Any] | None
     ]
 
     user_prompt = {
-        "task": "请审计这条RAG经验，判断它是否应该被保留。",
+        "task": "请审计这条AI经验池，判断它是否应该被保留。",
         "content_analysis": {
             "has_customer_dialog": has_customer_dialog,
             "is_product_catalog_copy": is_product_catalog_copy,
@@ -531,7 +531,7 @@ def audit_single_rag_experience(record: dict[str, Any]) -> dict[str, Any] | None
 
 
 def _choose_discard_target(targets: list[str], experiences: list[dict[str, Any]]) -> str | None:
-    """Given duplicate targets, choose which RAG experience to discard.
+    """Given duplicate targets, choose which AI experience pool item to discard.
 
     Prefer keeping the one with higher reply_count (more used) or older
     creation time (more stable). Discard the other(s).

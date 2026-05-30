@@ -1,4 +1,4 @@
-"""Create pending review candidates from governed RAG experiences.
+"""Create pending review candidates from governed AI experience pool items.
 
 This service is deliberately review-only. It may create files under
 ``review_candidates/pending`` and annotate the source experience, but it never
@@ -153,7 +153,7 @@ class RagExperienceCandidateNominator:
                 "status": "created",
                 "suggested_at": now_text,
                 "target_category": "",
-                "reason": "已存在同一RAG经验生成的待确认知识候选。",
+                "reason": "已存在同一AI经验池生成的待确认知识候选。",
                 "auto_create_allowed": False,
                 "created_candidate_id": candidate_id,
                 "created_at": now_text,

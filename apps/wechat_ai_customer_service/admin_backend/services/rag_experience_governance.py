@@ -1,4 +1,4 @@
-"""Unified final governance resolver for RAG experiences.
+"""Unified final governance resolver for AI experience pool items.
 
 This module intentionally does not write data. It folds quality, AI advice,
 source authority, pollution guards and legacy review state into one effective
@@ -22,9 +22,9 @@ from apps.wechat_ai_customer_service.admin_backend.services.source_authority_pol
 )
 
 
-GOVERNANCE_POLICY_VERSION = "rag_experience_governance_v1"
+GOVERNANCE_POLICY_VERSION = "ai_experience_pool_governance_v2"
 AUTO_TRIAGE_ACTIONS = {"discard", "already_covered"}
-RETRIEVABLE_STATES = {"retrievable_experience"}
+RETRIEVABLE_STATES: set[str] = set()
 REAL_CHAT_SOURCES = {
     "cleaned_real_chat_pack",
     "real_chat",
@@ -84,7 +84,7 @@ STABLE_PROCESS_TOKENS = (
 
 
 def resolve_rag_experience_governance(item: dict[str, Any]) -> dict[str, Any]:
-    """Return a single final governance decision for one RAG experience."""
+    """Return a single final governance decision for one AI experience pool item."""
 
     status = str(item.get("status") or "active")
     review = item.get("experience_review") if isinstance(item.get("experience_review"), dict) else {}
@@ -127,7 +127,7 @@ def resolve_rag_experience_governance(item: dict[str, Any]) -> dict[str, Any]:
             "promoted",
             "respect_promoted",
             "已升级为待确认知识",
-            "这条经验已经进入候选或正式知识处理链路，不再重复参与RAG检索。",
+            "这条经验已经进入候选或正式知识处理链路，不再重复参与运行时检索。",
             retrieval_allowed=False,
             promotion_allowed=False,
             style_allowed=False,
@@ -141,7 +141,7 @@ def resolve_rag_experience_governance(item: dict[str, Any]) -> dict[str, Any]:
             "user_discarded" if user_discard else "auto_discarded",
             "respect_user_discard" if user_discard else "auto_discard",
             "已废弃，不参与回答",
-            "这条经验已经被废弃或系统自动降噪，不参与RAG参考、候选晋升或风格学习。",
+            "这条经验已经被废弃或系统自动降噪，不参与AI经验池参考、候选晋升或风格学习。",
             retrieval_allowed=False,
             promotion_allowed=False,
             style_allowed=False,
@@ -166,8 +166,8 @@ def resolve_rag_experience_governance(item: dict[str, Any]) -> dict[str, Any]:
         return governance_decision(
             "blocked",
             "block_by_policy",
-            "人工已保留，但禁止参与RAG检索",
-            "这条内容命中商品主数据或具体商品事实边界，人工保留只保留审计动作，不能作为RAG事实参考。",
+            "人工已保留，但禁止作为回答依据",
+            "这条内容命中商品主数据或具体商品事实边界，人工保留只保留审计动作，不能作为客户回复依据。",
             retrieval_allowed=False,
             promotion_allowed=False,
             style_allowed=is_real_chat,
@@ -184,7 +184,7 @@ def resolve_rag_experience_governance(item: dict[str, Any]) -> dict[str, Any]:
                 "style_only",
                 "keep_style_only",
                 "仅作话术风格参考",
-                "这条真实聊天样本不适合作为RAG事实检索或正式知识候选，但可用于学习客服表达方式。",
+                "这条真实聊天样本不适合作为客户回复依据或正式知识候选，但可用于学习客服表达方式。",
                 retrieval_allowed=False,
                 promotion_allowed=False,
                 style_allowed=True,
@@ -195,7 +195,7 @@ def resolve_rag_experience_governance(item: dict[str, Any]) -> dict[str, Any]:
         return governance_decision(
             "auto_discarded",
             "auto_discard",
-            "建议废弃，已从RAG参考降噪",
+            "建议废弃，已从AI经验池参考降噪",
             str(ai.get("action_reason") or ai_auto_triage.get("reason") or "系统判断这条经验不适合继续参与审核、检索或晋升。"),
             retrieval_allowed=False,
             promotion_allowed=False,
@@ -249,7 +249,7 @@ def resolve_rag_experience_governance(item: dict[str, Any]) -> dict[str, Any]:
             "style_only",
             "keep_style_only",
             "仅作话术风格参考",
-            "真实聊天中包含商品事实、价格或车源线索，不参与RAG事实检索，但可借鉴表达方式。",
+            "真实聊天中包含商品事实、价格或车源线索，不参与客户回复依据，但可借鉴表达方式。",
             retrieval_allowed=False,
             promotion_allowed=False,
             style_allowed=True,
@@ -259,11 +259,11 @@ def resolve_rag_experience_governance(item: dict[str, Any]) -> dict[str, Any]:
         )
     if review_status in {"kept", "auto_kept"} and bool(quality.get("retrieval_allowed")):
         return governance_decision(
-            "retrievable_experience",
-            "keep_retrievable",
-            "已吸纳为经验，可作为RAG参考",
-            "这条经验通过质量和来源检查，客户问到相近低风险问题时可作为辅助参考。",
-            retrieval_allowed=True,
+            "kept_experience",
+            "keep_in_ai_experience_pool",
+            "已吸纳为AI经验池，不参与回答依据",
+            "这条经验通过质量和来源检查，保留在AI经验池用于治理、候选分发或风格学习，但不直接作为客户回复内容依据。",
+            retrieval_allowed=False,
             promotion_allowed=False,
             style_allowed=is_real_chat,
             risk_level="low",
@@ -289,7 +289,7 @@ def resolve_rag_experience_governance(item: dict[str, Any]) -> dict[str, Any]:
             "style_only" if is_real_chat else "pending_review",
             "keep_style_only" if is_real_chat else "wait_for_review",
             "仅作话术风格参考" if is_real_chat else "待处理，暂不参与回答",
-            "当前证据不足以参与RAG检索；真实聊天可保留表达风格，其余内容等待人工处理。",
+        "当前证据不足以作为运行时回答依据；真实聊天可保留表达风格，其余内容等待人工处理。",
             retrieval_allowed=False,
             promotion_allowed=False,
             style_allowed=is_real_chat,
@@ -301,7 +301,7 @@ def resolve_rag_experience_governance(item: dict[str, Any]) -> dict[str, Any]:
         "pending_review",
         "wait_for_review",
         "待处理，暂不参与回答",
-        "这条经验还没有通过人工或系统治理确认，不参与RAG参考或候选晋升。",
+        "这条经验还没有通过人工或系统治理确认，不参与AI经验池参考或候选晋升。",
         retrieval_allowed=False,
         promotion_allowed=False,
         style_allowed=is_real_chat,
@@ -319,10 +319,7 @@ def attach_governance(item: dict[str, Any]) -> dict[str, Any]:
 
 def governance_allows_retrieval(item: dict[str, Any]) -> bool:
     governance = item.get("governance") if isinstance(item.get("governance"), dict) else resolve_rag_experience_governance(item)
-    return (
-        bool(governance.get("retrieval_allowed"))
-        and str(governance.get("effective_state") or "") in RETRIEVABLE_STATES
-    )
+    return bool(governance.get("retrieval_allowed")) and str(governance.get("effective_state") or "") in RETRIEVABLE_STATES
 
 
 def governance_display_state(item: dict[str, Any], *, fallback: str = "pending") -> str:
@@ -332,7 +329,7 @@ def governance_display_state(item: dict[str, Any], *, fallback: str = "pending")
         return "discarded"
     if effective in {"promoted", "candidate_created"}:
         return "promoted"
-    if effective in {"retrievable_experience", "style_only", "candidate_suggested"}:
+    if effective in {"retrievable_experience", "kept_experience", "style_only", "candidate_suggested"}:
         return "kept"
     if effective == "pending_review":
         return "pending"
@@ -343,6 +340,7 @@ def governance_counts(items: list[dict[str, Any]]) -> dict[str, int]:
     states = {
         "pending_review": 0,
         "retrievable_experience": 0,
+        "kept_experience": 0,
         "style_only": 0,
         "candidate_suggested": 0,
         "candidate_created": 0,

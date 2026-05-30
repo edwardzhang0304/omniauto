@@ -1,7 +1,7 @@
 """Generate review-only candidates from raw WeChat customer-service materials.
 
 This workflow never edits formal structured business data directly. In the
-current governed flow, raw materials should first become RAG experiences; direct
+current governed flow, raw materials should first become AI experience pool items; direct
 candidate writes are blocked unless an explicit legacy environment flag is set.
 """
 
@@ -143,7 +143,7 @@ def main() -> int:
         limit=args.limit,
         write=bool(args.write and not args.dry_run),
     )
-    print(json.dumps(result, ensure_ascii=False, indent=2))
+    print(json.dumps(result, ensure_ascii=True, indent=2))
     return 0 if result.get("ok") else 1
 
 
@@ -168,7 +168,7 @@ def generate_candidates(raw_root: Path, pending_root: Path, limit: int, write: b
         "ok": True,
         "dry_run": not write,
         "write_blocked": write_blocked,
-        "strict_promotion_policy": "direct candidate writes are disabled; create RAG experiences first and promote manually",
+        "strict_promotion_policy": "direct candidate writes are disabled; create AI experience pool items first and promote manually",
         "raw_root": str(raw_root),
         "pending_root": str(pending_root),
         "files_seen": len(files),
@@ -1174,6 +1174,8 @@ def candidate_reject_reason(candidate: dict[str, Any]) -> str:
 
 def generated_from_pipeline_trace(text: str) -> bool:
     markers = (
+        "AI experience pool item ->",
+        "Intake -> AI experience pool item",
         "RAG experience ->",
         "Intake -> RAG experience",
         "candidates=",

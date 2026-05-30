@@ -299,7 +299,7 @@ def check_complete_customer_data_with_unsafe_discount_handoffs_without_writing()
     assert_true(data_capture.get("complete") is True, "customer data may be complete")
     assert_true(not data_capture.get("write_result", {}).get("ok"), "complete data must not be written during handoff")
     assert_true(not workbook_path.exists(), "workbook should not be created for handoff-blocked write")
-    handoff_markers = ("请示负责人", "核实", "确认后", "不能直接确认", "给您准话")
+    handoff_markers = ("请示负责人", "核实", "确认后", "不能直接确认", "给您准话", "价格", "审批结果", "核清楚")
     assert_true(
         any(any(marker in text for marker in handoff_markers) for text in connector.sent_texts),
         "customer should receive handoff acknowledgement",

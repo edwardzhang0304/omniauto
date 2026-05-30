@@ -1,7 +1,7 @@
-"""Migrate historical RAG experiences to the unified governance contract.
+"""Migrate historical AI experience pool items to the unified governance contract.
 
 The migration is intentionally narrow:
-- it writes governance snapshots and migration audit metadata to RAG experiences;
+- it writes governance snapshots and migration audit metadata to AI experience pool items;
 - it may persist obvious automatic discard decisions already made by governance;
 - it never edits formal knowledge, product master data, or source uploads.
 """
@@ -78,7 +78,7 @@ def main() -> int:
         report_path = Path(args.report)
         report_path.parent.mkdir(parents=True, exist_ok=True)
         report_path.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
-    print(json.dumps(report, ensure_ascii=False, indent=2))
+    print(json.dumps(report, ensure_ascii=True, indent=2))
     return 0 if report.get("ok") else 1
 
 
@@ -260,7 +260,7 @@ def quality_with_governance(quality: dict[str, Any], governance: dict[str, Any])
     result["signals"] = signals
     if previous_allowed and not final_allowed:
         reasons = list(result.get("reasons") if isinstance(result.get("reasons"), list) else [])
-        final_reason = str(governance.get("display_label") or governance.get("reason") or "最终治理裁决不允许RAG检索。")
+        final_reason = str(governance.get("display_label") or governance.get("reason") or "最终治理裁决不允许作为回答依据。")
         note = f"最终治理裁决：{final_reason}"
         if note not in reasons:
             reasons.append(note)

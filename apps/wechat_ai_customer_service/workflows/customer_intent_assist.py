@@ -403,7 +403,7 @@ def analyze_policy_intent(
             fields=fields,
             missing_fields=missing,
         )
-    if has_any(normalized, intent_keywords().get("after_sales", [])):
+    if has_any(normalized, intent_keywords().get("after_sales", [])) and not is_pre_purchase_vehicle_maintenance_guidance(normalized):
         return IntentAssistResult(
             enabled=True,
             mode="heuristic",
@@ -738,7 +738,31 @@ def trim_text(text: str, limit: int) -> str:
     value = str(text or "").strip()
     if len(value) <= limit:
         return value
-    return value[: max(0, limit - 3)].rstrip() + "..."
+    return truncate_visible_reply(value, limit)
+
+
+def truncate_visible_reply(text: str, limit: int) -> str:
+    value = " ".join(str(text or "").split()).strip()
+    if limit <= 1:
+        return value[:limit]
+    if len(value) <= limit:
+        return value
+    preferred = -1
+    for marker in ("。", "！", "？", "!", "?", "；", ";", "，", ","):
+        index = value.rfind(marker, 0, limit)
+        if index > preferred:
+            preferred = index
+    if preferred >= 0 and preferred + 1 >= max(12, int(limit * 0.45)):
+        candidate = value[: preferred + 1].strip()
+    else:
+        candidate = value[: max(1, limit - 1)].strip().rstrip("，,；;、:：")
+        if candidate and not candidate.endswith(("。", "！", "？", ".", "!", "?")):
+            candidate = candidate[: max(1, limit - 1)].rstrip("，,；;、:：") + "。"
+    if candidate.endswith(("，", ",", "；", ";", "、", ":", "：")):
+        candidate = candidate.rstrip("，,；;、:：")
+        if candidate and not candidate.endswith(("。", "！", "？", ".", "!", "?")):
+            candidate = candidate[: max(1, limit - 1)].rstrip("，,；;、:：") + "。"
+    return candidate[:limit].strip()
 
 
 def apply_boundary_fallback(response: dict[str, Any], heuristic: IntentAssistResult, reason: str) -> bool:
@@ -770,7 +794,7 @@ def boundary_fallback_candidate(heuristic: IntentAssistResult, reason: str) -> d
     if not reply:
         reply = "这个需要先跟负责人确认，问清楚后再回复您。"
     if len(reply) > 240:
-        reply = reply[:237] + "..."
+        reply = truncate_visible_reply(reply, 240)
     try:
         confidence = float(heuristic.confidence)
     except (TypeError, ValueError):
@@ -919,6 +943,67 @@ def has_product_detail(text: str) -> bool:
     return bool(re.search(rf"\d+\s*({quantity_unit_pattern()})", text, re.IGNORECASE))
 
 
+def is_pre_purchase_vehicle_maintenance_guidance(text: str) -> bool:
+    """Treat "后期维修成本/维修麻烦" as buying guidance, not an after-sales claim."""
+
+    normalized = normalize_text(text)
+    if "维修" not in normalized and "维护" not in normalized:
+        return False
+    hard_after_sales = [
+        "售后",
+        "质保",
+        "保修",
+        "退换",
+        "退款",
+        "赔偿",
+        "买完",
+        "坏了",
+        "出问题",
+        "负责",
+        "保修期",
+    ]
+    if has_any(normalized, hard_after_sales):
+        return False
+    maintenance_context = ["后期维修", "维修成本", "维修麻烦", "维修不贵", "维护成本", "少维修", "小毛病", "后期省心"]
+    selection_context = [
+        "怎么选",
+        "哪一类",
+        "哪类",
+        "哪种",
+        "哪个",
+        "建议",
+        "先看",
+        "适合",
+        "预算",
+        "通勤",
+        "代步",
+        "家用",
+        "二手车",
+        "车型",
+        "车况",
+        "保值",
+        "不想太贵",
+    ]
+    vehicle_context = [
+        "车",
+        "车型",
+        "二手",
+        "电车",
+        "新能源",
+        "纯电",
+        "混动",
+        "轿车",
+        "suv",
+        "mpv",
+        "里面选",
+        "选哪",
+        "选哪个",
+        "哪一类",
+        "哪种",
+    ]
+    return has_any(normalized, maintenance_context) and has_any(normalized, selection_context) and has_any(normalized, vehicle_context)
+
+
 def needs_approval(text: str) -> bool:
     if has_any(text, product_keywords("approval")):
         return True
@@ -941,7 +1026,7 @@ def format_missing(fields: list[str]) -> str:
 
 
 def print_json(payload: dict[str, Any]) -> None:
-    text = json.dumps(payload, ensure_ascii=False, indent=2) + "\n"
+    text = json.dumps(payload, ensure_ascii=True, indent=2) + "\n"
     try:
         sys.stdout.write(text)
     except UnicodeEncodeError:

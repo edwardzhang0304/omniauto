@@ -114,7 +114,7 @@ def check_migrated_content_counts() -> None:
     assert_equal(len(store.list_items("products")), product_count, "migrated product count")
     expected_faq_count = len([item for item in store.list_items("policies") if not str(item.get("id") or "").endswith("_details")])
     expected_faq_count += len(list(runtime.iter_all_product_scoped_items()))
-    expected_style_count = len(store.list_items("chats")) + len(runtime.list_items("global_guidelines"))
+    expected_style_count = len(runtime.list_items("chats")) + len(runtime.list_items("global_guidelines"))
     assert_equal(faq_count, expected_faq_count, "compiled policy and product-scoped FAQ count")
     assert_equal(style_count, expected_style_count, "compiled chat and global guideline count")
     fridge = store.get_item("products", "commercial_fridge_bx_200")

@@ -14,8 +14,14 @@ from typing import Any
 import psutil
 
 from apps.wechat_ai_customer_service.adapters.wechat_connector import reset_wxauto_sidecar_daemon
-from apps.wechat_ai_customer_service.adapters.wxauto_package_manager import WxautoPackageManager
+from apps.wechat_ai_customer_service.adapters.wxauto_package_manager import WxautoPackageManager, wxauto4_module_update_enabled
 from apps.wechat_ai_customer_service.cloud_gate import cloud_gate_status, cloud_required_enabled
+from apps.wechat_ai_customer_service.customer_service_live_safety import (
+    CustomerServiceLiveSafetyError,
+    assert_customer_service_recent_bootstrap_guard,
+    assert_customer_service_live_safety_guard,
+)
+from apps.wechat_ai_customer_service.admin_backend.services.customer_service_settings import CustomerServiceSettings
 from apps.wechat_ai_customer_service.admin_backend.services.wechat_startup_check import run_wechat_startup_self_check
 from apps.wechat_ai_customer_service.knowledge_paths import active_tenant_id, tenant_runtime_root
 from apps.wechat_ai_customer_service.sync import VpsLocalSyncService
@@ -26,11 +32,53 @@ APP_ROOT = PROJECT_ROOT / "apps" / "wechat_ai_customer_service"
 DEFAULT_CHEJIN_TENANT_ID = "chejin"
 DEFAULT_CHEJIN_CONFIG = APP_ROOT / "configs" / "jiangsu_chejin_xucong_live.example.json"
 
-RUNTIME_STATES = {"idle", "thinking", "stopped"}
+RUNTIME_STATES = {"idle", "thinking", "paused", "stopped"}
+VOLATILE_WECHAT_STARTUP_DETAILS = {
+    "wechat_not_ready",
+    "wechat_window_minimized",
+    "wechat_receive_unavailable",
+    "wechat_send_unavailable",
+}
+VOLATILE_WECHAT_STARTUP_MESSAGE_TTL_SECONDS = 45
 
 
 def now_iso() -> str:
     return datetime.now().isoformat(timespec="seconds")
+
+
+TRANSIENT_WRITE_WINERRORS = {5, 32, 33}
+
+
+def transient_write_error(exc: OSError) -> bool:
+    """Windows can briefly lock files that are being read by the UI/AV/indexer."""
+    winerror = getattr(exc, "winerror", None)
+    if winerror in TRANSIENT_WRITE_WINERRORS:
+        return True
+    errno_value = getattr(exc, "errno", None)
+    return errno_value in {13, 16, 32}
+
+
+def atomic_write_json(path: Path, payload: Any, *, attempts: int = 10) -> None:
+    text = json.dumps(payload, ensure_ascii=False, indent=2)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    last_error: OSError | None = None
+    for attempt in range(max(1, attempts)):
+        temp = path.with_name(f".{path.name}.{os.getpid()}.{time.time_ns()}.tmp")
+        try:
+            temp.write_text(text, encoding="utf-8")
+            os.replace(temp, path)
+            return
+        except OSError as exc:
+            last_error = exc
+            try:
+                temp.unlink()
+            except OSError:
+                pass
+            if not transient_write_error(exc) or attempt >= attempts - 1:
+                raise
+            time.sleep(0.05 * (attempt + 1))
+    if last_error is not None:
+        raise last_error
 
 
 def runtime_dir(tenant_id: str | None = None) -> Path:
@@ -43,6 +91,18 @@ def runtime_status_path(tenant_id: str | None = None) -> Path:
 
 def runtime_pid_path(tenant_id: str | None = None) -> Path:
     return runtime_dir(tenant_id) / "listener.pid.json"
+
+
+def runtime_operator_control_path(tenant_id: str | None = None) -> Path:
+    return runtime_dir(tenant_id) / "operator_control.json"
+
+
+def runtime_operator_guard_pid_path(tenant_id: str | None = None) -> Path:
+    return runtime_dir(tenant_id) / "operator_guard.pid.json"
+
+
+def runtime_operator_guard_state_path(tenant_id: str | None = None) -> Path:
+    return runtime_dir(tenant_id) / "operator_guard.state.json"
 
 
 def worker_pid_path(tenant_id: str | None = None) -> Path:
@@ -71,10 +131,7 @@ def write_runtime_status(
     }
     payload.update({key: value for key, value in extra.items() if value is not None})
     path = runtime_status_path(tenant_id)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    temp = path.with_suffix(".json.tmp")
-    temp.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
-    os.replace(temp, path)
+    atomic_write_json(path, payload)
     return payload
 
 
@@ -116,8 +173,28 @@ def status_default_message(state: str) -> str:
     return {
         "idle": "自动客服正在运行，当前没有正在处理的消息。",
         "thinking": "自动客服正在读取微信消息或调用大模型。",
-        "stopped": "自动客服监听已停止。",
+        "paused": "自动客服已暂停，等待恢复指令。",
+        "stopped": "已停止。",
     }.get(state, "自动客服状态未知。")
+
+
+def stale_volatile_wechat_startup_failure(status: dict[str, Any], *, now_ts: float | None = None) -> bool:
+    """Do not keep showing old recoverable WeChat startup failures forever."""
+    if str(status.get("state") or "") != "stopped":
+        return False
+    check = status.get("wechat_check") if isinstance(status.get("wechat_check"), dict) else {}
+    detail = str((check or {}).get("detail") or "")
+    if detail not in VOLATILE_WECHAT_STARTUP_DETAILS:
+        return False
+    updated_at = str(status.get("updated_at") or "")
+    if not updated_at:
+        return True
+    try:
+        parsed = datetime.fromisoformat(updated_at)
+    except ValueError:
+        return True
+    age = float(now_ts if now_ts is not None else time.time()) - parsed.timestamp()
+    return age >= VOLATILE_WECHAT_STARTUP_MESSAGE_TTL_SECONDS
 
 
 def summarize_listener_result(result: dict[str, Any]) -> dict[str, Any]:
@@ -157,7 +234,15 @@ class CustomerServiceRuntime:
         gate = cloud_gate_status() if cloud_required_enabled() else {"ok": True, "required": False}
         worker_pid_record = self._read_worker_pid_record()
         worker_pid = int(worker_pid_record.get("pid") or 0)
-        worker_running = self._pid_alive(worker_pid)
+        worker_running = self._worker_pid_matches_tenant_queue(worker_pid)
+        if worker_pid and not worker_running:
+            self._clear_worker_pid_record()
+        guard_pid_record = self._read_operator_guard_pid_record()
+        guard_pid = int(guard_pid_record.get("pid") or 0)
+        guard_running = self._pid_alive(guard_pid)
+        guard_state = self._read_operator_guard_state() if guard_running else {}
+        if not guard_running and guard_pid_record:
+            self._clear_operator_guard_runtime_files()
         queue_summary = {}
         try:
             from apps.wechat_ai_customer_service.admin_backend.services.work_queue import WorkQueueService
@@ -174,6 +259,9 @@ class CustomerServiceRuntime:
                 "cloud_gate": gate,
                 "worker_pid": worker_pid if worker_running else None,
                 "worker_running": worker_running,
+                "operator_guard_pid": guard_pid if guard_running else None,
+                "operator_guard_running": guard_running,
+                "operator_guard_state": guard_state,
                 "queue_summary": queue_summary,
             }
         )
@@ -183,9 +271,11 @@ class CustomerServiceRuntime:
             previous_state = str(status.get("state") or "")
             previous_message = str(status.get("message") or "").strip()
             status["state"] = "stopped"
-            if previous_state == "stopped" and previous_message:
+            if previous_state == "stopped" and previous_message and not stale_volatile_wechat_startup_failure(status):
                 status["message"] = previous_message
             else:
+                if previous_message:
+                    status["stale_message"] = previous_message
                 status["message"] = status_default_message("stopped")
         status["other_listeners"] = self._scan_all_listener_tenants()
         return status
@@ -201,7 +291,23 @@ class CustomerServiceRuntime:
         if current.get("running"):
             return {"ok": True, "message": "自动客服已经在运行。", "item": current}
         if cloud_required_enabled():
-            refresh = VpsLocalSyncService().fetch_shared_knowledge_snapshot(
+            sync_service = VpsLocalSyncService()
+            register = sync_service.register_node(
+                token=token,
+                tenant_id=self.tenant_id,
+                display_name="Local Customer Service Runtime",
+            )
+            if register.get("ok") is not True:
+                message = "无法向服务端注册本地节点，自动客服已锁定。请恢复服务端连接后重试。"
+                write_runtime_status("stopped", message, tenant_id=self.tenant_id)
+                return {
+                    "ok": False,
+                    "message": message,
+                    "detail": "cloud_node_register_failed",
+                    "sync_result": register,
+                    "item": self.status(),
+                }
+            refresh = sync_service.fetch_shared_knowledge_snapshot(
                 token=token,
                 tenant_id=self.tenant_id,
                 force=True,
@@ -226,6 +332,25 @@ class CustomerServiceRuntime:
         except FileNotFoundError as exc:
             write_runtime_status("stopped", str(exc), tenant_id=self.tenant_id)
             return {"ok": False, "message": str(exc), "item": self.status()}
+        bootstrap_refresh: dict[str, Any] | None = None
+        try:
+            live_safety_guard = self._validate_live_safety_guard(config_path)
+        except CustomerServiceLiveSafetyError as exc:
+            if not self._live_safety_failure_allows_bootstrap_refresh(exc.summary):
+                return self._live_safety_guard_failed_response(exc.summary, error=exc)
+            bootstrap_refresh = self._refresh_recent_bootstrap_guard(config_path, token=token)
+            if not bootstrap_refresh.get("ok"):
+                return self._live_safety_guard_failed_response(exc.summary, error=exc, bootstrap_refresh=bootstrap_refresh)
+            try:
+                live_safety_guard = self._validate_live_safety_guard(config_path)
+            except CustomerServiceLiveSafetyError as second_exc:
+                return self._live_safety_guard_failed_response(
+                    second_exc.summary,
+                    error=second_exc,
+                    bootstrap_refresh=bootstrap_refresh,
+                )
+            live_safety_guard = dict(live_safety_guard)
+            live_safety_guard["bootstrap_refresh"] = bootstrap_refresh
         listener_interval = self._managed_listener_interval_seconds(config_path)
         script_path = APP_ROOT / "scripts" / "run_customer_service_listener.py"
         if not script_path.exists():
@@ -245,6 +370,8 @@ class CustomerServiceRuntime:
             }
         env = dict(os.environ)
         env["WECHAT_KNOWLEDGE_TENANT"] = self.tenant_id
+        env["PYTHONUTF8"] = "1"
+        env["PYTHONIOENCODING"] = "utf-8"
         if token:
             env["WECHAT_RUNTIME_SYNC_TOKEN"] = token
         write_runtime_status(
@@ -287,6 +414,7 @@ class CustomerServiceRuntime:
                 "log_path": str(log_path),
                 "wxauto_update": wxauto_update,
                 "wechat_check": wechat_check,
+                "live_safety_guard": live_safety_guard,
             }
         )
         # Start background worker
@@ -297,10 +425,186 @@ class CustomerServiceRuntime:
         result["wechat_check"] = wechat_check
         if not worker_result.get("ok"):
             result["worker_warning"] = worker_result.get("message", "worker start warning")
+        result["live_safety_guard"] = live_safety_guard
         return result
 
+    def _live_safety_guard_failed_response(
+        self,
+        summary: dict[str, Any],
+        *,
+        error: Exception,
+        bootstrap_refresh: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        message = f"微信自动客服启动前安全护栏未通过：{error}"
+        payload = dict(summary)
+        if bootstrap_refresh is not None:
+            payload["bootstrap_refresh"] = bootstrap_refresh
+        write_runtime_status("stopped", message, tenant_id=self.tenant_id, live_safety_guard=payload)
+        return {
+            "ok": False,
+            "message": message,
+            "detail": "live_safety_guard_failed",
+            "live_safety_guard": payload,
+            "item": self.status(),
+        }
+
+    @staticmethod
+    def _live_safety_failure_allows_bootstrap_refresh(summary: dict[str, Any]) -> bool:
+        reasons = {str(item) for item in summary.get("fail_reasons", []) or [] if str(item)}
+        return bool(reasons) and reasons <= {"recent_bootstrap_missing", "recent_bootstrap_stale"}
+
+    def _refresh_recent_bootstrap_guard(self, config_path: Path, *, token: str = "") -> dict[str, Any]:
+        workflow = APP_ROOT / "workflows" / "listen_and_reply.py"
+        if not workflow.exists():
+            return {"ok": False, "reason": "workflow_missing", "workflow": str(workflow)}
+        bootstrap_targets = self._bootstrap_refresh_targets(config_path)
+        timeout_seconds = max(20.0, min(180.0, float(os.getenv("WECHAT_BOOTSTRAP_REFRESH_TIMEOUT_SECONDS") or "90")))
+        env = dict(os.environ)
+        env["WECHAT_KNOWLEDGE_TENANT"] = self.tenant_id
+        env["PYTHONUTF8"] = "1"
+        env["PYTHONIOENCODING"] = "utf-8"
+        if token:
+            env["WECHAT_RUNTIME_SYNC_TOKEN"] = token
+        write_runtime_status(
+            "thinking",
+            "正在刷新微信自动客服启动安全基线。",
+            tenant_id=self.tenant_id,
+            live_safety_guard={"bootstrap_refresh": {"ok": None, "status": "running"}},
+        )
+        creationflags = 0
+        if os.name == "nt":
+            creationflags |= getattr(subprocess, "CREATE_NO_WINDOW", 0)
+        command = [
+            str(self._python_executable()),
+            str(workflow),
+            "--config",
+            str(config_path),
+            "--once",
+            "--bootstrap",
+        ]
+        for target in bootstrap_targets:
+            command.extend(["--target", target])
+        started = time.time()
+        try:
+            completed = subprocess.run(
+                command,
+                cwd=str(PROJECT_ROOT),
+                env=env,
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                timeout=timeout_seconds,
+                creationflags=creationflags,
+            )
+        except subprocess.TimeoutExpired as exc:
+            return {
+                "ok": False,
+                "reason": "bootstrap_refresh_timeout",
+                "timeout_seconds": timeout_seconds,
+                "stdout_tail": self._tail_text(exc.stdout),
+                "stderr_tail": self._tail_text(exc.stderr),
+            }
+        except Exception as exc:
+            return {"ok": False, "reason": "bootstrap_refresh_exception", "error": repr(exc)}
+        parsed = self._parse_last_json(completed.stdout)
+        verified = self._verify_bootstrap_refresh_result(parsed, bootstrap_targets)
+        ok = completed.returncode == 0 and bool(verified.get("ok", True))
+        return {
+            "ok": ok,
+            "reason": "" if ok else str(verified.get("reason") or "bootstrap_refresh_failed"),
+            "returncode": completed.returncode,
+            "duration_seconds": round(time.time() - started, 3),
+            "targets": bootstrap_targets,
+            "verified": verified,
+            "stdout_tail": self._tail_text(completed.stdout),
+            "stderr_tail": self._tail_text(completed.stderr),
+        }
+
+    def _bootstrap_refresh_targets(self, config_path: Path) -> list[str]:
+        try:
+            payload = json.loads(config_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return []
+        guard = payload.get("live_safety_guard") if isinstance(payload.get("live_safety_guard"), dict) else {}
+        raw_targets = guard.get("allowed_targets") or guard.get("targets") or []
+        targets = self._dedupe_names(raw_targets if isinstance(raw_targets, list) else [])
+        if targets:
+            return targets
+        raw_config_targets = payload.get("targets") if isinstance(payload.get("targets"), list) else []
+        return self._dedupe_names(
+            [
+                (item or {}).get("name") or (item or {}).get("target_name")
+                for item in raw_config_targets
+                if isinstance(item, dict) and item.get("enabled", True) is not False
+            ]
+        )
+
+    @staticmethod
+    def _dedupe_names(raw_values: list[Any]) -> list[str]:
+        names: list[str] = []
+        seen: set[str] = set()
+        for raw in raw_values:
+            name = str(raw or "").strip()
+            if not name or name in seen:
+                continue
+            names.append(name)
+            seen.add(name)
+        return names
+
+    @staticmethod
+    def _parse_last_json(text: str) -> dict[str, Any]:
+        if not text:
+            return {}
+        try:
+            payload = json.loads(text)
+        except json.JSONDecodeError:
+            payload = None
+        if isinstance(payload, dict):
+            return payload
+        for line in reversed([item.strip() for item in text.splitlines() if item.strip()]):
+            try:
+                payload = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if isinstance(payload, dict):
+                return payload
+        return {}
+
+    @staticmethod
+    def _verify_bootstrap_refresh_result(payload: dict[str, Any], expected_targets: list[str]) -> dict[str, Any]:
+        if not expected_targets:
+            return {"ok": True, "reason": "no_explicit_bootstrap_targets"}
+        if not isinstance(payload, dict) or payload.get("ok") is not True:
+            return {"ok": False, "reason": "bootstrap_refresh_output_not_ok", "bootstrapped_targets": []}
+        events = payload.get("events") if isinstance(payload.get("events"), list) else []
+        bootstrapped = {
+            str(event.get("target") or "").strip()
+            for event in events
+            if isinstance(event, dict) and str(event.get("action") or "") == "bootstrapped"
+        }
+        missing = [target for target in expected_targets if target not in bootstrapped]
+        return {
+            "ok": not missing,
+            "reason": "" if not missing else "bootstrap_refresh_target_not_bootstrapped",
+            "bootstrapped_targets": sorted(bootstrapped),
+            "missing_targets": missing,
+            "event_count": len(events),
+        }
+
+    @staticmethod
+    def _tail_text(value: Any, *, limit: int = 1600) -> str:
+        if value is None:
+            return ""
+        text = value.decode("utf-8", errors="replace") if isinstance(value, bytes) else str(value)
+        return text[-limit:]
+
     def _auto_update_wxauto4(self) -> dict[str, Any]:
-        write_runtime_status("thinking", "正在检查 wxauto4 更新（包含 beta/rc 预发布版）。", tenant_id=self.tenant_id)
+        if not wxauto4_module_update_enabled():
+            return WxautoPackageManager().auto_update_on_wechat_module_start()
+        write_runtime_status("thinking", "正在检查 wxauto4 技术储备更新（包含 beta/rc 预发布版）。", tenant_id=self.tenant_id)
         try:
             result = WxautoPackageManager().auto_update_on_wechat_module_start()
         except Exception as exc:
@@ -315,11 +619,11 @@ class CustomerServiceRuntime:
         if result.get("updated"):
             reset_wxauto_sidecar_daemon()
         if result.get("updated"):
-            message = "wxauto4 已自动更新（包含预发布更新策略），正在启动微信自动客服监听。"
+            message = "wxauto4 技术储备已自动更新（包含预发布更新策略），正在启动微信自动客服监听。"
         elif result.get("ok"):
-            message = "wxauto4 已是当前可用版本（已检查 beta/rc），正在启动微信自动客服监听。"
+            message = "wxauto4 技术储备已是当前可用版本（已检查 beta/rc），正在启动微信自动客服监听。"
         else:
-            message = "wxauto4 更新检查失败，将继续使用当前版本并启动兼容模式。"
+            message = "wxauto4 技术储备更新检查失败，将继续使用 RPA 优先模式启动。"
         write_runtime_status("thinking", message, tenant_id=self.tenant_id, wxauto_update=result)
         return result
 
@@ -341,6 +645,33 @@ class CustomerServiceRuntime:
         )
         return check
 
+    def _validate_live_safety_guard(self, config_path: Path) -> dict[str, Any]:
+        try:
+            payload = json.loads(config_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return {"enabled": False, "ok": True, "fail_reasons": ["config_unreadable"]}
+        settings = CustomerServiceSettings(tenant_id=self.tenant_id).get()
+        summary = assert_customer_service_live_safety_guard(payload, settings=settings)
+        state = self._load_listener_state(payload)
+        bootstrap_summary = assert_customer_service_recent_bootstrap_guard(payload, state=state)
+        if bootstrap_summary.get("enabled"):
+            summary = dict(summary)
+            summary["bootstrap_guard"] = bootstrap_summary
+        return summary
+
+    def _load_listener_state(self, config: dict[str, Any]) -> dict[str, Any]:
+        raw_path = str((config or {}).get("state_path") or "").strip()
+        if not raw_path:
+            return {}
+        path = Path(raw_path)
+        if not path.is_absolute():
+            path = PROJECT_ROOT / path
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return {}
+        return payload if isinstance(payload, dict) else {}
+
     def _managed_listener_interval_seconds(self, config_path: Path) -> float:
         default_interval = 3.0
         try:
@@ -360,9 +691,10 @@ class CustomerServiceRuntime:
         if pid and self._pid_alive(pid):
             self._terminate_tree(pid)
         self._stop_worker()
-        write_runtime_status("stopped", "自动客服监听已手动停止。", tenant_id=self.tenant_id)
+        self._shutdown_operator_guard()
+        write_runtime_status("stopped", "已停止。", tenant_id=self.tenant_id)
         self._clear_pid_record()
-        return {"ok": True, "message": "自动客服监听已停止。", "item": self.status()}
+        return {"ok": True, "message": "已停止。", "item": self.status()}
 
     def _config_path_or_empty(self) -> str:
         try:
@@ -409,18 +741,52 @@ class CustomerServiceRuntime:
             return {}
         return payload if isinstance(payload, dict) else {}
 
+    def _read_operator_guard_pid_record(self) -> dict[str, Any]:
+        path = runtime_operator_guard_pid_path(self.tenant_id)
+        if not path.exists():
+            return {}
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return {}
+        return payload if isinstance(payload, dict) else {}
+
+    def _read_operator_guard_state(self) -> dict[str, Any]:
+        path = runtime_operator_guard_state_path(self.tenant_id)
+        if not path.exists():
+            return {}
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return {}
+        return payload if isinstance(payload, dict) else {}
+
     def _write_pid_record(self, payload: dict[str, Any]) -> None:
         path = runtime_pid_path(self.tenant_id)
-        path.parent.mkdir(parents=True, exist_ok=True)
-        temp = path.with_suffix(".json.tmp")
-        temp.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
-        os.replace(temp, path)
+        atomic_write_json(path, payload)
 
     def _clear_pid_record(self) -> None:
         try:
             runtime_pid_path(self.tenant_id).unlink()
         except FileNotFoundError:
             pass
+
+    def _clear_operator_guard_runtime_files(self) -> None:
+        for path in (
+            runtime_operator_guard_pid_path(self.tenant_id),
+            runtime_operator_guard_state_path(self.tenant_id),
+        ):
+            try:
+                path.unlink()
+            except FileNotFoundError:
+                pass
+
+    def _shutdown_operator_guard(self) -> None:
+        pid_record = self._read_operator_guard_pid_record()
+        guard_pid = int(pid_record.get("pid") or 0)
+        if guard_pid and self._pid_alive(guard_pid):
+            self._terminate_tree(guard_pid)
+        self._clear_operator_guard_runtime_files()
 
     _LISTENER_SCRIPT_NAME = "run_customer_service_listener.py"
     _WORKER_SCRIPT_NAME = "background_worker.py"
@@ -450,8 +816,11 @@ class CustomerServiceRuntime:
     @staticmethod
     def _extract_tenant_from_cmdline(cmdline: list[str]) -> str:
         for index, part in enumerate(cmdline):
-            if str(part) == "--tenant-id" and index + 1 < len(cmdline):
+            text = str(part)
+            if text == "--tenant-id" and index + 1 < len(cmdline):
                 return str(cmdline[index + 1]).strip()
+            if text.startswith("--tenant-id="):
+                return text.split("=", 1)[1].strip()
         return ""
 
     @staticmethod
@@ -532,37 +901,58 @@ class CustomerServiceRuntime:
             return {}
         return payload if isinstance(payload, dict) else {}
 
+    def _clear_worker_pid_record(self) -> None:
+        try:
+            worker_pid_path(self.tenant_id).unlink()
+        except FileNotFoundError:
+            pass
+
+    def _worker_pid_matches_tenant_queue(self, pid: int) -> bool:
+        if pid <= 0 or not self._pid_alive(pid):
+            return False
+        try:
+            proc = psutil.Process(pid)
+            name = str(proc.name() or "").lower()
+            cmdline = [str(item) for item in (proc.cmdline() or [])]
+        except (psutil.NoSuchProcess, psutil.AccessDenied):
+            return False
+        if "python" not in name:
+            return False
+        if not self._cmdline_has_script(cmdline, self._WORKER_SCRIPT_NAME):
+            return False
+        return (
+            self._cmdline_option_equals(cmdline, "--tenant-id", self.tenant_id)
+            and self._cmdline_option_equals(cmdline, "--queue", "customer_service")
+        )
+
     def _start_worker(self) -> dict[str, Any]:
         worker_record = self._read_worker_pid_record()
         existing_pid = int(worker_record.get("pid") or 0)
-        if existing_pid and self._pid_alive(existing_pid):
+        if existing_pid and self._worker_pid_matches_tenant_queue(existing_pid):
             return {"ok": True, "message": "后台 worker 已经在运行。"}
+        if existing_pid:
+            self._clear_worker_pid_record()
         scanned_worker_pids = self._scan_worker_running_pids(self.tenant_id)
         if scanned_worker_pids:
             worker_pid = max(scanned_worker_pids)
             path = worker_pid_path(self.tenant_id)
-            path.parent.mkdir(parents=True, exist_ok=True)
-            temp = path.with_suffix(".json.tmp")
-            temp.write_text(
-                json.dumps(
-                    {
-                        "pid": worker_pid,
-                        "tenant_id": self.tenant_id,
-                        "queue": "customer_service",
-                        "started_at": now_iso(),
-                    },
-                    ensure_ascii=False,
-                    indent=2,
-                ),
-                encoding="utf-8",
+            atomic_write_json(
+                path,
+                {
+                    "pid": worker_pid,
+                    "tenant_id": self.tenant_id,
+                    "queue": "customer_service",
+                    "started_at": now_iso(),
+                },
             )
-            os.replace(temp, path)
             return {"ok": True, "message": "后台 worker 已经在运行。", "worker_pid": worker_pid}
         script_path = APP_ROOT / "scripts" / "background_worker.py"
         if not script_path.exists():
             return {"ok": False, "message": f"缺少后台 worker 脚本：{script_path}"}
         env = dict(os.environ)
         env["WECHAT_KNOWLEDGE_TENANT"] = self.tenant_id
+        env["PYTHONUTF8"] = "1"
+        env["PYTHONIOENCODING"] = "utf-8"
         creationflags = 0
         if os.name == "nt":
             creationflags |= getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
@@ -594,15 +984,12 @@ class CustomerServiceRuntime:
         worker_record = self._read_worker_pid_record()
         pids = set(self._scan_worker_running_pids(self.tenant_id))
         pid = int(worker_record.get("pid") or 0)
-        if pid:
+        if pid and self._worker_pid_matches_tenant_queue(pid):
             pids.add(pid)
         for worker_pid in sorted(pids):
             if worker_pid and self._pid_alive(worker_pid):
                 self._terminate_tree(worker_pid)
-        try:
-            worker_pid_path(self.tenant_id).unlink()
-        except FileNotFoundError:
-            pass
+        self._clear_worker_pid_record()
 
     @staticmethod
     def _scan_worker_running_pids(tenant_id: str) -> list[int]:
@@ -617,11 +1004,26 @@ class CustomerServiceRuntime:
                     continue
                 if not CustomerServiceRuntime._cmdline_has_script(cmdline, CustomerServiceRuntime._WORKER_SCRIPT_NAME):
                     continue
-                cmd_str = " ".join(str(item) for item in cmdline)
-                if f"--tenant-id {tenant_id}" not in cmd_str:
+                if not CustomerServiceRuntime._cmdline_option_equals(cmdline, "--tenant-id", tenant_id):
+                    continue
+                if not CustomerServiceRuntime._cmdline_option_equals(cmdline, "--queue", "customer_service"):
                     continue
                 if CustomerServiceRuntime._pid_alive(pid):
                     pids.add(pid)
             except (psutil.NoSuchProcess, psutil.AccessDenied):
                 continue
         return sorted(pids)
+
+    @staticmethod
+    def _cmdline_option_equals(cmdline: list[str], option: str, expected: str) -> bool:
+        expected = str(expected)
+        prefix = f"{option}="
+        for index, part in enumerate(cmdline):
+            text = str(part)
+            if text == option and index + 1 < len(cmdline):
+                if str(cmdline[index + 1]) == expected:
+                    return True
+                continue
+            if text.startswith(prefix) and text[len(prefix):] == expected:
+                return True
+        return False

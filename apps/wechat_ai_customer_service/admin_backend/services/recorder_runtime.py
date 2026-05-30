@@ -14,11 +14,22 @@ from typing import Any
 import psutil
 
 from apps.wechat_ai_customer_service.adapters.wechat_connector import reset_wxauto_sidecar_daemon
-from apps.wechat_ai_customer_service.adapters.wxauto_package_manager import WxautoPackageManager
+from apps.wechat_ai_customer_service.adapters.wxauto_package_manager import WxautoPackageManager, wxauto4_module_update_enabled
+from apps.wechat_ai_customer_service.admin_backend.services.customer_service_runtime import atomic_write_json
 from apps.wechat_ai_customer_service.admin_backend.services.recorder_service import RecorderService
 from apps.wechat_ai_customer_service.admin_backend.services.wechat_startup_check import run_wechat_startup_self_check
 from apps.wechat_ai_customer_service.admin_backend.services.work_queue import WorkQueueService
 from apps.wechat_ai_customer_service.knowledge_paths import active_tenant_id, tenant_runtime_logs_root, tenant_runtime_root
+from apps.wechat_ai_customer_service.scripts.run_customer_service_listener import (
+    clear_file,
+    empty_operator_control_state,
+    launch_operator_guard,
+    normalize_operator_guard_settings,
+    read_operator_guard_pid,
+    sync_operator_mode,
+    verify_operator_guard_bootstrap,
+    write_operator_control_state,
+)
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[4]
@@ -51,6 +62,18 @@ def recorder_runtime_log_path(tenant_id: str | None = None) -> Path:
     return tenant_runtime_logs_root(tenant_id) / "recorder_managed_loop.log"
 
 
+def recorder_operator_control_path(tenant_id: str | None = None) -> Path:
+    return recorder_runtime_dir(tenant_id) / "operator_control.json"
+
+
+def recorder_operator_guard_pid_path(tenant_id: str | None = None) -> Path:
+    return recorder_runtime_dir(tenant_id) / "operator_guard.pid.json"
+
+
+def recorder_operator_guard_state_path(tenant_id: str | None = None) -> Path:
+    return recorder_runtime_dir(tenant_id) / "operator_guard.state.json"
+
+
 class RecorderRuntime:
     """Start/stop/status wrapper for one tenant recorder loop + export worker."""
 
@@ -71,13 +94,21 @@ class RecorderRuntime:
 
         worker_record = self._read_worker_pid_record()
         worker_pid = int(worker_record.get("pid") or 0)
-        worker_running = self._pid_alive(worker_pid)
+        worker_running = self._worker_pid_matches_tenant_queue(worker_pid, queue_name="recorder_exports")
+        if worker_pid and not worker_running:
+            self._clear_worker_pid_record()
         if not worker_running and not worker_record:
             scanned_workers = self._scan_worker_running_pids(self.tenant_id, queue_name="recorder_exports")
             if scanned_workers:
                 worker_pid = max(scanned_workers)
                 worker_running = True
 
+        guard_pid_record = self._read_operator_guard_pid_record()
+        guard_pid = int(guard_pid_record.get("pid") or 0)
+        guard_running = self._pid_alive(guard_pid)
+        guard_state = self._read_operator_guard_state() if guard_running else {}
+        if not guard_running and guard_pid_record:
+            self._clear_operator_guard_runtime_files()
         status_payload = self._read_status_payload()
         queue_summary = WorkQueueService(tenant_id=self.tenant_id).summary()
         if not running:
@@ -96,6 +127,9 @@ class RecorderRuntime:
                 "duplicate_loop_count": len(duplicate_loop_pids),
                 "worker_running": worker_running,
                 "worker_pid": worker_pid if worker_running else None,
+                "operator_guard_running": guard_running,
+                "operator_guard_pid": guard_pid if guard_running else None,
+                "operator_guard_state": guard_state,
                 "queue_summary": queue_summary,
                 "log_path": str(recorder_runtime_log_path(self.tenant_id)),
                 "tenant_id": self.tenant_id,
@@ -149,12 +183,21 @@ class RecorderRuntime:
         env = dict(os.environ)
         env["WECHAT_KNOWLEDGE_TENANT"] = self.tenant_id
         env["PYTHONUTF8"] = "1"
+        # Recorder must be able to re-raise WeChat even after the user sends it
+        # behind other windows. Keep this scoped to the recorder subprocess.
+        env.setdefault("WECHAT_WIN32_OCR_AGGRESSIVE_FOCUS", str(os.getenv("WECHAT_RECORDER_AGGRESSIVE_FOCUS") or "1"))
+        env.setdefault("WECHAT_WIN32_OCR_ATTACH_THREAD_INPUT", str(os.getenv("WECHAT_RECORDER_ATTACH_THREAD_INPUT") or "1"))
         creationflags = 0
         if os.name == "nt":
             creationflags |= getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
             creationflags |= getattr(subprocess, "CREATE_NO_WINDOW", 0)
         log_path = recorder_runtime_log_path(self.tenant_id)
         log_path.parent.mkdir(parents=True, exist_ok=True)
+        operator_guard_settings = self._operator_guard_settings(settings)
+        operator_pause_poll_seconds = max(
+            0.12,
+            float(operator_guard_settings.get("pause_poll_interval_ms") or 550) / 1000.0,
+        )
         log_handle = log_path.open("ab")
         try:
             proc = subprocess.Popen(
@@ -167,6 +210,10 @@ class RecorderRuntime:
                     "--interval-seconds",
                     str(interval),
                     "--discover",
+                    "--operator-control",
+                    str(recorder_operator_control_path(self.tenant_id)),
+                    "--operator-pause-poll-seconds",
+                    str(operator_pause_poll_seconds),
                 ],
                 cwd=str(PROJECT_ROOT),
                 env=env,
@@ -189,6 +236,30 @@ class RecorderRuntime:
                 "wechat_check": wechat_check,
             }
         )
+        operator_guard = self._launch_operator_guard_for_loop(parent_pid=proc.pid, settings=settings)
+        if operator_guard.get("ok") is not True:
+            self._terminate_tree(proc.pid)
+            self._clear_pid_record()
+            message = "AI智能记录员 RPA 防误触守护未就绪，已停止启动。请检查悬浮球/键鼠拦截状态。"
+            self._write_status_payload(
+                {
+                    "ok": True,
+                    "state": "stopped",
+                    "message": message,
+                    "updated_at": now_iso(),
+                    "tenant_id": self.tenant_id,
+                    "operator_guard": operator_guard,
+                    "wxauto_update": wxauto_update,
+                    "wechat_check": wechat_check,
+                }
+            )
+            return {
+                "ok": False,
+                "detail": "operator_guard_not_ready",
+                "message": message,
+                "operator_guard": operator_guard,
+                "item": self.status(),
+            }
         deduped: list[int] = []
         self._write_status_payload(
             {
@@ -200,17 +271,28 @@ class RecorderRuntime:
                 "last_start_at": now_iso(),
                 "wxauto_update": wxauto_update,
                 "wechat_check": wechat_check,
+                "operator_guard": operator_guard,
                 "deduped_loop_pids": deduped,
             }
         )
-        return {"ok": True, "message": "AI智能记录员已启动。", "wxauto_update": wxauto_update, "wechat_check": wechat_check, "deduped_loop_pids": deduped, "item": self.status()}
+        return {
+            "ok": True,
+            "message": "AI智能记录员已启动。",
+            "wxauto_update": wxauto_update,
+            "wechat_check": wechat_check,
+            "operator_guard": operator_guard,
+            "deduped_loop_pids": deduped,
+            "item": self.status(),
+        }
 
     def _auto_update_wxauto4(self) -> dict[str, Any]:
+        if not wxauto4_module_update_enabled():
+            return WxautoPackageManager().auto_update_on_wechat_module_start()
         self._write_status_payload(
             {
                 "ok": True,
                 "state": "thinking",
-                "message": "正在检查 wxauto4 更新（包含 beta/rc 预发布版）。",
+                "message": "正在检查 wxauto4 技术储备更新（包含 beta/rc 预发布版）。",
                 "updated_at": now_iso(),
                 "tenant_id": self.tenant_id,
             }
@@ -228,11 +310,11 @@ class RecorderRuntime:
             }
         if result.get("updated"):
             reset_wxauto_sidecar_daemon()
-            message = "wxauto4 已自动更新（包含预发布更新策略），正在启动 AI智能记录员。"
+            message = "wxauto4 技术储备已自动更新（包含预发布更新策略），正在启动 AI智能记录员。"
         elif result.get("ok"):
-            message = "wxauto4 已是当前可用版本（已检查 beta/rc），正在启动 AI智能记录员。"
+            message = "wxauto4 技术储备已是当前可用版本（已检查 beta/rc），正在启动 AI智能记录员。"
         else:
-            message = "wxauto4 更新检查失败，将继续使用当前版本并启动兼容模式。"
+            message = "wxauto4 技术储备更新检查失败，将继续使用 RPA 优先模式启动。"
         self._write_status_payload(
             {
                 "ok": True,
@@ -269,6 +351,87 @@ class RecorderRuntime:
             }
         )
         return check
+
+    def _operator_guard_settings(self, settings: dict[str, Any]) -> dict[str, Any]:
+        source = settings.get("rpa_operator_guard") if isinstance(settings.get("rpa_operator_guard"), dict) else {}
+        merged = {"enabled": True, **dict(source)}
+        if os.getenv("WECHAT_RECORDER_OPERATOR_GUARD_ENABLED") is not None:
+            merged["enabled"] = str(os.getenv("WECHAT_RECORDER_OPERATOR_GUARD_ENABLED") or "").strip().lower() not in {
+                "0",
+                "false",
+                "no",
+                "off",
+            }
+        return normalize_operator_guard_settings(merged)
+
+    def _launch_operator_guard_for_loop(self, *, parent_pid: int, settings: dict[str, Any]) -> dict[str, Any]:
+        guard_settings = self._operator_guard_settings(settings)
+        if os.name != "nt" or not guard_settings.get("enabled"):
+            return {"ok": True, "enabled": False, "settings": guard_settings}
+        control_path = recorder_operator_control_path(self.tenant_id)
+        pid_path = recorder_operator_guard_pid_path(self.tenant_id)
+        state_path = recorder_operator_guard_state_path(self.tenant_id)
+        clear_file(state_path)
+        clear_file(pid_path)
+        write_operator_control_state(
+            control_path,
+            empty_operator_control_state(self.tenant_id, mode="running"),
+        )
+        launch = launch_operator_guard(
+            tenant_id=self.tenant_id,
+            settings=guard_settings,
+            control_path=control_path,
+            status_path=recorder_runtime_status_path(self.tenant_id),
+            state_path=state_path,
+            pid_path=pid_path,
+            parent_pid=parent_pid,
+        )
+        if launch.get("ok") is not True:
+            return {"ok": False, "enabled": True, "settings": guard_settings, "launch": launch}
+        verify = verify_operator_guard_bootstrap(
+            int(launch.get("pid") or 0),
+            state_path,
+            expected_parent_pid=parent_pid,
+        )
+        result = {"ok": verify.get("ok") is True, "enabled": True, "settings": guard_settings, "launch": launch, "verify": verify}
+        if result["ok"]:
+            try:
+                state_pid = int(verify.get("state_pid") or 0)
+            except (TypeError, ValueError):
+                state_pid = 0
+            if state_pid > 0:
+                atomic_write_json(
+                    pid_path,
+                    {
+                        "pid": state_pid,
+                        "launcher_pid": int(launch.get("pid") or 0),
+                        "tenant_id": self.tenant_id,
+                        "started_at": now_iso(),
+                        "control_path": str(control_path),
+                        "status_path": str(recorder_runtime_status_path(self.tenant_id)),
+                        "state_path": str(state_path),
+                        "parent_pid": parent_pid,
+                    },
+                )
+        else:
+            self._shutdown_operator_guard("recorder_operator_guard_verify_failed")
+        return result
+
+    def _shutdown_operator_guard(self, reason: str) -> None:
+        control_path = recorder_operator_control_path(self.tenant_id)
+        pid_path = recorder_operator_guard_pid_path(self.tenant_id)
+        try:
+            sync_operator_mode(control_path, tenant_id=self.tenant_id, mode="stopped", message=reason)
+        except Exception:
+            pass
+        guard_pid = read_operator_guard_pid(pid_path)
+        if guard_pid > 0 and self._pid_alive(guard_pid):
+            self._terminate_tree(guard_pid)
+        self._clear_operator_guard_runtime_files()
+
+    def _clear_operator_guard_runtime_files(self) -> None:
+        clear_file(recorder_operator_guard_pid_path(self.tenant_id))
+        clear_file(recorder_operator_guard_state_path(self.tenant_id))
 
     def _dedupe_loop_processes(self, *, keep_pid: int) -> list[int]:
         running_pids = set(self._scan_loop_running_pids(self.tenant_id))
@@ -331,6 +494,7 @@ class RecorderRuntime:
         return RecorderRuntime._loop_parent_pid(left_pid) == right_pid or RecorderRuntime._loop_parent_pid(right_pid) == left_pid
 
     def stop(self) -> dict[str, Any]:
+        self._shutdown_operator_guard("recorder_manual_stop")
         loop_pids = set()
         pid_record = self._read_pid_record()
         pid = int(pid_record.get("pid") or 0)
@@ -344,13 +508,14 @@ class RecorderRuntime:
         worker_pids = set()
         worker_record = self._read_worker_pid_record()
         worker_pid = int(worker_record.get("pid") or 0)
-        if worker_pid:
+        if worker_pid and self._worker_pid_matches_tenant_queue(worker_pid, queue_name="recorder_exports"):
             worker_pids.add(worker_pid)
         worker_pids.update(self._scan_worker_running_pids(self.tenant_id, queue_name="recorder_exports"))
         for item in sorted(worker_pids):
             if item and self._pid_alive(item):
                 self._terminate_tree(item)
 
+        self._clear_operator_guard_runtime_files()
         self._clear_pid_record()
         self._clear_worker_pid_record()
         self._write_status_payload(
@@ -375,8 +540,10 @@ class RecorderRuntime:
     def _ensure_worker_running(self) -> dict[str, Any]:
         current = self._read_worker_pid_record()
         pid = int(current.get("pid") or 0)
-        if pid and self._pid_alive(pid):
+        if pid and self._worker_pid_matches_tenant_queue(pid, queue_name="recorder_exports"):
             return {"ok": True, "message": "导出 worker 已在运行。", "worker_pid": pid}
+        if pid:
+            self._clear_worker_pid_record()
         scanned = self._scan_worker_running_pids(self.tenant_id, queue_name="recorder_exports")
         if scanned:
             worker_pid = max(scanned)
@@ -443,10 +610,7 @@ class RecorderRuntime:
 
     def _write_pid_record(self, payload: dict[str, Any]) -> None:
         path = recorder_runtime_pid_path(self.tenant_id)
-        path.parent.mkdir(parents=True, exist_ok=True)
-        temp = path.with_suffix(".json.tmp")
-        temp.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
-        os.replace(temp, path)
+        atomic_write_json(path, payload)
 
     def _clear_pid_record(self) -> None:
         try:
@@ -464,18 +628,53 @@ class RecorderRuntime:
             return {}
         return payload if isinstance(payload, dict) else {}
 
+    def _read_operator_guard_pid_record(self) -> dict[str, Any]:
+        path = recorder_operator_guard_pid_path(self.tenant_id)
+        if not path.exists():
+            return {}
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return {}
+        return payload if isinstance(payload, dict) else {}
+
+    def _read_operator_guard_state(self) -> dict[str, Any]:
+        path = recorder_operator_guard_state_path(self.tenant_id)
+        if not path.exists():
+            return {}
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return {}
+        return payload if isinstance(payload, dict) else {}
+
     def _write_worker_pid_record(self, payload: dict[str, Any]) -> None:
         path = recorder_worker_pid_path(self.tenant_id)
-        path.parent.mkdir(parents=True, exist_ok=True)
-        temp = path.with_suffix(".json.tmp")
-        temp.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
-        os.replace(temp, path)
+        atomic_write_json(path, payload)
 
     def _clear_worker_pid_record(self) -> None:
         try:
             recorder_worker_pid_path(self.tenant_id).unlink()
         except FileNotFoundError:
             pass
+
+    def _worker_pid_matches_tenant_queue(self, pid: int, *, queue_name: str) -> bool:
+        if pid <= 0 or not self._pid_alive(pid):
+            return False
+        try:
+            proc = psutil.Process(pid)
+            name = str(proc.name() or "").lower()
+            cmdline = [str(item) for item in (proc.cmdline() or [])]
+        except (psutil.NoSuchProcess, psutil.AccessDenied):
+            return False
+        if "python" not in name:
+            return False
+        if not self._cmdline_has_script(cmdline, WORKER_SCRIPT_NAME):
+            return False
+        return (
+            self._cmdline_option_equals(cmdline, "--tenant-id", self.tenant_id)
+            and self._cmdline_option_equals(cmdline, "--queue", queue_name)
+        )
 
     def _read_status_payload(self) -> dict[str, Any]:
         path = recorder_runtime_status_path(self.tenant_id)
@@ -494,7 +693,7 @@ class RecorderRuntime:
         if not isinstance(payload, dict):
             payload = {}
         state = str(payload.get("state") or "stopped")
-        if state not in {"idle", "thinking", "stopped"}:
+        if state not in {"idle", "thinking", "paused", "stopped"}:
             state = "stopped"
         return {
             **payload,
@@ -506,10 +705,7 @@ class RecorderRuntime:
 
     def _write_status_payload(self, payload: dict[str, Any]) -> None:
         path = recorder_runtime_status_path(self.tenant_id)
-        path.parent.mkdir(parents=True, exist_ok=True)
-        temp = path.with_suffix(".json.tmp")
-        temp.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
-        os.replace(temp, path)
+        atomic_write_json(path, payload)
 
     @staticmethod
     def _pid_alive(pid: int) -> bool:
@@ -551,7 +747,7 @@ class RecorderRuntime:
                     continue
                 if not RecorderRuntime._cmdline_has_script(cmdline, RECORDER_SCRIPT_NAME):
                     continue
-                if f"--tenant-id {tenant_id}" not in " ".join(cmdline):
+                if not RecorderRuntime._cmdline_option_equals(cmdline, "--tenant-id", tenant_id):
                     continue
                 if RecorderRuntime._pid_alive(pid):
                     pids.add(pid)
@@ -572,16 +768,29 @@ class RecorderRuntime:
                     continue
                 if not RecorderRuntime._cmdline_has_script(cmdline, WORKER_SCRIPT_NAME):
                     continue
-                cmd_str = " ".join(cmdline)
-                if f"--tenant-id {tenant_id}" not in cmd_str:
+                if not RecorderRuntime._cmdline_option_equals(cmdline, "--tenant-id", tenant_id):
                     continue
-                if f"--queue {queue_name}" not in cmd_str:
+                if not RecorderRuntime._cmdline_option_equals(cmdline, "--queue", queue_name):
                     continue
                 if RecorderRuntime._pid_alive(pid):
                     pids.add(pid)
             except (psutil.NoSuchProcess, psutil.AccessDenied):
                 continue
         return sorted(pids)
+
+    @staticmethod
+    def _cmdline_option_equals(cmdline: list[str], option: str, expected: str) -> bool:
+        expected = str(expected)
+        prefix = f"{option}="
+        for index, part in enumerate(cmdline):
+            text = str(part)
+            if text == option and index + 1 < len(cmdline):
+                if str(cmdline[index + 1]) == expected:
+                    return True
+                continue
+            if text.startswith(prefix) and text[len(prefix):] == expected:
+                return True
+        return False
 
     @staticmethod
     def _python_executable() -> Path:

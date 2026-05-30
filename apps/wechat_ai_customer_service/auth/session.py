@@ -32,8 +32,10 @@ class AuthSettings:
 
 
 def load_auth_settings() -> AuthSettings:
+    auth_required_env = os.getenv("WECHAT_AUTH_REQUIRED")
+    auth_required_default = cloud_auth_required_default()
     return AuthSettings(
-        required=parse_bool(os.getenv("WECHAT_AUTH_REQUIRED"), default=False),
+        required=parse_bool(auth_required_env, default=auth_required_default),
         vps_base_url=discover_vps_base_url(),
         timeout_seconds=float(os.getenv("WECHAT_VPS_TIMEOUT_SECONDS") or "8"),
         local_session_hours=max(1, int(os.getenv("WECHAT_LOCAL_SESSION_HOURS") or "12")),
@@ -993,6 +995,10 @@ def parse_bool(value: str | None, *, default: bool = False) -> bool:
     if value is None or value.strip() == "":
         return default
     return value.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def cloud_auth_required_default() -> bool:
+    return parse_bool(os.getenv("WECHAT_CLOUD_REQUIRED"), default=True)
 
 
 def is_admin_username(username: str | None) -> bool:

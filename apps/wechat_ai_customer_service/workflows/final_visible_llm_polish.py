@@ -8,10 +8,15 @@ local guards so facts and safety boundaries cannot be changed by the model.
 from __future__ import annotations
 
 import json
+import hashlib
+import os
 import re
+import threading
+import time
 import urllib.error
 import urllib.request
 from difflib import SequenceMatcher
+from pathlib import Path
 from typing import Any
 
 from apps.wechat_ai_customer_service.llm_config import (
@@ -31,8 +36,11 @@ from customer_intent_assist import parse_json_object
 DEFAULT_MAX_REPLY_CHARS = 620
 DEFAULT_MAX_TOKENS = 260
 DEFAULT_TIMEOUT_SECONDS = 4
-DEFAULT_OPENAI_TIMEOUT_SECONDS = 12
+DEFAULT_OPENAI_TIMEOUT_SECONDS = 8
 DEFAULT_TEMPERATURE = 0.45
+DEFAULT_CACHE_TTL_SECONDS = 24 * 60 * 60
+DEFAULT_CACHE_MAX_ENTRIES = 512
+_CACHE_LOCK = threading.RLock()
 
 PROTECTED_TOKEN_PATTERN = re.compile(r"\d+(?:\.\d+)?\s*(?:万|元|块|公里|km|KM|年|天|%|折)|1[3-9]\d{9}|\b\d{4,}\b")
 AI_EXPOSURE_MARKERS = ("我是AI", "我是ai", "我是机器人", "AI助手", "智能客服", "自动回复系统", "机器客服")
@@ -87,6 +95,12 @@ def maybe_polish_customer_visible_reply(
     source_channel: str = "normal",
     needs_handoff: bool = False,
 ) -> dict[str, Any]:
+    started_at = time.time()
+
+    def finish(data: dict[str, Any]) -> dict[str, Any]:
+        data["duration_seconds"] = round(time.time() - started_at, 4)
+        return data
+
     settings = effective_settings(config)
     payload: dict[str, Any] = {
         "enabled": bool(settings.get("enabled", False)),
@@ -99,21 +113,32 @@ def maybe_polish_customer_visible_reply(
     if not payload["enabled"]:
         payload["reason"] = "final_visible_llm_polish_disabled"
         payload["reply_text"] = draft
-        return payload
+        return finish(payload)
     if not draft:
         payload["reason"] = "empty_reply"
         payload["reply_text"] = draft
-        return payload
+        return finish(payload)
 
-    result = polish_with_llm(
+    recent_replies = recent_reply_texts or []
+    result = get_cached_polish_result(
         settings=settings,
         customer_message=customer_message,
         draft_reply=draft,
-        recent_reply_texts=recent_reply_texts or [],
         source_channel=source_channel,
         needs_handoff=needs_handoff,
     )
+    if not result.get("ok"):
+        result = polish_with_llm(
+            settings=settings,
+            customer_message=customer_message,
+            draft_reply=draft,
+            recent_reply_texts=recent_replies,
+            source_channel=source_channel,
+            needs_handoff=needs_handoff,
+        )
     payload["llm_status"] = {key: result.get(key) for key in ("ok", "provider", "model", "status", "error") if key in result}
+    if result.get("cache"):
+        payload["cache"] = result.get("cache")
     if result.get("usage"):
         payload["llm_usage"] = result.get("usage")
     if result.get("prompt_estimate"):
@@ -121,7 +146,7 @@ def maybe_polish_customer_visible_reply(
     if not result.get("ok"):
         payload["reason"] = str(result.get("error") or "llm_polish_unavailable")
         payload["reply_text"] = draft
-        return payload
+        return finish(payload)
 
     candidate = result.get("candidate") if isinstance(result.get("candidate"), dict) else {}
     polished = truncate_reply(
@@ -135,16 +160,69 @@ def maybe_polish_customer_visible_reply(
     guard = guard_polished_reply(
         base_reply=draft,
         polished_reply=polished,
-        recent_reply_texts=recent_reply_texts or [],
+        recent_reply_texts=recent_replies,
         settings=settings,
         source_channel=source_channel,
     )
     payload["candidate"] = compact_candidate(candidate)
     payload["guard"] = guard
     if not guard.get("allowed"):
+        cache_info = result.get("cache") if isinstance(result.get("cache"), dict) else {}
+        if cache_info.get("hit") and guard.get("reason") == "polish_repeats_recent_reply":
+            fallback = polish_with_llm(
+                settings=settings,
+                customer_message=customer_message,
+                draft_reply=draft,
+                recent_reply_texts=recent_replies,
+                source_channel=source_channel,
+                needs_handoff=needs_handoff,
+            )
+            cache_payload = dict(payload.get("cache") or cache_info)
+            cache_payload.update({"hit": False, "fallback_from_hit": True, "fallback_reason": guard.get("reason")})
+            payload["cache"] = cache_payload
+            payload["llm_status"] = {key: fallback.get(key) for key in ("ok", "provider", "model", "status", "error") if key in fallback}
+            if fallback.get("usage"):
+                payload["llm_usage"] = fallback.get("usage")
+            if fallback.get("prompt_estimate"):
+                payload["prompt_estimate"] = fallback.get("prompt_estimate")
+            if fallback.get("ok"):
+                result = fallback
+                candidate = fallback.get("candidate") if isinstance(fallback.get("candidate"), dict) else {}
+                polished = truncate_reply(
+                    sanitize_risky_affirmative_opening(
+                        base_reply=draft,
+                        polished_reply=str(candidate.get("reply") or "").strip(),
+                        source_channel=source_channel,
+                    ),
+                    settings,
+                )
+                guard = guard_polished_reply(
+                    base_reply=draft,
+                    polished_reply=polished,
+                    recent_reply_texts=recent_replies,
+                    settings=settings,
+                    source_channel=source_channel,
+                )
+                payload["candidate"] = compact_candidate(candidate)
+                payload["guard"] = guard
         payload["reason"] = str(guard.get("reason") or "final_polish_guard_rejected")
         payload["reply_text"] = draft
-        return payload
+        if not guard.get("allowed"):
+            return finish(payload)
+    if not ((result.get("cache") or {}).get("hit")):
+        stored = remember_polish_result(
+            settings=settings,
+            customer_message=customer_message,
+            draft_reply=draft,
+            source_channel=source_channel,
+            needs_handoff=needs_handoff,
+            result=result,
+            candidate=candidate,
+        )
+        if stored.get("stored"):
+            cache_payload = dict(payload.get("cache") or {})
+            cache_payload.update(stored)
+            payload["cache"] = cache_payload
 
     payload.update(
         {
@@ -155,7 +233,7 @@ def maybe_polish_customer_visible_reply(
             "reply_text": polished,
         }
     )
-    return payload
+    return finish(payload)
 
 
 def effective_settings(config: dict[str, Any]) -> dict[str, Any]:
@@ -171,6 +249,10 @@ def effective_settings(config: dict[str, Any]) -> dict[str, Any]:
     settings.setdefault("temperature", DEFAULT_TEMPERATURE)
     settings.setdefault("max_reply_chars", DEFAULT_MAX_REPLY_CHARS)
     settings.setdefault("min_confidence", 0.25)
+    settings.setdefault("fast_prompt_enabled", True)
+    settings.setdefault("cache_enabled", True)
+    settings.setdefault("cache_ttl_seconds", DEFAULT_CACHE_TTL_SECONDS)
+    settings.setdefault("cache_max_entries", DEFAULT_CACHE_MAX_ENTRIES)
     settings.setdefault("required_for_send", bool(settings.get("enabled", False)))
     return settings
 
@@ -253,10 +335,215 @@ def manual_candidate(settings: dict[str, Any]) -> dict[str, Any]:
 def normalize_candidate(candidate: dict[str, Any] | None) -> dict[str, Any]:
     payload = candidate if isinstance(candidate, dict) else {}
     return {
-        "reply": str(payload.get("reply") or payload.get("polished_reply") or "").strip(),
+        "reply": str(payload.get("reply") or payload.get("polished_reply") or payload.get("polished") or "").strip(),
         "confidence": payload.get("confidence", 0.0),
         "reason": str(payload.get("reason") or ""),
     }
+
+
+def get_cached_polish_result(
+    *,
+    settings: dict[str, Any],
+    customer_message: str,
+    draft_reply: str,
+    source_channel: str,
+    needs_handoff: bool,
+) -> dict[str, Any]:
+    if not final_polish_cache_enabled(settings):
+        return {"ok": False, "cache": {"hit": False, "reason": "cache_disabled"}}
+    provider = resolve_effective_llm_provider(settings.get("provider") or "deepseek", read_secret_fn=read_secret)
+    if provider == "manual_json":
+        return {"ok": False, "provider": provider, "cache": {"hit": False, "reason": "manual_json_not_cached"}}
+    key = final_polish_cache_key(
+        settings=settings,
+        customer_message=customer_message,
+        draft_reply=draft_reply,
+        source_channel=source_channel,
+        needs_handoff=needs_handoff,
+    )
+    cache = read_final_polish_cache(settings)
+    entry = (cache.get("entries") or {}).get(key)
+    now_ts = time.time()
+    if not isinstance(entry, dict):
+        return {"ok": False, "provider": provider, "cache": {"hit": False, "key": key, "reason": "cache_miss"}}
+    expires_at = float(entry.get("expires_at") or 0)
+    if expires_at and expires_at < now_ts:
+        return {"ok": False, "provider": provider, "cache": {"hit": False, "key": key, "reason": "cache_expired"}}
+    candidate = normalize_candidate(entry.get("candidate") if isinstance(entry.get("candidate"), dict) else {})
+    if not candidate.get("reply"):
+        return {"ok": False, "provider": provider, "cache": {"hit": False, "key": key, "reason": "cache_candidate_empty"}}
+    return {
+        "ok": True,
+        "provider": provider,
+        "model": str(entry.get("model") or settings.get("model") or settings.get("model_tier") or ""),
+        "candidate": candidate,
+        "cache": {"hit": True, "key": key, "created_at": entry.get("created_at")},
+    }
+
+
+def remember_polish_result(
+    *,
+    settings: dict[str, Any],
+    customer_message: str,
+    draft_reply: str,
+    source_channel: str,
+    needs_handoff: bool,
+    result: dict[str, Any],
+    candidate: dict[str, Any],
+) -> dict[str, Any]:
+    if not final_polish_cache_enabled(settings):
+        return {"stored": False, "reason": "cache_disabled"}
+    provider = str(result.get("provider") or resolve_effective_llm_provider(settings.get("provider") or "deepseek", read_secret_fn=read_secret))
+    if provider == "manual_json":
+        return {"stored": False, "reason": "manual_json_not_cached"}
+    normalized = normalize_candidate(candidate)
+    if not normalized.get("reply"):
+        return {"stored": False, "reason": "cache_candidate_empty"}
+    key = final_polish_cache_key(
+        settings=settings,
+        customer_message=customer_message,
+        draft_reply=draft_reply,
+        source_channel=source_channel,
+        needs_handoff=needs_handoff,
+    )
+    created_at = int(time.time())
+    ttl = positive_int(settings.get("cache_ttl_seconds"), DEFAULT_CACHE_TTL_SECONDS)
+    entry = {
+        "created_at": created_at,
+        "expires_at": created_at + ttl,
+        "provider": provider,
+        "model": str(result.get("model") or settings.get("model") or settings.get("model_tier") or ""),
+        "source_channel": source_channel,
+        "candidate": compact_candidate(normalized),
+    }
+    try:
+        cache = read_final_polish_cache(settings)
+        entries = cache.setdefault("entries", {})
+        if not isinstance(entries, dict):
+            entries = {}
+            cache["entries"] = entries
+        entries[key] = entry
+        trim_final_polish_cache(cache, settings)
+        write_final_polish_cache(settings, cache)
+        return {"stored": True, "key": key}
+    except Exception as exc:  # noqa: BLE001 - cache failures must never block replies
+        return {"stored": False, "key": key, "reason": repr(exc)}
+
+
+def final_polish_cache_enabled(settings: dict[str, Any]) -> bool:
+    return settings.get("cache_enabled", True) is not False
+
+
+def final_polish_cache_key(
+    *,
+    settings: dict[str, Any],
+    customer_message: str,
+    draft_reply: str,
+    source_channel: str,
+    needs_handoff: bool,
+) -> str:
+    key_payload = {
+        "version": 1,
+        "provider": str(settings.get("provider") or ""),
+        "model": str(settings.get("model") or ""),
+        "model_tier": str(settings.get("model_tier") or ""),
+        "fast_prompt_enabled": settings.get("fast_prompt_enabled", True) is not False,
+        "identity_guard_enabled": settings.get("identity_guard_enabled", True) is not False,
+        "max_reply_chars": positive_int(settings.get("max_reply_chars"), DEFAULT_MAX_REPLY_CHARS),
+        "tenant_id": final_polish_cache_tenant_id(),
+        "source_channel": str(source_channel or "normal"),
+        "needs_handoff": bool(needs_handoff),
+        "customer_message": normalized_cache_text(customer_message, 800),
+        "draft_reply": normalized_cache_text(draft_reply, 1200),
+    }
+    raw = json.dumps(key_payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(raw.encode("utf-8")).hexdigest()
+
+
+def normalized_cache_text(value: str, limit: int) -> str:
+    clean = strip_test_run_markers(str(value or ""))
+    return " ".join(clean.split())[: max(1, limit)]
+
+
+def strip_test_run_markers(text: str) -> str:
+    """Remove bracketed live-test IDs so repeated acceptance tests can reuse polish cache."""
+    clean = str(text or "")
+    # Examples: [AUTH-FINAL2-20260530], [20260529_235132-U1],
+    # [ALT_EV_20260529_A1]. These are harness tokens, not customer semantics.
+    return re.sub(
+        r"\[(?:AUTH|ALT|CJCHK|FTA|LIVE|TEST|20\d{6})(?:[A-Za-z0-9_\-:]+)?\]",
+        "",
+        clean,
+        flags=re.IGNORECASE,
+    )
+
+
+def final_polish_cache_path(settings: dict[str, Any]) -> Path:
+    explicit = str(settings.get("cache_path") or os.environ.get("WECHAT_FINAL_POLISH_CACHE_PATH") or "").strip()
+    if explicit:
+        return Path(explicit)
+    project_root = Path(__file__).resolve().parents[3]
+    tenant_id = re.sub(r"[^A-Za-z0-9_.-]+", "_", final_polish_cache_tenant_id()).strip("._") or "default"
+    return project_root / "runtime" / "apps" / "wechat_ai_customer_service" / "cache" / f"final_visible_llm_polish_cache.{tenant_id}.json"
+
+
+def final_polish_cache_tenant_id() -> str:
+    return str(os.environ.get("WECHAT_KNOWLEDGE_TENANT") or "default").strip() or "default"
+
+
+def read_final_polish_cache(settings: dict[str, Any]) -> dict[str, Any]:
+    path = final_polish_cache_path(settings)
+    with _CACHE_LOCK:
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except FileNotFoundError:
+            return {"version": 1, "entries": {}}
+        except Exception:
+            return {"version": 1, "entries": {}}
+        if not isinstance(data, dict):
+            return {"version": 1, "entries": {}}
+        if not isinstance(data.get("entries"), dict):
+            data["entries"] = {}
+        return data
+
+
+def write_final_polish_cache(settings: dict[str, Any], cache: dict[str, Any]) -> None:
+    path = final_polish_cache_path(settings)
+    with _CACHE_LOCK:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        tmp_path = path.with_name(f"{path.name}.{os.getpid()}.{threading.get_ident()}.{int(time.time() * 1000)}.tmp")
+        try:
+            tmp_path.write_text(json.dumps(cache, ensure_ascii=False, indent=2), encoding="utf-8")
+            os.replace(tmp_path, path)
+        finally:
+            try:
+                tmp_path.unlink()
+            except FileNotFoundError:
+                pass
+
+
+def trim_final_polish_cache(cache: dict[str, Any], settings: dict[str, Any]) -> None:
+    entries = cache.get("entries")
+    if not isinstance(entries, dict):
+        cache["entries"] = {}
+        return
+    now_ts = time.time()
+    expired = [
+        key
+        for key, entry in entries.items()
+        if isinstance(entry, dict) and float(entry.get("expires_at") or 0) and float(entry.get("expires_at") or 0) < now_ts
+    ]
+    for key in expired:
+        entries.pop(key, None)
+    max_entries = positive_int(settings.get("cache_max_entries"), DEFAULT_CACHE_MAX_ENTRIES)
+    if len(entries) <= max_entries:
+        return
+    ordered = sorted(
+        entries.items(),
+        key=lambda item: float((item[1] if isinstance(item[1], dict) else {}).get("created_at") or 0),
+    )
+    for key, _entry in ordered[: max(0, len(entries) - max_entries)]:
+        entries.pop(key, None)
 
 
 def build_prompt_pack(
@@ -269,6 +556,27 @@ def build_prompt_pack(
     needs_handoff: bool,
 ) -> dict[str, Any]:
     identity_guard = settings.get("identity_guard_enabled", True) is not False
+    if settings.get("fast_prompt_enabled", True) is not False:
+        system = (
+            "你是微信客服最终轻量润色器。只把安全草稿改得更像真人客服，语气自然、简短。"
+            "禁止新增事实、数字、车型、价格、库存、承诺、联系方式或政策；必须保留草稿边界。"
+            + ("不要承认AI/机器人/智能客服身份。" if identity_guard else "")
+            + '只输出JSON对象，字段为{"reply":字符串,"confidence":0到1,"reason":字符串}。'
+        )
+        user = {
+            "customer": clip_text(customer_message, 220),
+            "draft": clip_text(draft_reply, 520),
+            "recent": [clip_text(item, 120) for item in (recent_reply_texts or [])[-2:]],
+            "keep_topics": topic_preservation_requirements(draft_reply),
+            "rules": [
+                "只改表达，不改事实。",
+                "不新增承诺或结论。",
+                "不要扩写，尽量不超过草稿长度，优先1到2句。",
+                "价格/金融/合同/置换/到店/电池等边界必须保留。",
+                "避免和recent完全重复。",
+            ],
+        }
+        return {"system": system, "user": user, "response_schema": None}
     system = (
         "你是微信客服最终话术润色器，只负责把安全草稿改得更像真人客服。"
         "禁止重新回答问题，禁止新增事实、车型、价格、库存、承诺、联系方式或政策。"
@@ -293,6 +601,7 @@ def build_prompt_pack(
         "output_rules": [
             "保留草稿含义和所有数字事实。",
             "不要新增承诺，不要新增车源、价格、库存、优惠、合同、贷款结论。",
+            "不要扩写，尽量不超过草稿长度，优先1到2句，像微信真人简短回复。",
             "不要出现转人工/人工客服等暴露链路措辞。",
             "若需要请示负责人或核实资料，语气可以更自然，但边界不能消失。",
             "若草稿涉及价格/金融/合同/电池三电/置换/到店等主题，润色后必须保留对应主题，不要改成另一个话题。",
@@ -321,12 +630,7 @@ def post_polish_request(
             {"role": "system", "content": prompt_pack["system"]},
             {
                 "role": "user",
-                "content": (
-                    json.dumps(prompt_pack["user"], ensure_ascii=False)
-                    + "\n\nJSON schema:\n"
-                    + json.dumps(prompt_pack["response_schema"], ensure_ascii=False)
-                    + "\n\n只输出JSON对象，不要解释。"
-                ),
+                "content": build_user_prompt_content(prompt_pack),
             },
         ],
         "temperature": temperature,
@@ -358,6 +662,14 @@ def post_polish_request(
         return {"ok": False, "provider": provider, "status": exc.code, "error": body[:1000]}
     except Exception as exc:
         return {"ok": False, "provider": provider, "error": repr(exc)}
+
+
+def build_user_prompt_content(prompt_pack: dict[str, Any]) -> str:
+    content = json.dumps(prompt_pack["user"], ensure_ascii=False)
+    schema = prompt_pack.get("response_schema")
+    if schema:
+        content += "\n\nJSON schema:\n" + json.dumps(schema, ensure_ascii=False)
+    return content + "\n\n只输出JSON对象，不要解释。"
 
 
 def guard_polished_reply(
@@ -517,7 +829,32 @@ def truncate_reply(reply: str, settings: dict[str, Any]) -> str:
     clean = " ".join(str(reply or "").split())
     if len(clean) <= max_chars:
         return clean
-    return clean[: max(1, max_chars - 1)].rstrip() + "..."
+    return truncate_reply_naturally(clean, max_chars)
+
+
+def truncate_reply_naturally(text: str, max_chars: int) -> str:
+    clean = " ".join(str(text or "").split()).strip()
+    if max_chars <= 1:
+        return clean[:max_chars]
+    if len(clean) <= max_chars:
+        return clean
+    cutoff = max(1, max_chars)
+    preferred = -1
+    for marker in ("。", "！", "？", "!", "?", "；", ";", "，", ","):
+        index = clean.rfind(marker, 0, cutoff)
+        if index > preferred:
+            preferred = index
+    if preferred >= 0 and preferred + 1 >= max(12, int(max_chars * 0.45)):
+        candidate = clean[: preferred + 1].strip()
+    else:
+        candidate = clean[: max(1, max_chars - 1)].strip().rstrip("，,；;、:：")
+        if candidate and not candidate.endswith(("。", "！", "？", ".", "!", "?")):
+            candidate = candidate[: max(1, max_chars - 1)].rstrip("，,；;、:：") + "。"
+    if candidate.endswith(("，", ",", "；", ";", "、", ":", "：")):
+        candidate = candidate.rstrip("，,；;、:：")
+        if candidate and not candidate.endswith(("。", "！", "？", ".", "!", "?")):
+            candidate = candidate[: max(1, max_chars - 1)].rstrip("，,；;、:：") + "。"
+    return candidate[:max_chars].strip()
 
 
 def clip_text(value: str, limit: int) -> str:

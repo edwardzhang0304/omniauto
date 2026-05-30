@@ -428,7 +428,7 @@ class WorkflowService:
             if real_chat_blocks:
                 return {
                     "ok": False,
-                    "message": "real-chat learning material cannot be applied directly to formal knowledge; send it to RAG experience/style memory first",
+                    "message": "real-chat learning material cannot be applied directly to formal knowledge; send it to AI experience pool item/style memory first",
                     "dry_run_job_id": dry_job.get("job_id"),
                     "blocked_items": real_chat_blocks,
                 }
@@ -943,12 +943,12 @@ def real_chat_formal_import_block_reason(item: dict[str, Any]) -> str:
         return (
             "检测到实盘/微信聊天来源 "
             + ", ".join(source_type_hits)
-            + "；这类材料只能进入RAG经验层和实盘话术风格层，不能直接写入正式知识库。"
+            + "；这类材料只能进入AI经验池和实盘话术风格层，不能直接写入正式知识库。"
         )
 
     item_id = str(item.get("id") or "")
     if any(item_id.startswith(prefix) for prefix in REAL_CHAT_ID_PREFIXES):
-        return "检测到实盘聊天批次ID；请进入RAG经验层/话术风格层，不能直接写入正式知识库。"
+        return "检测到实盘聊天批次ID；请进入AI经验池/话术风格层，不能直接写入正式知识库。"
 
     batch_token = " ".join(
         str(value or "")
@@ -960,7 +960,7 @@ def real_chat_formal_import_block_reason(item: dict[str, Any]) -> str:
         )
     ).lower()
     if any(marker.lower() in batch_token for marker in REAL_CHAT_BATCH_MARKERS):
-        return "检测到实盘聊天批次标记；请进入RAG经验层/话术风格层，不能直接写入正式知识库。"
+        return "检测到实盘聊天批次标记；请进入AI经验池/话术风格层，不能直接写入正式知识库。"
     return ""
 
 

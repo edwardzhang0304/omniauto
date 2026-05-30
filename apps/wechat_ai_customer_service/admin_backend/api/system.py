@@ -33,6 +33,14 @@ from apps.wechat_ai_customer_service.platform_safety_rules import load_platform_
 from apps.wechat_ai_customer_service.platform_understanding_rules import load_platform_understanding_rules, save_platform_understanding_rules
 from ..auth_context import current_auth_context
 from ..services.diagnostics_service import DiagnosticsService
+from ..services.feishu_integration import (
+    dispatch_handoff_case_to_feishu,
+    load_feishu_config,
+    merge_feishu_config_payload,
+    public_feishu_config,
+    save_feishu_config,
+    test_feishu_connection,
+)
 from ..services.handoff_store import HandoffStore
 from ..services.knowledge_store import KnowledgeStore
 from ..services.locks import list_runtime_locks
@@ -279,6 +287,76 @@ def test_llm_config(request: Request, payload: dict[str, Any] | None = None) -> 
         return {"ok": False, "message": f"连接失败: {exc.reason}", "provider": provider, "base_url": base_url, "model": model}
     except Exception as exc:
         return {"ok": False, "message": f"测试异常: {exc}", "provider": provider, "base_url": base_url, "model": model}
+
+
+@router.get("/feishu-config")
+def feishu_config(request: Request) -> dict[str, Any]:
+    current_auth_context(request)
+    return public_feishu_config(load_feishu_config())
+
+
+@router.put("/feishu-config")
+def update_feishu_config(request: Request, payload: dict[str, Any]) -> dict[str, Any]:
+    context = current_auth_context(request)
+    if context.role != Role.ADMIN:
+        return {"ok": False, "detail": "only admin can update Feishu handoff settings"}
+    config = save_feishu_config(payload)
+    return public_feishu_config(config)
+
+
+@router.post("/feishu-config/test")
+def test_feishu_config(request: Request, payload: dict[str, Any] | None = None) -> dict[str, Any]:
+    context = current_auth_context(request)
+    if context.role != Role.ADMIN:
+        return {"ok": False, "detail": "only admin can test Feishu handoff settings"}
+    payload = payload or {}
+    config = load_feishu_config()
+    feishu_payload_keys = (
+        "enabled",
+        "mode",
+        "webhook_url",
+        "webhook_secret",
+        "app_id",
+        "app_secret",
+        "receive_id_type",
+        "default_receive_ids",
+        "bound_accounts",
+    )
+    if any(key in payload for key in feishu_payload_keys):
+        config = merge_feishu_config_payload(payload, base=config)
+    dry_run = bool(payload.get("dry_run"))
+    return test_feishu_connection(config=config, dry_run=dry_run)
+
+
+@router.post("/feishu-config/test-handoff")
+def test_feishu_handoff(request: Request, payload: dict[str, Any] | None = None) -> dict[str, Any]:
+    context = current_auth_context(request)
+    if context.role != Role.ADMIN:
+        return {"ok": False, "detail": "only admin can test Feishu handoff settings"}
+    payload = payload or {}
+    case = {
+        "tenant_id": context.tenant_id,
+        "case_id": "handoff_test_preview",
+        "target": str(payload.get("target") or "文件传输助手"),
+        "reason": str(payload.get("reason") or "manual_handoff_test"),
+        "message_contents": [str(payload.get("message") or "这是一条转人工通知测试。")],
+        "payload": {"payload": {"kind": "manual_handoff_test"}},
+    }
+    config = load_feishu_config()
+    feishu_payload_keys = (
+        "enabled",
+        "mode",
+        "webhook_url",
+        "webhook_secret",
+        "app_id",
+        "app_secret",
+        "receive_id_type",
+        "default_receive_ids",
+        "bound_accounts",
+    )
+    if any(key in payload for key in feishu_payload_keys):
+        config = merge_feishu_config_payload(payload, base=config)
+    return dispatch_handoff_case_to_feishu(case, config=config, dry_run=bool(payload.get("dry_run")))
 
 
 def _llm_config_payload(*, context: Any, config: dict[str, str], provider: str) -> dict[str, Any]:

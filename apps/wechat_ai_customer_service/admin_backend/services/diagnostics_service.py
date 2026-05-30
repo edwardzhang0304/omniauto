@@ -44,7 +44,7 @@ class DiagnosticsService:
     ) -> dict[str, Any]:
         run_id = "diag_" + datetime.now().strftime("%Y%m%d_%H%M%S") + "_" + uuid.uuid4().hex[:6]
 
-        # Auto-dedup RAG experiences during full diagnostics (silent cleanup)
+        # Auto-dedup AI experience pool items during full diagnostics (silent cleanup)
         auto_dedup_result: dict[str, Any] | None = None
         if mode == "full" or auto_dedup_rag:
             try:

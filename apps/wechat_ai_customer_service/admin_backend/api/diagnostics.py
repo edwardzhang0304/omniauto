@@ -133,13 +133,13 @@ def delete_target(payload: dict[str, Any]) -> dict[str, Any]:
     if not target:
         return {"ok": False, "message": "target is required"}
 
-    # RAG experience target
+    # AI experience pool target
     if target.startswith("rag_exp_"):
         try:
             result = RagAdminService().discard_experience(target, reason=str(payload.get("reason") or "deleted from diagnostics"))
-            return {"ok": True, "message": f"RAG经验 {target} 已废弃。", "item": result.get("item")}
+            return {"ok": True, "message": f"AI经验池 {target} 已废弃。", "item": result.get("item")}
         except Exception as exc:
-            return {"ok": False, "message": f"failed to discard RAG experience: {exc}"}
+            return {"ok": False, "message": f"failed to discard AI experience pool item: {exc}"}
 
     # Knowledge item target: category_id/item_id
     parts = target.split("/", 1)

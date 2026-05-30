@@ -1,4 +1,4 @@
-"""RAG auxiliary layer admin APIs."""
+"""AI experience pool and retrieval admin APIs."""
 
 from __future__ import annotations
 
@@ -67,7 +67,7 @@ def interpret_experience(experience_id: str, payload: dict[str, Any] | None = No
     try:
         return rag_service().interpret_experience(experience_id, payload or {})
     except KeyError as exc:
-        raise HTTPException(status_code=404, detail=f"RAG experience not found: {experience_id}") from exc
+        raise HTTPException(status_code=404, detail=f"AI experience pool item not found: {experience_id}") from exc
 
 
 @router.post("/experiences/{experience_id}/discard")
@@ -75,7 +75,7 @@ def discard_experience(experience_id: str, payload: dict[str, Any] | None = None
     try:
         return rag_service().discard_experience(experience_id, payload or {})
     except KeyError as exc:
-        raise HTTPException(status_code=404, detail=f"RAG experience not found: {experience_id}") from exc
+        raise HTTPException(status_code=404, detail=f"AI experience pool item not found: {experience_id}") from exc
 
 
 @router.post("/experiences/{experience_id}/acknowledge")
@@ -83,7 +83,7 @@ def acknowledge_experience(experience_id: str, payload: dict[str, Any] | None = 
     try:
         return rag_service().acknowledge_experience(experience_id, payload or {})
     except KeyError as exc:
-        raise HTTPException(status_code=404, detail=f"RAG experience not found: {experience_id}") from exc
+        raise HTTPException(status_code=404, detail=f"AI experience pool item not found: {experience_id}") from exc
 
 
 @router.post("/experiences/{experience_id}/keep")
@@ -91,7 +91,7 @@ def keep_experience(experience_id: str, payload: dict[str, Any] | None = None) -
     try:
         return rag_service().keep_experience(experience_id, payload or {})
     except KeyError as exc:
-        raise HTTPException(status_code=404, detail=f"RAG experience not found: {experience_id}") from exc
+        raise HTTPException(status_code=404, detail=f"AI experience pool item not found: {experience_id}") from exc
 
 
 @router.post("/experiences/{experience_id}/reopen")
@@ -99,7 +99,7 @@ def reopen_experience(experience_id: str, payload: dict[str, Any] | None = None)
     try:
         result = rag_service().reopen_experience(experience_id, payload or {})
     except KeyError as exc:
-        raise HTTPException(status_code=404, detail=f"RAG experience not found: {experience_id}") from exc
+        raise HTTPException(status_code=404, detail=f"AI experience pool item not found: {experience_id}") from exc
     if not result.get("ok"):
         raise HTTPException(status_code=400, detail=result)
     return result
@@ -110,7 +110,7 @@ def update_experience(experience_id: str, payload: dict[str, Any] | None = None)
     try:
         result = rag_service().update_experience(experience_id, payload or {})
     except KeyError as exc:
-        raise HTTPException(status_code=404, detail=f"RAG experience not found: {experience_id}") from exc
+        raise HTTPException(status_code=404, detail=f"AI experience pool item not found: {experience_id}") from exc
     if not result.get("ok"):
         raise HTTPException(status_code=400, detail=result)
     return result
@@ -121,7 +121,7 @@ def promote_experience(experience_id: str, payload: dict[str, Any] | None = None
     try:
         result = rag_service().promote_experience(experience_id, payload or {})
     except KeyError as exc:
-        raise HTTPException(status_code=404, detail=f"RAG experience not found: {experience_id}") from exc
+        raise HTTPException(status_code=404, detail=f"AI experience pool item not found: {experience_id}") from exc
     if not result.get("ok"):
         raise HTTPException(status_code=400, detail=result)
     return result
@@ -132,7 +132,7 @@ def resolve_formal_overlap(experience_id: str, payload: dict[str, Any] | None = 
     try:
         result = rag_service().resolve_formal_overlap(experience_id, payload or {})
     except KeyError as exc:
-        raise HTTPException(status_code=404, detail=f"RAG experience not found: {experience_id}") from exc
+        raise HTTPException(status_code=404, detail=f"AI experience pool item not found: {experience_id}") from exc
     if not result.get("ok"):
         raise HTTPException(status_code=400, detail=result)
     return result

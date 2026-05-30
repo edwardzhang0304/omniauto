@@ -1,4 +1,4 @@
-"""Automatic review metadata for newly created RAG experiences.
+"""Automatic review metadata for newly created AI experience pool items.
 
 This module only adds AI interpretation metadata. It must never create review
 candidates or formal knowledge; promotion stays behind the manual RAG review
@@ -22,7 +22,7 @@ def auto_review_rag_experience(
     use_llm: bool = True,
     apply_auto_triage: bool = True,
 ) -> dict[str, Any]:
-    """Persist and return AI review advice for a RAG experience.
+    """Persist and return AI review advice for a AI experience pool item.
 
     The import of ``rag_admin_service`` is intentionally local to avoid a module
     cycle with the learning services. The formal comparison is part of the AI

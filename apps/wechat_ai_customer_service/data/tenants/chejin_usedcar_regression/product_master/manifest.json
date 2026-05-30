@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "authority": "product_master",
+  "category_id": "products",
+  "tenant_id": "chejin_usedcar_regression",
+  "updated_at": "2026-05-30T23:22:25",
+  "items_path": "items",
+  "compatibility": {
+    "legacy_read_fallback": "knowledge_bases/products",
+    "new_writes_to_legacy": false
+  }
+}

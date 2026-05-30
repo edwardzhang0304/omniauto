@@ -1,4 +1,4 @@
-"""Admin-facing wrapper for the local RAG auxiliary layer."""
+"""Admin-facing wrapper for retrieval and the AI experience pool."""
 
 from __future__ import annotations
 
@@ -421,7 +421,7 @@ class RagAdminService:
         if str(review.get("status") or "") in {"kept", AUTO_KEPT_REVIEW_STATUS}:
             return {
                 "ok": False,
-                "message": "这条RAG经验已经被人为保留；如需重新升级，请先点击\"重新待处理\"，再按AI建议操作。",
+                "message": "这条AI经验池已经被人为保留；如需重新升级，请先点击\"重新待处理\"，再按AI建议操作。",
                 "review_status": str(review.get("status") or ""),
             }
         formal_items = collect_formal_items()
@@ -453,7 +453,7 @@ class RagAdminService:
         if str((interpretation or {}).get("recommended_action") or "") != "promote_to_pending" or not bool((interpretation or {}).get("promotion_allowed", False)):
             return {
                 "ok": False,
-                "message": "AI没有建议把这条RAG经验升级为待确认知识。它可能已被正式知识覆盖、只是一次客户不合理要求、来源不够权威，或更适合保留在经验层。",
+                "message": "AI没有建议把这条AI经验池升级为待确认知识。它可能已被正式知识覆盖、只是一次客户不合理要求、来源不够权威，或更适合保留在经验层。",
                 "ai_interpretation": interpretation,
                 "formal_relation": relation,
                 "formal_match": annotated.get("formal_match") or {},
@@ -529,7 +529,7 @@ class RagAdminService:
         if formal_category_id in PRODUCT_MASTER_CATEGORIES and strategy != "keep_formal_discard_experience":
             return {
                 "ok": False,
-                "message": "商品资料属于权威主数据，禁止用RAG经验覆盖或合并正式商品资料；请保留正式知识并废弃该经验。",
+                "message": "商品资料属于权威主数据，禁止用AI经验池覆盖或合并正式商品资料；请保留正式知识并废弃该经验。",
                 "formal_relation": str(annotated.get("formal_relation") or ""),
                 "formal_match": compact_formal_match(formal_record),
             }
@@ -590,7 +590,7 @@ class RagAdminService:
                 "formal_relation": str(annotated.get("formal_relation") or ""),
                 "formal_match": compact_formal_match(formal_record),
                 "compile": replaced.get("compile"),
-                "message": "已按新经验覆盖更新正式知识库，并从RAG经验池移除这条经验。",
+                "message": "已按新经验覆盖更新正式知识库，并从AI经验池移除这条经验。",
                 "index": {"ok": True, "mode": "queued_async_rebuild"},
             }
 
@@ -641,7 +641,7 @@ class RagAdminService:
             "ai_interpretation": interpretation,
             "cache_policy": cache_policy,
             "compile": saved.get("compile") if isinstance(saved, dict) else {},
-            "message": "已完成AI合并并更新正式知识库，这条经验已从RAG经验池移除。",
+            "message": "已完成AI合并并更新正式知识库，这条经验已从AI经验池移除。",
             "index": {"ok": True, "mode": "queued_async_rebuild"},
         }
 
@@ -772,7 +772,7 @@ def save_formal_item(
     if not target_category:
         raise ValueError("formal target category is missing")
     if target_category in PRODUCT_MASTER_CATEGORIES:
-        raise ValueError("商品资料属于权威主数据，禁止通过RAG经验相近处理写回；请在商品库手动维护。")
+        raise ValueError("商品资料属于权威主数据，禁止通过AI经验池相近处理写回；请在商品库手动维护。")
     if not isinstance(item, dict) or not item:
         raise ValueError("formal merged item is missing")
     registry = KnowledgeRegistry()
@@ -1589,7 +1589,7 @@ def build_candidate_from_experience(item: dict[str, Any], *, preferred_category:
         raise ValueError(str(source_decision.get("message") or source_decision.get("reason") or "source is not authoritative for this candidate category"))
     data = candidate_data_for_category(category_id, item)
     if category_id == "chats" and not str(data.get("service_reply") or "").strip():
-        raise ValueError("这条RAG经验没有找到明确的客服回复，不能升级为聊天话术；请保留为经验或废弃。")
+        raise ValueError("这条AI经验池没有找到明确的客服回复，不能升级为聊天话术；请保留为经验或废弃。")
     item_id = safe_item_id(data.get("sku") or data.get("title") or data.get("customer_message") or item.get("experience_id") or "rag_experience")
     candidate_id = "rag_promote_" + stable_digest(str(item.get("experience_id") or json.dumps(item, ensure_ascii=False)), 20)
     candidate_item = {
@@ -1677,7 +1677,7 @@ def candidate_data_for_category(category_id: str, item: dict[str, Any]) -> dict[
     question = str(item.get("question") or "")
     reply = str(item.get("reply_text") or "")
     hit_text = str(hit.get("text") or "")
-    title = candidate_title_from_payload(structured) or truncate(str(item.get("summary") or question or reply or "RAG experience"), 64)
+    title = candidate_title_from_payload(structured) or truncate(str(item.get("summary") or question or reply or "AI experience pool item"), 64)
     keywords = keyword_list(" ".join([question, reply, hit_text]))
     additional_details = {
         "rag_experience_id": item.get("experience_id"),
@@ -1867,6 +1867,8 @@ def structured_payload_from_experience(item: dict[str, Any]) -> dict[str, Any]:
 def experience_is_pipeline_trace(item: dict[str, Any]) -> bool:
     text = experience_text(item)
     trace_markers = (
+        "AI experience pool item ->",
+        "Intake -> AI experience pool item",
         "RAG experience ->",
         "Intake -> RAG experience",
         "candidates=",
@@ -1875,10 +1877,10 @@ def experience_is_pipeline_trace(item: dict[str, Any]) -> bool:
 
 
 def pipeline_trace_has_promotable_business_content(item: dict[str, Any]) -> bool:
-    """Allow wrapped intake/RAG traces when they contain real business material.
+    """Allow wrapped intake/AI experience pool traces when they contain real business material.
 
     Raw-message learning stores evidence with technical prefixes such as
-    "Intake -> RAG experience".  Those prefixes alone should not block
+    "Intake -> AI experience pool item". Those prefixes alone should not block
     promotion when the inner content has been interpreted as useful customer
     service knowledge.  The final candidate still goes through source-authority
     and human review checks.
@@ -2007,8 +2009,16 @@ def parse_labeled_payload(text: str) -> dict[str, Any]:
 
 def normalize_chat_candidate_question(question: Any, item: dict[str, Any]) -> str:
     text = str(question or "").strip()
-    generic_titles = {"待分类规则", "待分类", "unknown", "RAG experience", "Intake -> RAG experience"}
-    if text and text not in generic_titles and not text.startswith("Intake -> RAG experience"):
+    generic_titles = {
+        "待分类规则",
+        "待分类",
+        "unknown",
+        "AI experience pool item",
+        "Intake -> AI experience pool item",
+        "RAG experience",
+        "Intake -> RAG experience",
+    }
+    if text and text not in generic_titles and not text.startswith(("Intake -> AI experience pool item", "Intake -> RAG experience")):
         return truncate(text, 180)
     interpretation = item.get("ai_interpretation") if isinstance(item.get("ai_interpretation"), dict) else {}
     meaning = str(interpretation.get("meaning") or "").strip()

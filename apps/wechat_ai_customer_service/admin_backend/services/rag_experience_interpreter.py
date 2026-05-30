@@ -1,4 +1,4 @@
-"""AI interpretation layer for RAG experiences.
+"""AI interpretation layer for AI experience pool items.
 
 The interpretation is review-only metadata. It helps merchants understand what
 an experience means and how to handle it, but it never promotes formal
@@ -368,7 +368,7 @@ def guardrail_assessment(item: dict[str, Any]) -> dict[str, Any]:
     """Conservative local policy before any model suggestion can promote.
 
     The model can explain, compare and recommend, but deterministic policy
-    still decides whether a RAG experience is allowed to become a promotion
+    still decides whether a AI experience pool item is allowed to become a promotion
     suggestion.  This keeps customer wishes, prompt-injection attempts and
     observed chat facts from being mistaken for merchant-approved rules.
     """
@@ -402,7 +402,7 @@ def guardrail_assessment(item: dict[str, Any]) -> dict[str, Any]:
         return guardrail_decision(
             "product_master_manual_intake_only",
             "discard",
-            "商品资料属于权威主数据，RAG经验层不做人工复核，自动降噪处理。",
+            "商品资料属于权威主数据，AI经验池不做人工复核，自动降噪处理。",
             auto_triage=True,
             observed_wechat=observed_wechat,
             contains_model_reply=contains_model_reply,
@@ -536,7 +536,7 @@ def auto_keep_assessment(
         return {
             "recommended": False,
             "reason_code": "intake_requires_human_review",
-            "reason": "资料导入线索仍需人工判断，不能自动保留为可参与回答的RAG经验。",
+            "reason": "资料导入线索仍需人工判断，不能自动保留为可参与回答的AI经验池。",
         }
     if not experience_contains_model_reply(item):
         return {
@@ -594,7 +594,7 @@ def auto_keep_assessment(
     return {
         "recommended": True,
         "reason_code": "low_risk_reference",
-        "reason": "系统判断这是一条低风险、可复用的表达经验，先自动保留在RAG经验层。",
+        "reason": "系统判断这是一条低风险、可复用的表达经验，先自动保留在AI经验池。",
     }
 
 

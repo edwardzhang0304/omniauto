@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>微信 AI 客服知识管理台</title>
-    <link rel="stylesheet" href="/static/styles.css?v=20260517-knowledge-renderfix-v8" />
+    <link rel="stylesheet" href="/static/styles.css?v=20260524-rpa-indicator-v1" />
   </head>
   <body>
     <section id="login-screen" class="login-screen">
@@ -88,7 +88,7 @@
           <div class="nav-group-title">知识成长中心</div>
           <button class="nav-item" data-view="knowledge_center">知识首页</button>
           <button class="nav-item nav-product-special" data-view="product_catalog">商品库</button>
-          <button class="nav-item" data-view="ai_reference">RAG经验池<span class="tab-count-badge is-hidden nav-badge" id="rag-experience-nav-badge">0</span></button>
+          <button class="nav-item" data-view="ai_reference">AI经验池<span class="tab-count-badge is-hidden nav-badge" id="rag-experience-nav-badge">0</span></button>
           <button class="nav-item" data-view="candidates">待确认知识<span class="tab-count-badge is-hidden nav-badge" id="candidate-nav-badge">0</span></button>
           <button class="nav-item" data-view="knowledge">正式知识库</button>
           <button class="nav-item" data-view="uploads">资料导入</button>
@@ -166,9 +166,9 @@
                 </label>
                 <div class="setting-grid">
                   <label class="checkbox-line"><input id="customer-record-messages" type="checkbox" /> 记录客服对话</label>
-                  <label class="checkbox-line"><input id="customer-auto-learn" type="checkbox" /> 自动整理为RAG经验</label>
+                  <label class="checkbox-line"><input id="customer-auto-learn" type="checkbox" /> 自动整理为AI经验池</label>
                   <label class="checkbox-line"><input id="customer-use-llm" type="checkbox" /> 使用大模型辅助整理</label>
-                  <label class="checkbox-line"><input id="customer-rag-enabled" type="checkbox" /> 使用RAG经验辅助回答</label>
+                  <label class="checkbox-line"><input id="customer-rag-enabled" type="checkbox" /> 使用AI经验池辅助回答</label>
                   <label class="checkbox-line"><input id="customer-data-capture" type="checkbox" /> 识别客户线索</label>
                   <label class="checkbox-line"><input id="customer-handoff" type="checkbox" /> 风险问题转人工</label>
                   <label class="checkbox-line"><input id="customer-operator-alert" type="checkbox" /> 需要人工时提醒</label>
@@ -233,7 +233,7 @@
             <div class="section-head">
               <div>
                 <h2>知识成长中心</h2>
-                <p>按 RAG经验、候选知识、正式知识的顺序管理客户自己的知识成长。</p>
+                <p>按 AI经验池、候选知识、正式知识的顺序管理客户自己的知识成长。</p>
               </div>
               <button class="secondary-button" id="refresh-overview">刷新</button>
             </div>
@@ -242,10 +242,10 @@
             </div>
             <div class="module-grid">
               <button class="module-card nav-shortcut product-module-card" data-view="product_catalog"><strong>商品库</strong><span>商品资料是特殊主数据，可在商品库内单独上传、确认和入库。</span></button>
-              <button class="module-card nav-shortcut" data-view="ai_reference"><strong>RAG经验池</strong><span>所有资料和聊天内容先进入这里，由 AI 给出处理建议。</span></button>
+              <button class="module-card nav-shortcut" data-view="ai_reference"><strong>AI经验池</strong><span>所有资料和聊天内容先进入这里，由 AI 给出处理建议。</span></button>
               <button class="module-card nav-shortcut" data-view="candidates"><strong>待确认知识</strong><span>像审核清单一样确认AI建议加入的知识。</span></button>
               <button class="module-card nav-shortcut" data-view="knowledge"><strong>正式知识库</strong><span>管理已生效的政策、流程、边界和话术。</span></button>
-              <button class="module-card nav-shortcut" data-view="uploads"><strong>资料导入</strong><span>上传政策规则、聊天记录和普通资料；整理后先进入RAG经验池。</span></button>
+              <button class="module-card nav-shortcut" data-view="uploads"><strong>资料导入</strong><span>上传政策规则、聊天记录和普通资料；整理后先进入AI经验池。</span></button>
               <button class="module-card nav-shortcut" data-view="diagnostics"><strong>知识检测</strong><span>检查知识冲突、缺失和运行风险。</span></button>
             </div>
           </article>
@@ -307,7 +307,7 @@
             </div>
             <div class="helper-card">
               <strong>商品库是商品主数据，正式知识库是业务规则。</strong>
-              <span>商品事实不从RAG经验或候选知识升级而来；商品专属问答、规则和解释请从商品详情进入，避免脱离商品单独编辑。</span>
+              <span>商品事实不从AI经验池或候选知识升级而来；商品专属问答、规则和解释请从商品详情进入，避免脱离商品单独编辑。</span>
             </div>
             <div class="section-head sub-head">
               <input class="search-input" id="knowledge-search" placeholder="搜索名称、关键词、话术" />
@@ -328,18 +328,18 @@
             <div class="section-head">
               <div>
                 <h2>资料导入</h2>
-                <p>上传后可自动识别资料类型并整理为 RAG 经验；系统默认先沉淀经验，再由你决定是否升级知识。</p>
+                <p>上传后可自动识别资料类型并整理为 AI经验池；系统默认先沉淀经验，再由你决定是否升级知识。</p>
               </div>
               <div class="button-row">
                 <button class="workflow-tab is-active" data-group="intake" data-tab="uploads">资料导入</button>
                 <button class="workflow-tab" data-group="intake" data-tab="generator">手动创建</button>
-                <button class="workflow-tab" data-group="intake" data-tab="rag_experiences">跳转到RAG经验池<span class="tab-count-badge is-hidden" id="rag-experience-intake-tab-badge" data-rag-experience-count-badge>0</span></button>
+                <button class="workflow-tab" data-group="intake" data-tab="rag_experiences">跳转到AI经验池<span class="tab-count-badge is-hidden" id="rag-experience-intake-tab-badge" data-rag-experience-count-badge>0</span></button>
               </div>
             </div>
 
             <div class="flow-guide">
               <div class="flow-step"><strong>1. 原始内容</strong><span>资料、聊天、群聊、文件传输助手</span></div>
-              <div class="flow-step"><strong>2. RAG经验池</strong><span>归纳为可追溯 RAG 经验</span></div>
+              <div class="flow-step"><strong>2. AI经验池</strong><span>归纳为可追溯 AI经验池</span></div>
               <div class="flow-step"><strong>3. 待确认知识</strong><span>已完善、待完善、需确认</span></div>
               <div class="flow-step"><strong>4. 正式知识库</strong><span>人工应用后生效</span></div>
             </div>
@@ -347,8 +347,8 @@
             <section class="workflow-section is-visible" data-intake-tab="generator">
               <div class="section-head sub-head">
                 <div>
-                  <h2>手动整理为RAG经验</h2>
-                  <p>管理员主动录入的内容也会先进入 RAG经验池；确认有价值后再手动升级为待确认知识。</p>
+                  <h2>手动整理为AI经验池</h2>
+                  <p>管理员主动录入的内容也会先进入 AI经验池；确认有价值后再手动升级为待确认知识。</p>
                 </div>
                 <div class="button-row">
                   <select id="generator-category">
@@ -366,7 +366,7 @@
                   </label>
                   <button class="primary-button" id="send-generator">生成/补充</button>
                   <div class="generator-summary" id="generator-summary"></div>
-                  <button class="primary-button" id="confirm-generator" disabled>确认加入RAG经验池</button>
+                  <button class="primary-button" id="confirm-generator" disabled>确认加入AI经验池</button>
                 </div>
               </div>
             </section>
@@ -375,13 +375,13 @@
               <div class="section-head sub-head">
                 <div>
                   <h2>资料导入</h2>
-                  <p>把清洗后的资料直接上传，系统会自动识别类型；默认上传后立即整理进 RAG经验池。</p>
+                  <p>把清洗后的资料直接上传，系统会自动识别类型；默认上传后立即整理进 AI经验池。</p>
                 </div>
                 <button class="primary-button is-hidden" id="upload-button" type="button">手动上传</button>
               </div>
               <div class="helper-card">
                 <strong>默认一键自动学习。</strong>
-                <span>上传后会自动整理为 RAG 经验，不会直接改动正式知识；需要入库时，再到 RAG经验池确认升级。</span>
+                <span>上传后会自动整理为 AI经验池，不会直接改动正式知识；需要入库时，再到 AI经验池确认升级。</span>
               </div>
               <div class="upload-zone">
                 <input id="upload-file" type="file" multiple />
@@ -438,7 +438,7 @@
             </div>
             <div class="helper-card">
               <strong>记录员只负责采集和整理。</strong>
-              <span>记录内容先进入RAG经验池；是否升级为待确认知识，需要用户手动确认。</span>
+              <span>记录内容先进入AI经验池；是否升级为待确认知识，需要用户手动确认。</span>
             </div>
             <div class="control-row">
               <div>
@@ -449,17 +449,14 @@
             </div>
             <div class="control-row">
               <div>
-                <strong>监听进程</strong>
+                <strong>监听进程状态</strong>
                 <span id="recorder-runtime-status">读取中...</span>
               </div>
-              <div class="button-row">
-                <button class="secondary-button" id="recorder-runtime-start" type="button">启动监听</button>
-                <button class="secondary-button" id="recorder-runtime-stop" type="button">停止监听</button>
-              </div>
+              <span class="inline-muted">已合并到左侧“运行控制台”</span>
             </div>
             <div class="recorder-toolbar">
               <label class="checkbox-line"><input id="recorder-notify" type="checkbox" /> 收录后在群内提示</label>
-              <label class="checkbox-line"><input id="recorder-auto-learn" type="checkbox" /> 自动整理为RAG经验</label>
+              <label class="checkbox-line"><input id="recorder-auto-learn" type="checkbox" /> 自动整理为AI经验池</label>
               <label class="checkbox-line"><input id="recorder-use-llm" type="checkbox" /> 使用大模型辅助提取</label>
               <button class="secondary-button" id="recorder-save-settings">保存设置</button>
             </div>
@@ -541,11 +538,11 @@
           <article class="glass-panel content-card view-panel" data-panel="ai_reference">
             <div class="section-head">
               <div>
-                <h2>RAG经验池</h2>
+                <h2>AI经验池</h2>
                 <p>优先查看 AI 从资料和对话里归纳出的经验；资料片段只作为证据参考。</p>
               </div>
               <div class="button-row">
-                <button class="workflow-tab is-active" data-group="reference" data-tab="experiences">RAG经验清单<span class="tab-count-badge is-hidden" id="rag-experience-tab-badge" data-rag-experience-count-badge>0</span></button>
+                <button class="workflow-tab is-active" data-group="reference" data-tab="experiences">AI经验池清单<span class="tab-count-badge is-hidden" id="rag-experience-tab-badge" data-rag-experience-count-badge>0</span></button>
                 <button class="workflow-tab" data-group="reference" data-tab="sources">资料片段</button>
               </div>
             </div>
@@ -553,7 +550,7 @@
             <section class="workflow-section is-visible" data-reference-tab="experiences">
               <div class="section-head sub-head">
                 <div>
-                  <h2>RAG经验清单</h2>
+                  <h2>AI经验池清单</h2>
                   <p>这里是 AI 读完资料或真实对话后留下的经验总结和处理建议。</p>
                 </div>
                 <div class="button-row">
@@ -566,10 +563,10 @@
                 <span>所有渠道获取到的信息先在这里沉淀。未确认的经验不会参与回答；需要变成稳定规则时，先手动升级为待确认知识，再人工确认进入正式知识库。</span>
               </div>
               <div class="metric-grid metric-grid-tight metric-grid-three" id="rag-experience-cards">
-                <div class="status-card loading"><strong><span class="loading-spinner" aria-hidden="true"></span>正在加载RAG经验统计</strong><span>请稍等。</span></div>
+                <div class="status-card loading"><strong><span class="loading-spinner" aria-hidden="true"></span>正在加载AI经验池统计</strong><span>请稍等。</span></div>
               </div>
               <div id="rag-experience-list" class="compact-list">
-                <div class="status-card loading"><strong><span class="loading-spinner" aria-hidden="true"></span>正在加载RAG经验清单</strong><span>如果经验较多，可能需要几秒钟。</span></div>
+                <div class="status-card loading"><strong><span class="loading-spinner" aria-hidden="true"></span>正在加载AI经验池清单</strong><span>如果经验较多，可能需要几秒钟。</span></div>
               </div>
             </section>
 
@@ -730,6 +727,106 @@
             <section class="settings-section">
               <div class="section-head sub-head">
                 <div>
+                  <h2>飞书转人工通知</h2>
+                  <p>当微信掉线、风控停机或命中不可自动处理规则时，自动推送给绑定的飞书值班人或群。</p>
+                </div>
+              </div>
+              <div id="feishu-config-summary" class="security-summary">飞书配置读取中...</div>
+              <div class="security-grid">
+                <section class="security-panel">
+                  <div class="security-panel-head">
+                    <h3>连接方式</h3>
+                    <span>Webhook 或自建应用机器人</span>
+                  </div>
+                  <form class="security-form" id="feishu-config-form">
+                    <label class="checkbox-field wide-field">
+                      <input name="enabled" type="checkbox" id="feishu-enabled-input" />
+                      <span>启用飞书转人工通知</span>
+                    </label>
+                    <label class="form-field">
+                      <span>推送模式</span>
+                      <select name="mode" id="feishu-mode-select">
+                        <option value="webhook">群机器人 Webhook</option>
+                        <option value="app_bot">自建应用机器人</option>
+                      </select>
+                    </label>
+                    <label class="form-field">
+                      <span>默认接收 ID 类型</span>
+                      <select name="receive_id_type" id="feishu-receive-id-type-select">
+                        <option value="open_id">open_id</option>
+                        <option value="user_id">user_id</option>
+                        <option value="union_id">union_id</option>
+                        <option value="email">email</option>
+                        <option value="chat_id">chat_id</option>
+                      </select>
+                    </label>
+                    <label class="form-field wide-field">
+                      <span>Webhook 地址</span>
+                      <input name="webhook_url" type="password" autocomplete="off" placeholder="粘贴飞书群机器人 Webhook；留空保留已保存值" id="feishu-webhook-url-input" />
+                      <small id="feishu-webhook-url-current">当前 Webhook 状态读取中...</small>
+                    </label>
+                    <label class="form-field wide-field">
+                      <span>Webhook 签名密钥</span>
+                      <input name="webhook_secret" type="password" autocomplete="off" placeholder="可选；开启签名校验时填写，留空保留" id="feishu-webhook-secret-input" />
+                      <small id="feishu-webhook-secret-current">当前签名密钥状态读取中...</small>
+                    </label>
+                    <label class="form-field">
+                      <span>App ID</span>
+                      <input name="app_id" autocomplete="off" placeholder="cli_xxx" id="feishu-app-id-input" />
+                    </label>
+                    <label class="form-field">
+                      <span>App Secret</span>
+                      <input name="app_secret" type="password" autocomplete="off" placeholder="留空保留已保存值" id="feishu-app-secret-input" />
+                      <small id="feishu-app-secret-current">当前 App Secret 状态读取中...</small>
+                    </label>
+                    <label class="form-field wide-field">
+                      <span>默认接收 ID</span>
+                      <textarea name="default_receive_ids" id="feishu-default-receive-ids-input" placeholder="每行一个 open_id/user_id/email/chat_id。Webhook 模式可留空。"></textarea>
+                      <small>自建应用机器人模式下，如果没有命中绑定账号，会推送到这里配置的默认接收人或群。</small>
+                    </label>
+                    <label class="form-field wide-field">
+                      <span>绑定账号</span>
+                      <textarea name="bound_accounts" id="feishu-bound-accounts-input" placeholder="每行：显示名 | 租户ID | ID类型 | 接收ID&#10;例如：许聪 | chejin | open_id | ou_xxx"></textarea>
+                      <small>租户 ID 可留空作为通用接收人；Webhook 模式不需要填写。</small>
+                    </label>
+                    <label class="checkbox-field">
+                      <input name="notify_on_handoff" type="checkbox" id="feishu-notify-handoff-input" />
+                      <span>转人工时通知</span>
+                    </label>
+                    <label class="checkbox-field">
+                      <input name="notify_on_logout" type="checkbox" id="feishu-notify-logout-input" />
+                      <span>微信掉线时通知</span>
+                    </label>
+                    <div class="security-actions wide-field">
+                      <button class="primary-button compact-button" type="submit" id="feishu-config-save">保存飞书配置</button>
+                      <button class="secondary-button compact-button" type="button" id="feishu-config-test">测试连接</button>
+                      <button class="secondary-button compact-button" type="button" id="feishu-config-test-dry">干跑校验</button>
+                    </div>
+                  </form>
+                </section>
+                <section class="security-panel">
+                  <div class="security-panel-head">
+                    <h3>推送规则</h3>
+                    <span>当前生效预览</span>
+                  </div>
+                  <div class="llm-info-grid">
+                    <div><span>通知开关</span><strong id="feishu-info-enabled">—</strong></div>
+                    <div><span>模式</span><strong id="feishu-info-mode">—</strong></div>
+                    <div><span>Webhook</span><strong id="feishu-info-webhook">—</strong></div>
+                    <div><span>应用机器人</span><strong id="feishu-info-app">—</strong></div>
+                    <div><span>默认接收人</span><strong id="feishu-info-default-targets">—</strong></div>
+                    <div><span>绑定账号</span><strong id="feishu-info-bound-targets">—</strong></div>
+                  </div>
+                </section>
+              </div>
+              <div class="security-note">
+                <strong>推荐接入方式</strong>
+                <span>先用 Webhook 接入一个人工值班群验证流程；需要按客户空间或负责人精准推送时，再切换到自建应用机器人并配置接收 ID。</span>
+              </div>
+            </section>
+            <section class="settings-section">
+              <div class="section-head sub-head">
+                <div>
                   <h2>备份还原</h2>
                   <p>仅保留最近 20 条备份快照，超过数量的旧备份会自动清理。</p>
                 </div>
@@ -814,12 +911,10 @@
       </section>
     </main>
     <aside class="customer-service-float is-stopped" id="customer-service-float" aria-live="polite">
-      <div class="float-status-line float-drag-handle" title="按住拖动浮窗位置">
+      <div class="float-header float-drag-handle" title="按住拖动浮窗位置">
         <span class="service-state-dot is-stopped"></span>
-        <div>
-          <strong>已停止</strong>
-          <small>正在读取自动客服状态...</small>
-        </div>
+        <strong>运行控制台</strong>
+        <span class="float-hotkey-inline">按F8启动/停止</span>
       </div>
     </aside>
     <div id="diagnostic-merge-modal" class="modal is-hidden">
@@ -853,6 +948,6 @@
         </div>
       </div>
     </div>
-    <script src="/static/app.js?v=20260518-llm-provider-ui-v3"></script>
+    <script src="/static/app.js?v=20260524-rpa-indicator-v1"></script>
   </body>
 </html>

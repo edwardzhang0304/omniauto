@@ -34,7 +34,7 @@ def main() -> int:
     args = parser.parse_args()
 
     result = migrate(apply=args.apply, force=args.force)
-    print(json.dumps(result, ensure_ascii=False, indent=2))
+    print(json.dumps(result, ensure_ascii=True, indent=2))
     return 0 if result.get("ok") else 1
 
 

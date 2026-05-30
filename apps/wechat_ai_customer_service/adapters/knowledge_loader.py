@@ -55,6 +55,9 @@ def detect_intent_tags(text: str) -> list[str]:
         for tag, keywords in intent_keywords().items()
         if any(keyword.lower() in normalized for keyword in keywords)
     }
+    if is_pre_purchase_vehicle_maintenance_guidance(normalized):
+        tags.discard("after_sales")
+        tags.add("scene_product")
     if re.search(rf"\d+\s*({quantity_unit_pattern()})", normalized, re.IGNORECASE):
         tags.add("quote")
         tags.add("product")
@@ -130,7 +133,7 @@ def build_category_evidence_pack(text: str, *, context: dict[str, Any] | None = 
     # inject "unknown" back and override the inferred classification.
     if resolver_tags - {"unknown"}:
         detected_tags.discard("unknown")
-    intent_tags = sorted(resolver_tags | detected_tags)
+    intent_tags = normalize_pre_purchase_vehicle_tags(sorted(resolver_tags | detected_tags), text)
     evidence = legacy_evidence_from_category_pack(category_pack)
     safety = build_safety_summary(intent_tags, evidence, text)
     rag_evidence = build_rag_runtime_evidence(text, intent_tags=intent_tags, evidence=evidence, context=context)
@@ -138,10 +141,13 @@ def build_category_evidence_pack(text: str, *, context: dict[str, Any] | None = 
         evidence["rag"] = rag_evidence
         allow_soft_rag_reference(safety, intent_tags=intent_tags, rag_evidence=rag_evidence, text=text)
     category_safety = category_pack.get("safety", {}) or {}
+    soft_pre_purchase_category_safety = is_soft_pre_purchase_category_safety(category_safety, text)
     for reason in category_safety.get("reasons", []) or []:
+        if soft_pre_purchase_category_safety and reason == "no_relevant_business_evidence":
+            continue
         if reason not in safety["reasons"]:
             safety["reasons"].append(reason)
-    if category_safety.get("must_handoff"):
+    if category_safety.get("must_handoff") and not soft_pre_purchase_category_safety:
         safety["must_handoff"] = True
         safety["allowed_auto_reply"] = False
     if rag_evidence.get("hits"):
@@ -619,6 +625,85 @@ def build_safety_summary(intent_tags: list[str], evidence: dict[str, Any], text:
         "allowed_auto_reply": not must_handoff,
         "discount_check": discount_check,
     }
+
+
+def normalize_pre_purchase_vehicle_tags(intent_tags: list[str], text: str) -> list[str]:
+    tags = {str(item) for item in intent_tags if str(item)}
+    if is_pre_purchase_vehicle_maintenance_guidance(text):
+        tags.discard("after_sales")
+        tags.add("scene_product")
+        tags.add("product")
+    return sorted(tags)
+
+
+def is_pre_purchase_vehicle_maintenance_guidance(text: str) -> bool:
+    normalized = normalize_text(text)
+    if "维修" not in normalized and "维护" not in normalized:
+        return False
+    hard_after_sales = [
+        "售后",
+        "质保",
+        "保修",
+        "退换",
+        "退款",
+        "赔偿",
+        "买完",
+        "坏了",
+        "出问题",
+        "负责",
+        "保修期",
+    ]
+    if any(term in normalized for term in hard_after_sales):
+        return False
+    maintenance_context = ["后期维修", "维修成本", "维修麻烦", "维修不贵", "维护成本", "少维修", "小毛病", "后期省心"]
+    selection_context = [
+        "怎么选",
+        "哪一类",
+        "哪类",
+        "哪种",
+        "哪个",
+        "建议",
+        "先看",
+        "适合",
+        "预算",
+        "通勤",
+        "代步",
+        "家用",
+        "二手车",
+        "车型",
+        "车况",
+        "保值",
+        "不想太贵",
+    ]
+    vehicle_context = [
+        "车",
+        "车型",
+        "二手",
+        "电车",
+        "新能源",
+        "纯电",
+        "混动",
+        "轿车",
+        "suv",
+        "mpv",
+        "里面选",
+        "选哪",
+        "选哪个",
+        "哪一类",
+        "哪种",
+    ]
+    return (
+        any(term in normalized for term in maintenance_context)
+        and any(term in normalized for term in selection_context)
+        and any(term in normalized for term in vehicle_context)
+    )
+
+
+def is_soft_pre_purchase_category_safety(category_safety: dict[str, Any], text: str) -> bool:
+    if not is_pre_purchase_vehicle_maintenance_guidance(text):
+        return False
+    reasons = {str(item) for item in (category_safety or {}).get("reasons", []) or [] if str(item)}
+    return bool(reasons) and reasons <= {"no_relevant_business_evidence"}
 
 
 def has_authoritative_business_evidence(intent_tags: list[str], evidence: dict[str, Any]) -> bool:

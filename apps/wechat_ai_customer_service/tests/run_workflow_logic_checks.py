@@ -30,6 +30,9 @@ os.environ.setdefault("WECHAT_CLOUD_REQUIRED", "0")
 os.environ.setdefault("WECHAT_CLOUD_STRICT_ONLINE", "0")
 
 import customer_intent_assist as customer_intent_assist_module  # noqa: E402
+import final_visible_llm_polish as final_polish_module  # noqa: E402
+import llm_reply_synthesis as synthesis_module  # noqa: E402
+import reply_style_adapter as reply_style_adapter_module  # noqa: E402
 from customer_intent_assist import IntentAssistResult, call_deepseek_advisory  # noqa: E402
 from customer_service_review_queue import build_review_queue  # noqa: E402
 from knowledge_loader import build_evidence_pack  # noqa: E402
@@ -38,24 +41,33 @@ from listen_and_reply import (  # noqa: E402
     apply_local_customer_service_settings,
     build_iteration_targets,
     build_operator_handoff_reply_text,
+    coalesce_active_targets,
     concealed_handoff_reply,
     configured_reply_prefix,
+    customer_data_complete_can_auto_ack,
     customer_data_write_allowed_before_handoff,
     detect_newer_messages_before_send,
+    decide_reply_with_data_capture,
+    enforce_rpa_reply_safety,
+    ensure_data_capture_success_context,
     is_bot_reply_content,
     load_config,
     load_rules,
     maybe_enrich_messages_with_history,
     plan_message_batch_semantics,
     maybe_apply_llm_reply,
+    multi_target_change_warmup_delay_seconds,
     parse_targets,
     polish_customer_visible_reply_text,
     process_target,
+    final_visible_polish_blocks_send,
     resolve_path,
     sanitize_customer_visible_reply_text,
     select_batch,
     select_batch_details,
     should_operator_handoff,
+    should_defer_standalone_greeting,
+    rpa_reply_content_char_count,
     _apply_greeting,
 )
 from apps.wechat_ai_customer_service.admin_backend.services.customer_service_settings import CustomerServiceSettings  # noqa: E402
@@ -66,11 +78,15 @@ from apps.wechat_ai_customer_service.llm_config import (  # noqa: E402
     resolve_llm_base_url,
     resolve_llm_tier_model,
 )
-from final_visible_llm_polish import guard_polished_reply, maybe_polish_customer_visible_reply  # noqa: E402
+from final_visible_llm_polish import guard_polished_reply, maybe_polish_customer_visible_reply, normalized_cache_text  # noqa: E402
 from llm_reply_guard import guard_synthesized_reply  # noqa: E402
 from realtime_reply_router import reply_similarity  # noqa: E402
 from reply_style_adapter import adapt_reply_style  # noqa: E402
 from wxauto4_sidecar import is_wechat_main_window  # noqa: E402
+from apps.wechat_ai_customer_service.customer_service_live_safety import (  # noqa: E402
+    CustomerServiceLiveSafetyError,
+    assert_customer_service_recent_bootstrap_guard,
+)
 
 
 CONFIG_PATH = APP_ROOT / "configs" / "file_transfer_smoke.example.json"
@@ -79,13 +95,44 @@ TEST_ARTIFACTS = PROJECT_ROOT / "runtime" / "apps" / "wechat_ai_customer_service
 
 
 class FakeConnector:
-    def __init__(self, messages: list[dict[str, Any]], history_messages: list[dict[str, Any]] | None = None) -> None:
+    def __init__(
+        self,
+        messages: list[dict[str, Any]],
+        history_messages: list[dict[str, Any]] | None = None,
+        history_load: dict[str, Any] | None = None,
+    ) -> None:
         self.messages = messages
         self.history_messages = history_messages
+        self.history_load = history_load
         self.sent_texts: list[str] = []
         self.history_load_calls: list[int] = []
+        self.history_mode_calls: list[dict[str, Any]] = []
 
-    def get_messages(self, target: str, exact: bool = True, history_load_times: int = 0) -> dict[str, Any]:
+    def get_messages(
+        self,
+        target: str,
+        exact: bool = True,
+        history_load_times: int = 0,
+        **kwargs: Any,
+    ) -> dict[str, Any]:
+        history_mode = str(kwargs.get("history_mode") or "")
+        if history_mode:
+            self.history_mode_calls.append(dict(kwargs))
+            messages = self.history_messages if self.history_messages is not None else self.messages
+            return {
+                "ok": True,
+                "target": target,
+                "exact": exact,
+                "history_load": self.history_load
+                or {
+                    "ok": True,
+                    "mode": history_mode,
+                    "anchor_found": True,
+                    "scroll_steps": 1,
+                    "stopped_reason": "anchor_found",
+                },
+                "messages": messages,
+            }
         if history_load_times:
             self.history_load_calls.append(history_load_times)
         messages = self.history_messages if history_load_times and self.history_messages is not None else self.messages
@@ -121,6 +168,24 @@ class RateLimitedTransportConnector(FakeConnector):
         }
 
 
+class InputNotReadyTransportConnector(FakeConnector):
+    def send_text_and_verify(self, target: str, text: str, exact: bool = True) -> dict[str, Any]:
+        self.sent_texts.append(text)
+        return {
+            "ok": False,
+            "verified": False,
+            "target": target,
+            "exact": exact,
+            "text": text,
+            "send": {
+                "ok": False,
+                "adapter": "win32_ocr",
+                "state": "send_input_not_ready",
+                "error": "input token not detected after paste",
+            },
+        }
+
+
 class FallbackTransportConnector(FakeConnector):
     def status(self) -> dict[str, Any]:
         return {"ok": True, "online": True, "adapter": "win32_ocr"}
@@ -137,34 +202,57 @@ def run_checks() -> dict[str, Any]:
         check_configured_bot_prefix_is_skipped,
         check_continuous_customer_messages_are_batched_with_overflow_guard,
         check_missing_original_batch_is_treated_as_stale_when_new_messages_visible,
+        check_freshness_anchor_mode_does_not_scroll_by_default,
+        check_freshness_matches_original_after_ocr_rewrap,
+        check_freshness_matches_visible_ocr_fragment_of_original,
         check_history_backfill_uses_connector_rpa_load_more,
+        check_anchor_history_does_not_scroll_when_anchor_visible,
+        check_anchor_history_searches_until_anchor_found,
+        check_anchor_history_fallback_preserves_visible_batch_when_load_drops_current,
+        check_anchor_history_blocks_when_anchor_not_found,
         check_semantic_batch_planner_groups_split_need,
         check_semantic_batch_planner_detects_mixed_risk_questions,
         check_mixed_safety_batch_forces_handoff,
         check_incomplete_customer_data_is_completed_and_written,
+        check_explicit_name_phone_is_written_even_when_intent_is_appointment,
+        check_visit_preference_acknowledgement_is_not_duplicated_after_polish,
         check_rate_limit_notice_and_backoff,
         check_rate_limit_notice_suppressed_on_fallback_transport,
         check_transport_send_rate_limit_defers_without_marking_processed,
+        check_transport_send_input_not_ready_defers_without_marking_processed,
         check_auto_reply_disabled_blocks_runtime_send,
         check_customer_service_console_switches_take_effect,
+        check_live_safety_guard_enforces_single_allowed_target,
+        check_rpa_safety_allows_standalone_greeting_by_default,
+        check_rpa_safety_defers_standalone_greeting_when_explicitly_enabled,
+        check_rpa_safety_caps_visible_reply,
         check_identity_guard_setting_controls_ai_disclosure,
         check_identity_guard_controls_handoff_phrase_concealment,
         check_contextual_greeting_avoids_repeated_file_transfer_honorific,
         check_concealed_handoff_acknowledges_contact_appointment,
+        check_customer_data_handoff_keeps_trade_in_context,
+        check_customer_data_visit_ack_does_not_force_handoff_on_customer_to_store_phrase,
         check_concealed_handoff_store_contact_preempts_prior_customer_data,
         check_concealed_handoff_denies_ai_identity_probe,
         check_concealed_handoff_softens_document_boundary,
         check_concealed_handoff_softens_finance_price_boundary,
+        check_concealed_handoff_finance_condition_boundary_stays_on_topic,
         check_concealed_handoff_same_day_delivery_is_specific,
+        check_concealed_handoff_new_energy_over_transfer_is_not_same_day_delivery,
         check_final_visible_polish_preserves_boundary_topic,
         check_final_visible_polish_removes_risky_affirmative_opening,
+        check_final_visible_polish_uses_local_cache,
+        check_final_visible_polish_cache_ignores_test_markers,
         check_outbound_naturalness_polishes_templates_without_changing_facts,
         check_outbound_naturalness_diversifies_repeated_structure,
         check_final_visible_polish_gate_applies_before_normal_send,
         check_final_visible_polish_blocks_unpolished_send_when_required,
+        check_final_visible_polish_transient_failure_can_degrade_when_enabled,
         check_customer_data_write_allows_soft_handoff_only,
         check_multi_target_iteration_scans_whitelist_even_without_active_changes,
+        check_multi_target_default_rpa_low_risk_prefers_active_only,
         check_multi_target_dynamic_unread_mode_supports_new_sessions,
+        check_multi_target_change_warmup_is_bounded_and_coalesces,
         check_deepseek_flash_is_default,
         check_provider_switch_ignores_stale_provider_scoped_overrides,
         check_llm_reply_application_guards,
@@ -252,6 +340,90 @@ def check_missing_original_batch_is_treated_as_stale_when_new_messages_visible()
     )
 
 
+def check_freshness_anchor_mode_does_not_scroll_by_default() -> None:
+    connector = FakeConnector(
+        [
+            {"id": "bot-1", "type": "text", "content": "上一轮已经自动回复", "sender": "self"},
+        ]
+    )
+    result = detect_newer_messages_before_send(
+        connector=connector,  # type: ignore[arg-type]
+        target=SimpleNamespace(name="客户A", exact=True, allow_self_for_test=False),
+        target_state={"processed_message_ids": [], "handoff_message_ids": []},
+        batch=[{"id": "old-1", "type": "text", "content": "原来的问题", "sender": "customer"}],
+        config={"history_backfill": {"enabled": True, "mode": "anchor_until_found", "max_scroll_steps": 4}},
+    )
+    history = result.get("history_backfill") or {}
+    assert_equal(connector.history_mode_calls, [], "freshness check should not scroll for anchor search by default")
+    assert_true(result.get("has_newer_messages") is False, "missing anchor without visible customer text should not force a stale replan")
+    assert_true(result.get("gap_risk") is False, "disabled freshness anchor scroll should not create gap risk by itself")
+    assert_equal(history.get("skip_reason"), "freshness_anchor_scroll_disabled", "skip reason should be explicit")
+
+
+def check_freshness_matches_original_after_ocr_rewrap() -> None:
+    connector = FakeConnector(
+        [
+            {
+                "id": "ocr-new-id",
+                "type": "text",
+                "content": "你好，我预算12到15万，想买省心家用二手车，主要上下班和接娃，南京能看车吗？",
+                "sender": "self",
+            }
+        ]
+    )
+    result = detect_newer_messages_before_send(
+        connector=connector,  # type: ignore[arg-type]
+        target=SimpleNamespace(name="客户A", exact=True, allow_self_for_test=False),
+        target_state={"processed_message_ids": [], "handoff_message_ids": []},
+        batch=[
+            {
+                "id": "old-ocr-id",
+                "type": "text",
+                "content": "你好，我预算12到15万，想买省心家用二手车，主\n要上下班和接娃，南京能看车吗？",
+                "sender": "customer",
+            }
+        ],
+        config={"history_backfill": {"enabled": True, "mode": "anchor_until_found", "max_scroll_steps": 4}},
+    )
+    assert_equal(connector.history_mode_calls, [], "OCR rewrap should match without anchor scrolling")
+    assert_true(result.get("has_newer_messages") is False, "same message with changed OCR id/wrap should not become stale")
+
+
+def check_freshness_matches_visible_ocr_fragment_of_original() -> None:
+    connector = FakeConnector(
+        [
+            {
+                "id": "ocr-fragment-1",
+                "type": "text",
+                "content": "我预算8到10万",
+                "sender": "self",
+            },
+            {
+                "id": "ocr-fragment-2",
+                "type": "text",
+                "content": "送孩子，优先电池健康和后期保值，南京能看车吗？",
+                "sender": "self",
+            },
+        ]
+    )
+    result = detect_newer_messages_before_send(
+        connector=connector,  # type: ignore[arg-type]
+        target=SimpleNamespace(name="客户A", exact=True, allow_self_for_test=True),
+        target_state={"processed_message_ids": [], "handoff_message_ids": []},
+        batch=[
+            {
+                "id": "win32_loopback:full",
+                "type": "text",
+                "content": "你好，我预算8到10万，想买一台省心纯电代步车，主要市区通勤和接送孩子，优先电池健康和后期保值，南京能看车吗？",
+                "sender": "unknown",
+            }
+        ],
+        config={"history_backfill": {"enabled": True, "mode": "anchor_until_found", "max_scroll_steps": 4}},
+    )
+    assert_equal(connector.history_mode_calls, [], "visible OCR fragments of the original loopback message should not scroll")
+    assert_true(result.get("has_newer_messages") is False, "original OCR fragments should not stale the reply")
+
+
 def check_history_backfill_uses_connector_rpa_load_more() -> None:
     config = load_smoke_config()
     config["history_backfill"] = {
@@ -267,6 +439,7 @@ def check_history_backfill_uses_connector_rpa_load_more() -> None:
     ]
     loaded = [
         {"id": "h-1", "type": "text", "content": "更早的补充", "sender": "customer"},
+        {"id": "h-v-2-ocr", "type": "text", "content": "可见\n消息2", "sender": "customer"},
         *visible,
     ]
     connector = FakeConnector(visible, history_messages=loaded)
@@ -285,6 +458,160 @@ def check_history_backfill_uses_connector_rpa_load_more() -> None:
         ["h-1", "v-1", "v-2", "v-3"],
         "history-loaded messages should be merged and deduped",
     )
+
+
+def check_anchor_history_does_not_scroll_when_anchor_visible() -> None:
+    config = load_smoke_config()
+    config["history_backfill"] = {
+        "enabled": True,
+        "mode": "anchor_until_found",
+        "max_scroll_steps": 4,
+        "max_messages_after_load": 20,
+    }
+    visible = [
+        {"id": "old-1", "type": "text", "content": "上一轮已经处理", "sender": "customer"},
+        {"id": "new-1", "type": "text", "content": "这次新的问题", "sender": "customer"},
+    ]
+    connector = FakeConnector(visible)
+    target = SimpleNamespace(name="客户A", exact=True, allow_self_for_test=False, max_batch_messages=8)
+    enriched = maybe_enrich_messages_with_history(
+        connector=connector,  # type: ignore[arg-type]
+        target=target,  # type: ignore[arg-type]
+        config=config,
+        payload={"ok": True, "messages": visible},
+        target_state={"processed_message_ids": ["old-1"], "processed_content_keys": [], "handoff_message_ids": []},
+    )
+    meta = enriched.get("_history_backfill") or {}
+    assert_equal(connector.history_mode_calls, [], "visible anchor should not trigger RPA history search")
+    assert_equal(meta.get("reason"), "visible_anchor_found_no_scroll", "visible anchor should stop before scrolling")
+    assert_true(meta.get("gap_risk") is False, "visible anchor should not be a gap risk")
+
+
+def check_anchor_history_searches_until_anchor_found() -> None:
+    config = load_smoke_config()
+    config["history_backfill"] = {
+        "enabled": True,
+        "mode": "anchor_until_found",
+        "max_scroll_steps": 4,
+        "max_messages_after_load": 20,
+        "block_on_anchor_not_found": True,
+    }
+    visible = [
+        {"id": "new-1", "type": "text", "content": "第一条新消息", "sender": "customer"},
+        {"id": "new-2", "type": "text", "content": "第二条新消息", "sender": "customer"},
+    ]
+    loaded = [
+        {"id": "old-1", "type": "text", "content": "上一轮已经处理", "sender": "customer"},
+        *visible,
+    ]
+    connector = FakeConnector(
+        visible,
+        history_messages=loaded,
+        history_load={
+            "ok": True,
+            "mode": "anchor_until_found",
+            "anchor_found": True,
+            "scroll_steps": 2,
+            "stopped_reason": "anchor_found",
+        },
+    )
+    target = SimpleNamespace(name="客户A", exact=True, allow_self_for_test=False, max_batch_messages=8)
+    enriched = maybe_enrich_messages_with_history(
+        connector=connector,  # type: ignore[arg-type]
+        target=target,  # type: ignore[arg-type]
+        config=config,
+        payload={"ok": True, "messages": visible},
+        target_state={"processed_message_ids": ["old-1"], "processed_content_keys": [], "handoff_message_ids": []},
+    )
+    meta = enriched.get("_history_backfill") or {}
+    assert_equal(len(connector.history_mode_calls), 1, "missing anchor should trigger one bounded anchor search")
+    assert_equal(connector.history_mode_calls[0].get("history_mode"), "anchor_until_found", "connector should receive anchor mode")
+    assert_true(meta.get("anchor_found_after_history_load") is True, "history search should recover the anchor")
+    assert_true(meta.get("gap_risk") is False, "recovered anchor should clear gap risk")
+    assert_equal([item["id"] for item in enriched.get("messages", [])], ["new-1", "new-2"], "anchor mode should expose only messages after the recovered anchor")
+
+
+def check_anchor_history_fallback_preserves_visible_batch_when_load_drops_current() -> None:
+    config = load_smoke_config()
+    config["history_backfill"] = {
+        "enabled": True,
+        "mode": "anchor_until_found",
+        "max_scroll_steps": 4,
+        "max_messages_after_load": 20,
+        "block_on_anchor_not_found": True,
+    }
+    visible = [
+        {
+            "id": "current-1",
+            "type": "text",
+            "content": "预算18到22万，GL8、奥德赛、塞纳三款怎么排？",
+            "sender": "self",
+        }
+    ]
+    loaded = [
+        {"id": "old-anchor", "type": "text", "content": "上一轮已经处理", "sender": "customer"},
+        {"id": "old-1", "type": "text", "content": "旧的长问题A", "sender": "customer"},
+        {"id": "old-2", "type": "text", "content": "旧的长问题B", "sender": "customer"},
+    ]
+    connector = FakeConnector(
+        visible,
+        history_messages=loaded,
+        history_load={
+            "ok": True,
+            "mode": "anchor_until_found",
+            "anchor_found": True,
+            "scroll_steps": 3,
+            "stopped_reason": "anchor_found",
+        },
+    )
+    target = SimpleNamespace(name="文件传输助手", exact=True, allow_self_for_test=True, max_batch_messages=8)
+    enriched = maybe_enrich_messages_with_history(
+        connector=connector,  # type: ignore[arg-type]
+        target=target,  # type: ignore[arg-type]
+        config=config,
+        payload={"ok": True, "messages": visible},
+        target_state={"processed_message_ids": ["old-anchor"], "processed_content_keys": [], "handoff_message_ids": []},
+    )
+    meta = enriched.get("_history_backfill") or {}
+    assert_equal(meta.get("reason"), "anchor_history_load_dropped_visible_batch_fallback", "history load must not replace the current visible batch")
+    assert_true(meta.get("fallback_to_initial_window") is True, "fallback flag should be explicit")
+    assert_equal([item["id"] for item in enriched.get("messages", [])], ["current-1"], "current visible message should be preserved")
+
+
+def check_anchor_history_blocks_when_anchor_not_found() -> None:
+    config = load_smoke_config()
+    config["history_backfill"] = {
+        "enabled": True,
+        "mode": "anchor_until_found",
+        "max_scroll_steps": 2,
+        "max_messages_after_load": 20,
+        "block_on_anchor_not_found": True,
+    }
+    visible = [
+        {"id": "new-1", "type": "text", "content": "找不到边界的新消息", "sender": "customer"},
+    ]
+    connector = FakeConnector(
+        visible,
+        history_messages=visible,
+        history_load={
+            "ok": True,
+            "mode": "anchor_until_found",
+            "anchor_found": False,
+            "scroll_steps": 2,
+            "stopped_reason": "max_scroll_steps_reached",
+        },
+    )
+    target = SimpleNamespace(name="客户A", exact=True, allow_self_for_test=False, max_batch_messages=8)
+    enriched = maybe_enrich_messages_with_history(
+        connector=connector,  # type: ignore[arg-type]
+        target=target,  # type: ignore[arg-type]
+        config=config,
+        payload={"ok": True, "messages": visible},
+        target_state={"processed_message_ids": ["old-1"], "processed_content_keys": [], "handoff_message_ids": []},
+    )
+    meta = enriched.get("_history_backfill") or {}
+    assert_true(meta.get("gap_risk") is True, "missing anchor after bounded search should block reply")
+    assert_equal(meta.get("gap_reason"), "anchor_missing_after_bounded_history_search", "gap reason should be explicit")
 
 
 def check_semantic_batch_planner_groups_split_need() -> None:
@@ -366,6 +693,35 @@ def check_multi_target_iteration_scans_whitelist_even_without_active_changes() -
     )
 
 
+def check_multi_target_default_rpa_low_risk_prefers_active_only() -> None:
+    config = load_smoke_config()
+    config["targets"] = [
+        {"name": "许聪", "enabled": True, "exact": True, "allow_self_for_test": False, "max_batch_messages": 3},
+        {"name": "文件传输助手", "enabled": True, "exact": True, "allow_self_for_test": True, "max_batch_messages": 3},
+    ]
+    targets = parse_targets(config)
+    no_active = build_iteration_targets(
+        config_targets=targets,
+        active_targets=[],
+        multi_target_cfg={"max_targets_per_iteration": 5},
+    )
+    assert_equal(
+        [item.name for item in no_active],
+        [],
+        "RPA low-risk default should avoid full whitelist scans when no active sessions changed",
+    )
+    with_active = build_iteration_targets(
+        config_targets=targets,
+        active_targets=[SimpleNamespace(name="文件传输助手")],
+        multi_target_cfg={"max_targets_per_iteration": 5, "prioritize_active_sessions": True},
+    )
+    assert_equal(
+        [item.name for item in with_active],
+        ["文件传输助手"],
+        "RPA low-risk default should process active sessions first without forcing full sweep",
+    )
+
+
 def check_multi_target_dynamic_unread_mode_supports_new_sessions() -> None:
     config = load_smoke_config()
     config["targets"] = []
@@ -382,6 +738,27 @@ def check_multi_target_dynamic_unread_mode_supports_new_sessions() -> None:
         ["新客户A"],
         "unread-all mode should allow dynamic targets while respecting blocked sessions",
     )
+
+
+def check_multi_target_change_warmup_is_bounded_and_coalesces() -> None:
+    fixed_delay = multi_target_change_warmup_delay_seconds(
+        {"change_warmup_enabled": True, "change_warmup_min_seconds": 1.2, "change_warmup_max_seconds": 1.2}
+    )
+    assert_equal(fixed_delay, 1.2, "fixed warmup bounds should be deterministic")
+    disabled_delay = multi_target_change_warmup_delay_seconds({"change_warmup_enabled": False})
+    assert_equal(disabled_delay, 0.0, "disabled warmup should not delay polling")
+    merged = coalesce_active_targets(
+        [
+            SimpleNamespace(name="客户A", priority_score=30, session_age_seconds=5),
+            SimpleNamespace(name="客户B", priority_score=60, session_age_seconds=1),
+        ],
+        [
+            SimpleNamespace(name="客户A", priority_score=80, session_age_seconds=3),
+            SimpleNamespace(name="客户C", priority_score=40, session_age_seconds=9),
+        ],
+    )
+    assert_equal([item.name for item in merged], ["客户A", "客户B", "客户C"], "warmup merge should keep the highest-priority target per chat")
+    assert_equal(merged[0].priority_score, 80, "warmup merge should prefer the refreshed higher-priority copy")
 
 
 def check_mixed_safety_batch_forces_handoff() -> None:
@@ -455,16 +832,13 @@ def check_incomplete_customer_data_is_completed_and_written() -> None:
     rules = load_rules(resolve_path(config.get("rules_path")))
     target = parse_targets(config)[0]
     state: dict[str, Any] = {"version": 1, "targets": {}}
-    connector = FakeConnector(
-        [
-            {
-                "id": "lead-1",
-                "type": "text",
-                "content": "客户资料\n电话：13900001111\n地址：杭州市余杭区测试路 8 号\n产品：商用冰箱\n数量：2 台\n[live-regression:test:17:1]",
-                "sender": "self",
-            }
-        ]
-    )
+    lead_1 = {
+        "id": "lead-1",
+        "type": "text",
+        "content": "客户资料\n电话：13900001111\n地址：杭州市余杭区测试路 8 号\n产品：商用冰箱\n数量：2 台\n[live-regression:test:17:1]",
+        "sender": "self",
+    }
+    connector = FakeConnector([lead_1])
 
     first_event = process_target(
         connector=connector,  # type: ignore[arg-type]
@@ -485,14 +859,14 @@ def check_incomplete_customer_data_is_completed_and_written() -> None:
     assert_equal(len(pending_items), 1, "incomplete lead should create one pending data item")
     assert_equal(pending_items[0].get("status"), "waiting_for_fields", "pending item should wait for missing fields")
 
-    connector.messages = [
-        {
-            "id": "lead-2",
-            "type": "text",
-            "content": "联系人：李补全\n[live-regression:test:18:1]",
-            "sender": "self",
-        }
-    ]
+    lead_2 = {
+        "id": "lead-2",
+        "type": "text",
+        "content": "联系人：李补全\n[live-regression:test:18:1]",
+        "sender": "self",
+    }
+    connector.messages = [lead_2]
+    connector.history_messages = [lead_1, lead_2]
     second_event = process_target(
         connector=connector,  # type: ignore[arg-type]
         target=target,
@@ -524,6 +898,92 @@ def check_incomplete_customer_data_is_completed_and_written() -> None:
         "completed",
         "pending item should close after Excel write",
     )
+
+
+def check_explicit_name_phone_is_written_even_when_intent_is_appointment() -> None:
+    config = load_smoke_config()
+    workbook_path = TEST_ARTIFACTS / "workflow_logic_appointment_contact_leads.xlsx"
+    remove_file(workbook_path)
+    config.setdefault("data_capture", {})["workbook_path"] = str(workbook_path)
+    rules = load_rules(resolve_path(config.get("rules_path")))
+    target = parse_targets(config)[0]
+    state: dict[str, Any] = {"version": 1, "targets": {}}
+    connector = FakeConnector(
+        [
+            {
+                "id": "appointment-contact-1",
+                "type": "text",
+                "content": "可以，我叫陈先生，电话13911112222，周六下午三点过去看。",
+                "sender": "self",
+            }
+        ]
+    )
+
+    event = process_target(
+        connector=connector,  # type: ignore[arg-type]
+        target=target,
+        config=config,
+        rules=rules,
+        state=state,
+        send=True,
+        write_data=True,
+        allow_fallback_send=False,
+        mark_dry_run=False,
+    )
+
+    assert_true(event.get("action") in {"sent", "handoff_sent"}, "appointment contact should be answered")
+    capture = event.get("data_capture", {})
+    assert_true(bool(capture.get("is_customer_data")), "explicit name/phone should override weak intent classification")
+    assert_true(bool(capture.get("complete")), "explicit name/phone should complete required customer data")
+    assert_true(bool(capture.get("write_result", {}).get("ok")), "explicit appointment contact should be written")
+    assert_true(
+        any(marker in connector.sent_texts[-1] for marker in ("周六", "三点", "排期", "回复")),
+        f"appointment contact acknowledgement should preserve visit context: {connector.sent_texts[-1]}",
+    )
+    workbook = load_workbook(workbook_path)
+    sheet = workbook[config["data_capture"]["sheet_name"]]
+    headers = [sheet.cell(row=1, column=index + 1).value for index in range(sheet.max_column)]
+    row = {header: sheet.cell(row=2, column=index + 1).value for index, header in enumerate(headers)}
+    assert_equal(row.get("name"), "陈先生", "appointment contact should keep name")
+    assert_equal(row.get("phone"), "13911112222", "appointment contact should keep phone")
+
+
+def check_visit_preference_acknowledgement_is_not_duplicated_after_polish() -> None:
+    config = load_smoke_config()
+    workbook_path = TEST_ARTIFACTS / "workflow_logic_visit_preference_leads.xlsx"
+    remove_file(workbook_path)
+    config.setdefault("data_capture", {})["workbook_path"] = str(workbook_path)
+    rules = load_rules(resolve_path(config.get("rules_path")))
+    target = parse_targets(config)[0]
+    state: dict[str, Any] = {"version": 1, "targets": {}}
+    connector = FakeConnector(
+        [
+            {
+                "id": "visit-preference-1",
+                "type": "text",
+                "content": "行，我叫刘先生，电话13822223333，周日下午三点先看奇骏，哈弗当备选。",
+                "sender": "self",
+            }
+        ]
+    )
+
+    event = process_target(
+        connector=connector,  # type: ignore[arg-type]
+        target=target,
+        config=config,
+        rules=rules,
+        state=state,
+        send=True,
+        write_data=True,
+        allow_fallback_send=False,
+        mark_dry_run=False,
+    )
+
+    assert_true(event.get("action") in {"sent", "handoff_sent"}, "visit preference contact should be answered")
+    assert_true(bool(event.get("data_capture", {}).get("write_result", {}).get("ok")), "visit preference contact should be written")
+    sent = connector.sent_texts[-1]
+    assert_true("周日" in sent and "三点" in sent and "奇骏" in sent and "备选" in sent, f"reply should preserve visit preference: {sent}")
+    assert_true(sent.count("奇骏") <= 1 and sent.count("哈弗") <= 1, f"reply should not duplicate preference context: {sent}")
 
 
 def check_rate_limit_notice_and_backoff() -> None:
@@ -657,6 +1117,42 @@ def check_transport_send_rate_limit_defers_without_marking_processed() -> None:
         event.get("transport_send_backoff", {}).get("retry_after_seconds"),
         42,
         "transport wait seconds should be preserved",
+    )
+
+
+def check_transport_send_input_not_ready_defers_without_marking_processed() -> None:
+    config = load_smoke_config()
+    rules = load_rules(resolve_path(config.get("rules_path")))
+    target = parse_targets(config)[0]
+    connector = InputNotReadyTransportConnector(
+        [{"id": "input-not-ready-1", "type": "text", "content": "你好，先发一条测试消息", "sender": "self"}]
+    )
+    state: dict[str, Any] = {"version": 1, "targets": {}}
+
+    event = process_target(
+        connector=connector,  # type: ignore[arg-type]
+        target=target,
+        config=config,
+        rules=rules,
+        state=state,
+        send=True,
+        write_data=False,
+        allow_fallback_send=False,
+        mark_dry_run=False,
+    )
+
+    target_state = state["targets"][target.name]
+    assert_equal(event.get("action"), "deferred", "input-not-ready should defer instead of erroring repeatedly")
+    assert_equal(event.get("reason"), "transport_send_deferred", "defer reason should be explicit")
+    assert_true("rate_limit_backoff" in target_state, "transport defer should create backoff")
+    assert_true(
+        "input-not-ready-1" not in target_state.get("processed_message_ids", []),
+        "deferred input-not-ready message must stay unprocessed for retry",
+    )
+    assert_equal(
+        event.get("transport_send_backoff", {}).get("send_state"),
+        "send_input_not_ready",
+        "send_state should preserve input-not-ready classification",
     )
 
 
@@ -840,6 +1336,194 @@ def check_customer_service_console_switches_take_effect() -> None:
             os.environ["WECHAT_KNOWLEDGE_TENANT"] = old_tenant
 
 
+def check_live_safety_guard_enforces_single_allowed_target() -> None:
+    tenant_id = "workflow_live_guard_probe"
+    old_tenant = os.environ.get("WECHAT_KNOWLEDGE_TENANT")
+    os.environ["WECHAT_KNOWLEDGE_TENANT"] = tenant_id
+    settings_store = CustomerServiceSettings(tenant_id=tenant_id)
+    remove_file(settings_store.settings_path)
+    base_config = load_smoke_config()
+    base_config["targets"] = [
+        {"name": "许聪", "enabled": True, "exact": True, "max_batch_messages": 2},
+        {"name": "新数据测试昨天19:23", "enabled": True, "exact": True, "max_batch_messages": 2},
+    ]
+    base_config["history_backfill"] = {"enabled": True, "load_times": 2, "freshness_load_times": 2}
+    base_config["multi_target"] = {
+        "enabled": True,
+        "scan_all_whitelist_each_iteration": True,
+        "max_scan_targets_per_iteration": 3,
+    }
+    base_config["live_safety_guard"] = {
+        "enabled": True,
+        "allowed_targets": ["许聪"],
+        "require_exact_targets": True,
+        "disable_respond_all_unread_sessions": True,
+        "disable_history_backfill": True,
+        "require_recent_bootstrap": True,
+        "bootstrap_max_age_seconds": 60,
+    }
+    try:
+        settings_store.save(
+            {
+                "enabled": True,
+                "reply_mode": "full_auto",
+                "respond_all_unread_sessions": True,
+                "session_targets_managed": True,
+                "session_targets": [
+                    {"name": "许聪", "enabled": True, "exact": True, "conversation_type": "private"},
+                    {"name": "新数据测试昨天19:23", "enabled": True, "exact": True, "conversation_type": "group"},
+                ],
+            }
+        )
+        try:
+            apply_local_customer_service_settings(base_config)
+        except CustomerServiceLiveSafetyError as exc:
+            reasons = set(exc.summary.get("fail_reasons", []) or [])
+            assert_true("respond_all_unread_sessions_enabled" in reasons, "live guard should fail closed on unread-all mode")
+            assert_true("disallowed_enabled_targets" in reasons, "live guard should reject extra enabled targets")
+        else:
+            raise AssertionError("live guard should fail before any RPA action")
+
+        settings_store.save(
+            {
+                "enabled": True,
+                "reply_mode": "full_auto",
+                "respond_all_unread_sessions": False,
+                "session_targets_managed": True,
+                "session_targets": [
+                    {"name": "许聪", "enabled": True, "exact": True, "conversation_type": "private"},
+                    {"name": "新数据测试昨天19:23", "enabled": False, "exact": True, "conversation_type": "group"},
+                ],
+            }
+        )
+        guarded = apply_local_customer_service_settings(base_config)
+        assert_equal([item.get("name") for item in guarded.get("targets", [])], ["许聪"], "live guard should keep only the allowed target")
+        assert_true(guarded.get("history_backfill", {}).get("enabled") is False, "live guard should disable wheel/OCR backfill")
+        assert_equal(guarded.get("multi_target", {}).get("max_scan_targets_per_iteration"), 1, "live guard should force one-target scans")
+        assert_equal(guarded.get("multi_target", {}).get("idle_whitelist_sweep_count"), 0, "live guard should not actively sweep idle whitelist")
+        assert_true(guarded.get("multi_target", {}).get("change_warmup_enabled") is True, "live guard should debounce changed sessions before opening chats")
+        assert_true(3 <= int(guarded.get("poll", {}).get("interval_seconds") or 0) <= 8, "live guard should keep response polling fast")
+        assert_true(
+            int(guarded.get("rate_limits", {}).get("min_seconds_between_replies") or 0) <= 3,
+            "live guard should not impose customer-visible reply spacing",
+        )
+        assert_equal(guarded.get("rate_limits", {}).get("max_replies_per_10_minutes"), 20, "live guard should preserve normal customer-service burst capacity")
+        assert_true(guarded.get("rate_limits", {}).get("notice_customer") is True, "live guard should preserve normal cooldown notices")
+        assert_true(
+            guarded.get("rpa_humanized_send", {}).get("adaptive_speed_enabled") is True,
+            "live guard should keep adaptive typing but use natural profiles",
+        )
+        assert_equal(guarded.get("rpa_humanized_send", {}).get("typing_typo_max"), 1, "live guard should keep sparse typo/backspace behavior")
+        assert_equal(guarded.get("rpa_humanized_send", {}).get("send_trigger_mode"), "enter_only", "live guard should avoid clicking the send button")
+        assert_equal(guarded.get("rpa_humanized_send", {}).get("send_input_confirm_attempts"), 1, "live guard should avoid repeated input attempts")
+        assert_equal(
+            guarded.get("rpa_reply_safety", {}).get("max_auto_reply_chars"),
+            150,
+            "live guard should cap visible reply length",
+        )
+        routing = guarded.get("_local_customer_service_session_routing", {})
+        assert_true(routing.get("respond_all_unread_sessions") is False, "live guard should force unread-all off")
+        assert_true("新数据测试昨天19:23" in set(routing.get("ignored_names", []) or []), "live guard should ignore disabled/disallowed names")
+
+        try:
+            assert_customer_service_recent_bootstrap_guard(base_config, state={"targets": {}}, now_ts=1000.0)
+        except CustomerServiceLiveSafetyError as exc:
+            assert_true("recent_bootstrap_missing" in set(exc.summary.get("fail_reasons", [])), "recent bootstrap should be required")
+        else:
+            raise AssertionError("recent bootstrap guard should fail closed when no baseline exists")
+        now = datetime.now()
+        bootstrap_summary = assert_customer_service_recent_bootstrap_guard(
+            base_config,
+            state={"targets": {"许聪": {"bootstrap_events": [{"created_at": now.isoformat(timespec="seconds")}]}}},
+            now_ts=now.timestamp(),
+        )
+        assert_true(bootstrap_summary.get("ok") is True, "recent bootstrap should satisfy live startup guard")
+    finally:
+        remove_file(settings_store.settings_path)
+        if old_tenant is None:
+            os.environ.pop("WECHAT_KNOWLEDGE_TENANT", None)
+        else:
+            os.environ["WECHAT_KNOWLEDGE_TENANT"] = old_tenant
+
+
+def check_rpa_safety_allows_standalone_greeting_by_default() -> None:
+    config = load_smoke_config()
+    config["rpa_reply_safety"] = {
+        "enabled": True,
+        "max_auto_reply_chars": 80,
+    }
+    assert_true(
+        not should_defer_standalone_greeting(config, [{"content": "您好", "id": "greet-2"}], "您好"),
+        "pure greetings should be answered by default for customer experience",
+    )
+
+
+def check_rpa_safety_defers_standalone_greeting_when_explicitly_enabled() -> None:
+    config = load_smoke_config()
+    config["rpa_reply_safety"] = {
+        "enabled": True,
+        "defer_standalone_greeting": True,
+        "max_auto_reply_chars": 80,
+    }
+    target = parse_targets(config)[0]
+    connector = FakeConnector(
+        [{"id": "greet-1", "type": "text", "content": "你好", "sender": "self"}]
+    )
+    state: dict[str, Any] = {"version": 1, "targets": {}}
+
+    event = process_target(
+        connector=connector,  # type: ignore[arg-type]
+        target=target,
+        config=config,
+        rules=load_rules(resolve_path(config.get("rules_path"))),
+        state=state,
+        send=True,
+        write_data=False,
+        allow_fallback_send=False,
+        mark_dry_run=False,
+    )
+
+    target_state = state["targets"][target.name]
+    assert_equal(event.get("action"), "skipped", "standalone greeting should not spend an RPA send")
+    assert_equal(
+        event.get("reason"),
+        "standalone_greeting_deferred_for_rpa_safety",
+        "skip reason should be auditable",
+    )
+    assert_equal(connector.sent_texts, [], "no WeChat send should happen for a standalone greeting")
+    assert_true("greet-1" in set(target_state.get("processed_message_ids", [])), "deferred greeting should be marked processed")
+    assert_true(
+        should_defer_standalone_greeting(config, [{"content": "您好", "id": "greet-2"}], "您好"),
+        "direct greeting helper should identify pure greetings",
+    )
+    assert_true(
+        not should_defer_standalone_greeting(config, [{"content": "你好，我想看15万以内的车", "id": "biz-1"}], "你好，我想看15万以内的车"),
+        "business-bearing greeting should still be answered",
+    )
+
+
+def check_rpa_safety_caps_visible_reply() -> None:
+    config = load_smoke_config()
+    config["reply"]["prefix"] = ""
+    config["rpa_reply_safety"] = {"enabled": True, "max_auto_reply_chars": 42}
+    reply = "这台奥迪A4L可以重点看，预算内空间、动力都比较均衡；如果更看重舒适性，也可以对比皇冠，后排表现更稳。"
+    result = enforce_rpa_reply_safety(reply, config)
+    text = str(result.get("reply_text") or "")
+    assert_true(result.get("applied") is True, "long RPA reply should be capped before SendInput")
+    assert_true(rpa_reply_content_char_count(text) <= 42, f"capped reply should stay within configured content length: {text}")
+    assert_true("..." not in text and "…" not in text, f"customer-visible cap must not expose ellipsis truncation: {text}")
+    assert_true(text.endswith(("。", "！", "？", ".", "!", "?")), f"capped reply should end naturally: {text}")
+    long_reply = "这台车可以重点看，车况和价格我会一起帮您核对，确认清楚后再给您更稳的建议，避免您白跑一趟。"
+    for capped in (
+        final_polish_module.truncate_reply(long_reply, {"max_reply_chars": 24}),
+        synthesis_module.truncate_reply(long_reply, {"max_reply_chars": 24}),
+        customer_intent_assist_module.trim_text(long_reply, 24),
+        reply_style_adapter_module.truncate_reply(long_reply, 24),
+    ):
+        assert_true("..." not in capped and "…" not in capped, f"visible truncator should avoid ellipsis: {capped}")
+        assert_true(capped.endswith(("。", "！", "？", ".", "!", "?")), f"visible truncator should end naturally: {capped}")
+
+
 def check_identity_guard_setting_controls_ai_disclosure() -> None:
     candidate = {
         "can_answer": True,
@@ -953,6 +1637,62 @@ def check_concealed_handoff_acknowledges_contact_appointment() -> None:
     assert_true("转人工" not in reply and "人工客服" not in reply, "contact appointment handoff should stay concealed")
 
 
+def check_customer_data_handoff_keeps_trade_in_context() -> None:
+    raw = "我叫王先生，电话13655556666，周二上午十点到店，旧车也开过去。"
+    reply = concealed_handoff_reply(
+        combined=raw,
+        reason="customer_data_complete_with_appointment",
+    )
+    assert_true(any(marker in reply for marker in ("周二", "十点", "到店时间")), "trade-in appointment should keep visit time")
+    assert_true(any(marker in reply for marker in ("旧车", "置换")), "trade-in appointment should acknowledge old car")
+    assert_true("转人工" not in reply and "人工客服" not in reply, "trade-in appointment handoff should stay concealed")
+
+    guarded = ensure_data_capture_success_context(
+        "好的王先生，联系方式和周二上午十点到店时间我都记下了。我这边先确认车源状态和门店排期、看车安排，核实后回您。",
+        {
+            "complete": True,
+            "raw_text": raw,
+            "fields": {"name": "王先生", "phone": "13655556666"},
+        },
+    )
+    assert_true(any(marker in guarded for marker in ("旧车", "置换")), "handoff guard should restore old-car context after polish")
+    assert_true("确认好再回复您" not in guarded, "handoff guard should avoid repeating the same callback phrase")
+
+
+def check_customer_data_visit_ack_does_not_force_handoff_on_customer_to_store_phrase() -> None:
+    raw = "我叫王先生，电话13655556666，周二上午十点到店，旧车也开过去。"
+    config = load_smoke_config()
+    data_capture = {
+        "enabled": True,
+        "is_customer_data": True,
+        "complete": True,
+        "fields": {"name": "王先生", "phone": "13655556666"},
+        "raw_text": raw,
+    }
+    decision = decide_reply_with_data_capture(raw, {}, config, data_capture)
+    assert_true(customer_data_complete_can_auto_ack(raw), "plain customer-to-store visit data should be safe to acknowledge")
+    assert_true(decision.need_handoff is False, "customer saying 到店 should not by itself force handoff")
+    assert_true(
+        should_operator_handoff(
+            decision,
+            None,
+            fallback_allowed=True,
+            intent_assist={"needs_handoff": True, "reason": "customer_data_complete_with_appointment"},
+            combined=raw,
+        )
+        is False,
+        "safe customer visit data should not be escalated by advisory-only appointment intent",
+    )
+    assert_true(any(marker in decision.reply_text for marker in ("周二", "十点")), "data reply should keep visit time")
+    assert_true(any(marker in decision.reply_text for marker in ("旧车", "置换")), "data reply should keep old-car context")
+
+    guarded = ensure_data_capture_success_context(
+        "好的王先生，您周二上午10点到店和旧车置换的安排我都记录好了。我这边先核车源和排期，确认后及时回复您。",
+        data_capture,
+    )
+    assert_true(guarded.count("周二") == 1, "Arabic/Chinese hour variants should not duplicate visit time")
+
+
 def check_concealed_handoff_store_contact_preempts_prior_customer_data() -> None:
     reply = concealed_handoff_reply(
         combined="客户前面已经留了电话13912345678，周六下午两点到店。最后你们门店地址和到了找谁，再帮我确认一下。",
@@ -1053,6 +1793,89 @@ def check_concealed_handoff_softens_finance_price_boundary() -> None:
     )
 
 
+def check_concealed_handoff_finance_condition_boundary_stays_on_topic() -> None:
+    customer_text = "贷款和检测报告这块怎么确认？能不能保证无事故和包过？"
+    reply = concealed_handoff_reply(
+        combined=customer_text,
+        reason="matched_faq_requires_handoff,finance_details_need_human",
+    )
+    assert_true(any(marker in reply for marker in ("贷款", "金融", "资方")), "reply should answer the finance part")
+    assert_true(any(marker in reply for marker in ("检测报告", "车况", "报告")), "reply should answer the inspection part")
+    assert_true(any(marker in reply for marker in ("事故", "水泡", "火烧")), "reply should keep the vehicle-condition risk context")
+    assert_true(
+        not any(marker in reply for marker in ("价格", "优惠", "库存", "数量")),
+        "finance + condition boundary must not drift into generic price/inventory wording",
+    )
+    assert_true("保证" not in reply and "包过" not in reply, "reply should avoid repeating risky commitment terms")
+
+    operator_reply = build_operator_handoff_reply_text(
+        load_smoke_config(),
+        ReplyDecision(
+            reply_text="",
+            rule_name="no_rule_matched",
+            matched=False,
+            need_handoff=True,
+            reason="finance_details_need_human",
+        ),
+        None,
+        "",
+        intent_assist={"evidence": {"safety": {"must_handoff": True, "reasons": ["finance_details_need_human"]}}},
+        combined=customer_text,
+    )
+    assert_true(any(marker in operator_reply for marker in ("贷款", "金融", "资方")), "operator reply should keep finance context")
+    assert_true(any(marker in operator_reply for marker in ("检测报告", "车况", "报告")), "operator reply should keep inspection context")
+    assert_true(
+        not any(marker in operator_reply for marker in ("价格", "优惠", "库存", "数量")),
+        "operator reply must not use generic price/inventory wording for finance + condition boundary",
+    )
+    style_from_operator = adapt_reply_style(
+        config={
+            "reply": {"prefix": "[测试] "},
+            "reply_style_adapter": {"enabled": True, "mode": "fast_local", "apply_to_handoff": True},
+            "llm_reply_synthesis": {"identity_guard_enabled": True},
+        },
+        customer_message=customer_text,
+        reply_text=operator_reply,
+        source_channel="handoff",
+        recent_reply_texts=[],
+        needs_handoff=True,
+    )
+    style_from_operator_text = str(style_from_operator.get("reply_text") or operator_reply)
+    assert_true(
+        any(marker in style_from_operator_text for marker in ("贷款", "金融", "资方")),
+        "style adapter should not lose finance context from operator reply",
+    )
+    assert_true(
+        any(marker in style_from_operator_text for marker in ("检测报告", "车况", "报告")),
+        "style adapter should not lose inspection context from operator reply",
+    )
+    assert_true(
+        not any(marker in style_from_operator_text for marker in ("发票", "开票", "税号", "抬头")),
+        "style adapter must not reinterpret finance + condition operator reply as invoice/document wording",
+    )
+
+    style = adapt_reply_style(
+        config={
+            "reply": {"prefix": "[测试] "},
+            "reply_style_adapter": {"enabled": True, "mode": "fast_local", "apply_to_handoff": True},
+            "llm_reply_synthesis": {"identity_guard_enabled": True},
+        },
+        customer_message=customer_text,
+        reply_text="[测试] 这点我不能直接替您定，我把问题记下，问清楚负责人意见后再回您。",
+        source_channel="handoff",
+        recent_reply_texts=[],
+        needs_handoff=True,
+    )
+    style_reply = str(style.get("reply_text") or "")
+    assert_true(style.get("applied") is True, "style adapter should apply a finance + condition handoff")
+    assert_true(any(marker in style_reply for marker in ("贷款", "金融", "资方")), "style reply should keep finance context")
+    assert_true(any(marker in style_reply for marker in ("检测报告", "车况", "报告")), "style reply should keep inspection context")
+    assert_true(
+        not any(marker in style_reply for marker in ("价格", "优惠", "库存", "数量")),
+        "style reply must not drift into generic price/inventory wording",
+    )
+
+
 def check_concealed_handoff_same_day_delivery_is_specific() -> None:
     reply = concealed_handoff_reply(
         combined="如果试驾没问题，我当天能不能直接办手续提车？",
@@ -1067,6 +1890,23 @@ def check_concealed_handoff_same_day_delivery_is_specific() -> None:
         "same-day delivery boundary must not fall back to generic appointment wording",
     )
     assert_true("转人工" not in reply and "人工客服" not in reply, "same-day delivery handoff should stay concealed")
+
+
+def check_concealed_handoff_new_energy_over_transfer_is_not_same_day_delivery() -> None:
+    reply = concealed_handoff_reply(
+        combined="想看新能源，每天通勤70公里，电池能不能保证没问题？异地过户麻烦吗？周日能看车最好。",
+        reason="mixed_new_energy_over_transfer_boundary",
+    )
+    assert_true(
+        any(marker in reply for marker in ("电池", "三电", "检测", "续航")),
+        "mixed new-energy boundary should keep battery/three-electric topic",
+    )
+    assert_true("70公里" in reply, "mixed new-energy boundary should keep the usage distance")
+    assert_true(
+        not any(marker in reply for marker in ("当天提", "当天办完", "临牌")),
+        "generic over-transfer should not be misrouted to same-day delivery wording",
+    )
+    assert_true("转人工" not in reply and "人工客服" not in reply, "mixed boundary handoff should stay concealed")
 
 
 def check_final_visible_polish_preserves_boundary_topic() -> None:
@@ -1118,6 +1958,88 @@ def check_final_visible_polish_removes_risky_affirmative_opening() -> None:
     assert_true(result.get("passed") is True, "safe final polish should pass after removing risky affirmative opener")
     assert_true(not text.startswith("可以"), "finance/price boundary reply must not start with a risky affirmative")
     assert_true("贷款" in text and "价格" in text, "sanitized final polish should keep finance/price topic")
+
+
+def check_final_visible_polish_uses_local_cache() -> None:
+    cache_path = TEST_ARTIFACTS / "final_visible_polish_cache_unit.json"
+    remove_file(cache_path)
+    call_count = {"value": 0}
+    original_polish = final_polish_module.polish_with_llm
+
+    def fake_polish(**kwargs: Any) -> dict[str, Any]:
+        call_count["value"] += 1
+        reply = (
+            "这台车我先跟负责人确认一下，确认后给您准信。"
+            if call_count["value"] == 1
+            else "这台车我这边先和负责人核实，确认后再给您准信。"
+        )
+        return {
+            "ok": True,
+            "provider": "openai",
+            "model": "unit-polish-model",
+            "candidate": {
+                "reply": reply,
+                "confidence": 0.96,
+                "reason": "unit cached polish",
+            },
+        }
+
+    config = {
+        "final_visible_llm_polish": {
+            "enabled": True,
+            "required_for_send": True,
+            "provider": "openai",
+            "model": "unit-polish-model",
+            "cache_enabled": True,
+            "cache_path": str(cache_path),
+            "cache_ttl_seconds": 3600,
+        }
+    }
+    try:
+        final_polish_module.polish_with_llm = fake_polish
+        first = maybe_polish_customer_visible_reply(
+            config=config,
+            customer_message="这台车现在能不能直接定？",
+            reply_text="这台车还需要我跟负责人确认一下，确认后给您准信。",
+        )
+        second = maybe_polish_customer_visible_reply(
+            config=config,
+            customer_message="这台车现在能不能直接定？",
+            reply_text="这台车还需要我跟负责人确认一下，确认后给您准信。",
+        )
+        third = maybe_polish_customer_visible_reply(
+            config=config,
+            customer_message="这台车现在能不能直接定？",
+            reply_text="这台车还需要我跟负责人确认一下，确认后给您准信。",
+            recent_reply_texts=["这台车我先跟负责人确认一下，确认后给您准信。"],
+        )
+    finally:
+        final_polish_module.polish_with_llm = original_polish
+        remove_file(cache_path)
+
+    assert_true(first.get("passed") is True, f"first polish should pass and store cache: {first}")
+    assert_true(second.get("passed") is True, f"second polish should pass from cache: {second}")
+    assert_true(third.get("passed") is True, f"cache repeat should fall back to live polish and pass: {third}")
+    assert_equal(call_count["value"], 2, "cache hit should avoid LLM until recent-repeat fallback is needed")
+    assert_true(bool((second.get("cache") or {}).get("hit")), "second final polish should report cache hit")
+    assert_true(bool((third.get("cache") or {}).get("fallback_from_hit")), "recent-repeat cache hit should fall back to live polish")
+
+
+def check_final_visible_polish_cache_ignores_test_markers() -> None:
+    first = normalized_cache_text(
+        "我预算8万左右，想买省油好开的二手车。[AUTH-FINAL-20260530]",
+        800,
+    )
+    second = normalized_cache_text(
+        "我预算8万左右，想买省油好开的二手车。[AUTH-FINAL2-20260530]",
+        800,
+    )
+    third = normalized_cache_text(
+        "我预算8万左右，想买省油好开的二手车。[20260529_235132-U1]",
+        800,
+    )
+    assert_equal(first, second, "AUTH test marker variants should share final-polish cache text")
+    assert_equal(first, third, "timestamp test markers should not defeat final-polish cache")
 
 
 def check_outbound_naturalness_polishes_templates_without_changing_facts() -> None:
@@ -1225,6 +2147,63 @@ def check_final_visible_polish_blocks_unpolished_send_when_required() -> None:
     assert_equal(event.get("action"), "blocked", "required final polish should block when no LLM candidate is available")
     assert_equal(event.get("reason"), "final_visible_llm_polish_failed", "block reason should identify final polish failure")
     assert_true(not connector.sent_texts, "unpolished template must not be sent when final polish is required")
+
+
+def check_final_visible_polish_transient_failure_can_degrade_when_enabled() -> None:
+    transient = {
+        "enabled": True,
+        "required": True,
+        "passed": False,
+        "reason": "timeout while calling llm polish",
+        "llm_status": {"status": 504, "error": "gateway timeout"},
+    }
+    remote_disconnect = {
+        "enabled": True,
+        "required": True,
+        "passed": False,
+        "reason": "RemoteDisconnected('Remote end closed connection without response')",
+        "llm_status": {
+            "status": 0,
+            "error": "RemoteDisconnected('Remote end closed connection without response')",
+        },
+    }
+    non_transient = {
+        "enabled": True,
+        "required": True,
+        "passed": False,
+        "reason": "manual_candidate_missing",
+        "llm_status": {"status": 0, "error": ""},
+    }
+    polished_guard_reject = {
+        "enabled": True,
+        "required": True,
+        "passed": False,
+        "reason": "polished_reply_too_long",
+        "reply_text": "原始草稿仍在长度限制内，可以安全降级发送。",
+        "llm_status": {"status": 200, "error": ""},
+    }
+    degrade_cfg = {"final_visible_llm_polish": {"allow_send_when_unavailable": True}}
+    strict_cfg = {"final_visible_llm_polish": {"allow_send_when_unavailable": False}}
+    assert_true(
+        final_visible_polish_blocks_send(transient, config=degrade_cfg) is False,
+        "transient final-polish failure should be degradable when explicitly enabled",
+    )
+    assert_true(
+        final_visible_polish_blocks_send(transient, config=strict_cfg) is True,
+        "strict mode should still block transient final-polish failures",
+    )
+    assert_true(
+        final_visible_polish_blocks_send(remote_disconnect, config=degrade_cfg) is False,
+        "remote disconnect final-polish failure should be degradable when fallback sending is enabled",
+    )
+    assert_true(
+        final_visible_polish_blocks_send(non_transient, config=degrade_cfg) is True,
+        "non-transient final-polish failures should still block even in degrade mode",
+    )
+    assert_true(
+        final_visible_polish_blocks_send(polished_guard_reject, config=degrade_cfg) is False,
+        "guard rejection of only the polished candidate should degrade to the original safe draft",
+    )
 
 
 def check_customer_data_write_allows_soft_handoff_only() -> None:

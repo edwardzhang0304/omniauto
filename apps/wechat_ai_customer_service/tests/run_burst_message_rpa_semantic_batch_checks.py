@@ -1,8 +1,8 @@
 """Simulated checks for burst-message history backfill and semantic planning.
 
 These checks do not touch live WeChat. They verify that the workflow uses the
-existing wxauto4 sidecar/RPA boundary for history loading and that consecutive
-messages are semantically grouped before reply synthesis.
+RPA history-loading boundary and that consecutive messages are semantically
+grouped before reply synthesis.
 """
 
 from __future__ import annotations
@@ -27,13 +27,18 @@ os.environ.setdefault("WECHAT_CLOUD_REQUIRED", "0")
 os.environ.setdefault("WECHAT_CLOUD_STRICT_ONLINE", "0")
 
 from listen_and_reply import (  # noqa: E402
+    bootstrap_target,
     detect_newer_messages_before_send,
     maybe_enrich_messages_with_history,
+    message_content_dedupe_key,
+    message_processed_content_keys,
     plan_message_batch_semantics,
+    process_target,
     select_batch_details,
 )
 from customer_service_loop import ReplyDecision  # noqa: E402
 from rag_answer_layer import maybe_build_rag_reply  # noqa: E402
+import realtime_reply_router as realtime_router  # noqa: E402
 from realtime_reply_router import (  # noqa: E402
     decide_realtime_reply_route,
     extract_visit_time_label,
@@ -52,6 +57,7 @@ class FakeConnector:
         self.visible = visible
         self.loaded = loaded
         self.history_load_calls: list[int] = []
+        self.sent_texts: list[str] = []
 
     def get_messages(self, target: str, exact: bool = True, history_load_times: int = 0) -> dict[str, Any]:
         if history_load_times:
@@ -61,9 +67,13 @@ class FakeConnector:
             "ok": True,
             "target": target,
             "exact": exact,
-            "history_load": {"mechanism": "wxauto4.LoadMoreCache", "requested_load_times": history_load_times},
+            "history_load": {"mechanism": "rpa.history_load", "requested_load_times": history_load_times},
             "messages": messages,
         }
+
+    def send_text_and_verify(self, target: str, text: str, exact: bool = True) -> dict[str, Any]:
+        self.sent_texts.append(text)
+        return {"ok": True, "verified": True, "target": target, "text": text, "exact": exact}
 
 
 def main() -> int:
@@ -79,14 +89,23 @@ def main() -> int:
         check_outdoor_suv_ranking_prefers_suvs,
         check_family_space_ranking_prefers_roomy_cars,
         check_retired_family_first_message_routes_to_candidates,
+        check_greeting_budget_need_overrides_generic_handoff,
+        check_soft_missing_evidence_price_fallback_does_not_block_candidates,
         check_visit_time_reply_preserves_specific_time,
         check_weekend_usage_is_not_appointment_intent,
         check_common_followup_guidance_stays_local,
         check_internal_rag_experience_not_pasted_to_customer,
         check_history_backfill_merges_loaded_messages,
+        check_history_backfill_recovers_missing_anchor_without_gap,
+        check_history_backfill_unresolved_anchor_flags_gap,
+        check_customer_service_gap_risk_blocks_reply,
+        check_processed_fragment_keys_suppress_ocr_splits,
         check_file_transfer_self_reply_is_not_reprocessed,
+        check_file_transfer_self_reply_ocr_punctuation_variant_is_not_reprocessed,
+        check_bootstrap_marks_latest_visible_before_history_scroll,
         check_freshness_backfill_finds_original_batch,
         check_freshness_backfill_stale_when_original_not_found,
+        check_freshness_missing_original_without_visible_newer_flags_gap,
     ):
         try:
             results.append({"name": check.__name__, "ok": True, "details": check()})
@@ -309,6 +328,126 @@ def check_retired_family_first_message_routes_to_candidates() -> dict[str, Any]:
     return {"route": route.get("reason")}
 
 
+def check_greeting_budget_need_overrides_generic_handoff() -> dict[str, Any]:
+    text = "你好，我预算12到15万，想买省心家用二手车，主要上下班和接娃，南京能看车吗？"
+    route = decide_realtime_reply_route(
+        config={"realtime_reply": {"enabled": True}},
+        combined=text,
+        decision=ReplyDecision(
+            reply_text="价格我肯定帮您争取，但最低价或破例优惠不能直接口头保证。我核实一下商品、数量和负责人意见，再回复您。",
+            rule_name=None,
+            matched=False,
+            need_handoff=True,
+            reason="evidence_safety:no_relevant_business_evidence",
+        ),
+        intent_result=SimpleNamespace(intent="product_inquiry"),
+        intent_assist={"evidence": {"safety": {"must_handoff": True, "reasons": ["no_relevant_business_evidence"]}}},
+        rag_reply={},
+        llm_reply={},
+        product_knowledge=None,
+        data_capture={},
+        evidence_pack={},
+        recent_reply_texts=[],
+    )
+    reply = maybe_build_realtime_reply(
+        config={"realtime_reply": {"enabled": True}},
+        route=route,
+        combined=text,
+        evidence_pack={
+            "evidence": {
+                "products": [
+                    {
+                        "id": "camry",
+                        "name": "2021款丰田凯美瑞2.0G豪华版",
+                        "category": "二手车/中型轿车",
+                        "aliases": ["凯美瑞", "丰田", "家用", "省心"],
+                        "specs": "2021年上牌，表显4.8万公里，2.0L自动挡",
+                        "price": 13.8,
+                        "stock": 1,
+                    },
+                    {
+                        "id": "xtrail",
+                        "name": "2020款日产奇骏2.5L四驱",
+                        "category": "二手车/SUV",
+                        "aliases": ["奇骏", "SUV", "家用", "空间"],
+                        "specs": "2020年上牌，表显5.9万公里，自动挡",
+                        "price": 14.6,
+                        "stock": 1,
+                    },
+                ]
+            }
+        },
+        current_reply_text="好的，收到。我先帮您核实下南京这边是否方便安排看车，并同步确认相关情况；具体价格、库存及审批结果都以最终核实为准，确认清楚后我再回复您。",
+        recent_reply_texts=[],
+    )
+    assert_equal(route.get("reason"), "detailed_vehicle_need_ready_for_candidates", "mixed greeting budget route")
+    assert_true(bool(reply.get("applied")), f"candidate reply should override generic no-evidence handoff: {reply}")
+    assert_true(bool(reply.get("used_product_ids")), f"candidate reply should include product ids: {reply}")
+    return {"route": route.get("reason"), "reply_rule": reply.get("rule_name"), "used_product_ids": reply.get("used_product_ids")}
+
+
+def check_soft_missing_evidence_price_fallback_does_not_block_candidates() -> dict[str, Any]:
+    text = "你好，我预算12到15万，想买省心家用二手车，主要上下班和接娃，南京能看车吗？"
+    route = decide_realtime_reply_route(
+        config={"realtime_reply": {"enabled": True}},
+        combined=text,
+        decision=ReplyDecision(
+            reply_text="价格和优惠这块我先帮您核实一下，但超出公开规则的部分我这边不能直接口头确认。等我把库存数量和负责人的意见确认清楚后，再给您一个明确答复。",
+            rule_name=None,
+            matched=False,
+            need_handoff=True,
+            reason="evidence_safety:no_relevant_business_evidence",
+        ),
+        intent_result=SimpleNamespace(intent="product_inquiry"),
+        intent_assist={"evidence": {"safety": {"must_handoff": True, "reasons": ["no_relevant_business_evidence"]}}},
+        rag_reply={},
+        llm_reply={},
+        product_knowledge=None,
+        data_capture={},
+        evidence_pack={"evidence": {"products": []}},
+        recent_reply_texts=[],
+    )
+    old_loader = realtime_router.load_catalog_product_candidates
+    realtime_router.load_catalog_product_candidates = lambda: [
+        {
+            "id": "chejin_camry_2021_20g",
+            "name": "2021款丰田凯美瑞2.0G豪华版",
+            "category": "二手车/中级轿车",
+            "aliases": ["凯美瑞", "家用", "省心"],
+            "spec": "2021年上牌，表显4.8万公里，2.0L自动挡，南京现车。",
+            "price": 13.8,
+            "stock": 1,
+            "recommendation": "适合日常家用、上下班和接娃。",
+        },
+        {
+            "id": "chejin_xtrail_2020_25l",
+            "name": "2020款日产奇骏2.5L四驱",
+            "category": "二手车/SUV",
+            "aliases": ["奇骏", "SUV", "空间"],
+            "spec": "2020年上牌，表显5.9万公里，自动挡，南京现车。",
+            "price": 14.6,
+            "stock": 1,
+            "recommendation": "适合空间和家庭出行。",
+        },
+    ]
+    try:
+        reply = maybe_build_realtime_reply(
+            config={"realtime_reply": {"enabled": True}},
+            route=route,
+            combined=text,
+            evidence_pack={"evidence": {"products": []}},
+            current_reply_text="价格和优惠这块我先帮您核实一下，但超出公开规则的部分我这边不能直接口头确认。等我把库存数量和负责人的意见确认清楚后，再给您一个明确答复。",
+            recent_reply_texts=[],
+        )
+    finally:
+        realtime_router.load_catalog_product_candidates = old_loader
+    assert_true(route.get("soft_missing_evidence") is True, f"route should preserve soft missing evidence flag: {route}")
+    assert_equal(route.get("reason"), "detailed_vehicle_need_ready_for_candidates", "budget scene route")
+    assert_true(bool(reply.get("applied")), f"soft no-evidence fallback should not block candidates: {reply}")
+    assert_true(bool(reply.get("used_product_ids")), f"catalog fallback should provide candidates: {reply}")
+    return {"route": route.get("reason"), "used_product_ids": reply.get("used_product_ids")}
+
+
 def check_visit_time_reply_preserves_specific_time() -> dict[str, Any]:
     text = "这周六上午十一点能看吗？最好别让我到了车不在。"
     assert_equal(extract_visit_time_label(text), "周六上午十一点", "visit time label")
@@ -449,7 +588,7 @@ def check_internal_rag_experience_not_pasted_to_customer() -> dict[str, Any]:
                         "score": 0.95,
                         "category": "rag_experience",
                         "source_type": "rag_experience",
-                        "text": "RAG经验概括：实盘话术样本；客户问法：两台车怎么选；历史回复要点：老哥，有空过来可以看看车子。",
+                        "text": "AI经验池概括：实盘话术样本；客户问法：两台车怎么选；历史回复要点：老哥，有空过来可以看看车子。",
                         "risk_terms": [],
                     }
                 ],
@@ -501,6 +640,119 @@ def check_history_backfill_merges_loaded_messages() -> dict[str, Any]:
     }
 
 
+def check_history_backfill_recovers_missing_anchor_without_gap() -> dict[str, Any]:
+    visible = [message("m5", "第五条：最好自动挡"), message("m6", "第六条：预算十万")]
+    loaded = [
+        message("m2", "第二条：上一轮已处理"),
+        message("m3", "第三条：中间补充"),
+        message("m4", "第四条：再补充"),
+        *visible,
+    ]
+    connector = FakeConnector(visible, loaded)
+    target = SimpleNamespace(name="客户A", exact=True, allow_self_for_test=False, max_batch_messages=8)
+    enriched = maybe_enrich_messages_with_history(
+        connector=connector,  # type: ignore[arg-type]
+        target=target,  # type: ignore[arg-type]
+        config={"history_backfill": {"enabled": True, "load_times": 3}},
+        payload={"ok": True, "messages": visible},
+        target_state={"processed_message_ids": ["m2"], "processed_content_keys": [], "handoff_message_ids": []},
+    )
+    meta = enriched.get("_history_backfill") or {}
+    selection = select_batch_details(
+        enriched.get("messages", []),
+        target_state={"processed_message_ids": ["m2"], "processed_content_keys": [], "handoff_message_ids": []},
+        allow_self_for_test=False,
+        max_batch_messages=8,
+        config={},
+    )
+    assert_equal(connector.history_load_calls, [3], "missing anchor should trigger history load")
+    assert_true(meta.get("anchor_found_after_history_load") is True, "anchor should be recovered")
+    assert_true(meta.get("gap_risk") is False, "recovered anchor should not flag gap")
+    assert_equal(selection.eligible_count, 4, "middle messages should be recovered as eligible")
+    return {"history_backfill": meta, "eligible_count": selection.eligible_count}
+
+
+def check_history_backfill_unresolved_anchor_flags_gap() -> dict[str, Any]:
+    visible = [message("m5", "第五条：最好自动挡"), message("m6", "第六条：预算十万")]
+    loaded = [message("m4", "第四条：中间补充"), *visible]
+    connector = FakeConnector(visible, loaded)
+    target = SimpleNamespace(name="客户A", exact=True, allow_self_for_test=False, max_batch_messages=8)
+    enriched = maybe_enrich_messages_with_history(
+        connector=connector,  # type: ignore[arg-type]
+        target=target,  # type: ignore[arg-type]
+        config={"history_backfill": {"enabled": True, "load_times": 3}},
+        payload={"ok": True, "messages": visible},
+        target_state={"processed_message_ids": ["m1"], "processed_content_keys": [], "handoff_message_ids": []},
+    )
+    meta = enriched.get("_history_backfill") or {}
+    assert_equal(connector.history_load_calls, [3], "unresolved anchor should trigger history load")
+    assert_true(meta.get("anchor_found_after_history_load") is False, "anchor should remain unresolved")
+    assert_true(meta.get("gap_risk") is True, "unresolved anchor should flag gap")
+    assert_equal(meta.get("gap_reason"), "anchor_missing_after_history_load", "gap reason")
+    return {"history_backfill": meta}
+
+
+def check_customer_service_gap_risk_blocks_reply() -> dict[str, Any]:
+    visible = [message("m5", "第五条：最好自动挡"), message("m6", "第六条：预算十万")]
+    loaded = [message("m4", "第四条：中间补充"), *visible]
+    connector = FakeConnector(visible, loaded)
+    target = SimpleNamespace(name="客户A", exact=True, allow_self_for_test=False, max_batch_messages=8)
+    state = {
+        "targets": {
+            "客户A": {
+                "processed_message_ids": ["m1"],
+                "processed_content_keys": [],
+                "handoff_message_ids": [],
+                "sent_replies": [],
+                "reply_timestamps": [],
+            }
+        }
+    }
+    event = process_target(
+        connector=connector,  # type: ignore[arg-type]
+        target=target,  # type: ignore[arg-type]
+        config={"history_backfill": {"enabled": True, "load_times": 3}, "raw_messages": {"enabled": False}},
+        rules={},
+        state=state,
+        send=True,
+        write_data=False,
+        allow_fallback_send=False,
+        mark_dry_run=False,
+    )
+    assert_equal(event.get("action"), "blocked", "gap risk should block send")
+    assert_equal(event.get("reason"), "history_backfill_gap_risk", "block reason")
+    assert_equal(connector.sent_texts, [], "gap risk must not send text")
+    assert_equal(state["targets"]["客户A"].get("processed_message_ids"), ["m1"], "gap risk must not mark processed")
+    return {"event": event, "history_load_calls": connector.history_load_calls}
+
+
+def check_processed_fragment_keys_suppress_ocr_splits() -> dict[str, Any]:
+    full = {
+        "id": "full-b10",
+        "type": "text",
+        "sender": "self",
+        "content": "[GAPGUARD_20260524_235553-B10]连续补充\n第10点：预算十三四万，想看车况透明、空间够\n用、后期别太费心。",
+    }
+    split = {
+        "id": "split-b10",
+        "type": "text",
+        "sender": "self",
+        "content": "第10点：预算十三四万，想看车况透明、空间够\n用、后期别太费心。",
+    }
+    processed_content_keys = set(message_processed_content_keys(full))
+    split_key = message_content_dedupe_key(split)
+    assert_true(split_key in processed_content_keys, f"split OCR fragment should be covered: {processed_content_keys}")
+    selection = select_batch_details(
+        [split],
+        target_state={"processed_message_ids": [], "processed_content_keys": list(processed_content_keys), "handoff_message_ids": []},
+        allow_self_for_test=True,
+        max_batch_messages=8,
+        config={},
+    )
+    assert_equal(selection.eligible_count, 0, "processed fragment should not be eligible again")
+    return {"processed_key_count": len(processed_content_keys), "split_key": split_key}
+
+
 def check_file_transfer_self_reply_is_not_reprocessed() -> dict[str, Any]:
     bot_reply = "条件已经比较清楚了：9万以内、主要给您爱人开，先看两台好上手的。"
     visible = [
@@ -522,6 +774,67 @@ def check_file_transfer_self_reply_is_not_reprocessed() -> dict[str, Any]:
     )
     assert_equal([item["id"] for item in selection.batch], ["new-customer"], "file transfer should skip prior self reply")
     return {"batch_ids": [item["id"] for item in selection.batch], "eligible_count": selection.eligible_count}
+
+
+def check_file_transfer_self_reply_ocr_punctuation_variant_is_not_reprocessed() -> dict[str, Any]:
+    sent_reply = "2019款本田凌派180TURBO CVT舒适版（5.88万，2019年9月上牌）可以先排在前面。"
+    ocr_reply = "2019款本田凌派180TURBOCVT舒适版(5.88万，2019年9月上牌）可以先排在前面。"
+    visible = [
+        message("bot-reply-ocr", ocr_reply, sender="self"),
+        message("new-test", "[RPA_MULTI_20260525_020151-02] 车况透明和后期少操心怎么取舍？", sender="self"),
+    ]
+    target_state = {
+        "processed_message_ids": [],
+        "handoff_message_ids": [],
+        "sent_replies": [{"reply_text": sent_reply, "processed_at": "2026-05-25T02:00:00"}],
+    }
+    selection = select_batch_details(
+        visible,
+        target_state=target_state,
+        allow_self_for_test=True,
+        max_batch_messages=1,
+        config={"reply": {"prefix": ""}},
+    )
+    assert_equal([item["id"] for item in selection.batch], ["new-test"], "OCR punctuation variant of self reply should be skipped")
+    assert_equal(selection.eligible_count, 1, "only the new test marker should remain eligible")
+    return {"batch_ids": [item["id"] for item in selection.batch], "eligible_count": selection.eligible_count}
+
+
+def check_bootstrap_marks_latest_visible_before_history_scroll() -> dict[str, Any]:
+    old_reply = "实际把关就是别只看外观。先看检测报告和维保出险，再看结构件和底盘。"
+    latest = [message("latest-visible-old-reply", old_reply, sender="self")]
+    loaded = [message("history-older-question", "旧问题：怎么确认车况透明？", sender="self")]
+    connector = FakeConnector(latest, loaded)
+    state: dict[str, Any] = {"targets": {}}
+    event = bootstrap_target(
+        connector,  # type: ignore[arg-type]
+        SimpleNamespace(name="文件传输助手", exact=True),
+        state,
+        {"bootstrap": {"history_load_times": 2}, "reply": {"prefix": ""}},
+    )
+    assert_true(event.get("action") == "bootstrapped", "bootstrap should succeed")
+    target_state = state["targets"]["文件传输助手"]
+    assert_true("latest-visible-old-reply" in target_state.get("processed_message_ids", []), "latest visible old reply should be marked before scrolling")
+    assert_true("history-older-question" in target_state.get("processed_message_ids", []), "history-loaded message should still be marked")
+
+    selection = select_batch_details(
+        [
+            message("latest-visible-old-reply-new-id", old_reply, sender="self"),
+            message("new-test-marker", "[RPA_MULTI_TEST-01] 预算十万以内，先看哪两台？", sender="self"),
+        ],
+        target_state=target_state,
+        allow_self_for_test=True,
+        max_batch_messages=1,
+        config={"reply": {"prefix": ""}},
+    )
+    assert_equal([item["id"] for item in selection.batch], ["new-test-marker"], "bootstrapped latest self reply should not become overflow after OCR id drift")
+    assert_equal(selection.eligible_count, 1, "only the current marker should remain eligible after bootstrap")
+    return {
+        "marked_message_ids": event.get("marked_message_ids"),
+        "latest_visible_count": event.get("latest_visible_count"),
+        "history_load_calls": connector.history_load_calls,
+        "batch_ids": [item["id"] for item in selection.batch],
+    }
 
 
 def check_freshness_backfill_finds_original_batch() -> dict[str, Any]:
@@ -557,6 +870,22 @@ def check_freshness_backfill_stale_when_original_not_found() -> dict[str, Any]:
     )
     assert_true(bool(result.get("has_newer_messages")), "stale visible newer")
     assert_equal(result.get("reason"), "original_batch_not_visible_assume_stale", "stale reason")
+    assert_true(bool(result.get("gap_risk")), "missing original after backfill should flag gap")
+    return result
+
+
+def check_freshness_missing_original_without_visible_newer_flags_gap() -> dict[str, Any]:
+    connector = FakeConnector([], [])
+    result = detect_newer_messages_before_send(
+        connector=connector,  # type: ignore[arg-type]
+        target=SimpleNamespace(name="客户A", exact=True, allow_self_for_test=False),
+        target_state={"processed_message_ids": [], "handoff_message_ids": []},
+        batch=[{"id": "old-missing", "type": "text", "content": "原问题", "sender": "customer"}],
+        config={"history_backfill": {"enabled": True, "freshness_load_times": 2, "max_messages_after_load": 80}},
+    )
+    assert_true(bool(result.get("has_newer_messages")), "gap risk should block stale send even without visible newer")
+    assert_equal(result.get("reason"), "original_batch_not_found_gap_risk", "gap reason")
+    assert_true(bool(result.get("gap_risk")), "gap risk flag")
     return result
 
 

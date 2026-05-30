@@ -6,6 +6,7 @@ import json
 import os
 import shutil
 import sys
+import csv
 from pathlib import Path
 from typing import Any
 
@@ -34,6 +35,7 @@ TEST_TENANT = "recorder_order_sheet_test"
 ORDER_HEADERS = [
     None,
     "日期",
+    "时间",
     "姓名",
     "责任人（老板）",
     "收货人",
@@ -77,6 +79,7 @@ def run_checks() -> None:
         validate_export(client, headers, run_id)
         validate_date_range_runs(client, headers)
         validate_name_context_inference_rules()
+        validate_name_owner_price_prefix_cleanup()
         validate_brand_single_use_rules()
     finally:
         export_run_module.call_deepseek_json = original_call_deepseek_json
@@ -266,18 +269,26 @@ def validate_export(client: TestClient, headers: dict[str, str], run_id: str) ->
     assert_true(float(progress.get("percent", 0) or 0) >= 1.0, "completed run progress should reach 100%")
     artifacts = item.get("artifacts") if isinstance(item.get("artifacts"), dict) else {}
     workbook_path = Path(str(artifacts.get("xlsx_path") or ""))
+    csv_path = Path(str(artifacts.get("csv_path") or ""))
     report_path = Path(str(artifacts.get("report_path") or ""))
     assert_true(workbook_path.exists(), "xlsx exists")
+    assert_true(csv_path.exists(), "csv exists")
     assert_true(report_path.exists(), "report exists")
+    with csv_path.open("r", encoding="utf-8-sig", newline="") as handle:
+        csv_rows = list(csv.reader(handle))
+    assert_true(len(csv_rows) >= 3, "csv should contain header and exported rows")
+    assert_equal(csv_rows[0], ["" if item is None else item for item in ORDER_HEADERS], "csv header should match expected template")
 
     workbook = load_workbook(workbook_path)
     sheet = workbook["Sheet1"]
     headers_row = [sheet.cell(row=1, column=index + 1).value for index in range(len(ORDER_HEADERS))]
     assert_equal(headers_row, ORDER_HEADERS, "order sheet header should match expected template")
     first_date = str(sheet.cell(row=2, column=2).value or "")
-    first_name = str(sheet.cell(row=2, column=3).value or "")
-    first_product = str(sheet.cell(row=2, column=8).value or "")
+    first_time = str(sheet.cell(row=2, column=3).value or "")
+    first_name = str(sheet.cell(row=2, column=4).value or "")
+    first_product = str(sheet.cell(row=2, column=9).value or "")
     assert_true(first_date in {"2025-03-03", "2025-03-04"}, "date should be YYYY-MM-DD text")
+    assert_true(bool(first_time) and len(first_time.split(":")) == 3, f"time should be HH:MM:SS text, got {first_time!r}")
     assert_true(bool(first_name), "name should be extracted")
     assert_true(bool(first_product), "product name should be extracted")
     hep_es_rows = []
@@ -291,12 +302,12 @@ def validate_export(client: TestClient, headers: dict[str, str], run_id: str) ->
     top_confidence_fill_type = ""
     has_colored_row = False
     for row_index in range(2, sheet.max_row + 1):
-        product_name = str(sheet.cell(row=row_index, column=8).value or "")
-        quantity = str(sheet.cell(row=row_index, column=9).value or "")
-        brand = str(sheet.cell(row=row_index, column=12).value or "")
-        name = str(sheet.cell(row=row_index, column=3).value or "")
-        remark = str(sheet.cell(row=row_index, column=17).value or "")
-        fill_type = str(sheet.cell(row=row_index, column=8).fill.fill_type or "")
+        product_name = str(sheet.cell(row=row_index, column=9).value or "")
+        quantity = str(sheet.cell(row=row_index, column=10).value or "")
+        brand = str(sheet.cell(row=row_index, column=13).value or "")
+        name = str(sheet.cell(row=row_index, column=4).value or "")
+        remark = str(sheet.cell(row=row_index, column=18).value or "")
+        fill_type = str(sheet.cell(row=row_index, column=9).fill.fill_type or "")
         if "HEPES" in product_name.upper():
             hep_es_rows.append((product_name, quantity))
         if "手套" in product_name:
@@ -341,8 +352,8 @@ def validate_export(client: TestClient, headers: dict[str, str], run_id: str) ->
     assert_true(has_colored_row, "sheet should contain confidence-colored rows")
     if top_confidence_fill_type:
         assert_true(top_confidence_fill_type in {"", "none"}, f"high-confidence rows should not be colored: {top_confidence_fill_type!r}")
-    cost_price = sheet.cell(row=2, column=13).value
-    total_cost = sheet.cell(row=2, column=15).value
+    cost_price = sheet.cell(row=2, column=14).value
+    total_cost = sheet.cell(row=2, column=16).value
     assert_true(cost_price in ("", None), "cost price should be empty in V1")
     assert_true(total_cost in ("", None), "total cost should be empty in V1")
 
@@ -427,6 +438,91 @@ def validate_name_context_inference_rules() -> None:
     assert_equal(str(adjusted.get("name") or ""), "王磊", "fallback row should fill name from context")
     assert_true(float(adjusted.get("confidence") or 0) < 0.9, "context fallback should reduce confidence")
     assert_true("姓名来自近3句上下文" in str(adjusted.get("remark") or ""), "fallback row should include traceable remark")
+
+
+def validate_name_owner_price_prefix_cleanup() -> None:
+    svc = RecorderExportRunService(tenant_id=TEST_TENANT)
+    examples = [
+        ("加厚喷砂手套一双78元程建军-张明老师", "程建军", "张明"),
+        ("普通5ml离心管1包25元卢南-戚向阳老师", "卢南", "戚向阳"),
+        ("alrabbitpAb订一个20u360元朱宁伟-胡升老师", "朱宁伟", "胡升"),
+        ("细胞培养瓶1箱640元崔明辉-姚晓敏老师", "崔明辉", "姚晓敏"),
+    ]
+    for text, expected_name, expected_owner in examples:
+        name, owner = svc._extract_name_owner(text)
+        assert_equal(name, expected_name, f"name cleanup failed for {text}")
+        assert_equal(owner, expected_owner, f"owner cleanup failed for {text}")
+    row = svc._empty_order_row()
+    row.update(
+        {
+            "name": "G73537F1桶105元卢南",
+            "owner": "戚向阳",
+            "product_name": "普通5ml离心管",
+            "quantity": "1",
+            "unit": "包",
+            "sale_price": "25",
+            "confidence": 0.9,
+            "needs_review": False,
+        }
+    )
+    finalized = svc._finalize_order_row(row, {"content": "普通5ml离心管1包25元卢南-戚向阳老师", "message_time": "2025-03-04 08:30:00"})
+    assert_equal(str(finalized.get("name") or ""), "卢南", "finalize should sanitize dirty name")
+    assert_equal(str(finalized.get("owner") or ""), "戚向阳", "finalize should preserve clean owner")
+    assert_true("元" not in str(finalized.get("name") or ""), "finalized name should not contain price text")
+    glove_row = svc._empty_order_row()
+    glove_row.update({"name": "78元程建军", "owner": "程建军", "product_name": "加厚喷砂手套一双", "sale_price": "78", "confidence": 0.8})
+    glove_finalized = svc._finalize_order_row(glove_row, {"content": "加厚喷砂手套一双78元程建军-张明老师", "message_time": "2025-03-04 08:31:00"})
+    assert_equal(str(glove_finalized.get("name") or ""), "程建军", "dirty price prefix should be removed from glove buyer")
+    assert_equal(str(glove_finalized.get("quantity") or ""), "1", "一双/default quantity should be captured")
+    assert_true(not svc._should_drop_order_row(glove_finalized), "valid glove order should stay")
+    book_row = svc._empty_order_row()
+    book_row.update({"product_name": "书", "quantity": "1", "sale_price": "55.66", "confidence": 0.9})
+    assert_true(svc._should_drop_order_row(book_row), "generic book row should be dropped from lab order export")
+    noise_row = svc._empty_order_row()
+    noise_row.update({"product_name": "索莱宝油红O染色试剂盒(细胞专用) 1322 1T1△600*070", "confidence": 0.55})
+    assert_true(svc._should_drop_order_row(noise_row), "product-only noise row without person/quantity/price should be dropped")
+    assert_equal(
+        svc._extract_product_name("雾化机代付89/0.85=105元黄敏伟-姚晓敏老师"),
+        "雾化机",
+        "short instrument product names should survive product extraction",
+    )
+    implied_one_row = svc._empty_order_row()
+    implied_one_row.update(
+        {
+            "name": "朱宁伟",
+            "owner": "朱宁伟",
+            "product_name": "酶科 大鼠白细胞介素 1β(IL-1β)ELISA科研试剂盒",
+            "unit": "盒",
+            "sale_price": "900",
+            "source_scope_text": "酶科 MK1588B大鼠白细胞介素 1β(IL-1β)ELISA科研试剂盒48T900元",
+            "confidence": 0.62,
+        }
+    )
+    implied_one_finalized = svc._finalize_order_row(implied_one_row, {"content": "酶科 MK1588B大鼠白细胞介素 1β(IL-1β)ELISA科研试剂盒48T900元 朱宁伟老师", "message_time": "2025-03-04 08:32:00"})
+    assert_equal(str(implied_one_finalized.get("quantity") or ""), "1", "priced row without explicit quantity should default to 1 for structured export")
+    assert_equal(str(implied_one_finalized.get("unit") or ""), "盒", "existing unit should be preserved when defaulting quantity")
+    dash_one_row = svc._empty_order_row()
+    dash_one_row.update(
+        {
+            "name": "贾姝",
+            "owner": "任宇杰",
+            "product_name": "Polyclonal antibody 14088-1-AP",
+            "quantity": "1",
+            "unit": "个",
+            "sale_price": "1215",
+            "source_scope_text": "Polyclonal antibody 14088-1-AP 订—个50u 1350*0.9=1215元 贾姝老师(任宇杰订)",
+            "confidence": 0.62,
+        }
+    )
+    dash_one_finalized = svc._finalize_order_row(dash_one_row, {"content": "Polyclonal antibody 14088-1-AP 订—个50u 1350*0.9=1215元 贾姝老师(任宇杰订)", "message_time": "2025-03-04 08:33:00"})
+    assert_equal(str(dash_one_finalized.get("quantity") or ""), "1", "OCR dash in 订—个 should not clear supported quantity")
+    assert_equal(str(dash_one_finalized.get("unit") or ""), "个", "OCR dash quantity row should preserve unit")
+    assert_equal(str(dash_one_finalized.get("time") or ""), "08:33:00", "finalize should write local HH:MM:SS time")
+    utc_row = svc._finalize_order_row(dash_one_row, {"content": "Polyclonal antibody 14088-1-AP 订—个50u 1350*0.9=1215元 贾姝老师(任宇杰订)", "message_time": "2025-03-04T00:33:00Z"})
+    assert_equal(str(utc_row.get("time") or ""), "08:33:00", "timezone-aware message time should be converted to UTC+8")
+    missing_product_row = svc._empty_order_row()
+    missing_product_row.update({"name": "俞淑芳", "quantity": "1", "unit": "支", "sale_price": "140", "confidence": 0.79})
+    assert_true(svc._should_drop_order_row(missing_product_row), "rows without product name should not enter the main order sheet")
 
 
 def validate_brand_single_use_rules() -> None:

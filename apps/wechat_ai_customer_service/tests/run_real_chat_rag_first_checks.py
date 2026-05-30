@@ -208,7 +208,7 @@ def check_low_value_rag_reply_auto_discards() -> bool:
                         "score": 0.99,
                         "category": "rag_experience",
                         "source_type": "rag_experience",
-                        "text": "RAG经验概括：测试低价值回灌片段。",
+                        "text": "AI经验池概括：测试低价值回灌片段。",
                     },
                 },
             )

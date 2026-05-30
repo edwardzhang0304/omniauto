@@ -1,8 +1,9 @@
 """Comprehensive live WeChat checks for customer-service behavior.
 
 Unlike the simulated suites, this runner sends real messages to WeChat File
-Transfer Assistant through wxauto4, then runs the guarded customer-service
-workflow so the reply is sent back into the same real WeChat conversation.
+Transfer Assistant through the RPA-first WeChat connector, then runs the
+guarded customer-service workflow so the reply is sent back into the same real
+WeChat conversation.
 """
 
 from __future__ import annotations
@@ -10,6 +11,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import sys
 import time
 from datetime import datetime
@@ -22,6 +24,7 @@ os.environ.setdefault("OMP_NUM_THREADS", "1")
 os.environ.setdefault("NUMEXPR_NUM_THREADS", "1")
 os.environ.setdefault("WECHAT_CLOUD_REQUIRED", "0")
 os.environ.setdefault("WECHAT_CLOUD_STRICT_ONLINE", "0")
+os.environ.setdefault("WECHAT_CHEJIN_TEST_TENANT_ID", "chejin")
 
 APP_ROOT = Path(__file__).resolve().parents[1]
 PROJECT_ROOT = APP_ROOT.parents[1]
@@ -38,6 +41,7 @@ from listen_and_reply import (  # noqa: E402
     bootstrap_target,
     load_config,
     load_rules,
+    message_stable_content_key,
     process_target,
     resolve_path,
 )
@@ -101,6 +105,7 @@ def run_live_checks(token: str, args: argparse.Namespace) -> dict[str, Any]:
                 rules=rules,
                 state=state,
                 case=case,
+                batch_token=token,
                 delay_seconds=max(0.6, float(args.delay_seconds or 1.0)),
                 burst_delay_seconds=max(0.1, float(args.burst_delay_seconds or 0.25)),
             )
@@ -131,6 +136,17 @@ def run_live_checks(token: str, args: argparse.Namespace) -> dict[str, Any]:
 
 def build_live_config(root: Path) -> dict[str, Any]:
     config = apply_local_customer_service_settings(load_config(CONFIG_PATH))
+    local_settings = dict(config.get("_local_customer_service_settings", {}) or {})
+    local_settings.update(
+        {
+            "enabled": True,
+            "reply_mode": "auto",
+            "record_messages": True,
+            "style_adapter_enabled": True,
+            "identity_guard_enabled": True,
+        }
+    )
+    config["_local_customer_service_settings"] = local_settings
     config["state_path"] = str(root / "state.json")
     config["audit_log_path"] = str(root / "audit.jsonl")
     config.setdefault("operator_alert", {})
@@ -153,6 +169,9 @@ def build_live_config(root: Path) -> dict[str, Any]:
     config["llm_reply_synthesis"]["identity_guard_enabled"] = True
     config["llm_reply_synthesis"].setdefault("cost_controls", {})
     config["llm_reply_synthesis"]["cost_controls"]["max_llm_calls_per_run"] = 0
+    config.setdefault("final_visible_llm_polish", {})
+    config["final_visible_llm_polish"]["enabled"] = False
+    config["final_visible_llm_polish"]["required_for_send"] = False
     config.setdefault("intent_assist", {})
     config["intent_assist"]["mode"] = "heuristic"
     config["intent_assist"].setdefault("llm_advisory", {})
@@ -352,6 +371,7 @@ def run_case(
     rules: dict[str, Any],
     state: dict[str, Any],
     case: dict[str, Any],
+    batch_token: str,
     delay_seconds: float,
     burst_delay_seconds: float,
 ) -> dict[str, Any]:
@@ -367,6 +387,12 @@ def run_case(
                 assert_true(result.get("ok"), f"{case['id']} burst send failed: {result}")
                 time.sleep(burst_delay_seconds)
             time.sleep(delay_seconds)
+            mark_non_batch_messages_processed(
+                connector=connector,
+                target=target,
+                state=state,
+                batch_token=batch_token,
+            )
             event = process_target(
                 connector=connector,
                 target=target,
@@ -389,6 +415,12 @@ def run_case(
                 send_result = connector.send_text_and_verify(target.name, str(spec.get("message") or ""), exact=target.exact)
                 assert_true(send_result.get("ok"), f"{case['id']} turn {index} send failed: {send_result}")
                 time.sleep(delay_seconds)
+                mark_non_batch_messages_processed(
+                    connector=connector,
+                    target=target,
+                    state=state,
+                    batch_token=batch_token,
+                )
                 event = process_target(
                     connector=connector,
                     target=target,
@@ -453,9 +485,10 @@ def assert_event(case_id: str, index: int, spec: dict[str, Any], event: dict[str
         assert_true(str(plan.get("kind") or "") in semantic_kind_any, f"{name} semantic kind mismatch: {plan}")
     if spec.get("expect_history_backfill"):
         backfill = event.get("history_backfill") if isinstance(event.get("history_backfill"), dict) else {}
+        mechanism = str(backfill.get("mechanism") or "")
         assert_true(
-            str(backfill.get("mechanism") or "").startswith("wxauto4."),
-            f"{name} should use wxauto4/RPA backfill: {backfill}",
+            mechanism == "rpa.history_load" or mechanism.startswith("win32_ocr."),
+            f"{name} should use pure RPA-compatible backfill: {backfill}",
         )
     if spec.get("expect_overflow"):
         selection = event.get("batch_selection") if isinstance(event.get("batch_selection"), dict) else {}
@@ -500,6 +533,52 @@ def summarize_turn(case_id: str, index: int, spec: dict[str, Any], event: dict[s
             "saved_reason": budget.get("saved_reason"),
         },
     }
+
+
+def mark_non_batch_messages_processed(
+    *,
+    connector: WeChatConnector,
+    target: TargetConfig,
+    state: dict[str, Any],
+    batch_token: str,
+) -> None:
+    """Keep long-lived File Transfer Assistant history out of token-scoped live tests."""
+    normalized_token = normalize_live_token(batch_token)
+    if not normalized_token:
+        return
+    payload = connector.get_messages(target.name, exact=target.exact, history_load_times=2)
+    if not payload.get("ok"):
+        return
+    target_state = state.setdefault("targets", {}).setdefault(
+        target.name,
+        {
+            "processed_message_ids": [],
+            "processed_content_keys": [],
+            "handoff_message_ids": [],
+            "sent_replies": [],
+            "reply_timestamps": [],
+        },
+    )
+    processed = list(target_state.get("processed_message_ids", []))
+    processed_keys = list(target_state.get("processed_content_keys", []))
+    for message in payload.get("messages", []) or []:
+        if not isinstance(message, dict):
+            continue
+        content = str(message.get("content") or "")
+        if normalized_token in normalize_live_token(content):
+            continue
+        message_id = str(message.get("id") or "")
+        if message_id and message_id not in processed:
+            processed.append(message_id)
+        stable_key = message_stable_content_key(message)
+        if stable_key and stable_key not in processed_keys:
+            processed_keys.append(stable_key)
+    target_state["processed_message_ids"] = processed[-1000:]
+    target_state["processed_content_keys"] = processed_keys[-1000:]
+
+
+def normalize_live_token(value: str) -> str:
+    return re.sub(r"[^0-9A-Za-z]+", "", str(value or "")).lower()
 
 
 def assert_true(value: Any, message: str) -> None:

@@ -32,15 +32,19 @@ SOURCE_SETTING_KEYS = {
 IDENTITY_PROBE_TERMS = ("是不是ai", "是不是AI", "ai吗", "AI吗", "机器人", "自动回复", "机器客服")
 RECOMMEND_TERMS = ("推荐", "车源", "预算", "通勤", "家用", "省油", "看看", "哪台", "哪款", "挑")
 PRICE_TERMS = ("价格", "报价", "优惠", "便宜", "贵", "低点", "少点", "预算", "最低", "底价", "贷款", "金融", "包过", "首付", "月供")
+PRICE_ONLY_TERMS = ("价格", "报价", "优惠", "便宜", "贵", "低点", "少点", "预算", "最低", "底价")
+FINANCE_TERMS = ("贷款", "金融", "包过", "首付", "月供", "征信", "资方", "审批", "利率")
+CONDITION_TERMS = ("检测报告", "检测", "车况", "事故", "水泡", "火烧", "出险", "维保", "保养记录", "报告")
 BUDGET_REASK_REJECT_TERMS = ("别再问预算", "不要再问预算", "不用再问预算", "别问预算", "按刚才说", "刚才说的", "前面说了", "上面说了")
 HANDOFF_MARKERS = ("转人工", "人工客服", "真人客服", "同事联系", "专员联系", "销售联系")
 AI_EXPOSURE_MARKERS = ("我是AI", "我是ai", "我是机器人", "智能客服", "自动回复", "机器客服")
 CONTACT_DATA_TERMS = ("电话", "手机号", "联系方式", "我叫", "联系人", "姓名", "先生", "女士")
 APPOINTMENT_TERMS = ("试驾", "到店", "看车", "订金", "定金", "留车", "预约", "周末", "周六", "周日", "上午", "下午", "几点", "安排", "过去", "来店")
 SAME_DAY_DELIVERY_TERMS = ("办手续", "直接办", "当天办", "提车", "直接提", "当天提", "临牌", "过户", "交车")
+SAME_DAY_DELIVERY_STRONG_TERMS = ("办手续", "直接办", "当天办", "当天", "提车", "直接提", "当天提", "临牌", "交车", "办完")
 LOCATION_CONTACT_TERMS = ("门店地址", "店地址", "地址", "导航", "位置", "在哪", "哪里", "找谁", "联系人", "对接人", "到了找")
 LOCATION_CONTACT_STRONG_TERMS = ("门店地址", "店地址", "地址", "导航", "位置", "在哪", "哪里", "找谁", "对接人", "到了找", "到店找", "跑错")
-LOCATION_VISIT_CONTEXT_TERMS = ("门店", "店里", "到店", "到了", "过去", "看车", "试驾", "来店", "导航", "地址")
+LOCATION_VISIT_CONTEXT_TERMS = ("门店地址", "店地址", "门店", "店里", "到店", "到了", "过去", "看车", "试驾", "来店", "导航")
 TRADE_IN_TERMS = ("置换", "抵车款", "抵多少", "抵扣", "卖车", "收车", "旧车", "估价", "估个", "估一下")
 NEW_ENERGY_TERMS = ("新能源", "电池", "三电", "续航", "充电", "混动", "dm-i", "dmi")
 DOCUMENT_TERMS = ("合同", "发票", "开票", "抬头", "税号", "少开", "低开")
@@ -262,6 +266,13 @@ def infer_style_profile(examples: list[dict[str, Any]]) -> dict[str, Any]:
     }
 
 
+def is_same_day_delivery_context(text: str) -> bool:
+    clean = normalize_text(text)
+    if not clean:
+        return False
+    return contains_any(clean, SAME_DAY_DELIVERY_STRONG_TERMS)
+
+
 def handoff_specific_reply(context: str, recent_reply_texts: list[str]) -> str:
     clean = normalize_text(context)
     if is_location_contact_context(clean):
@@ -275,6 +286,16 @@ def handoff_specific_reply(context: str, recent_reply_texts: list[str]) -> str:
             recent_reply_texts=recent_reply_texts,
         )[0]
     if contains_any(clean, CONTACT_DATA_TERMS) and contains_any(clean, APPOINTMENT_TERMS):
+        if contains_any(clean, TRADE_IN_TERMS) or "开过去" in clean:
+            return choose_reply_variant(
+                [
+                    "可以，联系方式、到店时间和旧车置换我都记下了。接下来确认车源状态、门店排期和看车安排，核好后回您。",
+                    "好的，您的信息和到店时间我记下了，旧车置换也一起备注。我这边确认车源和门店排期，弄清楚后回您。",
+                    "信息我记下了，旧车也按置换一起备注。这边确认车源还在不在、到店时间能不能排上，弄清楚后回您。",
+                ],
+                key_text=context,
+                recent_reply_texts=recent_reply_texts,
+            )[0]
         return choose_reply_variant(
             [
                 "可以，您的信息和到店时间我记下了。我这边确认一下车源和门店排期，弄清楚后回您，尽量别让您白跑。",
@@ -284,12 +305,35 @@ def handoff_specific_reply(context: str, recent_reply_texts: list[str]) -> str:
             key_text=context,
             recent_reply_texts=recent_reply_texts,
         )[0]
-    if contains_any(clean, SAME_DAY_DELIVERY_TERMS):
+    if contains_any(clean, NEW_ENERGY_TERMS):
+        usage_detail = new_energy_usage_detail(context)
+        return choose_reply_variant(
+            [
+                f"您担心电池和三电很正常，{usage_detail}。这块不能只听一句口头保证，我先核实检测记录、电池状态和车况，请稍等，确认后再跟您说这台适不适合。",
+                f"新能源最该看的就是电池、三电和检测记录。{usage_detail}，我先核清楚实际续航、检测报告和车况，请稍等，确认好再给您更稳的判断。",
+                f"这个问题问得很关键。{usage_detail}，混动车要看电池状态、三电检测和实际用车强度，我先把这些核实清楚，请稍等，确认后再跟您说适不适合入手。",
+            ],
+            key_text=context,
+            recent_reply_texts=recent_reply_texts,
+        )[0]
+    if is_same_day_delivery_context(clean):
         return choose_reply_variant(
             [
                 "这个要看车源状态、手续资料、付款方式、过户和临牌安排，不能只凭一句话保证当天提。我先把这些环节核清楚，确认能不能当天办完再回复您。",
                 "当天提车不是不能安排，但要先确认车况报告、合同资料、付款到账、过户和临牌这些节点。我先核实门店流程，确认稳了再跟您说。",
                 "您想当天办完我理解，这个我先确认车源、手续资料和过户排期，能不能当天交车要核准后再给您准话，避免您白跑或等太久。",
+            ],
+            key_text=context,
+            recent_reply_texts=recent_reply_texts,
+        )[0]
+    has_finance_boundary = contains_any(clean, FINANCE_TERMS)
+    has_condition_boundary = contains_any(clean, CONDITION_TERMS)
+    if has_finance_boundary and has_condition_boundary:
+        return choose_reply_variant(
+            [
+                "贷款要看资方审核，检测报告和车况记录我可以帮您核；事故、水泡、火烧这类不能先口头定死，最终以报告和门店确认为准。",
+                "金融方案要按资方审核走，车况这块我会重点核检测报告、出险和维保记录；涉及事故水泡火烧，最终以报告为准。",
+                "这两块要分开看：贷款看资方审核，车况看检测报告和实车记录。我先把报告边界和金融方案核清楚，再给您准话。",
             ],
             key_text=context,
             recent_reply_texts=recent_reply_texts,
@@ -314,17 +358,38 @@ def handoff_specific_reply(context: str, recent_reply_texts: list[str]) -> str:
             key_text=context,
             recent_reply_texts=recent_reply_texts,
         )[0]
-    if contains_any(clean, PRICE_TERMS):
+    has_price_boundary = contains_any(clean, PRICE_ONLY_TERMS)
+    if has_finance_boundary and has_price_boundary:
         return choose_reply_variant(
             [
-                "您想今天定，我理解，价格和金融这块我不能为了促成就随口保证。我先把车源、付款方式和负责人意见确认好，再给您明确答复。",
-                "价格我肯定帮您争取，但最低价和贷款结果不能直接口头保证。我核实一下具体车源、成交方式和负责人意见，再回复您。",
-                "这个我先帮您往下问，争取归争取，但价格、库存和金融结果都要确认过才稳。我核清楚后再给您准话。",
+                "我理解您想把贷款和价格先问准，贷款要看资方审核，价格也要按车源和门店审批核准；我先确认车型、付款方式和负责人意见，再给您准话。",
+                "我理解您想把价格和贷款一次问清楚，金融审批和成交价不能先口头定死；我先核实车源、首付月供方向和价格审批，再给您准话。",
+                "这类问题我会谨慎点，帮您争取可以，但贷款看资方、价格看门店审批；我先核实付款方案和负责人意见，再给您准话。",
             ],
             key_text=context,
             recent_reply_texts=recent_reply_texts,
         )[0]
-    if contains_any(clean, SAME_DAY_DELIVERY_TERMS):
+    if has_finance_boundary:
+        return choose_reply_variant(
+            [
+                "贷款要看资方审核，首付、月供和利率都得按具体车源和资料核算；我先确认金融方案后给您准话。",
+                "金融这块不能先口头定死，主要看车型、首付比例、期数和资方审核。我先把方案核清楚再回复您。",
+                "分期可以先算方向，但审批结果、利率和月供要看资方。我先确认付款方案，核好后跟您说准。",
+            ],
+            key_text=context,
+            recent_reply_texts=recent_reply_texts,
+        )[0]
+    if has_price_boundary:
+        return choose_reply_variant(
+            [
+                "价格和优惠我会帮您核，但超出公开规则的部分不能直接口头答应。我先把数量、库存和负责人意见确认好，再给您明确答复。",
+                "价格我肯定帮您争取，但最低价或破例优惠不能直接口头保证。我核实一下商品、数量和负责人意见，再回复您。",
+                "这个我先帮您往下问，争取归争取，但价格、库存和审批结果都要确认过才稳。我核清楚后再给您准话。",
+            ],
+            key_text=context,
+            recent_reply_texts=recent_reply_texts,
+        )[0]
+    if is_same_day_delivery_context(clean):
         return choose_reply_variant(
             [
                 "这个要看车源状态、手续资料、付款方式、过户和临牌安排，不能只凭一句话保证当天提。我先把这些环节核清楚，确认能不能当天办完再回复您。",
@@ -340,17 +405,6 @@ def handoff_specific_reply(context: str, recent_reply_texts: list[str]) -> str:
                 "您这个安排我记下了，我这边确认排期，核实车源状态后回复您。",
                 "可以，我把您想看的时间和方向记下，确认一下车源和门店排期再回复您。",
                 "到店这块我记一下，再确认排期和车源状态，避免您白跑，确认好就回您。",
-            ],
-            key_text=context,
-            recent_reply_texts=recent_reply_texts,
-        )[0]
-    if contains_any(clean, NEW_ENERGY_TERMS):
-        usage_detail = new_energy_usage_detail(context)
-        return choose_reply_variant(
-            [
-                f"您担心电池和三电很正常，{usage_detail}。这块不能只听一句口头保证，我先核实检测记录、电池状态和车况，请稍等，确认后再跟您说这台适不适合。",
-                f"新能源最该看的就是电池、三电和检测记录。{usage_detail}，我先核清楚实际续航、检测报告和车况，请稍等，确认好再给您更稳的判断。",
-                f"这个问题问得很关键。{usage_detail}，混动车要看电池状态、三电检测和实际用车强度，我先把这些核实清楚，请稍等，确认后再跟您说适不适合入手。",
             ],
             key_text=context,
             recent_reply_texts=recent_reply_texts,
@@ -703,7 +757,7 @@ def truncate_reply(text: str, max_chars: int) -> str:
     clean = re.sub(r"\s+", " ", str(text or "")).strip()
     if len(clean) <= max_chars:
         return clean
-    return clean[: max(1, max_chars - 1)].rstrip("，,。；; ") + "…"
+    return truncate_visible_reply(clean, max_chars)
 
 
 def compact_text(text: str, max_chars: int) -> str:
@@ -711,6 +765,30 @@ def compact_text(text: str, max_chars: int) -> str:
     if len(clean) <= max_chars:
         return clean
     return clean[: max(1, max_chars - 1)].rstrip("，,。；; ") + "…"
+
+
+def truncate_visible_reply(text: str, max_chars: int) -> str:
+    clean = re.sub(r"\s+", " ", str(text or "")).strip()
+    if max_chars <= 1:
+        return clean[:max_chars]
+    if len(clean) <= max_chars:
+        return clean
+    preferred = -1
+    for marker in ("。", "！", "？", "!", "?", "；", ";", "，", ","):
+        index = clean.rfind(marker, 0, max_chars)
+        if index > preferred:
+            preferred = index
+    if preferred >= 0 and preferred + 1 >= max(12, int(max_chars * 0.45)):
+        candidate = clean[: preferred + 1].strip()
+    else:
+        candidate = clean[: max(1, max_chars - 1)].strip().rstrip("，,；;、:：")
+        if candidate and not candidate.endswith(("。", "！", "？", ".", "!", "?")):
+            candidate = candidate[: max(1, max_chars - 1)].rstrip("，,；;、:：") + "。"
+    if candidate.endswith(("，", ",", "；", ";", "、", ":", "：")):
+        candidate = candidate.rstrip("，,；;、:：")
+        if candidate and not candidate.endswith(("。", "！", "？", ".", "!", "?")):
+            candidate = candidate[: max(1, max_chars - 1)].rstrip("，,；;、:：") + "。"
+    return candidate[:max_chars].strip()
 
 
 def new_energy_usage_detail(context: str) -> str:

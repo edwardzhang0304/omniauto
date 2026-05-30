@@ -101,7 +101,7 @@ def main() -> int:
                 "cache_policy": {"refresh_after_seconds": 300, "ttl_seconds": 1800},
             }
         )
-        assert_true(freshness >= 330, f"online freshness window should cover refresh cadence, got {freshness}")
+        assert_true(freshness >= 1800, f"online freshness window should honor valid cloud lease TTL, got {freshness}")
         results.append({"name": "cloud_gate_freshness_window_alignment", "ok": True})
     except Exception as exc:
         results.append({"name": "cloud_gate_freshness_window_alignment", "ok": False, "error": repr(exc)})

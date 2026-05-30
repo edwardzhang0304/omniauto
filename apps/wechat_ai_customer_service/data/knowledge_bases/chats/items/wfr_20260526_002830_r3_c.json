@@ -1,0 +1,39 @@
+{
+  "id": "wfr_20260526_002830_r3_c",
+  "customer_message": "wfrq_20260526_002830_r3_c 周末看车怎么预约更快？",
+  "service_reply": "你发下到店时间和意向车型，我帮你安排预约看车排期。",
+  "intent_tags": [
+    "预约看车"
+  ],
+  "tone_tags": [
+    "执行导向"
+  ],
+  "scenario": "看车预约",
+  "hit_count": 6,
+  "schema_version": 1,
+  "category_id": "chats",
+  "source": {
+    "type": "workflow_import"
+  },
+  "data": {
+    "customer_message": "wfrq_20260526_002830_r3_c 周末看车怎么预约更快？",
+    "service_reply": "你发下到店时间和意向车型，我帮你安排预约看车排期。",
+    "intent_tags": [],
+    "tone_tags": [],
+    "additional_details": {
+      "workflow_import": "你发下到店时间和意向车型，我帮你安排预约看车排期。"
+    }
+  },
+  "runtime": {
+    "allow_auto_reply": true,
+    "requires_handoff": false,
+    "risk_level": "normal"
+  },
+  "metadata": {
+    "created_at": "2026-05-26T00:28:30",
+    "updated_at": "2026-05-26T00:28:34",
+    "created_by": "workflow_import",
+    "updated_by": "workflow_import"
+  },
+  "status": "active"
+}

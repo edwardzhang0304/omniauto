@@ -19,10 +19,12 @@ import copy
 import hashlib
 import json
 import os
+import random
 import re
 import sys
 import threading
 import time
+import unicodedata
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -59,6 +61,7 @@ from realtime_reply_router import (
     choose_reply_variant,
     de_template_reply_text,
     decide_realtime_reply_route,
+    extract_visit_time_label,
     initial_token_budget,
     maybe_build_realtime_reply,
     reply_similarity,
@@ -66,6 +69,7 @@ from realtime_reply_router import (
 )
 from reply_style_adapter import adapt_reply_style, infer_source_channel
 from wechat_connector import FILE_TRANSFER_ASSISTANT, ROOT, WeChatConnector
+from apps.wechat_ai_customer_service.customer_service_live_safety import apply_customer_service_live_safety_guard
 from apps.wechat_ai_customer_service.admin_backend.services.customer_service_runtime import (
     summarize_listener_result,
     write_runtime_status,
@@ -88,6 +92,25 @@ MAX_STORED_IDS = 1000
 DEFAULT_MAX_BATCH_MESSAGES = 8
 
 
+def write_workflow_phase(phase: str, **payload: Any) -> None:
+    path_value = str(os.getenv("WECHAT_LISTENER_PHASE_LOG_PATH") or "").strip()
+    if not path_value:
+        return
+    record = {
+        "created_at": datetime.now().isoformat(timespec="seconds"),
+        "pid": os.getpid(),
+        "phase": str(phase or "").strip(),
+        **payload,
+    }
+    try:
+        path = Path(path_value)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with path.open("a", encoding="utf-8") as handle:
+            handle.write(json.dumps(record, ensure_ascii=False) + "\n")
+    except Exception:
+        pass
+
+
 EXPLICIT_HANDOFF_PATTERNS = (
     r"转人工",
     r"人工客服",
@@ -98,11 +121,15 @@ EXPLICIT_HANDOFF_PATTERNS = (
     r"(转给|交给).{0,6}(同事|顾问|专员|客服)",
 )
 PRICE_HARD_BOUNDARY_TERMS = ("价格", "报价", "最低", "底价", "优惠", "折扣", "少点", "便宜", "贷款", "金融", "包过", "首付", "月供")
+PRICE_ONLY_HARD_BOUNDARY_TERMS = ("价格", "报价", "最低", "底价", "优惠", "折扣", "少点", "便宜")
+FINANCE_HARD_BOUNDARY_TERMS = ("贷款", "金融", "包过", "首付", "月供", "征信", "资方", "审批", "利率")
+CONDITION_BOUNDARY_TERMS = ("检测报告", "检测", "车况", "事故", "水泡", "火烧", "出险", "维保", "保养记录", "报告")
 APPOINTMENT_TERMS = ("试驾", "到店", "看车", "订金", "定金", "留车", "锁车", "预约", "周末", "周六", "周日", "上午", "下午", "几点", "安排", "过去", "来店", "门店")
 SAME_DAY_DELIVERY_TERMS = ("办手续", "直接办", "当天办", "提车", "直接提", "当天提", "临牌", "过户", "交车")
+SAME_DAY_DELIVERY_STRONG_TERMS = ("办手续", "直接办", "当天办", "当天", "提车", "直接提", "当天提", "临牌", "交车", "办完")
 LOCATION_CONTACT_TERMS = ("门店地址", "店地址", "地址", "导航", "位置", "在哪", "哪里", "找谁", "联系人", "对接人", "到了找")
 LOCATION_CONTACT_STRONG_TERMS = ("门店地址", "店地址", "地址", "导航", "位置", "在哪", "哪里", "找谁", "对接人", "到了找", "到店找", "跑错")
-LOCATION_VISIT_CONTEXT_TERMS = ("门店", "店里", "到店", "到了", "过去", "看车", "试驾", "来店", "导航", "地址")
+LOCATION_VISIT_CONTEXT_TERMS = ("门店地址", "店地址", "门店", "店里", "到店", "到了", "过去", "看车", "试驾", "来店", "导航")
 CONTACT_DATA_TERMS = ("电话", "手机号", "联系方式", "我叫", "联系人", "姓名", "先生", "女士")
 AFTER_SALES_TERMS = ("赔偿", "退款", "纠纷", "投诉", "事故", "水泡", "火烧", "过户", "上牌")
 TRADE_IN_TERMS = ("置换", "抵车款", "抵多少", "抵扣", "抵一点", "卖车", "收车", "旧车", "估价", "估个", "估一下", "估一", "怎么估")
@@ -110,6 +137,33 @@ INTERNAL_PROBE_TERMS = ("系统提示词", "内部规则", "API密钥", "api密�
 NEW_ENERGY_TERMS = ("新能源", "电池", "三电", "续航", "充电", "混动", "DM-i", "dmi", "插混")
 DOCUMENT_TERMS = ("合同", "发票", "开票", "抬头", "税号", "少开", "低开", "保险")
 OFF_TOPIC_TERMS = ("外挂", "破解", "脚本", "刷单", "灰产", "游戏外挂")
+STANDALONE_GREETING_TERMS = {
+    "你好",
+    "您好",
+    "在吗",
+    "有人吗",
+    "老板在吗",
+    "hello",
+    "hi",
+    "哈喽",
+    "嗨",
+}
+GREETING_BUSINESS_HINT_TERMS = tuple(
+    unique
+    for group in (
+        PRICE_HARD_BOUNDARY_TERMS,
+        APPOINTMENT_TERMS,
+        SAME_DAY_DELIVERY_TERMS,
+        LOCATION_CONTACT_TERMS,
+        CONTACT_DATA_TERMS,
+        AFTER_SALES_TERMS,
+        TRADE_IN_TERMS,
+        NEW_ENERGY_TERMS,
+        DOCUMENT_TERMS,
+        ("车", "预算", "推荐", "公里", "年份", "车况", "事故", "保养", "置换", "贷款"),
+    )
+    for unique in group
+)
 
 
 @dataclass(frozen=True)
@@ -254,12 +308,16 @@ def main() -> int:
 
     try:
         write_runtime_status("thinking", "正在读取微信消息并调用必要的大模型。")
+        write_workflow_phase("workflow_start", config=str(args.config), send=bool(args.send), write_data=bool(args.write_data))
         result = run_workflow(args)
     except Exception as exc:
+        write_workflow_phase("workflow_exception", error=repr(exc))
         write_runtime_status("idle", "本轮处理出错，监听会自动重试。", last_error=repr(exc))
         result = {"ok": False, "error": repr(exc)}
     else:
-        write_runtime_status("idle", "本轮微信消息处理完成。", **summarize_listener_result(result))
+        write_workflow_phase("workflow_done", ok=bool(result.get("ok")), event_count=len(result.get("events") or []))
+        status_state, status_message = listener_runtime_status_after_result(result)
+        write_runtime_status(status_state, status_message, **summarize_listener_result(result))
 
     print_json(result)
     return 0 if result.get("ok") else 1
@@ -313,7 +371,17 @@ def run_workflow(args: argparse.Namespace) -> dict[str, Any]:
         connector = WeChatConnector()
         state = load_state(state_path)
 
-        status = connector.require_online()
+        skip_pre_status = listener_skip_pre_status_check()
+        if skip_pre_status:
+            status = {
+                "ok": True,
+                "online": True,
+                "adapter": "win32_ocr",
+                "state": "pre_status_check_skipped",
+                "reason": "managed_listener_low_risk_mode",
+            }
+        else:
+            status = connector.require_online()
         summary: dict[str, Any] = {
             "ok": True,
             "dry_run": not args.send,
@@ -334,11 +402,32 @@ def run_workflow(args: argparse.Namespace) -> dict[str, Any]:
                 max_targets_per_iteration=int(multi_target_cfg.get("max_targets_per_iteration", 5)),
                 min_switch_interval_seconds=int(multi_target_cfg.get("min_switch_interval_seconds", 2)),
             )
+        previous_active_names: set[str] = set()
 
         for iteration in range(iterations):
             iteration_events = []
             if use_multi_target and session_monitor is not None:
                 active = session_monitor.poll(connector)
+                active_names = {str(item.name) for item in active if str(getattr(item, "name", "") or "")}
+                if active and active_names != previous_active_names:
+                    warmup_delay = multi_target_change_warmup_delay_seconds(multi_target_cfg)
+                    if warmup_delay > 0:
+                        write_workflow_phase(
+                            "session_change_warmup_start",
+                            iteration=iteration + 1,
+                            active_targets=sorted(active_names),
+                            delay_seconds=round(warmup_delay, 3),
+                        )
+                        time.sleep(warmup_delay)
+                        refreshed_active = session_monitor.poll(connector)
+                        active = coalesce_active_targets(active, refreshed_active)
+                        active_names = {str(item.name) for item in active if str(getattr(item, "name", "") or "")}
+                        write_workflow_phase(
+                            "session_change_warmup_done",
+                            iteration=iteration + 1,
+                            active_targets=sorted(active_names),
+                        )
+                previous_active_names = active_names
                 dynamic_targets = build_iteration_targets(
                     config_targets=targets,
                     active_targets=active,
@@ -374,6 +463,8 @@ def run_workflow(args: argparse.Namespace) -> dict[str, Any]:
                     session_monitor.reset_unread(target.name)
             save_state(state_path, state)
             summary["events"].extend(iteration_events)
+            if any(item.get("ok") is False for item in iteration_events if isinstance(item, dict)):
+                summary["ok"] = False
             if iteration < iterations - 1:
                 time.sleep(max(1, interval))
 
@@ -393,6 +484,13 @@ def cloud_gate_error_result() -> dict[str, Any] | None:
         "message": message,
         "cloud_gate": gate,
     }
+
+
+def listener_skip_pre_status_check() -> bool:
+    raw = os.getenv("WECHAT_LISTENER_SKIP_PRE_STATUS")
+    if raw is None:
+        return True
+    return str(raw).strip().lower() not in {"0", "false", "no", "off"}
 
 
 def _enqueue_post_reply_work(
@@ -482,12 +580,20 @@ def process_target(
         target.name,
         {
             "processed_message_ids": [],
+            "processed_content_keys": [],
             "handoff_message_ids": [],
             "sent_replies": [],
             "reply_timestamps": [],
         },
     )
+    write_workflow_phase("target_get_messages_start", target=target.name, send=bool(send))
     payload = connector.get_messages(target.name, exact=target.exact)
+    write_workflow_phase(
+        "target_get_messages_done",
+        target=target.name,
+        ok=bool(payload.get("ok")),
+        message_count=len(payload.get("messages") or []),
+    )
     if not payload.get("ok"):
         return base_event(target, "error", {"messages": payload})
     console_settings = config.get("_local_customer_service_settings", {}) or {}
@@ -500,6 +606,7 @@ def process_target(
     if str(console_settings.get("reply_mode") or "") == "manual_assist":
         send = False
 
+    write_workflow_phase("history_backfill_start", target=target.name, message_count=len(payload.get("messages") or []))
     payload = maybe_enrich_messages_with_history(
         connector=connector,
         target=target,
@@ -507,6 +614,7 @@ def process_target(
         payload=payload,
         target_state=target_state,
     )
+    write_workflow_phase("history_backfill_done", target=target.name, message_count=len(payload.get("messages") or []))
     raw_capture = maybe_record_raw_messages(target, config, payload.get("messages", []) or [])
     selection = select_batch_details(
         payload.get("messages", []) or [],
@@ -515,6 +623,34 @@ def process_target(
         max_batch_messages=target.max_batch_messages,
         config=config,
     )
+    write_workflow_phase(
+        "batch_selection_done",
+        target=target.name,
+        eligible_count=selection.eligible_count,
+        overflow_count=len(selection.overflow_messages),
+    )
+    history_backfill_meta = payload.get("_history_backfill", {}) if isinstance(payload.get("_history_backfill"), dict) else {}
+    if history_gap_risk_blocks_reply(history_backfill_meta, config) and selection.eligible_count > 0:
+        write_runtime_status(
+            "paused",
+            "检测到微信消息窗口可能存在缺口，已暂停自动回复，等待回填确认或人工处理。",
+            target=target.name,
+            last_action="blocked",
+            last_reason="history_backfill_gap_risk",
+            history_backfill=history_backfill_meta,
+        )
+        return base_event(
+            target,
+            "blocked",
+            {
+                "reason": "history_backfill_gap_risk",
+                "raw_capture": raw_capture,
+                "batch_selection": batch_selection_payload(selection),
+                "history_backfill": history_backfill_meta,
+                "message_count": selection.eligible_count,
+                "dry_run": not send,
+            },
+        )
     batch = selection.batch
     if not batch:
         return base_event(
@@ -527,14 +663,50 @@ def process_target(
             },
         )
 
-    # Load or create customer profile
+    # LLM-only planning runs in parallel, so keep it side-effect-free. The real
+    # send/write path still updates customer profile stats below.
     profile_store = CustomerProfileStore()
-    profile = profile_store.get_or_create(target_name=target.name, display_name=target.name)
-    profile_store.increment_message_stats(target_name=target.name, is_reply=False)
+    if send or write_data:
+        profile = profile_store.get_or_create(target_name=target.name, display_name=target.name)
+        profile_store.increment_message_stats(target_name=target.name, is_reply=False)
+    else:
+        profile = profile_store.get_profile(target_name=target.name) or {
+            "target_name": target.name,
+            "display_name": target.name,
+            "basic_info": {},
+            "tags": {},
+            "conversation_summary": "",
+            "greeting_preference": {},
+        }
 
     semantic_batch_plan = plan_message_batch_semantics(batch, config)
     combined = str(semantic_batch_plan.get("combined_text") or "\n".join(str(item.get("content") or "") for item in batch))
     message_ids = [str(item.get("id") or "") for item in batch]
+    if send and should_defer_standalone_greeting(config, batch, combined):
+        mark_coalesced_messages(
+            target_state,
+            batch,
+            reason="standalone_greeting_deferred_for_rpa_safety",
+        )
+        mark_coalesced_messages(
+            target_state,
+            selection.overflow_messages,
+            reason="overflow_coalesced_after_standalone_greeting_defer",
+        )
+        return base_event(
+            target,
+            "skipped",
+            {
+                "reason": "standalone_greeting_deferred_for_rpa_safety",
+                "message_ids": message_ids,
+                "message_count": len(batch),
+                "combined_content": combined,
+                "raw_capture": raw_capture,
+                "batch_selection": batch_selection_payload(selection),
+                "semantic_batch_plan": semantic_batch_plan,
+                "dry_run": False,
+            },
+        )
     write_runtime_status(
         "thinking",
         f"正在处理「{target.name}」的 {len(batch)} 条新消息。",
@@ -566,12 +738,14 @@ def process_target(
     )
 
     # 2. LLM intent routing — replaces keyword-based customer_data gate
+    write_workflow_phase("intent_route_start", target=target.name, message_count=len(batch))
     intent_result = route_intent(
         combined=combined,
         config=config,
         evidence_pack=evidence_pack,
         target_state=target_state,
     )
+    write_workflow_phase("intent_route_done", target=target.name, intent=intent_result.intent, confidence=intent_result.confidence)
 
     # 3. Branch by intent
     data_capture: dict[str, Any] = {"enabled": False}
@@ -579,6 +753,7 @@ def process_target(
     decision: ReplyDecision
 
     if intent_result.intent == "customer_data_provide":
+        write_workflow_phase("data_capture_start", target=target.name, intent=intent_result.intent)
         data_capture = maybe_capture_customer_data(
             config=config,
             target_state=target_state,
@@ -588,6 +763,7 @@ def process_target(
             write_data=False,
             intent_result=intent_result,
         )
+        write_workflow_phase("data_capture_done", target=target.name, enabled=bool(data_capture.get("enabled")), complete=bool(data_capture.get("complete")))
         if data_capture.get("enabled"):
             data_capture["write_requested"] = write_data
         decision = decide_reply_with_data_capture(
@@ -606,6 +782,7 @@ def process_target(
     else:
         # product_inquiry, general_chat, greeting, unclear
         # Extract data fields without blocking the flow
+        write_workflow_phase("data_capture_start", target=target.name, intent=intent_result.intent)
         data_capture = maybe_capture_customer_data(
             config=config,
             target_state=target_state,
@@ -615,11 +792,19 @@ def process_target(
             write_data=False,
             intent_result=intent_result,
         )
+        write_workflow_phase("data_capture_done", target=target.name, enabled=bool(data_capture.get("enabled")), complete=bool(data_capture.get("complete")))
         if data_capture.get("enabled"):
             data_capture["write_requested"] = write_data
 
+        write_workflow_phase("product_knowledge_start", target=target.name)
         product_knowledge = maybe_match_product_knowledge(
             config, target_state, combined, data_capture
+        )
+        write_workflow_phase(
+            "product_knowledge_done",
+            target=target.name,
+            matched=bool(product_knowledge and product_knowledge.get("matched")),
+            match_type=(product_knowledge or {}).get("match_type") if product_knowledge else "",
         )
         update_conversation_context(target_state, product_knowledge)
         decision = decide_reply_with_data_capture(
@@ -667,6 +852,7 @@ def process_target(
 
     clear_rate_limit_backoff(target_state, message_ids)
 
+    write_workflow_phase("intent_assist_start", target=target.name)
     event["intent_assist"] = maybe_analyze_intent(
         config=config,
         combined=combined,
@@ -675,6 +861,13 @@ def process_target(
         data_capture=data_capture,
         product_knowledge=product_knowledge,
     )
+    write_workflow_phase(
+        "intent_assist_done",
+        target=target.name,
+        needs_handoff=bool(event["intent_assist"].get("needs_handoff")),
+        llm_status=((event["intent_assist"].get("llm_advisory") or {}).get("status") if isinstance(event["intent_assist"].get("llm_advisory"), dict) else ""),
+    )
+    write_workflow_phase("rag_reply_start", target=target.name)
     rag_reply = maybe_build_rag_reply(
         config=config,
         text=combined,
@@ -684,6 +877,7 @@ def process_target(
         product_knowledge=product_knowledge,
         data_capture=data_capture,
     )
+    write_workflow_phase("rag_reply_done", target=target.name, applied=bool(rag_reply.get("applied")))
     event["rag_reply"] = rag_reply
     if rag_reply.get("applied"):
         decision = ReplyDecision(
@@ -708,6 +902,7 @@ def process_target(
             "reason": "skipped_after_rag_reply",
         }
     else:
+        write_workflow_phase("llm_reply_apply_start", target=target.name)
         llm_reply = maybe_apply_llm_reply(
             config=config,
             decision=decision,
@@ -716,6 +911,7 @@ def process_target(
             product_knowledge=product_knowledge,
             data_capture=data_capture,
         )
+        write_workflow_phase("llm_reply_apply_done", target=target.name, applied=bool(llm_reply.get("applied")), reason=llm_reply.get("reason"))
     event["llm_reply"] = llm_reply
     if llm_reply.get("applied"):
         decision = ReplyDecision(
@@ -738,6 +934,7 @@ def process_target(
         "applied": realtime_combined != combined,
         "text": realtime_combined[:1200] if realtime_combined != combined else "",
     }
+    write_workflow_phase("realtime_route_start", target=target.name)
     runtime_route = decide_realtime_reply_route(
         config=config,
         combined=realtime_combined,
@@ -750,6 +947,13 @@ def process_target(
         data_capture=data_capture,
         evidence_pack=evidence_pack,
         recent_reply_texts=recent_reply_texts,
+    )
+    write_workflow_phase(
+        "realtime_route_done",
+        target=target.name,
+        level=runtime_route.get("level"),
+        foreground_llm_allowed=bool(runtime_route.get("foreground_llm_allowed")),
+        reason=runtime_route.get("reason"),
     )
     event["runtime_route"] = runtime_route
     if runtime_route.get("level") == "L0" and runtime_route.get("reason") == "deterministic_handoff_or_high_risk_boundary":
@@ -766,6 +970,7 @@ def process_target(
             "reply_text": reply_text,
         }
     token_budget = initial_token_budget(runtime_route)
+    write_workflow_phase("realtime_reply_start", target=target.name)
     realtime_reply = maybe_build_realtime_reply(
         config=config,
         route=runtime_route,
@@ -774,6 +979,7 @@ def process_target(
         current_reply_text=reply_text,
         recent_reply_texts=recent_reply_texts,
     )
+    write_workflow_phase("realtime_reply_done", target=target.name, applied=bool(realtime_reply.get("applied")), reason=realtime_reply.get("reason"))
     event["realtime_reply"] = realtime_reply
     if realtime_reply.get("applied"):
         decision = ReplyDecision(
@@ -803,6 +1009,7 @@ def process_target(
         }
     else:
         synthesis_config = build_synthesis_config_for_route(config, runtime_route)
+        write_workflow_phase("llm_synthesis_start", target=target.name, route_level=runtime_route.get("level"))
         llm_synthesis = maybe_synthesize_reply(
             config=synthesis_config,
             target_name=target.name,
@@ -819,6 +1026,7 @@ def process_target(
             raw_capture=raw_capture,
             customer_profile=profile,
         )
+        write_workflow_phase("llm_synthesis_done", target=target.name, applied=bool(llm_synthesis.get("applied")), reason=llm_synthesis.get("reason"))
     token_budget = update_token_budget_from_synthesis(token_budget, llm_synthesis)
     event["token_budget"] = token_budget
     event["llm_reply_synthesis"] = llm_synthesis
@@ -851,6 +1059,7 @@ def process_target(
         llm_reply=llm_reply,
         rag_reply=rag_reply,
     )
+    write_workflow_phase("reply_style_start", target=target.name, source_channel=style_channel)
     style_adaptation = adapt_reply_style(
         config=config,
         customer_message=combined,
@@ -860,6 +1069,7 @@ def process_target(
         recent_reply_texts=recent_reply_texts,
         needs_handoff=bool(decision.need_handoff),
     )
+    write_workflow_phase("reply_style_done", target=target.name, applied=bool(style_adaptation.get("applied")), reason=style_adaptation.get("reason"))
     event["reply_style_adapter"] = style_adaptation
     if style_adaptation.get("applied"):
         decision = ReplyDecision(
@@ -877,6 +1087,7 @@ def process_target(
         }
 
     if send:
+        write_workflow_phase("freshness_check_start", target=target.name)
         freshness = detect_newer_messages_before_send(
             connector=connector,
             target=target,
@@ -884,13 +1095,19 @@ def process_target(
             batch=batch,
             config=config,
         )
+        write_workflow_phase(
+            "freshness_check_done",
+            target=target.name,
+            has_newer_messages=bool(freshness.get("has_newer_messages")),
+            gap_risk=bool(freshness.get("gap_risk")),
+        )
         event["freshness_check"] = freshness
         if freshness.get("has_newer_messages"):
             event["action"] = "skipped"
-            event["reason"] = "newer_message_arrived_during_reply_build"
+            event["reason"] = "freshness_gap_risk" if freshness.get("gap_risk") else "newer_message_arrived_during_reply_build"
             write_runtime_status(
                 "idle",
-                "客户刚刚又发了新消息，本轮旧回复已暂停，下一轮会合并最新上下文再答。",
+                "消息窗口连续性无法确认，本轮旧回复已暂停。" if freshness.get("gap_risk") else "客户刚刚又发了新消息，本轮旧回复已暂停，下一轮会合并最新上下文再答。",
                 target=target.name,
                 last_action="skipped",
                 last_reason=event["reason"],
@@ -903,6 +1120,7 @@ def process_target(
         product_knowledge,
         fallback_allowed,
         intent_assist=event["intent_assist"],
+        combined=combined,
     )
     operator_handoff = handoff_enabled and operator_handoff_required
     prebuilt_handoff_reason = ""
@@ -955,6 +1173,7 @@ def process_target(
         if handoff_naturalness.get("applied"):
             prebuilt_handoff_reply_text = str(handoff_naturalness.get("reply_text") or prebuilt_handoff_reply_text)
         if not (send and operator_handoff_required and not handoff_enabled):
+            write_workflow_phase("final_polish_start", target=target.name, source_channel="handoff", reply_chars=len(prebuilt_handoff_reply_text))
             final_handoff_polish = finalize_customer_visible_reply_with_llm(
                 prebuilt_handoff_reply_text,
                 config=config,
@@ -963,11 +1182,27 @@ def process_target(
                 source_channel="handoff",
                 needs_handoff=True,
             )
+            write_workflow_phase("final_polish_done", target=target.name, passed=bool(final_handoff_polish.get("passed")), reason=final_handoff_polish.get("reason"))
             event["final_visible_llm_polish_handoff"] = final_handoff_polish
             if final_handoff_polish.get("passed"):
                 prebuilt_handoff_reply_text = str(final_handoff_polish.get("reply_text") or prebuilt_handoff_reply_text)
-            elif final_visible_polish_blocks_send(final_handoff_polish):
+            elif final_visible_polish_blocks_send(final_handoff_polish, config=config):
                 return block_for_final_visible_polish_failure(event, target, final_handoff_polish)
+            elif final_visible_polish_degraded(final_handoff_polish, config=config):
+                event["final_visible_llm_polish_handoff_degraded"] = True
+        if decision.rule_name == "customer_data_capture":
+            guarded_handoff_reply = ensure_data_capture_success_context(prebuilt_handoff_reply_text, data_capture)
+            if guarded_handoff_reply != prebuilt_handoff_reply_text:
+                event["data_capture_reply_guard_handoff"] = {
+                    "applied": True,
+                    "original_reply_text": prebuilt_handoff_reply_text,
+                    "reply_text": guarded_handoff_reply,
+                }
+                prebuilt_handoff_reply_text = guarded_handoff_reply
+        handoff_reply_safety = enforce_rpa_reply_safety(prebuilt_handoff_reply_text, config)
+        event["rpa_reply_safety_handoff"] = handoff_reply_safety
+        if handoff_reply_safety.get("applied"):
+            prebuilt_handoff_reply_text = str(handoff_reply_safety.get("reply_text") or prebuilt_handoff_reply_text)
         decision = ReplyDecision(
             reply_text=split_reply_prefix(prebuilt_handoff_reply_text, config)[1],
             rule_name=decision.rule_name,
@@ -1018,7 +1253,10 @@ def process_target(
         event["decision"]["need_handoff"] = True
         event["decision"]["handoff_reason"] = reason
         event["decision"]["reply_text"] = handoff_reply_text
+        write_runtime_status("thinking", f"正在向「{target.name}」发送回复。", target=target.name, reply_chars=len(handoff_reply_text))
+        write_workflow_phase("rpa_send_start", target=target.name, reply_chars=len(handoff_reply_text), handoff=True)
         verified = connector.send_text_and_verify(target.name, handoff_reply_text, exact=target.exact)
+        write_workflow_phase("rpa_send_done", target=target.name, verified=bool(verified.get("verified")), adapter=verified.get("adapter"), state=verified.get("state"))
         event["send_result"] = verified
         event["verified"] = bool(verified.get("verified"))
         deferred = maybe_defer_transport_send_failure(target_state, message_ids, verified, event)
@@ -1120,6 +1358,7 @@ def process_target(
         event["outbound_naturalness"] = outbound_naturalness
         if outbound_naturalness.get("applied"):
             reply_text = str(outbound_naturalness.get("reply_text") or reply_text)
+        write_workflow_phase("final_polish_start", target=target.name, source_channel=str(style_channel or "normal"), reply_chars=len(reply_text))
         final_polish = finalize_customer_visible_reply_with_llm(
             reply_text,
             config=config,
@@ -1128,13 +1367,32 @@ def process_target(
             source_channel=str(style_channel or "normal"),
             needs_handoff=False,
         )
+        write_workflow_phase("final_polish_done", target=target.name, passed=bool(final_polish.get("passed")), reason=final_polish.get("reason"))
         event["final_visible_llm_polish"] = final_polish
         if final_polish.get("passed"):
             reply_text = str(final_polish.get("reply_text") or reply_text)
-        elif final_visible_polish_blocks_send(final_polish):
+        elif final_visible_polish_blocks_send(final_polish, config=config):
             return block_for_final_visible_polish_failure(event, target, final_polish)
+        elif final_visible_polish_degraded(final_polish, config=config):
+            event["final_visible_llm_polish_degraded"] = True
+        if decision.rule_name == "customer_data_capture":
+            guarded_data_reply = ensure_data_capture_success_context(reply_text, data_capture)
+            if guarded_data_reply != reply_text:
+                event["data_capture_reply_guard"] = {
+                    "applied": True,
+                    "original_reply_text": reply_text,
+                    "reply_text": guarded_data_reply,
+                }
+                reply_text = guarded_data_reply
+        reply_safety = enforce_rpa_reply_safety(reply_text, config)
+        event["rpa_reply_safety"] = reply_safety
+        if reply_safety.get("applied"):
+            reply_text = str(reply_safety.get("reply_text") or reply_text)
         event["decision"]["reply_text"] = reply_text
+        write_runtime_status("thinking", f"正在向「{target.name}」发送回复。", target=target.name, reply_chars=len(reply_text))
+        write_workflow_phase("rpa_send_start", target=target.name, reply_chars=len(reply_text), handoff=False)
         verified = connector.send_text_and_verify(target.name, reply_text, exact=target.exact)
+        write_workflow_phase("rpa_send_done", target=target.name, verified=bool(verified.get("verified")), adapter=verified.get("adapter"), state=verified.get("state"))
         event["send_result"] = verified
         event["verified"] = bool(verified.get("verified"))
         deferred = maybe_defer_transport_send_failure(target_state, message_ids, verified, event)
@@ -1286,8 +1544,10 @@ def handle_rate_limit_block(
     event["final_visible_llm_polish_rate_limit"] = final_notice_polish
     if final_notice_polish.get("passed"):
         notice_text = str(final_notice_polish.get("reply_text") or notice_text)
-    elif final_visible_polish_blocks_send(final_notice_polish):
+    elif final_visible_polish_blocks_send(final_notice_polish, config=config):
         return block_for_final_visible_polish_failure(event, target, final_notice_polish)
+    elif final_visible_polish_degraded(final_notice_polish, config=config):
+        event["final_visible_llm_polish_rate_limit_degraded"] = True
     verified = connector.send_text_and_verify(target.name, notice_text, exact=target.exact)
     event["rate_limit_notice"] = {
         "reply_text": notice_text,
@@ -1335,6 +1595,7 @@ def maybe_defer_transport_send_failure(
         "send_geometry_blocked",
         "target_not_confirmed",
         "send_uia_unavailable",
+        "send_input_not_ready",
     }:
         return None
     backoff = transport_send_backoff(send_result)
@@ -1358,6 +1619,7 @@ def transport_send_backoff(send_result: dict[str, Any]) -> dict[str, Any]:
             "send_geometry_blocked": 180,
             "target_not_confirmed": 120,
             "send_uia_unavailable": 300,
+            "send_input_not_ready": 180,
         }.get(str(send_result.get("state") or ""), 180)
     retry_after_at = datetime.now() + timedelta(seconds=wait_seconds)
     return {
@@ -1412,6 +1674,121 @@ def split_reply_prefix(reply_text: str, config: dict[str, Any]) -> tuple[str, st
     if prefix and clean.startswith(prefix):
         return prefix, clean[len(prefix) :].strip()
     return "", clean
+
+
+def rpa_reply_safety_settings(config: dict[str, Any]) -> dict[str, Any]:
+    settings = config.get("rpa_reply_safety") if isinstance(config.get("rpa_reply_safety"), dict) else {}
+    guard = config.get("live_safety_guard") if isinstance(config.get("live_safety_guard"), dict) else {}
+    enabled = settings.get("enabled", guard.get("enabled", False))
+    return {
+        "enabled": bool(enabled),
+        "defer_standalone_greeting": settings.get(
+            "defer_standalone_greeting",
+            guard.get("defer_standalone_greeting", False),
+        )
+        is not False,
+        "max_auto_reply_chars": int(settings.get("max_auto_reply_chars") or guard.get("max_auto_reply_chars") or 0),
+    }
+
+
+def normalize_greeting_probe_text(text: str) -> str:
+    compact = re.sub(r"[\s，。,.！？!、~～：:；;“”\"'（）()]+", "", str(text or "")).lower()
+    return compact.strip()
+
+
+def is_standalone_greeting_text(text: str) -> bool:
+    compact = normalize_greeting_probe_text(text)
+    if not compact or len(compact) > 12:
+        return False
+    if any(term.lower() in compact for term in GREETING_BUSINESS_HINT_TERMS):
+        return False
+    return compact in STANDALONE_GREETING_TERMS
+
+
+def should_defer_standalone_greeting(config: dict[str, Any], batch: list[dict[str, Any]], combined: str) -> bool:
+    settings = rpa_reply_safety_settings(config)
+    if not settings.get("enabled") or not settings.get("defer_standalone_greeting"):
+        return False
+    messages = [item for item in batch if str(item.get("content") or "").strip()]
+    if not messages:
+        return False
+    if any(not is_standalone_greeting_text(str(item.get("content") or "")) for item in messages):
+        return False
+    return is_standalone_greeting_text(combined)
+
+
+def truncate_reply_body_for_rpa_safety(body: str, max_chars: int) -> str:
+    clean = " ".join(str(body or "").split())
+    if max_chars <= 0 or rpa_reply_content_char_count(clean) <= max_chars:
+        return clean
+    cutoff = rpa_reply_content_cutoff_index(clean, max_chars)
+    preferred = -1
+    for marker in ("。", "！", "？", "!", "?", "；", ";", "，", ","):
+        index = clean.rfind(marker, 0, cutoff)
+        if index > preferred:
+            preferred = index
+    if preferred >= 0 and rpa_reply_content_char_count(clean[: preferred + 1]) >= max(18, int(max_chars * 0.55)):
+        trimmed = clean[: preferred + 1].rstrip()
+    else:
+        trimmed = clean[:cutoff].rstrip()
+    return finish_truncated_reply_body(trimmed)
+
+
+def finish_truncated_reply_body(text: str) -> str:
+    clean = str(text or "").strip().rstrip("，,；;、:：")
+    if not clean:
+        return clean
+    if clean.endswith(("。", "！", "？", ".", "!", "?")):
+        return clean
+    return clean + "。"
+
+
+def rpa_reply_content_char_count(text: str) -> int:
+    """Count visible content characters, ignoring punctuation and whitespace."""
+    count = 0
+    for char in str(text or ""):
+        if not char.strip():
+            continue
+        category = unicodedata.category(char)
+        if category.startswith("P") or category.startswith("Z"):
+            continue
+        count += 1
+    return count
+
+
+def rpa_reply_content_cutoff_index(text: str, max_chars: int) -> int:
+    if max_chars <= 0:
+        return 0
+    count = 0
+    for index, char in enumerate(str(text or "")):
+        if char.strip():
+            category = unicodedata.category(char)
+            if not category.startswith("P") and not category.startswith("Z"):
+                count += 1
+        if count >= max_chars:
+            return index + 1
+    return len(str(text or ""))
+
+
+def enforce_rpa_reply_safety(reply_text: str, config: dict[str, Any]) -> dict[str, Any]:
+    settings = rpa_reply_safety_settings(config)
+    if not settings.get("enabled"):
+        return {"applied": False, "reason": "rpa_reply_safety_disabled", "reply_text": str(reply_text or "").strip()}
+    limit = int(settings.get("max_auto_reply_chars") or 0)
+    if limit <= 0:
+        return {"applied": False, "reason": "max_auto_reply_chars_unset", "reply_text": str(reply_text or "").strip()}
+    prefix, body = split_reply_prefix(reply_text, config)
+    truncated = truncate_reply_body_for_rpa_safety(body or reply_text, limit)
+    final = format_reply(truncated, prefix or configured_reply_prefix(config))
+    if final.strip() == str(reply_text or "").strip():
+        return {"applied": False, "reason": "within_rpa_reply_limit", "reply_text": final}
+    return {
+        "applied": True,
+        "reason": "rpa_reply_length_capped",
+        "reply_text": final,
+        "max_auto_reply_chars": limit,
+        "original_chars": rpa_reply_content_char_count(str(reply_text or "").strip()),
+    }
 
 
 def recent_customer_visible_reply_texts(target_state: dict[str, Any], *, limit: int = 5) -> list[str]:
@@ -1474,6 +1851,9 @@ def state_context_text_is_polluted(text: str) -> bool:
 
 def build_realtime_context_combined(combined: str, target_state: dict[str, Any]) -> str:
     current = str(combined or "").strip()
+    fresh_need = extract_latest_fresh_need_reset_message(current)
+    if fresh_need:
+        return fresh_need
     recent = recent_customer_message_texts(target_state, limit=5)
     if not current or not recent:
         return current
@@ -1547,6 +1927,46 @@ def build_realtime_context_combined(combined: str, target_state: dict[str, Any])
     return f"近期客户需求：\n{recent_text}\n当前客户问题：{current}"
 
 
+def extract_latest_fresh_need_reset_message(text: str) -> str:
+    """Return a latest self-contained new-customer need from a mixed visible batch."""
+    raw = str(text or "").strip()
+    if "\n" not in raw:
+        return ""
+    lines = [line.strip(" \t-•·、") for line in raw.splitlines() if line.strip()]
+    if len(lines) <= 1:
+        return ""
+    for line in reversed(lines):
+        clean = re.sub(r"\s+", "", line).lower()
+        if not any(marker in clean for marker in ("刚加上", "刚加好友", "刚加微信", "刚通过", "朋友介绍", "第一次咨询")):
+            continue
+        has_budget = bool(
+            re.search(
+                r"(\d+(?:\.\d+)?\s*(?:到|至|~|～|-|—|－)?\s*\d*(?:\.\d+)?\s*万|[一二三四五六七八九十两]{1,3}万)",
+                line,
+            )
+        )
+        has_vehicle_need = any(
+            marker in clean
+            for marker in (
+                "预算",
+                "买",
+                "换",
+                "看车",
+                "车",
+                "家用",
+                "通勤",
+                "接待",
+                "客户",
+                "代步",
+                "省油",
+                "体面",
+            )
+        )
+        if has_budget and has_vehicle_need:
+            return line
+    return ""
+
+
 def recent_sent_reply_content_keys(target_state: dict[str, Any], *, limit: int = 30) -> set[str]:
     """Track exact customer-visible replies so File Transfer self-tests do not re-read them as customer input."""
     keys: list[str] = []
@@ -1569,7 +1989,7 @@ def recent_sent_reply_content_keys(target_state: dict[str, Any], *, limit: int =
 
 
 def normalize_reply_content_key(text: str) -> str:
-    return re.sub(r"\s+", "", str(text or "").strip())
+    return re.sub(r"[^0-9A-Za-z\u4e00-\u9fff]+", "", str(text or "").strip()).lower()
 
 
 def has_explicit_handoff_phrase(text: str) -> bool:
@@ -1613,6 +2033,13 @@ def is_location_contact_context(context: str) -> bool:
     )
 
 
+def is_same_day_delivery_context(context: str) -> bool:
+    clean = re.sub(r"\s+", "", str(context or ""))
+    if not clean:
+        return False
+    return any(term in clean for term in SAME_DAY_DELIVERY_STRONG_TERMS)
+
+
 def concealed_handoff_reply(*, combined: str = "", reason: str = "", recent_reply_texts: list[str] | None = None) -> str:
     context = f"{combined} {reason}".strip()
     if is_location_contact_context(context):
@@ -1626,6 +2053,16 @@ def concealed_handoff_reply(*, combined: str = "", reason: str = "", recent_repl
             recent_reply_texts=recent_reply_texts,
         )
     if any(term in context for term in CONTACT_DATA_TERMS) and any(term in context for term in APPOINTMENT_TERMS):
+        if any(term in context for term in ("旧车", "置换", "开过去", "抵车款")):
+            return choose_customer_visible_variant(
+                [
+                    "可以，姓名、电话和到店时间我记下了，旧车置换也一起备注。我这边确认车源和门店排期，核好后回您。",
+                    "联系方式、到店时间和旧车置换我都记下了。接下来确认车源状态、门店排期和看车安排，核好后回您。",
+                    "信息我记下了，旧车也按置换一起备注。这边确认车源还在不在、到店时间能不能排上，弄清楚后回您。",
+                ],
+                context=context,
+                recent_reply_texts=recent_reply_texts,
+            )
         return choose_customer_visible_variant(
             [
                 "可以，姓名、电话和到店时间我记下了。我这边确认一下车源和门店排期，弄清楚后回您，尽量别让您白跑。",
@@ -1635,12 +2072,35 @@ def concealed_handoff_reply(*, combined: str = "", reason: str = "", recent_repl
             context=context,
             recent_reply_texts=recent_reply_texts,
         )
-    if any(term in context for term in SAME_DAY_DELIVERY_TERMS):
+    if any(term in context for term in NEW_ENERGY_TERMS):
+        usage_detail = new_energy_usage_detail(context)
+        return choose_customer_visible_variant(
+            [
+                f"您担心电池和三电很正常，{usage_detail}。这块不能只听一句口头保证，我先核实检测记录、电池状态和车况，请稍等，确认后再跟您说这台适不适合。",
+                f"新能源最该看的就是电池、三电和检测记录。{usage_detail}，我先核清楚实际续航、检测报告和车况，请稍等，确认好再给您更稳的判断。",
+                f"这个问题问得很关键。{usage_detail}，混动车要看电池状态、三电检测和实际用车强度，我先把这些核实清楚，请稍等，确认后再跟您说适不适合入手。",
+            ],
+            context=context,
+            recent_reply_texts=recent_reply_texts,
+        )
+    if is_same_day_delivery_context(context):
         return choose_customer_visible_variant(
             [
                 "这个要看车源状态、手续资料、付款方式、过户和临牌安排，不能只凭一句话保证当天提。我先把这些环节核清楚，确认能不能当天办完再回复您。",
                 "当天提车不是不能安排，但要先确认车况报告、合同资料、付款到账、过户和临牌这些节点。我先核实门店流程，确认稳了再跟您说。",
                 "您想当天办完我理解，这个我先确认车源、手续资料和过户排期，能不能当天交车要核准后再给您准话，避免您白跑或等太久。",
+            ],
+            context=context,
+            recent_reply_texts=recent_reply_texts,
+        )
+    has_finance_boundary = any(term in context for term in FINANCE_HARD_BOUNDARY_TERMS)
+    has_condition_boundary = any(term in context for term in CONDITION_BOUNDARY_TERMS)
+    if has_finance_boundary and has_condition_boundary:
+        return choose_customer_visible_variant(
+            [
+                "贷款要看资方审核，检测报告和车况记录我可以帮您核；事故、水泡、火烧这类不能先口头定死，最终以报告和门店确认为准。",
+                "金融方案要按资方审核走，车况这块我会重点核检测报告、出险和维保记录；涉及事故水泡火烧，最终以报告为准。",
+                "这两块要分开看：贷款看资方审核，车况看检测报告和实车记录。我先把报告边界和金融方案核清楚，再给您准话。",
             ],
             context=context,
             recent_reply_texts=recent_reply_texts,
@@ -1665,17 +2125,38 @@ def concealed_handoff_reply(*, combined: str = "", reason: str = "", recent_repl
             context=context,
             recent_reply_texts=recent_reply_texts,
         )
-    if any(term in context for term in PRICE_HARD_BOUNDARY_TERMS):
+    has_price_boundary = any(term in context for term in PRICE_ONLY_HARD_BOUNDARY_TERMS)
+    if has_finance_boundary and has_price_boundary:
         return choose_customer_visible_variant(
             [
-                "您想今天定，我理解，价格和金融这块我不能为了促成就随口保证。我先把车源、付款方式和负责人意见确认好，再给您明确答复。",
-                "价格我肯定帮您争取，但最低价和贷款结果不能直接口头保证。我核实一下具体车源、成交方式和负责人意见，再回复您。",
-                "这个我先帮您往下问，争取归争取，但价格、库存和金融结果都要确认过才稳。我核清楚后再给您准话。",
+                "贷款要看资方审核，价格也要按车源和门店审批核准；我先确认车型、付款方式和负责人意见，再给您准话。",
+                "金融审批和成交价都不能先口头定死，我先把车源、首付月供方向和价格审批核清楚，再回复您。",
+                "这类问题我会谨慎点：贷款看资方，价格看门店审批。我先核实付款方案和负责人意见，确认后再跟您说准。",
             ],
             context=context,
             recent_reply_texts=recent_reply_texts,
         )
-    if any(term in context for term in SAME_DAY_DELIVERY_TERMS):
+    if has_finance_boundary:
+        return choose_customer_visible_variant(
+            [
+                "贷款要看资方审核，首付、月供和利率都得按具体车源和资料核算；我先确认金融方案后给您准话。",
+                "金融这块不能先口头定死，主要看车型、首付比例、期数和资方审核。我先把方案核清楚再回复您。",
+                "分期可以先算方向，但审批结果、利率和月供要看资方。我先确认付款方案，核好后跟您说准。",
+            ],
+            context=context,
+            recent_reply_texts=recent_reply_texts,
+        )
+    if has_price_boundary:
+        return choose_customer_visible_variant(
+            [
+                "价格和优惠我会帮您核，但超出公开规则的部分不能直接口头答应。我先把数量、库存和负责人意见确认好，再给您明确答复。",
+                "价格我肯定帮您争取，但最低价或破例优惠不能直接口头保证。我核实一下商品、数量和负责人意见，再回复您。",
+                "这个我先帮您往下问，争取归争取，但价格、库存和审批结果都要确认过才稳。我核清楚后再给您准话。",
+            ],
+            context=context,
+            recent_reply_texts=recent_reply_texts,
+        )
+    if is_same_day_delivery_context(context):
         return choose_customer_visible_variant(
             [
                 "这个要看车源状态、手续资料、付款方式、过户和临牌安排，不能只凭一句话保证当天提。我先把这些环节核清楚，确认能不能当天办完再回复您。",
@@ -1691,17 +2172,6 @@ def concealed_handoff_reply(*, combined: str = "", reason: str = "", recent_repl
                 "您这个安排我记下了，我这边确认排期，核实后回您。",
                 "可以，我把您想看的时间和车型记下，确认一下车源和门店排期再回复您。",
                 "到店这块我记一下，再确认排期和车源状态，避免您白跑，确认好就回您。",
-            ],
-            context=context,
-            recent_reply_texts=recent_reply_texts,
-        )
-    if any(term in context for term in NEW_ENERGY_TERMS):
-        usage_detail = new_energy_usage_detail(context)
-        return choose_customer_visible_variant(
-            [
-                f"您担心电池和三电很正常，{usage_detail}。这块不能只听一句口头保证，我先核实检测记录、电池状态和车况，请稍等，确认后再跟您说这台适不适合。",
-                f"新能源最该看的就是电池、三电和检测记录。{usage_detail}，我先核清楚实际续航、检测报告和车况，请稍等，确认好再给您更稳的判断。",
-                f"这个问题问得很关键。{usage_detail}，混动车要看电池状态、三电检测和实际用车强度，我先把这些核实清楚，请稍等，确认后再跟您说适不适合入手。",
             ],
             context=context,
             recent_reply_texts=recent_reply_texts,
@@ -1831,8 +2301,66 @@ def finalize_customer_visible_reply_with_llm(
     return result
 
 
-def final_visible_polish_blocks_send(result: dict[str, Any]) -> bool:
-    return bool(result.get("enabled") and result.get("required") and not result.get("passed"))
+def final_visible_polish_blocks_send(result: dict[str, Any], *, config: dict[str, Any] | None = None) -> bool:
+    if not bool(result.get("enabled") and result.get("required") and not result.get("passed")):
+        return False
+    if final_visible_polish_degraded(result, config=config):
+        return False
+    return True
+
+
+def final_visible_polish_degraded(result: dict[str, Any], *, config: dict[str, Any] | None = None) -> bool:
+    if not isinstance(config, dict):
+        return False
+    settings = config.get("final_visible_llm_polish")
+    if not isinstance(settings, dict):
+        return False
+    if settings.get("allow_send_when_unavailable", False) is not True:
+        return False
+    return final_visible_polish_is_degradable_failure(result)
+
+
+def final_visible_polish_is_degradable_failure(result: dict[str, Any]) -> bool:
+    reason = str(result.get("reason") or "").lower()
+    llm_status = result.get("llm_status") if isinstance(result.get("llm_status"), dict) else {}
+    fallback_reply = str(result.get("reply_text") or "").strip()
+    if (reason.startswith("polish_") or reason.startswith("polished_")) and fallback_reply:
+        # Guard rejected only the polished variant; fallback draft reply stays
+        # unchanged and is safer than blocking runtime delivery.
+        return True
+    status_value = llm_status.get("status")
+    status_code = 0
+    try:
+        status_code = int(status_value)
+    except (TypeError, ValueError):
+        status_code = 0
+    if status_code in {408, 409, 429, 500, 502, 503, 504}:
+        return True
+
+    transient_tokens = (
+        "timeout",
+        "timed out",
+        "connection aborted",
+        "connection reset",
+        "connection closed",
+        "connection error",
+        "remote disconnected",
+        "remote end closed",
+        "server disconnected",
+        "temporarily unavailable",
+        "service unavailable",
+        "too many requests",
+        "rate limit",
+        "gateway timeout",
+        "bad gateway",
+        "llm_polish_unavailable",
+    )
+    if any(token in reason for token in transient_tokens):
+        return True
+    llm_error = str(llm_status.get("error") or "").lower()
+    if llm_error and any(token in llm_error for token in transient_tokens):
+        return True
+    return False
 
 
 def block_for_final_visible_polish_failure(event: dict[str, Any], target: TargetConfig, result: dict[str, Any]) -> dict[str, Any]:
@@ -1876,7 +2404,7 @@ def normalize_customer_visible_mechanics(
         ("我这边会", ("这边会", "我会", "先")),
         ("这个需求已经比较明确了", ("条件已经比较清楚了", "这个方向挺明确了", "需求这块已经不算泛了")),
         ("好的，请发我", ("可以，您发我", "行，您把", "您直接发我")),
-        ("没问题，您先慢慢看", ("可以，您先看看", "行，您先不急", "没事，您先了解")),
+        ("没问题，您先慢慢看", ("可以，您先慢慢看", "行，您先慢慢看，不急", "没事，您先慢慢看")),
         ("我帮您确认报价", ("我帮您核报价", "我给您核一下报价", "我这边看下报价")),
         ("我帮您核对", ("我帮您看下", "我这边核一下", "我来对一下")),
         ("您这个需求我建议先按", ("您这个需求可以先按", "这类需求重点按", "这种情况先按")),
@@ -1965,6 +2493,7 @@ def should_operator_handoff(
     product_knowledge: dict[str, Any] | None,
     fallback_allowed: bool,
     intent_assist: dict[str, Any] | None = None,
+    combined: str = "",
 ) -> bool:
     if evidence_requires_handoff(intent_assist):
         return True
@@ -1975,6 +2504,8 @@ def should_operator_handoff(
             return True
         reason = str(intent_assist.get("reason") or "")
         if reason == "customer_data_complete_with_appointment":
+            if decision.rule_name == "customer_data_capture" and customer_data_complete_can_auto_ack(combined):
+                return False
             return True
     if product_knowledge and product_knowledge.get("auto_reply_allowed") is False:
         return True
@@ -2107,9 +2638,38 @@ def record_operator_alert(
     else:
         alert["delivery"] = {"type": "disabled", "ok": False}
     alert["case_store"] = create_handoff_case(config, alert)
+    dispatch = alert["case_store"].get("dispatch") if isinstance(alert.get("case_store"), dict) else None
+    if isinstance(dispatch, dict) and isinstance(alert.get("delivery"), dict):
+        alert["delivery"]["feishu"] = dispatch
     target_state.setdefault("operator_alerts", []).append(alert)
     target_state["operator_alerts"] = target_state["operator_alerts"][-MAX_STORED_IDS:]
     return alert
+
+
+def dispatch_handoff_case_notification(case: dict[str, Any]) -> dict[str, Any]:
+    if bool(case.get("deduped")):
+        return {
+            "enabled": False,
+            "status": "deduped_skip",
+            "adapter": "feishu",
+            "reason": "handoff_case_already_exists",
+            "case_id": case.get("case_id"),
+        }
+    try:
+        from apps.wechat_ai_customer_service.admin_backend.services.feishu_integration import (
+            dispatch_handoff_case_to_feishu,
+        )
+
+        return dispatch_handoff_case_to_feishu(case)
+    except Exception as exc:  # noqa: BLE001 - local handoff case must survive notification failures.
+        return {
+            "enabled": True,
+            "ok": False,
+            "status": "dispatch_error",
+            "adapter": "feishu",
+            "case_id": case.get("case_id"),
+            "error": repr(exc),
+        }
 
 
 def create_handoff_case(config: dict[str, Any], alert: dict[str, Any]) -> dict[str, Any]:
@@ -2132,7 +2692,18 @@ def create_handoff_case(config: dict[str, Any], alert: dict[str, Any]) -> dict[s
                 "priority": 1,
             }
         )
-        return {"enabled": True, "ok": True, "case_id": case.get("case_id"), "status": case.get("status")}
+        dispatch = dispatch_handoff_case_notification(case)
+        operator_alert = case.get("operator_alert") if isinstance(case.get("operator_alert"), dict) else {}
+        operator_alert["dispatch"] = dispatch
+        case["operator_alert"] = operator_alert
+        return {
+            "enabled": True,
+            "ok": True,
+            "case_id": case.get("case_id"),
+            "status": case.get("status"),
+            "deduped": bool(case.get("deduped")),
+            "dispatch": dispatch,
+        }
     except Exception as exc:
         return {"enabled": True, "ok": False, "error": repr(exc)}
 
@@ -2183,9 +2754,15 @@ def maybe_capture_customer_data(
     required_fields = [str(item) for item in settings.get("required_fields", ["name", "phone"])]
     extraction = extract_customer_data(merged_text, required_fields=required_fields)
 
-    # Intent-driven gate: only mark as customer_data when LLM intent says so
+    # Intent is useful as a weak gate, but it must not block explicit lead
+    # fields.  Live sales chats often provide "我叫X，电话..." inside an
+    # appointment sentence; keyword intent may classify that as appointment or
+    # unclear, while the extracted name/phone are still a strong data signal.
     if intent_result is not None:
-        is_customer_data = intent_result.intent == "customer_data_provide" and bool(extraction.fields)
+        strong_field_signal = bool(extraction.fields) and bool(extraction.is_customer_data)
+        is_customer_data = bool(extraction.fields) and (
+            intent_result.intent == "customer_data_provide" or strong_field_signal
+        )
     else:
         is_customer_data = extraction.is_customer_data
 
@@ -2263,7 +2840,7 @@ def decide_reply_with_data_capture(
             needs_handoff = visible_platform_terms_hit(
                 combined,
                 settings=config.get("llm_reply_synthesis", {}) or {},
-            )
+            ) and not customer_data_complete_can_auto_ack(combined)
             return ReplyDecision(
                 reply_text=reply,
                 rule_name="customer_data_capture",
@@ -2439,6 +3016,7 @@ def apply_local_customer_service_settings(config: dict[str, Any]) -> dict[str, A
     final_polish.setdefault("retry_count", 0)
     final_polish.setdefault("temperature", 0.45)
     final_polish.setdefault("max_reply_chars", 620)
+    final_polish.setdefault("allow_send_when_unavailable", True)
     merged["final_visible_llm_polish"] = final_polish
 
     data_capture = dict(merged.get("data_capture", {}) or {})
@@ -2452,7 +3030,7 @@ def apply_local_customer_service_settings(config: dict[str, Any]) -> dict[str, A
     operator_alert = dict(merged.get("operator_alert", {}) or {})
     operator_alert["enabled"] = settings.get("operator_alert_enabled", True) is not False
     merged["operator_alert"] = operator_alert
-    return merged
+    return apply_customer_service_live_safety_guard(merged, settings=settings)
 
 
 def update_conversation_context(target_state: dict[str, Any], product_knowledge: dict[str, Any] | None) -> None:
@@ -2614,6 +3192,39 @@ def visible_platform_terms_hit(text: str, *, settings: dict[str, Any]) -> bool:
         "commitment_terms",
     )
     return any(term and term in clean for group in groups for term in guard_term_set(platform_rules, group))
+
+
+def customer_data_complete_can_auto_ack(text: str) -> bool:
+    clean = normalize_reply_content_key(text)
+    if not clean:
+        return False
+    if not any(term in clean for term in ("电话", "手机号", "联系方式", "我叫", "姓名", "先生", "女士")):
+        return False
+    if not any(term in clean for term in ("到店", "看车", "过去", "来店", "周一", "周二", "周三", "周四", "周五", "周六", "周日", "上午", "下午", "晚上")):
+        return False
+    hard_terms = (
+        "定金",
+        "订金",
+        "留车",
+        "锁车",
+        "当天提",
+        "直接提",
+        "提车",
+        "最低",
+        "底价",
+        "优惠",
+        "包过",
+        "保证",
+        "置换价",
+        "抵多少",
+        "估价",
+        "合同",
+        "发票",
+        "身份证",
+        "银行卡",
+        "征信",
+    )
+    return not any(term in clean for term in hard_terms)
 
 
 def build_intent_context(
@@ -2930,6 +3541,9 @@ def business_evidence_available(intent_assist: dict[str, Any], product_knowledge
 def data_capture_reply(config: dict[str, Any], data_capture: dict[str, Any], complete: bool) -> str:
     settings = config.get("data_capture", {}) or {}
     if complete:
+        contextual = build_data_capture_success_context_reply(data_capture)
+        if contextual:
+            return contextual
         return str(settings.get("success_reply") or "资料我收到了，后面按这个继续跟进。")
     missing = "、".join(data_capture.get("missing_required_labels", []) or data_capture.get("missing_required_fields", []) or [])
     template = str(
@@ -2937,6 +3551,167 @@ def data_capture_reply(config: dict[str, Any], data_capture: dict[str, Any], com
         or "好的，这块我记下了。另外还需要您的{missing_fields}，方便后续跟进，您发我一下就好~"
     )
     return template.format(missing_fields=missing)
+
+
+def build_data_capture_success_context_reply(data_capture: dict[str, Any]) -> str:
+    raw_text = strip_live_marker_suffix(str(data_capture.get("raw_text") or ""))
+    fields = data_capture.get("fields") if isinstance(data_capture.get("fields"), dict) else {}
+    name = sanitize_lead_display_name(str(fields.get("name") or ""))
+    phone = str(fields.get("phone") or "").strip()
+    visit_time = extract_visit_time_label(raw_text)
+    visit_preference = extract_visit_preference_label(raw_text)
+    raw_key = normalize_reply_content_key(raw_text)
+    has_trade_in = any(term in raw_key for term in ("旧车", "置换", "开过去", "抵车款"))
+    if not (visit_time or visit_preference or has_trade_in):
+        return ""
+    opener = f"好的{name}，" if name else "好的，"
+    first = "电话我记下了" if phone else "资料我记下了"
+    context_bits: list[str] = []
+    if visit_time and visit_preference:
+        context_bits.append(f"{visit_time}{visit_preference}")
+    elif visit_time:
+        context_bits.append(f"{visit_time}到店")
+    if has_trade_in:
+        context_bits.append("旧车置换我也一起备注")
+    context_text = "，".join(bit for bit in context_bits if bit)
+    if context_text:
+        return f"{opener}{first}，{context_text}；我先核车源和排期，确认好再回复您。"
+    return f"{opener}{first}，我先核车源和排期，确认好再回复您。"
+
+
+def ensure_data_capture_success_context(reply_text: str, data_capture: dict[str, Any]) -> str:
+    if not data_capture.get("complete"):
+        return str(reply_text or "").strip()
+    raw_text = strip_live_marker_suffix(str(data_capture.get("raw_text") or ""))
+    if not raw_text:
+        return str(reply_text or "").strip()
+    current = str(reply_text or "").strip()
+    current_key = normalize_reply_content_key(current)
+    missing: list[str] = []
+    visit_time = extract_visit_time_label(raw_text)
+    visit_preference = extract_visit_preference_label(raw_text)
+    current_time_key = normalize_visit_time_key(current)
+    if visit_time and normalize_visit_time_key(visit_time) not in current_time_key:
+        missing.append(f"{visit_time}到店")
+    if visit_preference and not visit_preference_already_covered(visit_preference, current_key):
+        missing.append(visit_preference)
+    raw_key = normalize_reply_content_key(raw_text)
+    if any(term in raw_key for term in ("旧车", "置换", "开过去", "抵车款")) and not any(term in current_key for term in ("旧车", "置换")):
+        missing.append("旧车置换")
+    if not missing:
+        return current
+    base = current.rstrip("。")
+    suffix = "，".join(unique_list(missing))
+    if any(term in current_key for term in ("回复", "回您", "回你", "核实后回", "确认后回")):
+        return f"{base}。{suffix}我也一起备注进去。"
+    return f"{base}。{suffix}我也一起备注，确认好再回复您。"
+
+
+def normalize_visit_time_key(text: str) -> str:
+    clean = normalize_reply_content_key(text)
+    if not clean:
+        return ""
+
+    def repl(match: re.Match[str]) -> str:
+        hour = chinese_hour_to_int(match.group(1))
+        return f"{hour}点" if hour is not None else match.group(0)
+
+    return re.sub(r"([一二三四五六七八九十两]{1,3})点", repl, clean)
+
+
+def chinese_hour_to_int(value: str) -> int | None:
+    text = str(value or "").strip()
+    direct = {
+        "一": 1,
+        "二": 2,
+        "两": 2,
+        "三": 3,
+        "四": 4,
+        "五": 5,
+        "六": 6,
+        "七": 7,
+        "八": 8,
+        "九": 9,
+        "十": 10,
+    }
+    if text in direct:
+        return direct[text]
+    if text.startswith("十") and len(text) == 2:
+        tail = direct.get(text[1])
+        return 10 + tail if tail is not None else None
+    if text.endswith("十") and len(text) == 2:
+        head = direct.get(text[0])
+        return head * 10 if head is not None else None
+    if "十" in text:
+        head_text, tail_text = text.split("十", 1)
+        head = direct.get(head_text) if head_text else 1
+        tail = direct.get(tail_text) if tail_text else 0
+        if head is None or tail is None:
+            return None
+        return head * 10 + tail
+    return None
+
+
+def visit_preference_already_covered(visit_preference: str, current_key: str) -> bool:
+    preference_key = normalize_reply_content_key(visit_preference)
+    if not preference_key:
+        return True
+    if preference_key in current_key:
+        return True
+    # Final visible polish may rewrite "当备选" to "做备选" or similar. For
+    # lead-capture acknowledgements, avoid appending the same preference twice
+    # when the product names and priority/backup intent are already present.
+    product_terms = (
+        "奇骏",
+        "哈弗",
+        "h6",
+        "polo",
+        "高尔夫",
+        "途观",
+        "凯美瑞",
+        "雅阁",
+        "思域",
+        "皇冠",
+        "宝马",
+        "奥迪",
+        "特斯拉",
+        "model3",
+    )
+    mentioned_products = [normalize_reply_content_key(term) for term in product_terms if normalize_reply_content_key(term) in preference_key]
+    if mentioned_products and not all(term in current_key for term in mentioned_products):
+        return False
+    if "备选" in preference_key and "备选" not in current_key:
+        return False
+    priority_markers = ("先看", "优先看", "排前", "更偏向", "先排")
+    if any(normalize_reply_content_key(marker) in preference_key for marker in priority_markers):
+        return any(normalize_reply_content_key(marker) in current_key for marker in priority_markers)
+    return bool(mentioned_products)
+
+
+def extract_visit_preference_label(raw_text: str) -> str:
+    clean = strip_live_marker_suffix(str(raw_text or ""))
+    match = re.search(
+        r"(?:周[一二三四五六日]|今天|明天|后天)?(?:上午|中午|下午|晚上)?[一二三四五六七八九十两\d]{1,3}点(?:半)?([^。！？!?\n]{0,36})",
+        clean,
+    )
+    if not match:
+        return ""
+    tail = match.group(1).strip(" ，,；;。")
+    tail = re.sub(r"^(到店|过去|来店|去看|过去看|看车|到店看车)[，,；; ]*", "", tail).strip()
+    if not tail or tail in {"过去看", "看车", "到店"}:
+        return ""
+    if any(term in tail for term in ("先看", "优先看", "当备选", "备选")):
+        return tail[:36].rstrip("，,；;。")
+    return ""
+
+
+def sanitize_lead_display_name(value: str) -> str:
+    clean = re.sub(r"[\s，,。；;：:]+", "", str(value or ""))
+    return clean[:8]
+
+
+def strip_live_marker_suffix(value: str) -> str:
+    return re.sub(r"\([^()\n]{8,140}\)\s*$", "", str(value or "").strip()).strip()
 
 
 def finalize_data_capture_state(target_state: dict[str, Any], data_capture: dict[str, Any]) -> None:
@@ -3091,7 +3866,12 @@ def clear_no_relevant_handoff_after_safe_synthesis(
     if guard.get("action") != "send_reply" or guard.get("reason") not in {"guard_passed", "llm_soft_handoff_downgraded"}:
         return
     summary = llm_synthesis.get("evidence_summary", {}) or {}
-    if int(summary.get("structured_evidence_count") or 0) <= 0 and int(summary.get("rag_hit_count") or 0) <= 0:
+    advisor_soft_reply = str(llm_synthesis.get("advisor_mode") or "") == "clear_common_sense_recommendation"
+    if (
+        not advisor_soft_reply
+        and int(summary.get("structured_evidence_count") or 0) <= 0
+        and int(summary.get("rag_hit_count") or 0) <= 0
+    ):
         return
     safety = evidence_safety(intent_assist)
     reasons = {str(item) for item in safety.get("reasons", []) or [] if str(item)}
@@ -3154,12 +3934,25 @@ def maybe_enrich_messages_with_history(
     target_state: dict[str, Any],
 ) -> dict[str, Any]:
     settings = history_backfill_settings(config)
+    if str(settings.get("mode") or "").strip().lower() == "anchor_until_found":
+        return maybe_enrich_messages_with_anchor_history(
+            connector=connector,
+            target=target,
+            config=config,
+            payload=payload,
+            target_state=target_state,
+            settings=settings,
+        )
     if not settings.get("enabled"):
         enriched = dict(payload)
         enriched["_history_backfill"] = {"enabled": False, "applied": False, "reason": "disabled"}
         return enriched
 
     messages = payload.get("messages", []) or []
+    gap_guard_enabled = bool(settings.get("gap_guard_enabled", True))
+    anchor_ids, anchor_content_keys = customer_service_anchor_sets(target_state) if gap_guard_enabled else (set(), set())
+    anchor_count = len(anchor_ids) + len(anchor_content_keys)
+    initial_anchor_index = find_latest_customer_service_anchor_index(messages, anchor_ids, anchor_content_keys)
     initial_selection = select_batch_details(
         messages,
         target_state=target_state,
@@ -3176,6 +3969,8 @@ def maybe_enrich_messages_with_history(
         trigger_reasons.append("visible_window_saturated")
     if initial_selection.truncated:
         trigger_reasons.append("batch_truncated")
+    if anchor_count and initial_selection.eligible_count > 0 and initial_anchor_index < 0:
+        trigger_reasons.append("anchor_missing")
     if not trigger_reasons:
         enriched = dict(payload)
         enriched["_history_backfill"] = {
@@ -3185,6 +3980,11 @@ def maybe_enrich_messages_with_history(
             "eligible_count": initial_selection.eligible_count,
             "trigger_visible_unprocessed_count": trigger_count,
             "trigger_visible_saturated_count": saturated_count,
+            "gap_guard_enabled": gap_guard_enabled,
+            "anchor_count": anchor_count,
+            "anchor_found_initial": initial_anchor_index >= 0,
+            "anchor_index_initial": initial_anchor_index,
+            "gap_risk": False,
         }
         return enriched
 
@@ -3195,11 +3995,23 @@ def maybe_enrich_messages_with_history(
     )
     if load_times <= 0:
         enriched = dict(payload)
+        gap_risk = history_backfill_gap_risk(
+            settings=settings,
+            anchor_count=anchor_count,
+            anchor_found=initial_anchor_index >= 0,
+            selection=initial_selection,
+        )
         enriched["_history_backfill"] = {
             "enabled": True,
             "applied": False,
             "reason": "load_times_zero",
             "trigger_reasons": trigger_reasons,
+            "gap_guard_enabled": gap_guard_enabled,
+            "anchor_count": anchor_count,
+            "anchor_found_initial": initial_anchor_index >= 0,
+            "anchor_index_initial": initial_anchor_index,
+            "gap_risk": gap_risk,
+            "gap_reason": "anchor_missing_history_load_disabled" if gap_risk else "",
         }
         return enriched
 
@@ -3207,6 +4019,12 @@ def maybe_enrich_messages_with_history(
         loaded = connector.get_messages(target.name, exact=target.exact, history_load_times=load_times)
     except Exception as exc:
         enriched = dict(payload)
+        gap_risk = history_backfill_gap_risk(
+            settings=settings,
+            anchor_count=anchor_count,
+            anchor_found=initial_anchor_index >= 0,
+            selection=initial_selection,
+        )
         enriched["_history_backfill"] = {
             "enabled": True,
             "applied": False,
@@ -3214,11 +4032,23 @@ def maybe_enrich_messages_with_history(
             "error": repr(exc),
             "trigger_reasons": trigger_reasons,
             "load_times": load_times,
+            "gap_guard_enabled": gap_guard_enabled,
+            "anchor_count": anchor_count,
+            "anchor_found_initial": initial_anchor_index >= 0,
+            "anchor_index_initial": initial_anchor_index,
+            "gap_risk": gap_risk,
+            "gap_reason": "anchor_missing_history_load_exception" if gap_risk else "",
         }
         return enriched
 
     if not loaded.get("ok"):
         enriched = dict(payload)
+        gap_risk = history_backfill_gap_risk(
+            settings=settings,
+            anchor_count=anchor_count,
+            anchor_found=initial_anchor_index >= 0,
+            selection=initial_selection,
+        )
         enriched["_history_backfill"] = {
             "enabled": True,
             "applied": False,
@@ -3226,11 +4056,23 @@ def maybe_enrich_messages_with_history(
             "result": loaded,
             "trigger_reasons": trigger_reasons,
             "load_times": load_times,
+            "gap_guard_enabled": gap_guard_enabled,
+            "anchor_count": anchor_count,
+            "anchor_found_initial": initial_anchor_index >= 0,
+            "anchor_index_initial": initial_anchor_index,
+            "gap_risk": gap_risk,
+            "gap_reason": "anchor_missing_history_load_failed" if gap_risk else "",
         }
         return enriched
     sidecar_history_load = loaded.get("history_load") if isinstance(loaded.get("history_load"), dict) else {}
     if sidecar_history_load and sidecar_history_load.get("ok") is False:
         enriched = dict(payload)
+        gap_risk = history_backfill_gap_risk(
+            settings=settings,
+            anchor_count=anchor_count,
+            anchor_found=initial_anchor_index >= 0,
+            selection=initial_selection,
+        )
         enriched["_history_backfill"] = {
             "enabled": True,
             "applied": False,
@@ -3238,6 +4080,12 @@ def maybe_enrich_messages_with_history(
             "trigger_reasons": trigger_reasons,
             "load_times": load_times,
             "sidecar_history_load": sidecar_history_load,
+            "gap_guard_enabled": gap_guard_enabled,
+            "anchor_count": anchor_count,
+            "anchor_found_initial": initial_anchor_index >= 0,
+            "anchor_index_initial": initial_anchor_index,
+            "gap_risk": gap_risk,
+            "gap_reason": "anchor_missing_sidecar_history_load_failed" if gap_risk else "",
         }
         return enriched
 
@@ -3247,44 +4095,429 @@ def maybe_enrich_messages_with_history(
         messages,
         max_messages=max_messages,
     )
+    recovered_anchor_index = find_latest_customer_service_anchor_index(merged_messages, anchor_ids, anchor_content_keys)
+    final_selection = select_batch_details(
+        merged_messages,
+        target_state=target_state,
+        allow_self_for_test=target.allow_self_for_test,
+        max_batch_messages=target.max_batch_messages,
+        config=config,
+    )
+    gap_risk = history_backfill_gap_risk(
+        settings=settings,
+        anchor_count=anchor_count,
+        anchor_found=recovered_anchor_index >= 0,
+        selection=final_selection,
+    )
     enriched = dict(loaded)
     enriched["messages"] = merged_messages
     enriched["_history_backfill"] = {
         "enabled": True,
         "applied": True,
-        "mechanism": str(sidecar_history_load.get("mechanism") or "wxauto4.history_load"),
+        "mechanism": str(sidecar_history_load.get("mechanism") or "rpa.history_load"),
         "trigger_reasons": trigger_reasons,
         "load_times": load_times,
         "initial_message_count": len(messages),
         "loaded_message_count": len(loaded.get("messages", []) or []),
         "final_message_count": len(merged_messages),
+        "final_eligible_count": final_selection.eligible_count,
+        "final_truncated": final_selection.truncated,
         "sidecar_history_load": sidecar_history_load,
+        "gap_guard_enabled": gap_guard_enabled,
+        "anchor_count": anchor_count,
+        "anchor_found_initial": initial_anchor_index >= 0,
+        "anchor_index_initial": initial_anchor_index,
+        "anchor_found_after_history_load": recovered_anchor_index >= 0,
+        "anchor_index_after_history_load": recovered_anchor_index,
+        "gap_risk": gap_risk,
+        "gap_reason": "anchor_missing_after_history_load" if gap_risk else "",
     }
     return enriched
+
+
+def maybe_enrich_messages_with_anchor_history(
+    *,
+    connector: WeChatConnector,
+    target: TargetConfig,
+    config: dict[str, Any],
+    payload: dict[str, Any],
+    target_state: dict[str, Any],
+    settings: dict[str, Any],
+) -> dict[str, Any]:
+    if payload.get("scheduler_capture_id"):
+        enriched = dict(payload)
+        history_meta = payload.get("_history_backfill") if isinstance(payload.get("_history_backfill"), dict) else {}
+        enriched["_history_backfill"] = {
+            **history_meta,
+            "planner_reused_scheduler_capture": True,
+            "reason": history_meta.get("reason") or "scheduler_capture_history_reused",
+        }
+        return enriched
+
+    if not settings.get("enabled"):
+        enriched = dict(payload)
+        enriched["_history_backfill"] = {
+            "enabled": False,
+            "mode": "anchor_until_found",
+            "applied": False,
+            "reason": "disabled",
+        }
+        return enriched
+
+    messages = payload.get("messages", []) or []
+    initial_selection = select_batch_details(
+        messages,
+        target_state=target_state,
+        allow_self_for_test=target.allow_self_for_test,
+        max_batch_messages=target.max_batch_messages,
+        config=config,
+    )
+    anchors = customer_service_anchor_payload(target_state)
+    anchor_ids = set(anchors.get("anchor_ids", []) or [])
+    anchor_content_keys = set(anchors.get("anchor_content_keys", []) or [])
+    reply_content_keys = set(anchors.get("reply_content_keys", []) or [])
+    anchor_count = len(anchor_ids) + len(anchor_content_keys) + len(reply_content_keys)
+    initial_anchor_index = find_latest_customer_service_anchor_index(
+        messages,
+        anchor_ids,
+        anchor_content_keys,
+        reply_content_keys=reply_content_keys,
+    )
+
+    if initial_anchor_index >= 0:
+        messages_after_anchor = messages[initial_anchor_index + 1 :]
+        selection_after_anchor = select_batch_details(
+            messages_after_anchor,
+            target_state=target_state,
+            allow_self_for_test=target.allow_self_for_test,
+            max_batch_messages=target.max_batch_messages,
+            config=config,
+        )
+        enriched = dict(payload)
+        enriched["messages"] = messages_after_anchor
+        enriched["_history_backfill"] = {
+            "enabled": True,
+            "mode": "anchor_until_found",
+            "applied": False,
+            "reason": "visible_anchor_found_no_scroll",
+            "eligible_count": selection_after_anchor.eligible_count,
+            "anchor_count": anchor_count,
+            "anchor_found_initial": True,
+            "anchor_index_initial": initial_anchor_index,
+            "messages_after_anchor_count": len(messages_after_anchor),
+            "gap_risk": False,
+        }
+        return enriched
+
+    if initial_selection.eligible_count <= 0:
+        enriched = dict(payload)
+        enriched["_history_backfill"] = {
+            "enabled": True,
+            "mode": "anchor_until_found",
+            "applied": False,
+            "reason": "no_visible_unprocessed_messages",
+            "eligible_count": 0,
+            "anchor_count": anchor_count,
+            "anchor_found_initial": False,
+            "anchor_index_initial": -1,
+            "gap_risk": False,
+        }
+        return enriched
+
+    if anchor_count <= 0:
+        gap_risk = bool(settings.get("first_window_gap_guard"))
+        enriched = dict(payload)
+        enriched["_history_backfill"] = {
+            "enabled": True,
+            "mode": "anchor_until_found",
+            "applied": False,
+            "reason": "no_anchor_candidates",
+            "eligible_count": initial_selection.eligible_count,
+            "anchor_count": 0,
+            "anchor_found_initial": False,
+            "anchor_index_initial": -1,
+            "gap_risk": gap_risk,
+            "gap_reason": "no_anchor_candidates_for_visible_messages" if gap_risk else "",
+        }
+        return enriched
+
+    if not bool(settings.get("trigger_when_anchor_missing", True)):
+        enriched = dict(payload)
+        enriched["_history_backfill"] = {
+            "enabled": True,
+            "mode": "anchor_until_found",
+            "applied": False,
+            "reason": "anchor_missing_trigger_disabled",
+            "eligible_count": initial_selection.eligible_count,
+            "anchor_count": anchor_count,
+            "anchor_found_initial": False,
+            "anchor_index_initial": -1,
+            "gap_risk": False,
+        }
+        return enriched
+
+    max_scroll_steps = bounded_nonnegative_int(
+        settings.get("max_scroll_steps"),
+        default=positive_int(settings.get("max_load_times"), 5),
+        maximum=16,
+    )
+    if max_scroll_steps <= 0:
+        enriched = dict(payload)
+        enriched["_history_backfill"] = {
+            "enabled": True,
+            "mode": "anchor_until_found",
+            "applied": False,
+            "reason": "max_scroll_steps_zero",
+            "eligible_count": initial_selection.eligible_count,
+            "anchor_count": anchor_count,
+            "anchor_found_initial": False,
+            "anchor_index_initial": -1,
+            "gap_risk": bool(settings.get("block_on_anchor_not_found", settings.get("block_on_gap_risk", True))),
+            "gap_reason": "anchor_missing_history_search_disabled",
+        }
+        return enriched
+
+    try:
+        loaded = connector.get_messages(
+            target.name,
+            exact=target.exact,
+            history_mode="anchor_until_found",
+            anchor_ids=sorted(anchor_ids),
+            anchor_content_keys=sorted(anchor_content_keys),
+            reply_content_keys=sorted(reply_content_keys),
+            max_scroll_steps=max_scroll_steps,
+            max_duration_seconds=bounded_nonnegative_int(settings.get("max_duration_seconds"), default=12, maximum=60),
+            max_snapshots=bounded_nonnegative_int(settings.get("max_snapshots"), default=max_scroll_steps + 2, maximum=24),
+            min_delay_ms=bounded_nonnegative_int(settings.get("min_delay_ms"), default=180, maximum=5000),
+            max_delay_ms=bounded_nonnegative_int(settings.get("max_delay_ms"), default=650, maximum=10000),
+            restore_to_latest=bool(settings.get("restore_to_latest", True)),
+        )
+    except Exception as exc:
+        enriched = dict(payload)
+        enriched["_history_backfill"] = {
+            "enabled": True,
+            "mode": "anchor_until_found",
+            "applied": False,
+            "reason": "anchor_history_load_exception",
+            "error": repr(exc),
+            "eligible_count": initial_selection.eligible_count,
+            "anchor_count": anchor_count,
+            "anchor_found_initial": False,
+            "anchor_index_initial": -1,
+            "gap_risk": True,
+            "gap_reason": "anchor_missing_history_load_exception",
+        }
+        return enriched
+
+    sidecar_history_load = loaded.get("history_load") if isinstance(loaded.get("history_load"), dict) else {}
+    if not loaded.get("ok") or (sidecar_history_load and sidecar_history_load.get("ok") is False):
+        enriched = dict(payload)
+        enriched["_history_backfill"] = {
+            "enabled": True,
+            "mode": "anchor_until_found",
+            "applied": False,
+            "reason": "anchor_history_load_failed",
+            "result": loaded if not loaded.get("ok") else None,
+            "sidecar_history_load": sidecar_history_load,
+            "eligible_count": initial_selection.eligible_count,
+            "anchor_count": anchor_count,
+            "anchor_found_initial": False,
+            "anchor_index_initial": -1,
+            "gap_risk": True,
+            "gap_reason": "anchor_missing_history_load_failed",
+        }
+        return enriched
+
+    loaded_messages = loaded.get("messages", []) or []
+    loaded_anchor_index = find_latest_customer_service_anchor_index(
+        loaded_messages,
+        anchor_ids,
+        anchor_content_keys,
+        reply_content_keys=reply_content_keys,
+    )
+    loaded_messages_after_anchor = loaded_messages[loaded_anchor_index + 1 :] if loaded_anchor_index >= 0 else loaded_messages
+    initial_batch = list(initial_selection.batch) + list(initial_selection.overflow_messages)
+    if initial_batch and not message_window_contains_initial_batch(loaded_messages_after_anchor, initial_batch):
+        enriched = dict(payload)
+        enriched["_history_backfill"] = {
+            "enabled": True,
+            "mode": "anchor_until_found",
+            "applied": bool(sidecar_history_load.get("scroll_steps") or sidecar_history_load.get("anchor_found")),
+            "mechanism": str(sidecar_history_load.get("mechanism") or "rpa.anchor_history_load"),
+            "trigger_reasons": ["anchor_missing"],
+            "reason": "anchor_history_load_dropped_visible_batch_fallback",
+            "initial_message_count": len(messages),
+            "loaded_message_count": len(loaded_messages),
+            "loaded_messages_after_anchor_count": len(loaded_messages_after_anchor),
+            "final_message_count": len(messages),
+            "messages_after_anchor_count": len(messages),
+            "final_eligible_count": initial_selection.eligible_count,
+            "final_truncated": initial_selection.truncated,
+            "sidecar_history_load": sidecar_history_load,
+            "anchor_count": anchor_count,
+            "anchor_found_initial": False,
+            "anchor_index_initial": -1,
+            "anchor_found_after_history_load": loaded_anchor_index >= 0 or bool(sidecar_history_load.get("anchor_found")),
+            "anchor_index_after_history_load": loaded_anchor_index,
+            "history_window_contains_initial_batch": False,
+            "fallback_to_initial_window": True,
+            "gap_risk": False,
+            "gap_reason": "",
+        }
+        return enriched
+
+    max_messages = positive_int(settings.get("max_messages_after_load"), 80)
+    merged_messages = merge_message_windows(
+        loaded_messages,
+        messages,
+        max_messages=max_messages,
+    )
+    recovered_anchor_index = find_latest_customer_service_anchor_index(
+        merged_messages,
+        anchor_ids,
+        anchor_content_keys,
+        reply_content_keys=reply_content_keys,
+    )
+    messages_after_anchor = merged_messages[recovered_anchor_index + 1 :] if recovered_anchor_index >= 0 else merged_messages
+    if initial_batch and not message_window_contains_initial_batch(messages_after_anchor, initial_batch):
+        enriched = dict(payload)
+        enriched["_history_backfill"] = {
+            "enabled": True,
+            "mode": "anchor_until_found",
+            "applied": bool(sidecar_history_load.get("scroll_steps") or sidecar_history_load.get("anchor_found")),
+            "mechanism": str(sidecar_history_load.get("mechanism") or "rpa.anchor_history_load"),
+            "trigger_reasons": ["anchor_missing"],
+            "reason": "anchor_history_load_dropped_visible_batch_fallback",
+            "initial_message_count": len(messages),
+            "loaded_message_count": len(loaded_messages),
+            "final_message_count": len(merged_messages),
+            "messages_after_anchor_count": len(messages_after_anchor),
+            "final_eligible_count": initial_selection.eligible_count,
+            "final_truncated": initial_selection.truncated,
+            "sidecar_history_load": sidecar_history_load,
+            "anchor_count": anchor_count,
+            "anchor_found_initial": False,
+            "anchor_index_initial": -1,
+            "anchor_found_after_history_load": recovered_anchor_index >= 0 or bool(sidecar_history_load.get("anchor_found")),
+            "anchor_index_after_history_load": recovered_anchor_index,
+            "history_window_contains_initial_batch": False,
+            "fallback_to_initial_window": True,
+            "gap_risk": False,
+            "gap_reason": "",
+        }
+        return enriched
+    final_selection = select_batch_details(
+        messages_after_anchor,
+        target_state=target_state,
+        allow_self_for_test=target.allow_self_for_test,
+        max_batch_messages=target.max_batch_messages,
+        config=config,
+    )
+    anchor_found = recovered_anchor_index >= 0 or bool(sidecar_history_load.get("anchor_found"))
+    gap_risk = final_selection.eligible_count > 0 and not anchor_found and bool(
+        settings.get("block_on_anchor_not_found", settings.get("block_on_gap_risk", True))
+    )
+    enriched = dict(loaded)
+    enriched["messages"] = messages_after_anchor
+    enriched["_history_backfill"] = {
+        "enabled": True,
+        "mode": "anchor_until_found",
+        "applied": bool(sidecar_history_load.get("scroll_steps") or sidecar_history_load.get("anchor_found")),
+        "mechanism": str(sidecar_history_load.get("mechanism") or "rpa.anchor_history_load"),
+        "trigger_reasons": ["anchor_missing"],
+        "initial_message_count": len(messages),
+        "loaded_message_count": len(loaded_messages),
+        "loaded_messages_after_anchor_count": len(loaded_messages_after_anchor),
+        "final_message_count": len(merged_messages),
+        "messages_after_anchor_count": len(messages_after_anchor),
+        "final_eligible_count": final_selection.eligible_count,
+        "final_truncated": final_selection.truncated,
+        "sidecar_history_load": sidecar_history_load,
+        "anchor_count": anchor_count,
+        "anchor_found_initial": False,
+        "anchor_index_initial": -1,
+        "anchor_found_after_history_load": anchor_found,
+        "anchor_index_after_history_load": recovered_anchor_index,
+        "history_window_contains_initial_batch": True,
+        "gap_risk": gap_risk,
+        "gap_reason": "anchor_missing_after_bounded_history_search" if gap_risk else "",
+    }
+    return enriched
+
+
+def message_window_contains_initial_batch(messages: list[dict[str, Any]], initial_batch: list[dict[str, Any]]) -> bool:
+    original_ids = {str(item.get("id") or "") for item in initial_batch if isinstance(item, dict) and str(item.get("id") or "")}
+    original_content_keys = {
+        key
+        for item in initial_batch
+        if isinstance(item, dict)
+        for key in message_original_match_keys(item)
+        if key
+    }
+    if not original_ids and not original_content_keys:
+        return True
+    return any(
+        isinstance(message, dict) and message_matches_original_batch(message, original_ids, original_content_keys)
+        for message in messages or []
+    )
 
 
 def history_backfill_settings(config: dict[str, Any] | None = None) -> dict[str, Any]:
     cfg = config if isinstance(config, dict) else {}
     settings = dict(cfg.get("history_backfill", {}) or {})
     settings.setdefault("enabled", True)
+    settings.setdefault("mode", "fixed_load_times")
     settings.setdefault("load_times", 2)
     settings.setdefault("max_load_times", 5)
+    settings.setdefault("max_scroll_steps", settings.get("max_load_times", 5))
+    settings.setdefault("max_duration_seconds", 12)
+    settings.setdefault("max_snapshots", 8)
+    settings.setdefault("min_delay_ms", 180)
+    settings.setdefault("max_delay_ms", 650)
+    settings.setdefault("restore_to_latest", True)
+    settings.setdefault("trigger_when_anchor_missing", True)
+    settings.setdefault("block_on_anchor_not_found", settings.get("block_on_gap_risk", True))
     settings.setdefault("trigger_visible_unprocessed_count", 6)
     settings.setdefault("trigger_visible_saturated_count", 5)
     settings.setdefault("max_messages_after_load", 80)
     settings.setdefault("freshness_load_times", settings.get("load_times", 2))
+    settings.setdefault("freshness_anchor_scroll_enabled", False)
+    settings.setdefault("freshness_anchor_max_scroll_steps", 0)
+    settings.setdefault("gap_guard_enabled", True)
+    settings.setdefault("block_on_gap_risk", True)
+    settings.setdefault("first_window_gap_guard", False)
     return settings
 
 
 def merge_message_windows(*windows: list[dict[str, Any]], max_messages: int = 80) -> list[dict[str, Any]]:
+    window_content_keys = [
+        {
+            content_key
+            for item in window or []
+            if isinstance(item, dict)
+            for content_key in [message_content_dedupe_key(item)]
+            if content_key
+        }
+        for window in windows
+    ]
+    future_content_keys: list[set[str]] = []
+    future: set[str] = set()
+    for keys in reversed(window_content_keys):
+        future_content_keys.append(set(future))
+        future.update(keys)
+    future_content_keys.reverse()
+
     seen: set[str] = set()
     merged: list[dict[str, Any]] = []
-    for window in windows:
+    for index, window in enumerate(windows):
         for item in window or []:
             if not isinstance(item, dict):
                 continue
             key = message_dedupe_key(item)
             if not key or key in seen:
+                continue
+            content_key = message_content_dedupe_key(item)
+            if content_key and content_key in future_content_keys[index]:
                 continue
             seen.add(key)
             merged.append(item)
@@ -3311,6 +4544,23 @@ def message_dedupe_key(message: dict[str, Any]) -> str:
     ).hexdigest()[:24]
 
 
+def message_content_dedupe_key(message: dict[str, Any]) -> str:
+    content = normalize_ocr_content_for_dedupe(str(message.get("content") or ""))
+    if not content:
+        return ""
+    return "\x1f".join(
+        [
+            str(message.get("sender") or "").strip(),
+            str(message.get("type") or "").strip(),
+            content,
+        ]
+    )
+
+
+def normalize_ocr_content_for_dedupe(text: str) -> str:
+    return re.sub(r"[^0-9A-Za-z\u4e00-\u9fff]+", "", str(text or "")).lower()
+
+
 def positive_int(value: Any, default: int) -> int:
     try:
         parsed = int(value or 0)
@@ -3324,6 +4574,14 @@ def bounded_positive_int(value: Any, *, default: int, maximum: int) -> int:
     return max(0, min(maximum, parsed))
 
 
+def bounded_nonnegative_int(value: Any, *, default: int, maximum: int) -> int:
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        parsed = int(default)
+    return max(0, min(maximum, parsed))
+
+
 def bootstrap_target(
     connector: WeChatConnector,
     target: TargetConfig,
@@ -3334,28 +4592,55 @@ def bootstrap_target(
         target.name,
         {
             "processed_message_ids": [],
+            "processed_content_keys": [],
             "handoff_message_ids": [],
             "sent_replies": [],
             "reply_timestamps": [],
         },
     )
-    payload = connector.get_messages(target.name, exact=target.exact)
-    if not payload.get("ok"):
-        return base_event(target, "error", {"messages": payload})
+    load_times = bootstrap_history_load_times(config)
+    try:
+        latest_payload = connector.get_messages(target.name, exact=target.exact, history_load_times=0)
+    except TypeError:
+        latest_payload = connector.get_messages(target.name, exact=target.exact)
+    if not latest_payload.get("ok"):
+        return base_event(target, "error", {"messages": latest_payload})
+    payload = latest_payload
+    if load_times > 0:
+        try:
+            history_payload = connector.get_messages(target.name, exact=target.exact, history_load_times=load_times)
+        except TypeError:
+            history_payload = connector.get_messages(target.name, exact=target.exact)
+        if not history_payload.get("ok"):
+            return base_event(target, "error", {"messages": history_payload})
+        payload = history_payload
+        payload["_bootstrap_latest_snapshot"] = latest_payload
 
     processed = list(target_state.get("processed_message_ids", []))
+    processed_content_keys = list(target_state.get("processed_content_keys", []))
     added = []
-    for message in payload.get("messages", []) or []:
+    candidates: list[dict[str, Any]] = []
+    for source_payload in (latest_payload, payload):
+        for message in source_payload.get("messages", []) or []:
+            if isinstance(message, dict):
+                candidates.append(message)
+    for message in candidates:
         message_id = str(message.get("id") or "")
         content = str(message.get("content") or "").strip()
         if not message_id or not content or message.get("type") != "text":
             continue
         if is_bot_reply_content(content, config):
             continue
-        if message_id not in processed:
-            processed.append(message_id)
-            added.append(message_id)
+        content_keys = message_processed_content_keys(message)
+        if message_id in processed:
+            continue
+        if any(key in processed_content_keys for key in content_keys):
+            continue
+        processed.append(message_id)
+        append_unique_limited(processed_content_keys, content_keys)
+        added.append(message_id)
     target_state["processed_message_ids"] = processed[-MAX_STORED_IDS:]
+    target_state["processed_content_keys"] = processed_content_keys[-MAX_STORED_IDS:]
     target_state.setdefault("bootstrap_events", []).append(
         {
             "message_ids": added,
@@ -3365,8 +4650,25 @@ def bootstrap_target(
     return base_event(
         target,
         "bootstrapped",
-        {"marked_message_ids": added, "marked_count": len(added)},
+        {
+            "marked_message_ids": added,
+            "marked_count": len(added),
+            "history_load_times": load_times,
+            "history_load": payload.get("history_load") if isinstance(payload.get("history_load"), dict) else {},
+            "latest_visible_count": len(latest_payload.get("messages", []) or []),
+        },
     )
+
+
+def bootstrap_history_load_times(config: dict[str, Any] | None = None) -> int:
+    cfg = config if isinstance(config, dict) else {}
+    settings = dict(cfg.get("bootstrap", {}) or {})
+    history_settings = dict(cfg.get("history_backfill", {}) or {})
+    raw_value = settings.get("history_load_times")
+    if raw_value is None:
+        raw_value = history_settings.get("bootstrap_load_times", history_settings.get("load_times", 2))
+    max_value = positive_int(settings.get("max_history_load_times", history_settings.get("max_load_times", 5)), 5)
+    return bounded_nonnegative_int(raw_value, default=2, maximum=max_value)
 
 
 def select_batch(
@@ -3393,6 +4695,7 @@ def select_batch_details(
     config: dict[str, Any] | None = None,
 ) -> BatchSelection:
     processed = set(target_state.get("processed_message_ids", []))
+    processed_content_keys = set(target_state.get("processed_content_keys", []))
     handoff = set(target_state.get("handoff_message_ids", []))
     sent_reply_content_keys = recent_sent_reply_content_keys(target_state)
     selected: list[dict[str, Any]] = []
@@ -3405,6 +4708,7 @@ def select_batch_details(
         if not message_is_reply_candidate(
             message,
             processed=processed,
+            processed_content_keys=processed_content_keys,
             handoff=handoff,
             allow_self_for_test=allow_self_for_test,
             config=config,
@@ -3431,6 +4735,7 @@ def message_is_reply_candidate(
     message: dict[str, Any],
     *,
     processed: set[str],
+    processed_content_keys: set[str] | None = None,
     handoff: set[str],
     allow_self_for_test: bool,
     config: dict[str, Any] | None = None,
@@ -3440,6 +4745,10 @@ def message_is_reply_candidate(
     content = str(message.get("content") or "").strip()
     sender = str(message.get("sender") or "")
     if not message_id or message_id in processed or message_id in handoff:
+        return False
+    stable_key = message_stable_content_key(message)
+    content_key = message_content_dedupe_key(message)
+    if processed_content_keys and ((stable_key and stable_key in processed_content_keys) or (content_key and content_key in processed_content_keys)):
         return False
     if message.get("type") != "text" or not content:
         return False
@@ -3636,11 +4945,9 @@ def detect_newer_messages_before_send(
 ) -> dict[str, Any]:
     """Prevent sending a stale LLM reply when the customer talks during thinking."""
     original_ids = [str(item.get("id") or "") for item in batch if str(item.get("id") or "")]
-    original_content_keys = {
-        key
-        for key in (message_stable_content_key(item) for item in batch)
-        if key
-    }
+    original_content_keys: set[str] = set()
+    for item in batch:
+        original_content_keys.update(message_original_match_keys(item))
     if not original_ids:
         return {"ok": True, "has_newer_messages": False, "reason": "empty_batch"}
     payload = connector.get_messages(target.name, exact=target.exact)
@@ -3655,40 +4962,100 @@ def detect_newer_messages_before_send(
             latest_original_index = max(latest_original_index, index)
     if latest_original_index < 0:
         settings = history_backfill_settings(config)
-        load_times = bounded_positive_int(
-            settings.get("freshness_load_times"),
-            default=0,
-            maximum=positive_int(settings.get("max_load_times"), 5),
-        )
-        if settings.get("enabled") and load_times > 0:
-            try:
-                loaded = connector.get_messages(target.name, exact=target.exact, history_load_times=load_times)
-            except Exception as exc:
-                loaded = {"ok": False, "error": repr(exc)}
-            history_meta = {
-                "applied": bool(loaded.get("ok")),
-                "mechanism": str((loaded.get("history_load") or {}).get("mechanism") or "wxauto4.history_load"),
-                "load_times": load_times,
-                "result_ok": bool(loaded.get("ok")),
-                "error": loaded.get("error"),
-                "sidecar_history_load": loaded.get("history_load"),
-            }
-            if loaded.get("ok"):
-                messages = merge_message_windows(
-                    loaded.get("messages", []) or [],
-                    messages,
-                    max_messages=positive_int(settings.get("max_messages_after_load"), 80),
-                )
-                latest_original_index = -1
-                for index, message in enumerate(messages):
-                    if message_matches_original_batch(message, original_set, original_content_keys):
-                        latest_original_index = max(latest_original_index, index)
+        if settings.get("enabled") and str(settings.get("mode") or "").strip().lower() == "anchor_until_found":
+            freshness_anchor_enabled = bool(settings.get("freshness_anchor_scroll_enabled"))
+            max_scroll_steps = bounded_nonnegative_int(
+                settings.get("freshness_anchor_max_scroll_steps"),
+                default=0,
+                maximum=bounded_nonnegative_int(settings.get("max_scroll_steps"), default=positive_int(settings.get("max_load_times"), 5), maximum=16),
+            )
+            if freshness_anchor_enabled and max_scroll_steps > 0:
+                try:
+                    loaded = connector.get_messages(
+                        target.name,
+                        exact=target.exact,
+                        history_mode="anchor_until_found",
+                        anchor_ids=original_ids,
+                        anchor_content_keys=sorted(original_content_keys),
+                        max_scroll_steps=max_scroll_steps,
+                        max_duration_seconds=bounded_nonnegative_int(settings.get("max_duration_seconds"), default=12, maximum=60),
+                        max_snapshots=bounded_nonnegative_int(settings.get("max_snapshots"), default=max_scroll_steps + 2, maximum=24),
+                        min_delay_ms=bounded_nonnegative_int(settings.get("min_delay_ms"), default=180, maximum=5000),
+                        max_delay_ms=bounded_nonnegative_int(settings.get("max_delay_ms"), default=650, maximum=10000),
+                        restore_to_latest=bool(settings.get("restore_to_latest", True)),
+                    )
+                except Exception as exc:
+                    loaded = {"ok": False, "error": repr(exc)}
+                history_meta = {
+                    "applied": bool(loaded.get("ok")),
+                    "mechanism": str((loaded.get("history_load") or {}).get("mechanism") or "rpa.history_load"),
+                    "mode": "anchor_until_found",
+                    "max_scroll_steps": max_scroll_steps,
+                    "result_ok": bool(loaded.get("ok")),
+                    "error": loaded.get("error"),
+                    "sidecar_history_load": loaded.get("history_load"),
+                }
+                if loaded.get("ok"):
+                    messages = merge_message_windows(
+                        loaded.get("messages", []) or [],
+                        messages,
+                        max_messages=positive_int(settings.get("max_messages_after_load"), 80),
+                    )
+                    latest_original_index = -1
+                    for index, message in enumerate(messages):
+                        if message_matches_original_batch(message, original_set, original_content_keys):
+                            latest_original_index = max(latest_original_index, index)
+            else:
+                history_meta = {
+                    "applied": False,
+                    "mechanism": "rpa.history_load",
+                    "mode": "anchor_until_found",
+                    "max_scroll_steps": 0,
+                    "result_ok": True,
+                    "skip_reason": "freshness_anchor_scroll_disabled",
+                }
+        else:
+            load_times = bounded_nonnegative_int(
+                settings.get("freshness_load_times"),
+                default=0,
+                maximum=positive_int(settings.get("max_load_times"), 5),
+            )
+            if settings.get("enabled") and load_times > 0:
+                try:
+                    loaded = connector.get_messages(target.name, exact=target.exact, history_load_times=load_times)
+                except Exception as exc:
+                    loaded = {"ok": False, "error": repr(exc)}
+                history_meta = {
+                    "applied": bool(loaded.get("ok")),
+                    "mechanism": str((loaded.get("history_load") or {}).get("mechanism") or "rpa.history_load"),
+                    "load_times": load_times,
+                    "result_ok": bool(loaded.get("ok")),
+                    "error": loaded.get("error"),
+                    "sidecar_history_load": loaded.get("history_load"),
+                }
+                if loaded.get("ok"):
+                    messages = merge_message_windows(
+                        loaded.get("messages", []) or [],
+                        messages,
+                        max_messages=positive_int(settings.get("max_messages_after_load"), 80),
+                    )
+                    latest_original_index = -1
+                    for index, message in enumerate(messages):
+                        if message_matches_original_batch(message, original_set, original_content_keys):
+                            latest_original_index = max(latest_original_index, index)
         if latest_original_index >= 0:
             history_meta["original_batch_found_after_history_load"] = True
         else:
             history_meta["original_batch_found_after_history_load"] = False
+            if history_meta.get("skip_reason") == "freshness_anchor_scroll_disabled":
+                history_meta["gap_risk"] = False
+                history_meta["gap_reason"] = ""
+            else:
+                history_meta["gap_risk"] = True
+                history_meta["gap_reason"] = "original_batch_missing_after_freshness_backfill"
     if latest_original_index < 0:
         processed = set(target_state.get("processed_message_ids", []))
+        processed_content_keys = set(target_state.get("processed_content_keys", []))
         handoff = set(target_state.get("handoff_message_ids", []))
         sent_reply_content_keys = recent_sent_reply_content_keys(target_state)
         visible_unprocessed = [
@@ -3701,6 +5068,7 @@ def detect_newer_messages_before_send(
             if message_is_reply_candidate(
                 message,
                 processed=processed,
+                processed_content_keys=processed_content_keys,
                 handoff=handoff,
                 allow_self_for_test=target.allow_self_for_test,
                 config=config,
@@ -3708,19 +5076,24 @@ def detect_newer_messages_before_send(
             )
             and not message_matches_original_batch(message, original_set, original_content_keys)
         ]
+        gap_risk = bool(history_meta.get("gap_risk"))
         return {
             "ok": True,
-            "has_newer_messages": bool(visible_unprocessed),
+            "has_newer_messages": bool(visible_unprocessed) or gap_risk,
             "reason": (
                 "original_batch_not_visible_assume_stale"
                 if visible_unprocessed
+                else "original_batch_not_found_gap_risk"
+                if gap_risk
                 else "original_batch_not_found_no_visible_unprocessed"
             ),
             "newer_message_ids": [item["id"] for item in visible_unprocessed],
             "newer_messages": visible_unprocessed[:5],
             "history_backfill": history_meta,
+            "gap_risk": gap_risk,
         }
     processed = set(target_state.get("processed_message_ids", []))
+    processed_content_keys = set(target_state.get("processed_content_keys", []))
     handoff = set(target_state.get("handoff_message_ids", []))
     sent_reply_content_keys = recent_sent_reply_content_keys(target_state)
     newer: list[dict[str, Any]] = []
@@ -3728,6 +5101,7 @@ def detect_newer_messages_before_send(
         if not message_is_reply_candidate(
             message,
             processed=processed,
+            processed_content_keys=processed_content_keys,
             handoff=handoff,
             allow_self_for_test=target.allow_self_for_test,
             config=config,
@@ -3757,8 +5131,25 @@ def message_matches_original_batch(
     message_id = str(message.get("id") or "")
     if message_id and message_id in original_ids:
         return True
-    stable_key = message_stable_content_key(message)
-    return bool(stable_key and stable_key in original_content_keys)
+    if any(key in original_content_keys for key in message_original_match_keys(message)):
+        return True
+    return message_content_is_original_fragment(message, original_content_keys)
+
+
+def message_content_is_original_fragment(message: dict[str, Any], original_content_keys: set[str]) -> bool:
+    content = normalize_ocr_content_for_dedupe(str(message.get("content") or ""))
+    if len(content) < 8:
+        return False
+    for key in original_content_keys:
+        parts = str(key or "").split("\x1f")
+        if len(parts) != 3:
+            continue
+        original = normalize_ocr_content_for_dedupe(parts[2])
+        if len(original) < 8:
+            continue
+        if content in original or original in content:
+            return True
+    return False
 
 
 def message_stable_content_key(message: dict[str, Any]) -> str:
@@ -3772,6 +5163,195 @@ def message_stable_content_key(message: dict[str, Any]) -> str:
             content,
         ]
     )
+
+
+def customer_service_anchor_sets(target_state: dict[str, Any]) -> tuple[set[str], set[str]]:
+    payload = customer_service_anchor_payload(target_state)
+    return set(payload.get("anchor_ids", []) or []), set(payload.get("anchor_content_keys", []) or [])
+
+
+def customer_service_anchor_payload(target_state: dict[str, Any]) -> dict[str, list[str]]:
+    anchor_ids = {
+        str(item).strip()
+        for key in ("processed_message_ids", "handoff_message_ids")
+        for item in target_state.get(key, []) or []
+        if str(item).strip()
+    }
+    anchor_content_keys: set[str] = set()
+    for item in target_state.get("processed_content_keys", []) or []:
+        key = str(item).strip()
+        if not key:
+            continue
+        anchor_content_keys.add(key)
+        normalized_key = normalized_processed_content_key(key)
+        if normalized_key:
+            anchor_content_keys.add(normalized_key)
+
+    reply_content_keys: set[str] = set()
+    last_anchor = target_state.get("last_successful_reply_anchor")
+    if isinstance(last_anchor, dict):
+        for item in last_anchor.get("message_ids", []) or []:
+            value = str(item or "").strip()
+            if value:
+                anchor_ids.add(value)
+        for item in last_anchor.get("message_content_keys", []) or []:
+            value = str(item or "").strip()
+            if not value:
+                continue
+            anchor_content_keys.add(value)
+            normalized_value = normalized_processed_content_key(value)
+            if normalized_value:
+                anchor_content_keys.add(normalized_value)
+        reply_key = normalize_reply_content_key(str(last_anchor.get("reply_text") or last_anchor.get("reply_text_sample") or ""))
+        if reply_key:
+            reply_content_keys.add(reply_key)
+        stored_reply_key = normalize_reply_content_key(str(last_anchor.get("reply_content_key") or ""))
+        if stored_reply_key:
+            reply_content_keys.add(stored_reply_key)
+
+    for item in (target_state.get("sent_replies", []) or [])[-5:]:
+        if not isinstance(item, dict):
+            continue
+        for message_id in item.get("message_ids", []) or []:
+            value = str(message_id or "").strip()
+            if value:
+                anchor_ids.add(value)
+        for content in item.get("message_contents", []) or []:
+            mock_message = {"sender": "customer", "type": "text", "content": str(content or "")}
+            for key in message_processed_content_keys(mock_message):
+                anchor_content_keys.add(key)
+        reply_key = normalize_reply_content_key(str(item.get("reply_text") or ""))
+        if reply_key:
+            reply_content_keys.add(reply_key)
+
+    return {
+        "anchor_ids": sorted(anchor_ids),
+        "anchor_content_keys": sorted(anchor_content_keys),
+        "reply_content_keys": sorted(reply_content_keys),
+    }
+
+
+def find_latest_customer_service_anchor_index(
+    messages: list[dict[str, Any]],
+    anchor_ids: set[str],
+    anchor_content_keys: set[str],
+    *,
+    reply_content_keys: set[str] | None = None,
+) -> int:
+    reply_keys = reply_content_keys or set()
+    if not anchor_ids and not anchor_content_keys and not reply_keys:
+        return -1
+    latest = -1
+    for index, message in enumerate(messages or []):
+        if not isinstance(message, dict):
+            continue
+        message_id = str(message.get("id") or "").strip()
+        stable_key = message_stable_content_key(message)
+        content_key = message_content_dedupe_key(message)
+        reply_key = normalize_reply_content_key(str(message.get("content") or ""))
+        if (
+            (message_id and message_id in anchor_ids)
+            or (stable_key and stable_key in anchor_content_keys)
+            or (content_key and content_key in anchor_content_keys)
+            or (reply_key and reply_key in reply_keys)
+        ):
+            latest = index
+    return latest
+
+
+def message_processed_content_keys(message: dict[str, Any]) -> list[str]:
+    keys: list[str] = []
+    for key in (
+        message_stable_content_key(message),
+        message_content_dedupe_key(message),
+        *message_fragment_content_keys(message),
+    ):
+        if key and key not in keys:
+            keys.append(key)
+    return keys
+
+
+def message_original_match_keys(message: dict[str, Any]) -> list[str]:
+    keys = message_processed_content_keys(message)
+    for key in list(keys):
+        parts = str(key or "").split("\x1f")
+        if len(parts) != 3 or not parts[2]:
+            continue
+        content_only = "\x1f".join(["content", parts[2]])
+        if content_only not in keys:
+            keys.append(content_only)
+    return keys
+
+
+def message_fragment_content_keys(message: dict[str, Any]) -> list[str]:
+    content = str(message.get("content") or "").strip()
+    if not content:
+        return []
+    sender = str(message.get("sender") or "").strip()
+    message_type = str(message.get("type") or "").strip()
+    lines = [line.strip() for line in re.split(r"\n+", content) if line.strip()]
+    fragments: list[str] = []
+    for line in lines:
+        normalized = normalize_ocr_content_for_dedupe(line)
+        if len(normalized) >= 16:
+            fragments.append(normalized)
+    for index in range(len(lines) - 1):
+        normalized = normalize_ocr_content_for_dedupe(lines[index] + lines[index + 1])
+        if len(normalized) >= 24:
+            fragments.append(normalized)
+    keys: list[str] = []
+    for fragment in fragments:
+        key = "\x1f".join([sender, message_type, fragment])
+        if key not in keys:
+            keys.append(key)
+    return keys
+
+
+def normalized_processed_content_key(key: str) -> str:
+    parts = str(key or "").split("\x1f")
+    if len(parts) != 3:
+        return ""
+    content = normalize_ocr_content_for_dedupe(parts[2])
+    if not content:
+        return ""
+    return "\x1f".join([parts[0], parts[1], content])
+
+
+def append_unique_limited(values: list[str], keys: list[str]) -> None:
+    for key in keys:
+        if key and key not in values:
+            values.append(key)
+
+
+def history_backfill_gap_risk(
+    *,
+    settings: dict[str, Any],
+    anchor_count: int,
+    anchor_found: bool,
+    selection: BatchSelection,
+) -> bool:
+    if not settings.get("gap_guard_enabled", True):
+        return False
+    if selection.eligible_count <= 0:
+        return False
+    if anchor_count > 0:
+        return not anchor_found
+    return bool(settings.get("first_window_gap_guard")) and selection.truncated
+
+
+def history_gap_risk_blocks_reply(history_backfill: dict[str, Any], config: dict[str, Any] | None = None) -> bool:
+    if not isinstance(history_backfill, dict) or not history_backfill.get("gap_risk"):
+        return False
+    settings = history_backfill_settings(config)
+    return bool(settings.get("block_on_gap_risk", True))
+
+
+def listener_runtime_status_after_result(result: dict[str, Any]) -> tuple[str, str]:
+    events = [item for item in result.get("events", []) or [] if isinstance(item, dict)]
+    last_event = events[-1] if events else {}
+    if last_event.get("action") == "blocked" and last_event.get("reason") == "history_backfill_gap_risk":
+        return "paused", "检测到微信消息窗口可能存在缺口，已暂停自动回复。"
+    return "idle", "本轮微信消息处理完成。"
 
 
 def check_rate_limit(target_state: dict[str, Any], config: dict[str, Any]) -> dict[str, Any]:
@@ -3975,11 +5555,14 @@ def mark_processed(
     send_result: dict[str, Any] | None = None,
 ) -> None:
     processed = list(target_state.get("processed_message_ids", []))
+    processed_content_keys = list(target_state.get("processed_content_keys", []))
     for message in batch:
         message_id = str(message.get("id") or "")
         if message_id and message_id not in processed:
             processed.append(message_id)
+        append_unique_limited(processed_content_keys, message_processed_content_keys(message))
     target_state["processed_message_ids"] = processed[-MAX_STORED_IDS:]
+    target_state["processed_content_keys"] = processed_content_keys[-MAX_STORED_IDS:]
     entry = {
         "reply_trace_id": reply_trace_id or build_reply_trace_id("", batch, reply_text),
         "message_ids": [item.get("id") for item in batch],
@@ -3990,6 +5573,19 @@ def mark_processed(
     if send_result:
         entry["send_verified"] = bool(send_result.get("verified"))
     target_state.setdefault("sent_replies", []).append(entry)
+    if send_result and bool(send_result.get("verified")):
+        message_content_keys: list[str] = []
+        for message in batch:
+            append_unique_limited(message_content_keys, message_processed_content_keys(message))
+        target_state["last_successful_reply_anchor"] = {
+            "reply_trace_id": entry["reply_trace_id"],
+            "message_ids": [str(item.get("id") or "") for item in batch if str(item.get("id") or "")],
+            "message_content_keys": message_content_keys[-MAX_STORED_IDS:],
+            "reply_content_key": normalize_reply_content_key(reply_text),
+            "reply_text_sample": str(reply_text or "").strip()[:160],
+            "processed_at": entry["processed_at"],
+            "send_verified": True,
+        }
 
 
 def mark_coalesced_messages(
@@ -4003,6 +5599,7 @@ def mark_coalesced_messages(
     if not messages:
         return
     processed = list(target_state.get("processed_message_ids", []))
+    processed_content_keys = list(target_state.get("processed_content_keys", []))
     message_ids: list[str] = []
     for message in messages:
         message_id = str(message.get("id") or "")
@@ -4011,9 +5608,11 @@ def mark_coalesced_messages(
         message_ids.append(message_id)
         if message_id not in processed:
             processed.append(message_id)
+        append_unique_limited(processed_content_keys, message_processed_content_keys(message))
     if not message_ids:
         return
     target_state["processed_message_ids"] = processed[-MAX_STORED_IDS:]
+    target_state["processed_content_keys"] = processed_content_keys[-MAX_STORED_IDS:]
     target_state.setdefault("coalesced_message_batches", []).append(
         {
             "reply_trace_id": reply_trace_id,
@@ -4037,11 +5636,14 @@ def mark_handoff(
     reply_text: str = "",
 ) -> None:
     handoff = list(target_state.get("handoff_message_ids", []))
+    processed_content_keys = list(target_state.get("processed_content_keys", []))
     for message in batch:
         message_id = str(message.get("id") or "")
         if message_id and message_id not in handoff:
             handoff.append(message_id)
+        append_unique_limited(processed_content_keys, message_processed_content_keys(message))
     target_state["handoff_message_ids"] = handoff[-MAX_STORED_IDS:]
+    target_state["processed_content_keys"] = processed_content_keys[-MAX_STORED_IDS:]
     event = {
         "reply_trace_id": reply_trace_id or build_reply_trace_id("", batch, reply_text),
         "message_ids": [item.get("id") for item in batch],
@@ -4403,16 +6005,29 @@ def build_iteration_targets(
     """Build per-iteration target list: active sessions first, then full whitelist scan."""
     cfg = multi_target_cfg or {}
     prioritize_active = cfg.get("prioritize_active_sessions", True) is not False
-    # By default we scan all configured targets each iteration so no whitelist target is missed.
-    scan_all = cfg.get("scan_all_whitelist_each_iteration", True) is not False
+    # RPA low-risk mode: prioritize unread/changed sessions and avoid
+    # aggressive full-whitelist scans unless explicitly requested.
+    rpa_low_risk_mode = cfg.get("rpa_low_risk_mode", True) is not False
+    scan_all_raw = cfg.get("scan_all_whitelist_each_iteration")
+    if scan_all_raw is None:
+        scan_all = not rpa_low_risk_mode
+    else:
+        scan_all = scan_all_raw is not False
+    active_limit_default = 3 if rpa_low_risk_mode else 5
+    scan_limit_default = 3 if (rpa_low_risk_mode and scan_all) else 0
+    idle_sweep_default = 0 if rpa_low_risk_mode else 1
     try:
-        active_limit = int(cfg.get("max_targets_per_iteration", 5) or 5)
+        active_limit = int(cfg.get("max_targets_per_iteration", active_limit_default) or active_limit_default)
     except (TypeError, ValueError):
-        active_limit = 5
+        active_limit = active_limit_default
     try:
-        scan_limit = int(cfg.get("max_scan_targets_per_iteration", 0) or 0)
+        scan_limit = int(cfg.get("max_scan_targets_per_iteration", scan_limit_default) or scan_limit_default)
     except (TypeError, ValueError):
-        scan_limit = 0
+        scan_limit = scan_limit_default
+    try:
+        idle_whitelist_sweep_count = int(cfg.get("idle_whitelist_sweep_count", idle_sweep_default) or idle_sweep_default)
+    except (TypeError, ValueError):
+        idle_whitelist_sweep_count = idle_sweep_default
     try:
         dynamic_max_batch = int(
             cfg.get("dynamic_max_batch_messages")
@@ -4478,13 +6093,71 @@ def build_iteration_targets(
                     )
                 )
 
-    if not ordered:
+    if not ordered and scan_all:
         for base in config_targets:
+            push(base)
+    elif not ordered and idle_whitelist_sweep_count > 0:
+        for base in config_targets[:idle_whitelist_sweep_count]:
             push(base)
 
     if scan_limit > 0:
         return ordered[:scan_limit]
     return ordered
+
+
+def multi_target_change_warmup_delay_seconds(multi_target_cfg: dict[str, Any] | None) -> float:
+    """Short passive debounce after a session-list change to coalesce human bursts."""
+    cfg = multi_target_cfg or {}
+    if cfg.get("change_warmup_enabled", True) is False:
+        return 0.0
+    try:
+        min_seconds = float(cfg.get("change_warmup_min_seconds", 0.8))
+    except (TypeError, ValueError):
+        min_seconds = 0.8
+    try:
+        max_seconds = float(cfg.get("change_warmup_max_seconds", 2.0))
+    except (TypeError, ValueError):
+        max_seconds = 2.0
+    min_seconds = max(0.0, min(min_seconds, 5.0))
+    max_seconds = max(min_seconds, min(max_seconds, 5.0))
+    if max_seconds <= 0:
+        return 0.0
+    if max_seconds == min_seconds:
+        return min_seconds
+    return random.uniform(min_seconds, max_seconds)
+
+
+def coalesce_active_targets(*target_groups: list[Any]) -> list[Any]:
+    """Merge active target polls while preserving priority and first-seen order."""
+    by_name: dict[str, Any] = {}
+    order: dict[str, int] = {}
+    counter = 0
+    for group in target_groups:
+        for item in group or []:
+            name = str(getattr(item, "name", "") or "").strip()
+            if not name:
+                continue
+            if name not in order:
+                order[name] = counter
+                counter += 1
+            existing = by_name.get(name)
+            if existing is None:
+                by_name[name] = item
+                continue
+            current_score = int(getattr(item, "priority_score", 0) or 0)
+            existing_score = int(getattr(existing, "priority_score", 0) or 0)
+            current_age = int(getattr(item, "session_age_seconds", 0) or 0)
+            existing_age = int(getattr(existing, "session_age_seconds", 0) or 0)
+            if (current_score, current_age) > (existing_score, existing_age):
+                by_name[name] = item
+    return sorted(
+        by_name.values(),
+        key=lambda item: (
+            -int(getattr(item, "priority_score", 0) or 0),
+            -int(getattr(item, "session_age_seconds", 0) or 0),
+            order.get(str(getattr(item, "name", "") or ""), 0),
+        ),
+    )
 
 
 def resolve_iterations(args: argparse.Namespace, config: dict[str, Any]) -> int:
@@ -4510,11 +6183,9 @@ def parse_datetime(value: str) -> datetime | None:
 
 
 def print_json(payload: dict[str, Any]) -> None:
-    text = json.dumps(payload, ensure_ascii=False, indent=2) + "\n"
-    try:
-        sys.stdout.write(text)
-    except UnicodeEncodeError:
-        sys.stdout.buffer.write(text.encode("utf-8"))
+    # stdout is parsed by the managed listener across a Windows process boundary.
+    # Escape non-ASCII so Chinese target names survive regardless of console code page.
+    sys.stdout.write(json.dumps(payload, ensure_ascii=True, indent=2) + "\n")
 
 
 if __name__ == "__main__":

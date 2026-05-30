@@ -4,7 +4,7 @@
     "messages": ["我开便利店，想找个能放饮料的冷柜，别太复杂"],
     "expect_action": "sent",
     "expect_intent": "product_detail",
-    "expect_reply_contains": ["商用冰箱", "999"],
+    "expect_reply_contains": ["商用冰箱", "1000"],
     "expect_reply_not_contains": ["客户资料", "缺少", "电话"]
   },
   {

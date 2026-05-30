@@ -55,14 +55,14 @@ def main() -> int:
     tenant_id = active_tenant_id(args.tenant_id or None)
     plan = collect_file_storage(tenant_id)
     if args.dry_run:
-        print(json.dumps({"ok": True, "dry_run": True, "tenant_id": tenant_id, "counts": plan["counts"]}, ensure_ascii=False, indent=2))
+        print(json.dumps({"ok": True, "dry_run": True, "tenant_id": tenant_id, "counts": plan["counts"]}, ensure_ascii=True, indent=2))
         return 0
 
     config = load_storage_config()
     store = get_postgres_store(tenant_id=tenant_id, config=config)
     availability = store.availability()
     if not availability.ok:
-        print(json.dumps({"ok": False, "message": availability.reason, "counts": plan["counts"]}, ensure_ascii=False, indent=2))
+        print(json.dumps({"ok": False, "message": availability.reason, "counts": plan["counts"]}, ensure_ascii=True, indent=2))
         return 2
     if not args.skip_init:
         store.initialize_schema()

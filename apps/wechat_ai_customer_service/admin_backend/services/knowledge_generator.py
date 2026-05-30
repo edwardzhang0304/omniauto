@@ -167,7 +167,7 @@ class KnowledgeGenerator:
     def confirm_session_to_rag_experience(self, session_id: str, *, use_llm: bool = True) -> dict[str, Any]:
         session = self.require_session(session_id)
         if session.get("status") != "ready":
-            return {"ok": False, "message": "generator session is not ready to become RAG experience", "session": session}
+            return {"ok": False, "message": "generator session is not ready to become AI experience pool item", "session": session}
         category_id = str(session.get("category_id") or "")
         item = session.get("draft_item") if isinstance(session.get("draft_item"), dict) else {}
         evidence = json.dumps(

@@ -39,6 +39,7 @@ from apps.wechat_ai_customer_service.admin_backend.services.diagnostics_service 
 from apps.wechat_ai_customer_service.admin_backend.services.knowledge_deduper import KnowledgeDeduper  # noqa: E402
 from apps.wechat_ai_customer_service.admin_backend.services.knowledge_compiler import KnowledgeCompiler, compile_faq  # noqa: E402
 from apps.wechat_ai_customer_service.admin_backend.services.formal_review_state import sort_knowledge_items_for_review  # noqa: E402
+from apps.wechat_ai_customer_service.admin_backend.services.customer_service_runtime import stale_volatile_wechat_startup_failure  # noqa: E402
 from apps.wechat_ai_customer_service.admin_backend.services.learning_service import LearningService  # noqa: E402
 from apps.wechat_ai_customer_service.admin_backend.services import rag_admin_service as rag_admin_service_module  # noqa: E402
 from apps.wechat_ai_customer_service.admin_backend.services import rag_experience_interpreter as rag_interpreter_module  # noqa: E402
@@ -214,6 +215,7 @@ def checks_for_chapter(chapter: str) -> list[Any]:
         check_static_assets,
         check_platform_safety_rules_api,
         check_platform_understanding_rules_api,
+        check_customer_service_stale_wechat_startup_message,
         check_formal_knowledge_review_sort,
         check_rag_status_and_search_api,
         check_rag_experience_api,
@@ -304,7 +306,7 @@ def check_index_page(client: TestClient) -> None:
     assert_true("AI智能记录员" in text, "index should expose recorder workbench")
     assert_true("知识成长中心" in text, "index should group upload, learning, and candidate review")
     assert_true("商品库" in text, "index should expose product catalog workbench")
-    assert_true("RAG经验池" in text, "index should group reference material and dialogue experience")
+    assert_true("AI经验池" in text, "index should group reference material and dialogue experience")
     assert_true("整理未处理资料" in text, "index should expose one-click material learning in upload context")
     assert_true("自动识别（推荐）" in text, "index should provide auto kind recognition as default upload mode")
     assert_true("上传后自动整理并吸收经验（推荐）" in text, "index should provide upload-then-auto-learn default flow")
@@ -423,7 +425,7 @@ def check_static_assets(client: TestClient) -> None:
     assert_true("/api/rag/experiences/interpret" in js.text, "frontend should call rag experience interpretation endpoint")
     assert_equal(js.text.count("const processingNotice = ragExperienceProcessingNoticeHtml();"), 1, "frontend should render RAG background-processing notice in one global location only")
     assert_equal(js.text.count("const actionNotice = ragActionNoticeHtml();"), 1, "frontend should render RAG action notice in one global location only")
-    assert_true("保留为经验" in js.text and "保留为线索" not in js.text, "frontend should label keep action as experience retention")
+    assert_true("保留到AI经验池" in js.text and "保留为线索" not in js.text, "frontend should label keep action as AI experience pool retention")
     assert_true("ragInterpretationLoadingIds" in js.text and "button-spinner" in css.text and "整理中" in js.text, "frontend should show a spinner while AI re-interpretation is running")
     assert_true("ragActionLoadingIds" in js.text and "升级中" in js.text and "废弃中" in js.text, "frontend should show per-row loading states for RAG actions")
     assert_true("promotion_allowed" in js.text and "auto_triaged" in js.text and "auto_kept" in js.text, "frontend should honor AI promotion permission plus auto-kept and auto-triaged RAG experiences")
@@ -434,15 +436,45 @@ def check_static_assets(client: TestClient) -> None:
     assert_true("/keep" in js.text and "/reopen" in js.text, "frontend should call rag experience keep/reopen endpoints")
     assert_true("formal_relation" in js.text, "frontend should render rag/formal knowledge relationship")
     assert_true("quality-chip" in js.text, "frontend should render rag experience quality chips")
-    assert_true("retrieval_allowed" in js.text, "frontend should render rag retrieval eligibility")
+    assert_true("作为回答依据" in js.text, "frontend should explain AI experience pool content-authority eligibility")
     assert_true("rag_evidence" in js.text, "frontend should render candidate rag evidence")
     assert_true("readableSourcePlainText" in js.text and "查看技术原文（排查用）" in js.text, "frontend should render RAG sources in business-readable form and hide raw JSON behind diagnostics")
     assert_true("客户怎么问的" in js.text and "AI怎么回的" in js.text, "frontend should explain chat evidence without exposing raw JSON first")
     assert_true('id="rag-source-list"' in client.get("/").text, "frontend should expose rag source list")
     assert_true("资料片段" in client.get("/").text, "frontend should expose imported reference material")
-    assert_true("RAG经验清单" in client.get("/").text, "frontend should expose dialogue experience")
+    assert_true("AI经验池清单" in client.get("/").text, "frontend should expose dialogue experience")
     html = client.get("/").text
     assert_true(html.find('data-tab="experiences"') < html.find('data-tab="sources"'), "AI experience tab should appear before raw source snippets")
+
+
+def check_customer_service_stale_wechat_startup_message(client: TestClient) -> None:
+    fresh = {
+        "state": "stopped",
+        "updated_at": "2026-05-24T04:00:00",
+        "wechat_check": {"detail": "wechat_not_ready"},
+    }
+    stale = {
+        **fresh,
+        "updated_at": "2026-05-24T03:59:00",
+    }
+    cloud_lock = {
+        "state": "stopped",
+        "updated_at": "2026-05-24T03:59:00",
+        "wechat_check": {"detail": "cloud_authoritative_access_required"},
+    }
+    now_ts = 1779566420.0
+    assert_true(
+        stale_volatile_wechat_startup_failure(fresh, now_ts=now_ts) is False,
+        "fresh WeChat startup failure should remain visible briefly",
+    )
+    assert_true(
+        stale_volatile_wechat_startup_failure(stale, now_ts=now_ts) is True,
+        "stale volatile WeChat startup failure should not pollute refreshed status",
+    )
+    assert_true(
+        stale_volatile_wechat_startup_failure(cloud_lock, now_ts=now_ts) is False,
+        "non-volatile lock messages should remain visible",
+    )
 
 
 def check_formal_knowledge_review_sort(client: TestClient) -> None:
@@ -489,26 +521,33 @@ def check_rag_experience_api(client: TestClient) -> None:
     store = RagExperienceStore()
     cleanup_rag_experience_probe(store)
     try:
-        record = store.record_reply(
-            target="admin_rag_experience_probe",
-            message_ids=["admin-rag-exp-001"],
-            question="客户随口问公寓门锁安装要不要提前留电源",
-            reply_text="一般建议提前确认门厚、开孔和供电方式，我先按常规安装注意事项给您整理。",
-            raw_reply_text="一般建议提前确认门厚、开孔和供电方式，我先按常规安装注意事项给您整理。",
-            intent_assist={"intent": "product_detail", "recommended_action": "answer"},
-            rag_reply={
-                "applied": True,
-                "hit": {
-                    "chunk_id": "admin-rag-exp-chunk",
-                    "source_id": "admin-rag-exp-source",
-                    "score": 0.91,
-                    "category": "product_explanations",
-                    "source_type": "rag_soft_reference",
-                    "product_id": "fl-920",
-                    "text": "智能门锁安装前建议确认门厚、锁体开孔、供电方式和现场网络。",
+        from apps.wechat_ai_customer_service.admin_backend.services import llm_knowledge_audit  # noqa: PLC0415
+
+        original_has_llm_config_for_record = llm_knowledge_audit.has_llm_config
+        try:
+            llm_knowledge_audit.has_llm_config = lambda: False  # type: ignore[assignment]
+            record = store.record_reply(
+                target="admin_rag_experience_probe",
+                message_ids=["admin-rag-exp-001"],
+                question="客户随口问公寓门锁安装要不要提前留电源",
+                reply_text="一般建议提前确认门厚、开孔和供电方式，我先按常规安装注意事项给您整理。",
+                raw_reply_text="一般建议提前确认门厚、开孔和供电方式，我先按常规安装注意事项给您整理。",
+                intent_assist={"intent": "product_detail", "recommended_action": "answer"},
+                rag_reply={
+                    "applied": True,
+                    "hit": {
+                        "chunk_id": "admin-rag-exp-chunk",
+                        "source_id": "admin-rag-exp-source",
+                        "score": 0.91,
+                        "category": "product_explanations",
+                        "source_type": "rag_soft_reference",
+                        "product_id": "fl-920",
+                        "text": "智能门锁安装前建议确认门厚、锁体开孔、供电方式和现场网络。",
+                    },
                 },
-            },
-        )
+            )
+        finally:
+            llm_knowledge_audit.has_llm_config = original_has_llm_config_for_record  # type: ignore[assignment]
         assert_true(record.get("quality", {}).get("retrieval_allowed") is False, "unconfirmed rag experience should not be retrieval eligible")
         listed = client.get("/api/rag/experiences", params={"status": "active", "limit": 50})
         assert_equal(listed.status_code, 200, "rag experience list endpoint")
@@ -531,7 +570,7 @@ def check_rag_experience_api(client: TestClient) -> None:
                 "business_type": "客服经验",
                 "meaning": "这条经验是在说明客户询问安装准备时，客服可以先提醒核对门厚、开孔和供电。",
                 "recommended_action": "keep_as_experience",
-                "action_label": "建议保留为经验",
+                "action_label": "建议保留到AI经验池",
                 "action_reason": "它更像可复用表达经验，不能直接成为正式承诺。",
                 "auto_keep": {
                     "recommended": True,
@@ -559,7 +598,7 @@ def check_rag_experience_api(client: TestClient) -> None:
             assert_equal(
                 relisted_item.get("experience_review", {}).get("status"),
                 "auto_kept",
-                "low-risk reply experiences should be auto-kept in the RAG layer after AI interpretation",
+                "low-risk reply experiences should be auto-kept in the AI experience pool after AI interpretation",
             )
         finally:
             rag_admin_service_module.RagExperienceInterpreter.interpret = original_interpret
@@ -567,23 +606,21 @@ def check_rag_experience_api(client: TestClient) -> None:
         search = client.post("/api/rag/search", json={"query": "公寓门锁安装提前留电源", "limit": 10})
         assert_equal(search.status_code, 200, "rag experience search endpoint")
         assert_true(
-            any(hit.get("source_id") == record["experience_id"] and hit.get("source_type") == "rag_experience" for hit in search.json().get("hits", [])),
-            "auto-kept low-risk rag experience should participate in rag retrieval",
+            not any(hit.get("source_id") == record["experience_id"] for hit in search.json().get("hits", [])),
+            "auto-kept AI experience pool item should not participate in runtime retrieval",
         )
         kept_high = client.post(
             f"/api/rag/experiences/{record['experience_id']}/keep",
-            json={"reason": "admin backend keep before retrieval check"},
+            json={"reason": "admin backend keep before authority-gated retrieval check"},
         )
         assert_equal(kept_high.status_code, 200, "high quality rag experience keep endpoint")
         assert_equal(kept_high.json().get("item", {}).get("experience_review", {}).get("status"), "kept", "manual keep should overwrite auto-kept status")
         kept_search = client.post("/api/rag/search", json={"query": "公寓门锁安装提前留电源", "limit": 10})
         assert_equal(kept_search.status_code, 200, "kept rag experience search endpoint")
         assert_true(
-            any(hit.get("source_id") == record["experience_id"] and hit.get("source_type") == "rag_experience" for hit in kept_search.json().get("hits", [])),
-            "kept high-quality rag experience should participate in rag retrieval",
+            not any(hit.get("source_id") == record["experience_id"] for hit in kept_search.json().get("hits", [])),
+            "manually kept AI experience pool item should still not participate in runtime retrieval",
         )
-
-        from apps.wechat_ai_customer_service.admin_backend.services import llm_knowledge_audit  # noqa: PLC0415
 
         original_has_llm_config = llm_knowledge_audit.has_llm_config
         try:
@@ -1584,7 +1621,7 @@ def check_ai_knowledge_generator_flow(client: TestClient) -> None:
         rag_created = client.post(
             "/api/generator/sessions",
             json={
-                "message": "新增商品：RAG经验回归验证冷柜，单价1999元/台，10台以上1899元，库存50台，24小时发货。",
+                "message": "新增商品：AI经验池回归验证冷柜，单价1999元/台，10台以上1899元，库存50台，24小时发货。",
                 "use_llm": False,
             },
         ).json()
@@ -2269,7 +2306,7 @@ def cleanup_admin_check_artifacts() -> None:
             or "批量上传测试" in text
             or "暂存缺价测试商品" in text
             or "管理台生成器测试商品" in text
-            or "RAG经验回归验证冷柜" in text
+            or "AI经验池回归验证冷柜" in text
         ):
             path.unlink()
     for path in (APP_ROOT / "data" / "review_candidates").glob("*/*.json"):

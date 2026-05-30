@@ -1,9 +1,9 @@
 """Minimal runner for the accepted WeChat customer-service baseline.
 
-This runner intentionally avoids screenshot/OCR/window-capture probes. It only:
+This runner intentionally avoids startup/login automation. It only:
 1. Connects to an already logged-in WeChat main window.
 2. Refuses to start WeChat or interact with the login window.
-3. Calls the Python 3.12 wxauto4 sidecar.
+3. Calls WeChatConnector (RPA-first, optional wxauto4 reserve).
 4. Emits JSON for status, sessions, messages, send, or smoke-test actions.
 """
 
@@ -73,7 +73,7 @@ def main() -> int:
 
 
 def print_json(payload: dict[str, Any]) -> None:
-    sys.stdout.write(json.dumps(payload, ensure_ascii=False, indent=2))
+    sys.stdout.write(json.dumps(payload, ensure_ascii=True, indent=2))
     sys.stdout.write("\n")
 
 

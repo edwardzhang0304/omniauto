@@ -7,6 +7,7 @@ import json
 import os
 import re
 import time
+from difflib import SequenceMatcher
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -22,6 +23,10 @@ MAX_FILE_RECORDS = 10000
 MAX_BATCH_RECORDS = 2000
 SAFE_ID_RE = re.compile(r"[^A-Za-z0-9_.-]+")
 WINDOWS_FILE_RETRY_DELAYS = (0.03, 0.08, 0.16, 0.32, 0.64)
+OCR_FUZZY_DEDUPE_MIN_LENGTH = 24
+OCR_FUZZY_DEDUPE_RATIO = 0.965
+OCR_PARTIAL_DEDUPE_MIN_LENGTH = 12
+OCR_PARTIAL_DEDUPE_WINDOW_SECONDS = 30 * 60
 
 
 class RawMessageStore:
@@ -98,6 +103,8 @@ class RawMessageStore:
             )
             db_existing = db.get_raw_message_by_dedupe(self.tenant_id, message["dedupe_key"]) if db else None
             previous = db_existing or updated_records.get(message["dedupe_key"])
+            if not previous:
+                previous = find_ocr_near_duplicate(updated_records.values(), message)
             if previous:
                 message = merge_message(previous, message, source_module=source_module)
                 duplicates.append(message)
@@ -415,9 +422,94 @@ def merge_message(existing: dict[str, Any], incoming: dict[str, Any], *, source_
     merged["source_modules"] = modules
     merged["updated_at"] = now()
     merged["learning_enabled"] = bool(merged.get("learning_enabled", True)) and bool(incoming.get("learning_enabled", True))
+    existing_key = fuzzy_ocr_content_key(str(merged.get("content") or ""))
+    incoming_key = fuzzy_ocr_content_key(str(incoming.get("content") or ""))
+    if (
+        existing_key
+        and incoming_key
+        and len(incoming_key) > len(existing_key) + 4
+        and existing_key in incoming_key
+    ):
+        merged["content"] = str(incoming.get("content") or merged.get("content") or "")
+        merged["message_fingerprint"] = str(incoming.get("message_fingerprint") or merged.get("message_fingerprint") or "")
+        merged["raw_payload"] = incoming.get("raw_payload") if isinstance(incoming.get("raw_payload"), dict) else merged.get("raw_payload", {})
+        if incoming.get("message_id"):
+            merged["message_id"] = str(incoming.get("message_id") or "")
     if incoming.get("excluded_reason") and not merged["learning_enabled"]:
         merged["excluded_reason"] = str(incoming.get("excluded_reason") or merged.get("excluded_reason") or "")
     return merged
+
+
+def find_ocr_near_duplicate(existing_records: Any, incoming: dict[str, Any]) -> dict[str, Any] | None:
+    """Merge highly similar OCR captures that differ by tiny recognition noise."""
+    incoming_modules = {str(item) for item in incoming.get("source_modules", []) if str(item)}
+    if "smart_recorder" not in incoming_modules and str(incoming.get("source_adapter") or "") != "win32_ocr":
+        return None
+    incoming_key = fuzzy_ocr_content_key(str(incoming.get("content") or ""))
+    if len(incoming_key) < OCR_PARTIAL_DEDUPE_MIN_LENGTH:
+        return None
+    best: tuple[float, dict[str, Any]] | None = None
+    for candidate in existing_records:
+        if not isinstance(candidate, dict):
+            continue
+        if str(candidate.get("conversation_id") or "") != str(incoming.get("conversation_id") or ""):
+            continue
+        if str(candidate.get("sender") or "") != str(incoming.get("sender") or ""):
+            continue
+        if str(candidate.get("content_type") or "") != str(incoming.get("content_type") or ""):
+            continue
+        incoming_time = str(incoming.get("message_time") or "")
+        candidate_time = str(candidate.get("message_time") or "")
+        if incoming_time and candidate_time and incoming_time != candidate_time:
+            continue
+        candidate_modules = {str(item) for item in candidate.get("source_modules", []) if str(item)}
+        if "smart_recorder" not in candidate_modules and str(candidate.get("source_adapter") or "") != "win32_ocr":
+            continue
+        candidate_key = fuzzy_ocr_content_key(str(candidate.get("content") or ""))
+        if len(candidate_key) < OCR_PARTIAL_DEDUPE_MIN_LENGTH:
+            continue
+        partial_score = ocr_partial_duplicate_score(incoming_key, candidate_key)
+        if partial_score and ocr_observed_times_close(incoming, candidate):
+            if best is None or partial_score > best[0]:
+                best = (partial_score, candidate)
+            continue
+        if len(candidate_key) < OCR_FUZZY_DEDUPE_MIN_LENGTH:
+            continue
+        max_length = max(len(incoming_key), len(candidate_key))
+        if abs(len(incoming_key) - len(candidate_key)) > max(4, int(max_length * 0.08)):
+            continue
+        ratio = SequenceMatcher(None, incoming_key, candidate_key).ratio()
+        if ratio >= OCR_FUZZY_DEDUPE_RATIO and (best is None or ratio > best[0]):
+            best = (ratio, candidate)
+    return best[1] if best else None
+
+
+def fuzzy_ocr_content_key(value: str) -> str:
+    return re.sub(r"\s+", "", str(value or "").strip())
+
+
+def ocr_partial_duplicate_score(left: str, right: str) -> float:
+    shorter, longer = (left, right) if len(left) <= len(right) else (right, left)
+    if len(shorter) < OCR_PARTIAL_DEDUPE_MIN_LENGTH or not longer or shorter not in longer:
+        return 0.0
+    if len(shorter) == len(longer):
+        return 0.0
+    unique_signal = re.search(r"[A-Za-z][A-Za-z0-9_.-]{5,}", shorter) or re.search(
+        r"\d+(?:\.\d+)?(?:元|ML|G|MG|UL|μL)|\d+(?:\.\d+)?\s*[xX*×]\s*\d+",
+        shorter,
+        re.I,
+    )
+    if not unique_signal and len(shorter) < OCR_FUZZY_DEDUPE_MIN_LENGTH:
+        return 0.0
+    return 1.0 + (len(shorter) / max(1, len(longer)))
+
+
+def ocr_observed_times_close(left: dict[str, Any], right: dict[str, Any]) -> bool:
+    left_time = parse_time_text(str(left.get("observed_at") or left.get("message_time") or ""))
+    right_time = parse_time_text(str(right.get("observed_at") or right.get("message_time") or ""))
+    if left_time is None or right_time is None:
+        return True
+    return abs((left_time - right_time).total_seconds()) <= OCR_PARTIAL_DEDUPE_WINDOW_SECONDS
 
 
 def normalize_conversation_type(value: str) -> str:

@@ -254,7 +254,7 @@ def mark_processed(target_state: dict[str, Any], message: dict[str, Any], reply_
 
 
 def print_json(payload: dict[str, Any]) -> None:
-    sys.stdout.write(json.dumps(payload, ensure_ascii=False, indent=2))
+    sys.stdout.write(json.dumps(payload, ensure_ascii=True, indent=2))
     sys.stdout.write("\n")
 
 

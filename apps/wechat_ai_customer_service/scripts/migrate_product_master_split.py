@@ -41,7 +41,7 @@ def main() -> int:
         result["tenant_id"] = tenant_id
         result["product_master_root"] = str(store.root)
         results.append(result)
-    print(json.dumps({"ok": all(item.get("ok") for item in results), "results": results}, ensure_ascii=False, indent=2))
+    print(json.dumps({"ok": all(item.get("ok") for item in results), "results": results}, ensure_ascii=True, indent=2))
     return 0 if all(item.get("ok") for item in results) else 1
 
 

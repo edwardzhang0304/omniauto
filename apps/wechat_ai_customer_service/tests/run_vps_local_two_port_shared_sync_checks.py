@@ -113,6 +113,16 @@ def main() -> int:
         assert_true(bool(cache_status.get("expires_at")), "local status should expose cloud cache expiry")
         assert_equal(cache_status.get("tenant_industry_id"), "home_appliance", "status should expose tenant industry binding")
 
+        chejin_registration = request_json(
+            "POST",
+            f"{local_base}/api/sync/register-node",
+            {"display_name": "two-port-local-client"},
+            headers={"X-Tenant-ID": "chejin"},
+        )
+        assert_true(chejin_registration.get("ok") is True and chejin_registration.get("node"), "same local node should register for chejin")
+        node_cache = json.loads(local_node_cache_path().read_text(encoding="utf-8"))
+        assert_true({"default", "chejin"}.issubset(set(node_cache.get("tenant_ids", []))), "local node cache should merge tenant scopes")
+
         usedcar_sync = request_json(
             "POST",
             f"{local_base}/api/sync/shared/cloud-snapshot",
@@ -123,6 +133,8 @@ def main() -> int:
         assert_true((shared_runtime_cache_root() / "risk_control" / "items" / "cloud_usedcar_transfer_boundary.json").exists(), "used-car item should be included for used-car tenant snapshot")
         assert_true(not (shared_runtime_cache_root() / "reply_style" / "items" / "cloud_home_appliance_install_style.json").exists(), "home appliance item should not leak into used-car tenant snapshot")
         assert_true(shared_runtime_cache_root() in runtime_knowledge_roots("chejin"), "shared root should participate for matched tenant")
+        chejin_status = request_json("GET", f"{local_base}/api/sync/status", headers={"X-Tenant-ID": "chejin"})
+        assert_true(chejin_status.get("cloud_gate", {}).get("ok") is True, f"cloud gate should accept merged chejin node: {chejin_status.get('cloud_gate')}")
         assert_true(shared_runtime_cache_root() not in runtime_knowledge_roots("default"), "shared root should not participate when snapshot tenant mismatches active tenant")
 
         result = {

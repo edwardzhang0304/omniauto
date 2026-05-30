@@ -268,14 +268,14 @@ def evaluate_candidate_source_authority(candidate: dict[str, Any]) -> dict[str, 
             category,
             source_types,
             "dynamic_product_recommendation_chat_stays_rag_only",
-            "这条话术包含具体商品/车型推荐、库存或价格时效信息，不能写入正式话术；请保留在RAG经验层，正式回复应在运行时读取商品库后再推荐。",
+            "这条话术包含具体商品/车型推荐、库存或价格时效信息，不能写入正式话术；请保留在AI经验池，正式回复应在运行时读取商品库后再推荐。",
         )
     if observed_wechat and category == "chats" and observed_chat_candidate_is_too_specific(candidate):
         return denied(
             category,
             source_types,
             "observed_wechat_chat_candidate_not_generalized",
-            "这条聊天话术带有具体客户、人称、转人工场景或金融边界，不能直接写入正式话术；请保留在RAG经验层，或人工改写成通用边界规则后再提交。",
+            "这条聊天话术带有具体客户、人称、转人工场景或金融边界，不能直接写入正式话术；请保留在AI经验池，或人工改写成通用边界规则后再提交。",
         )
 
     return {
@@ -386,7 +386,7 @@ def evaluate_experience_source_authority(item: dict[str, Any], category: str) ->
             category,
             source_types,
             "rag_product_master_promotion_disabled",
-            "商品资料属于权威主数据，RAG经验不能升级为商品资料；请通过商品库手动导入/维护。",
+            "商品资料属于权威主数据，AI经验池不能升级为商品资料；请通过商品库手动导入/维护。",
         )
     if observed_wechat and contains_model_reply and category != "chats":
         return denied(
@@ -400,7 +400,7 @@ def evaluate_experience_source_authority(item: dict[str, Any], category: str) ->
             category,
             source_types,
             "dynamic_product_recommendation_chat_stays_rag_only",
-            "这条话术包含具体商品/车型推荐、库存或价格时效信息，不能升级为正式话术候选；请保留在RAG经验层，正式回复应在运行时读取商品库后再推荐。",
+            "这条话术包含具体商品/车型推荐、库存或价格时效信息，不能升级为正式话术候选；请保留在AI经验池，正式回复应在运行时读取商品库后再推荐。",
         )
     if observed_wechat and category == "chats" and observed_chat_experience_is_too_specific(item):
         return denied(

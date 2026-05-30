@@ -1413,7 +1413,7 @@ async function showPackageDetail(packageId) {
     <div class="package-detail-note">
       <div>
         <strong>这些数据是什么？</strong>
-        <span>正式知识、商品专属知识、RAG 资料和 RAG 经验是客户本地客服系统使用的数据层。想看正文，请点“下载可读知识表”，会导出 Excel。</span>
+        <span>正式知识、商品专属知识、运行时知识检索资料和 AI经验池是客户本地客服系统使用的数据层。想看正文，请点“下载可读知识表”，会导出 Excel。</span>
         <span>底部的 path、sha256、bytes 是备份包技术清单，用于校验和还原，平时不需要阅读。</span>
       </div>
       <div class="button-row">
