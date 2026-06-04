@@ -164,6 +164,11 @@
                   <span>工作模式</span>
                   <select id="customer-service-mode"></select>
                 </label>
+                <label class="form-field">
+                  <span>客服大脑模式</span>
+                  <select id="customer-brain-mode"></select>
+                  <span class="inline-muted">默认关闭；影子观察不改变实盘回复。</span>
+                </label>
                 <div class="setting-grid">
                   <label class="checkbox-line"><input id="customer-record-messages" type="checkbox" /> 记录客服对话</label>
                   <label class="checkbox-line"><input id="customer-auto-learn" type="checkbox" /> 自动整理为AI经验池</label>
@@ -631,15 +636,15 @@
               <div class="section-head sub-head">
                 <div>
                   <h2>大模型配置</h2>
-                  <p>配置 OpenAI-compatible 大模型供应商，用于 AI 辅助整理和自动回复。</p>
+                  <p>配置主用与备选大模型供应商，用于 AI 辅助整理和自动回复。</p>
                 </div>
               </div>
               <div id="llm-config-summary" class="security-summary">大模型配置读取中...</div>
               <div class="security-grid">
                 <section class="security-panel">
                   <div class="security-panel-head">
-                    <h3>供应商基础配置</h3>
-                    <span>官方 OpenAI 或第三方中转</span>
+                    <h3>主用供应商</h3>
+                    <span>当前默认走这条链路</span>
                   </div>
                   <form class="security-form" id="llm-config-form">
                     <label class="form-field">
@@ -696,7 +701,7 @@
                     <datalist id="llm-model-options"></datalist>
                     <div class="llm-model-list wide-field" id="llm-model-availability-note">可用模型读取中...</div>
                     <div class="security-actions">
-                      <button class="primary-button compact-button" type="submit" id="llm-config-save">保存配置</button>
+                      <button class="primary-button compact-button" type="submit" id="llm-config-save">保存主备配置</button>
                       <button class="secondary-button compact-button" type="button" id="llm-config-test">测试浅任务</button>
                       <button class="secondary-button compact-button" type="button" id="llm-config-test-pro">测试深度思考</button>
                       <button class="secondary-button compact-button" type="button" id="llm-config-toggle">显示</button>
@@ -705,8 +710,77 @@
                 </section>
                 <section class="security-panel">
                   <div class="security-panel-head">
+                    <h3>备选供应商</h3>
+                    <span>主链路异常时自动切换</span>
+                  </div>
+                  <div class="security-form">
+                    <label class="checkbox-field wide-field">
+                      <input name="fallback_enabled" type="checkbox" id="llm-fallback-enabled-input" />
+                      <span>启用备选自动切换</span>
+                    </label>
+                    <label class="form-field">
+                      <span>备选供应商</span>
+                      <select name="fallback_provider" id="llm-fallback-provider-select"></select>
+                    </label>
+                    <label class="form-field">
+                      <span>备选 Base URL</span>
+                      <input name="fallback_base_url" type="url" autocomplete="off" placeholder="https://.../v1" id="llm-fallback-base-url-input" />
+                    </label>
+                    <label class="form-field wide-field">
+                      <span>备选 API Key</span>
+                      <input name="fallback_api_key" type="password" autocomplete="off" placeholder="输入备选 API Key 后点击保存" id="llm-fallback-api-key-input" />
+                      <small id="llm-fallback-api-key-current">当前备选 Key 状态读取中...</small>
+                    </label>
+                    <label class="checkbox-field wide-field">
+                      <input name="fallback_allow_insecure_tls" type="checkbox" id="llm-fallback-insecure-tls-input" />
+                      <span>备选链路允许自签名证书（仅自有或可信中转）</span>
+                    </label>
+                    <div class="llm-route-grid wide-field">
+                      <section class="llm-route-card">
+                        <div class="llm-route-head">
+                          <strong>备选浅任务入口</strong>
+                          <span>主链路异常时接管浅任务</span>
+                        </div>
+                        <label class="form-field">
+                          <span>模型</span>
+                          <select id="llm-fallback-flash-model-select" aria-label="选择备选浅任务模型"></select>
+                          <input name="fallback_flash_model" type="hidden" id="llm-fallback-flash-model-input" />
+                        </label>
+                        <label class="form-field">
+                          <span>思考强度</span>
+                          <select name="fallback_flash_reasoning_effort" id="llm-fallback-flash-reasoning-input"></select>
+                        </label>
+                        <small>主用上游短暂超时、503、限流时，用于接管浅任务。</small>
+                      </section>
+                      <section class="llm-route-card">
+                        <div class="llm-route-head">
+                          <strong>备选深度思考入口</strong>
+                          <span>主链路异常时接管深度任务</span>
+                        </div>
+                        <label class="form-field">
+                          <span>模型</span>
+                          <select id="llm-fallback-pro-model-select" aria-label="选择备选深度思考模型"></select>
+                          <input name="fallback_pro_model" type="hidden" id="llm-fallback-pro-model-input" />
+                        </label>
+                        <label class="form-field">
+                          <span>思考强度</span>
+                          <select name="fallback_pro_reasoning_effort" id="llm-fallback-pro-reasoning-input"></select>
+                        </label>
+                        <small>主用上游短暂不可用时，用于接管复杂推理和高风险场景。</small>
+                      </section>
+                    </div>
+                    <div class="llm-model-list wide-field" id="llm-fallback-model-availability-note">备选可用模型读取中...</div>
+                    <div class="security-actions">
+                      <button class="secondary-button compact-button" type="button" id="llm-fallback-test">测试备选浅任务</button>
+                      <button class="secondary-button compact-button" type="button" id="llm-fallback-test-pro">测试备选深度思考</button>
+                      <button class="secondary-button compact-button" type="button" id="llm-fallback-toggle">显示</button>
+                    </div>
+                  </div>
+                </section>
+                <section class="security-panel">
+                  <div class="security-panel-head">
                     <h3>当前路由预览</h3>
-                    <span>运行时按任务类型自动选择</span>
+                    <span>运行时按任务类型自动选择，主链路异常时自动切备选</span>
                   </div>
                   <div class="llm-info-grid">
                     <div><span>供应商</span><strong id="llm-info-provider">—</strong></div>
@@ -716,12 +790,18 @@
                     <div><span>深度思考强度</span><strong id="llm-info-pro-effort">—</strong></div>
                     <div><span>Base URL</span><strong id="llm-info-base-url">—</strong></div>
                     <div><span>TLS 校验</span><strong id="llm-info-tls">—</strong></div>
+                    <div><span>备选开关</span><strong id="llm-info-fallback-enabled">—</strong></div>
+                    <div><span>备选供应商</span><strong id="llm-info-fallback-provider">—</strong></div>
+                    <div><span>备选浅任务模型</span><strong id="llm-info-fallback-flash-model">—</strong></div>
+                    <div><span>备选深度思考模型</span><strong id="llm-info-fallback-pro-model">—</strong></div>
+                    <div><span>备选 Base URL</span><strong id="llm-info-fallback-base-url">—</strong></div>
+                    <div><span>备选 TLS</span><strong id="llm-info-fallback-tls">—</strong></div>
                   </div>
                 </section>
               </div>
               <div class="security-note">
                 <strong>Key 存储位置</strong>
-                <span>API Key 保存在客户端本地的 llm_config.json 中，不会上传到 VPS 服务端；第三方中转请选择 OpenAI Compatible 并填写中转 Base URL。</span>
+                <span>主用与备选 API Key 都保存在客户端本地的 llm_config.json 中，不会上传到 VPS 服务端；第三方中转请选择对应供应商并填写正确的 Base URL。</span>
               </div>
             </section>
             <section class="settings-section">

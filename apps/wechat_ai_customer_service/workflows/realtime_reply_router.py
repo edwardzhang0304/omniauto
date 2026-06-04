@@ -11,14 +11,32 @@ import hashlib
 import re
 from typing import Any
 
+from apps.wechat_ai_customer_service.wechat_message_normalizer import (
+    split_wechat_ocr_speaker_prefix,
+)
 from knowledge_runtime import KnowledgeRuntime
+from product_name_matcher import collect_matched_aliases, compact_match_text, fold_confusable_text
 from product_vocabulary import contains_product_term
 
 
 DEFAULT_MAX_PROMPT_TOKENS = 3000
 DEFAULT_MAX_COMPLETION_TOKENS = 500
 
-GREETING_TERMS = ("你好", "您好", "在吗", "在么", "有人吗", "哈喽", "嗨")
+GREETING_TERMS = ("你好", "您好", "在吗", "在么", "在不在", "有人吗", "哈喽", "嗨")
+SOCIAL_SUMMON_TERMS = (
+    "在不在",
+    "在吗",
+    "在么",
+    "有人吗",
+    "出来",
+    "有事问你",
+    "有事咨询",
+    "方便吗",
+    "忙吗",
+    "人呢",
+    "回下",
+    "回一下",
+)
 DATA_TERMS = ("电话", "手机号", "联系方式", "我叫", "姓名", "地址")
 RECOMMEND_TERMS = (
     "预算",
@@ -222,6 +240,8 @@ TESTDRIVE_MATERIAL_TERMS = (
 )
 PRICE_NEGOTIATION_TERMS = ("价格", "优惠", "贵", "谈一点", "少一点", "便宜点", "还能谈", "再谈", "让点")
 PRICE_QUERY_TERMS = ("多少钱", "什么价", "报价", "价格", "价位", "区间", "落地价", "总价")
+CATALOG_PRICE_SUPERLATIVE_TERMS = ("最贵", "价格最高", "报价最高", "标价最高", "最高价", "最高价格", "贵的车", "高端")
+CATALOG_PRICE_LIST_TERMS = ("标价", "报价单", "价格表", "发一下报价", "发下报价", "发一下价格", "发下价格", "公开报价", "在售报价", "报价发我", "把报价发我", "发我报价", "发报价")
 WARRANTY_GUIDANCE_TERMS = ("质保", "保修", "售后", "买完", "核心部件", "出问题", "维修")
 COMFORT_HIGHWAY_TERMS = ("后排", "孩子", "老人", "父母", "高速", "回老家", "颠", "舒适", "舒服", "隔音", "胎噪", "底盘")
 CARGO_SPACE_GUIDANCE_TERMS = (
@@ -247,7 +267,7 @@ CARGO_SPACE_GUIDANCE_TERMS = (
 )
 VEHICLE_TYPE_GUIDANCE_TERMS = ("轿车", "suv", "mpv", "七座", "车型", "方向", "太大", "停车", "油耗")
 MAINTENANCE_COST_TERMS = ("保养成本", "后期成本", "养车成本", "用车成本", "维修成本", "维护成本", "维护", "后期保养", "后期维修", "小毛病", "少操心", "豪华品牌", "mpv", "油车", "油耗")
-COMMON_VEHICLE_BRAND_OR_MODEL_TERMS = ("品牌", "车型", "车系", "型号")
+COMMON_VEHICLE_BRAND_OR_MODEL_TERMS = ("品牌", "车型", "车系", "型号", "德系", "日系", "美系", "韩系", "法系", "国产")
 NO_DEPOSIT_VISIT_TERMS = (
     "不交定金",
     "先不交定金",
@@ -592,6 +612,10 @@ def decide_realtime_reply_route(
     llm_synthesis_enabled = bool((config.get("llm_reply_synthesis", {}) or {}).get("enabled", False))
     common_sense_advisor_enabled = settings.get("common_sense_advisor_enabled", True) is not False
     common_sense_advisor_allowed = bool(settings.get("allow_foreground_llm", True)) and llm_synthesis_enabled and common_sense_advisor_enabled
+    business_local_style_refinement_allowed = (
+        common_sense_advisor_allowed
+        and bool(settings.get("business_local_style_foreground_llm_enabled", False))
+    )
 
     def _common_sense_advisor_route(
         reason: str,
@@ -614,6 +638,31 @@ def decide_realtime_reply_route(
                 payload["advisor_max_reply_chars"] = int(advisor_max_reply_chars)
         return payload
 
+    def _business_local_style_route(
+        reason: str,
+        *,
+        background_jobs: list[str] | None = None,
+        advisor_mode: str = "direct_question_resolution",
+        advisor_goal: str = "refine_local_business_draft_with_grounded_direct_answer",
+        advisor_max_reply_chars: int = 140,
+        extra: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        payload = {
+            **route,
+            "level": "L1",
+            "reason": reason,
+            "foreground_llm_allowed": business_local_style_refinement_allowed,
+            "background_jobs": background_jobs or ["reply_quality_review"],
+        }
+        if extra:
+            payload.update(extra)
+        if business_local_style_refinement_allowed:
+            payload["advisor_mode"] = advisor_mode
+            payload["advisor_goal"] = advisor_goal
+            if advisor_max_reply_chars > 0:
+                payload["advisor_max_reply_chars"] = int(advisor_max_reply_chars)
+        return payload
+
     if is_identity_probe(text) and not contains_any(text, HIGH_RISK_TERMS):
         return {
             **route,
@@ -622,7 +671,14 @@ def decide_realtime_reply_route(
             "foreground_llm_allowed": False,
             "background_jobs": ["reply_quality_review"],
         }
-    intent = str(getattr(intent_result, "intent", "") or intent_assist.get("intent") or "")
+    intent_primary = str(getattr(intent_result, "intent", "") or "").strip()
+    intent_assisted = str(intent_assist.get("intent") or "").strip()
+    intent = intent_primary or intent_assisted
+    if (
+        intent_primary in {"", "unknown", "unclear"}
+        or (intent_primary == "general_chat" and intent_assisted in {"greeting", "small_talk"})
+    ) and intent_assisted:
+        intent = intent_assisted
     safety = ((intent_assist.get("evidence", {}) or {}).get("safety", {}) or {})
     safety_reasons = {str(item) for item in safety.get("reasons", []) or [] if str(item)}
     soft_missing_evidence = bool(safety.get("must_handoff")) and bool(safety_reasons) and safety_reasons <= {"no_relevant_business_evidence", "auto_reply_disabled"}
@@ -672,6 +728,22 @@ def decide_realtime_reply_route(
             "foreground_llm_allowed": False,
             "background_jobs": ["reply_quality_review"],
         }
+    if not soft_missing_evidence and (rag_reply.get("applied") or bool((evidence_pack.get("rag_evidence", {}) or {}).get("hits"))):
+        return {
+            **route,
+            "level": "L1",
+            "reason": "rag_or_style_experience_available",
+            "foreground_llm_allowed": False,
+            "background_jobs": ["rag_experience_audit"],
+        }
+    if intent == "small_talk" and not has_business_signal(text):
+        return {
+            **route,
+            "level": "L1",
+            "reason": "small_talk",
+            "foreground_llm_allowed": False,
+            "background_jobs": ["reply_quality_review"],
+        }
     if is_offtopic_social_message(text, recent_reply_texts=recent_reply_texts or []):
         return _common_sense_advisor_route(
             "offtopic_soft_redirect_needs_light_synthesis",
@@ -715,88 +787,81 @@ def decide_realtime_reply_route(
         )
     ):
         compare_question = False
+    if is_catalog_price_superlative_request(text) or is_catalog_price_superlative_request(source_text):
+        return _business_local_style_route(
+            "catalog_price_superlative_available",
+            advisor_mode="direct_question_resolution",
+            advisor_goal="answer_most_expensive_product_from_product_master",
+            advisor_max_reply_chars=120,
+        )
+    if is_catalog_price_list_request(text) or is_catalog_price_list_request(source_text):
+        return _business_local_style_route(
+            "catalog_price_list_available",
+            advisor_mode="direct_question_resolution",
+            advisor_goal="answer_public_quote_list_from_product_master",
+            advisor_max_reply_chars=140,
+        )
+    if is_direct_product_price_query(text) or is_direct_product_price_query(source_text):
+        return _common_sense_advisor_route(
+            "direct_product_price_requires_synthesis",
+            advisor_mode="direct_question_resolution",
+            advisor_goal="answer_product_quote_from_product_master_or_context",
+            advisor_max_reply_chars=96,
+        )
     if not current_priority_guidance and (
         is_followup_vehicle_source_request(text, recent_reply_texts or [])
         or is_followup_vehicle_source_request(source_text, recent_reply_texts or [])
     ) and not compare_question:
-        return {
-            **route,
-            "level": "L1",
-            "reason": "followup_ready_for_vehicle_candidates",
-            "foreground_llm_allowed": False,
-            "background_jobs": ["reply_quality_review"],
-        }
+        return _business_local_style_route(
+            "followup_ready_for_vehicle_candidates",
+            advisor_mode="clear_common_sense_recommendation",
+            advisor_goal="recommend_catalog_candidates_without_repeating_old_catalog",
+        )
     if (
         not current_priority_guidance
         and not compare_question
-        and (is_explicit_vehicle_source_request(text) or is_explicit_vehicle_source_request(source_text))
+        and (
+            is_explicit_vehicle_source_request(text)
+            or is_explicit_vehicle_source_request(source_text)
+            or is_inventory_category_availability_request(text)
+            or is_inventory_category_availability_request(source_text)
+        )
     ):
-        return {
-            **route,
-            "level": "L1",
-            "reason": "explicit_vehicle_candidates_requested",
-            "foreground_llm_allowed": False,
-            "background_jobs": ["reply_quality_review"],
-        }
+        return _business_local_style_route(
+            "explicit_vehicle_candidates_requested",
+            advisor_mode="clear_common_sense_recommendation",
+            advisor_goal="recommend_catalog_candidates_matching_latest_need",
+        )
     if (
         not current_priority_guidance
         and not compare_question
         and (is_detailed_vehicle_need_ready(text) or is_detailed_vehicle_need_ready(source_text))
     ):
-        return {
-            **route,
-            "level": "L1",
-            "reason": "detailed_vehicle_need_ready_for_candidates",
-            "foreground_llm_allowed": False,
-            "background_jobs": ["reply_quality_review"],
-        }
+        return _business_local_style_route(
+            "detailed_vehicle_need_ready_for_candidates",
+            advisor_mode="clear_common_sense_recommendation",
+            advisor_goal="recommend_catalog_candidates_matching_latest_need",
+        )
     if is_testdrive_material_question(text):
-        return {
-            **route,
-            "level": "L1",
-            "reason": "common_testdrive_materials_can_use_local_style",
-            "foreground_llm_allowed": False,
-            "background_jobs": ["reply_quality_review"],
-        }
+        return _business_local_style_route("common_testdrive_materials_can_use_local_style")
     if compare_question:
         current_compare_products = extract_current_catalog_compare_products(text)
         recent_compare_products = extract_recent_catalog_compare_products(recent_reply_texts or [], limit=2) if is_existing_vehicle_option_compare(text) else []
         if len(current_compare_products) >= 2 or recent_compare_products:
-            return {
-                **route,
-                "level": "L1",
-                "reason": "common_vehicle_compare_can_use_local_style",
-                "foreground_llm_allowed": False,
-                "background_jobs": ["reply_quality_review"],
-                "advisor_mode": "catalog_grounded_compare",
-            }
+            return _business_local_style_route(
+                "common_vehicle_compare_can_use_local_style",
+                advisor_mode="catalog_grounded_compare",
+                advisor_goal="compare_only_mentioned_catalog_options_and_pick_when_safe",
+            )
         return _common_sense_advisor_route("common_vehicle_compare_can_use_local_style")
     if is_vehicle_type_guidance_question(text):
         return _common_sense_advisor_route("common_vehicle_type_guidance_can_use_local_style")
     if is_maintenance_cost_question(text):
-        return {
-            **route,
-            "level": "L1",
-            "reason": "common_maintenance_cost_can_use_local_style",
-            "foreground_llm_allowed": False,
-            "background_jobs": ["reply_quality_review"],
-        }
+        return _business_local_style_route("common_maintenance_cost_can_use_local_style")
     if is_fee_transparency_question(text):
-        return {
-            **route,
-            "level": "L1",
-            "reason": "common_fee_guidance_can_use_local_style",
-            "foreground_llm_allowed": False,
-            "background_jobs": ["reply_quality_review"],
-        }
+        return _business_local_style_route("common_fee_guidance_can_use_local_style")
     if is_finance_guidance_question(text):
-        return {
-            **route,
-            "level": "L1",
-            "reason": "common_finance_guidance_can_use_local_style",
-            "foreground_llm_allowed": False,
-            "background_jobs": ["reply_quality_review"],
-        }
+        return _business_local_style_route("common_finance_guidance_can_use_local_style")
     if is_specific_testdrive_appointment_question(text):
         return {
             **route,
@@ -806,89 +871,32 @@ def decide_realtime_reply_route(
             "background_jobs": ["reply_quality_review"],
         }
     if is_visit_report_prep_question(text):
-        return {
-            **route,
-            "level": "L1",
-            "reason": "common_visit_timing_can_use_local_style",
-            "foreground_llm_allowed": False,
-            "background_jobs": ["reply_quality_review"],
-        }
+        return _business_local_style_route("common_visit_timing_can_use_local_style")
     if (
         contains_any(text, TRADE_IN_TERMS)
         and contains_any(text, ("现场估", "现场评估", "开过去", "老车", "估价", "估一下"))
         and not contains_any(text, EXPLICIT_SOURCE_TERMS + ("推荐", "优先看", "值得看", "更想看", "想看", "备选", "当备选"))
     ):
-        return {
-            **route,
-            "level": "L1",
-            "reason": "common_trade_in_collect_can_use_local_style",
-            "foreground_llm_allowed": False,
-            "background_jobs": ["customer_profile_update", "reply_quality_review"],
-        }
+        return _business_local_style_route(
+            "common_trade_in_collect_can_use_local_style",
+            background_jobs=["customer_profile_update", "reply_quality_review"],
+        )
     if is_inspection_guidance_question(text):
-        return {
-            **route,
-            "level": "L1",
-            "reason": "common_inspection_guidance_can_use_local_style",
-            "foreground_llm_allowed": False,
-            "background_jobs": ["reply_quality_review"],
-        }
+        return _business_local_style_route("common_inspection_guidance_can_use_local_style")
     if is_cargo_space_guidance_question(text):
-        return {
-            **route,
-            "level": "L1",
-            "reason": "common_cargo_space_guidance_can_use_local_style",
-            "foreground_llm_allowed": False,
-            "background_jobs": ["reply_quality_review"],
-        }
+        return _business_local_style_route("common_cargo_space_guidance_can_use_local_style")
     if is_comfort_highway_question(text):
-        return {
-            **route,
-            "level": "L1",
-            "reason": "common_comfort_highway_guidance_can_use_local_style",
-            "foreground_llm_allowed": False,
-            "background_jobs": ["reply_quality_review"],
-        }
+        return _business_local_style_route("common_comfort_highway_guidance_can_use_local_style")
     if is_feature_guidance_question(text):
-        return {
-            **route,
-            "level": "L1",
-            "reason": "common_feature_guidance_can_use_local_style",
-            "foreground_llm_allowed": False,
-            "background_jobs": ["reply_quality_review"],
-        }
+        return _business_local_style_route("common_feature_guidance_can_use_local_style")
     if is_price_negotiation_question(text):
-        return {
-            **route,
-            "level": "L1",
-            "reason": "common_price_negotiation_can_use_local_style",
-            "foreground_llm_allowed": False,
-            "background_jobs": ["reply_quality_review"],
-        }
+        return _business_local_style_route("common_price_negotiation_can_use_local_style")
     if is_warranty_guidance_question(text):
-        return {
-            **route,
-            "level": "L1",
-            "reason": "common_warranty_guidance_can_use_local_style",
-            "foreground_llm_allowed": False,
-            "background_jobs": ["reply_quality_review"],
-        }
+        return _business_local_style_route("common_warranty_guidance_can_use_local_style")
     if is_visit_timing_question(text):
-        return {
-            **route,
-            "level": "L1",
-            "reason": "common_visit_timing_can_use_local_style",
-            "foreground_llm_allowed": False,
-            "background_jobs": ["reply_quality_review"],
-        }
+        return _business_local_style_route("common_visit_timing_can_use_local_style")
     if is_no_deposit_visit_question(text):
-        return {
-            **route,
-            "level": "L1",
-            "reason": "common_no_deposit_visit_can_use_local_style",
-            "foreground_llm_allowed": False,
-            "background_jobs": ["reply_quality_review"],
-        }
+        return _business_local_style_route("common_no_deposit_visit_can_use_local_style")
     if must_handoff:
         return {
             **route,
@@ -905,6 +913,20 @@ def decide_realtime_reply_route(
             "foreground_llm_allowed": False,
             "background_jobs": ["reply_quality_review"],
         }
+    if is_catalog_price_superlative_request(text) or is_catalog_price_superlative_request(source_text):
+        return _business_local_style_route(
+            "catalog_price_superlative_available",
+            advisor_mode="direct_question_resolution",
+            advisor_goal="answer_most_expensive_product_from_product_master",
+            advisor_max_reply_chars=120,
+        )
+    if is_catalog_price_list_request(text) or is_catalog_price_list_request(source_text):
+        return _business_local_style_route(
+            "catalog_price_list_available",
+            advisor_mode="direct_question_resolution",
+            advisor_goal="answer_public_quote_list_from_product_master",
+            advisor_max_reply_chars=140,
+        )
     if product_knowledge and product_knowledge.get("matched") and not product_knowledge.get("needs_handoff"):
         return {
             **route,
@@ -913,61 +935,39 @@ def decide_realtime_reply_route(
             "foreground_llm_allowed": False,
         }
     if not compare_question and (is_followup_vehicle_source_request(text, recent_reply_texts or []) or is_followup_vehicle_source_request(source_text, recent_reply_texts or [])):
-        return {
-            **route,
-            "level": "L1",
-            "reason": "followup_ready_for_vehicle_candidates",
-            "foreground_llm_allowed": False,
-            "background_jobs": ["reply_quality_review"],
-        }
-    if not compare_question and (is_explicit_vehicle_source_request(text) or is_explicit_vehicle_source_request(source_text)):
-        return {
-            **route,
-            "level": "L1",
-            "reason": "explicit_vehicle_candidates_requested",
-            "foreground_llm_allowed": False,
-            "background_jobs": ["reply_quality_review"],
-        }
+        return _business_local_style_route(
+            "followup_ready_for_vehicle_candidates",
+            advisor_mode="clear_common_sense_recommendation",
+            advisor_goal="recommend_catalog_candidates_without_repeating_old_catalog",
+        )
+    if not compare_question and (
+        is_explicit_vehicle_source_request(text)
+        or is_explicit_vehicle_source_request(source_text)
+        or is_inventory_category_availability_request(text)
+        or is_inventory_category_availability_request(source_text)
+    ):
+        return _business_local_style_route(
+            "explicit_vehicle_candidates_requested",
+            advisor_mode="clear_common_sense_recommendation",
+            advisor_goal="recommend_catalog_candidates_matching_latest_need",
+        )
     if not compare_question and (is_detailed_vehicle_need_ready(text) or is_detailed_vehicle_need_ready(source_text)):
-        return {
-            **route,
-            "level": "L1",
-            "reason": "detailed_vehicle_need_ready_for_candidates",
-            "foreground_llm_allowed": False,
-            "background_jobs": ["reply_quality_review"],
-        }
+        return _business_local_style_route(
+            "detailed_vehicle_need_ready_for_candidates",
+            advisor_mode="clear_common_sense_recommendation",
+            advisor_goal="recommend_catalog_candidates_matching_latest_need",
+        )
     if contains_any(text, VALUE_RETENTION_TERMS):
-        return {
-            **route,
-            "level": "L1",
-            "reason": "common_value_retention_followup_can_use_local_style",
-            "foreground_llm_allowed": False,
-            "background_jobs": ["reply_quality_review"],
-        }
+        return _business_local_style_route("common_value_retention_followup_can_use_local_style")
     if contains_any(text, NEW_ENERGY_CHECK_TERMS):
-        return {
-            **route,
-            "level": "L1",
-            "reason": "common_new_energy_check_can_use_local_style",
-            "foreground_llm_allowed": False,
-            "background_jobs": ["reply_quality_review"],
-        }
+        return _business_local_style_route("common_new_energy_check_can_use_local_style")
     if contains_any(text, TRADE_IN_TERMS):
-        return {
-            **route,
-            "level": "L1",
-            "reason": "common_trade_in_collect_can_use_local_style",
-            "foreground_llm_allowed": False,
-            "background_jobs": ["customer_profile_update", "reply_quality_review"],
-        }
+        return _business_local_style_route(
+            "common_trade_in_collect_can_use_local_style",
+            background_jobs=["customer_profile_update", "reply_quality_review"],
+        )
     if is_appointment_context_query(text):
-        return {
-            **route,
-            "level": "L1",
-            "reason": "common_visit_timing_can_use_local_style",
-            "foreground_llm_allowed": False,
-            "background_jobs": ["reply_quality_review"],
-        }
+        return _business_local_style_route("common_visit_timing_can_use_local_style")
     if contains_any(text, FOLLOWUP_TERMS) and len(text) >= 8:
         return {
             **route,
@@ -977,13 +977,11 @@ def decide_realtime_reply_route(
             "background_jobs": ["conversation_summary"],
         }
     if contains_any(text, RECOMMEND_TERMS):
-        return {
-            **route,
-            "level": "L1",
-            "reason": "common_recommendation_can_use_local_candidates",
-            "foreground_llm_allowed": False,
-            "background_jobs": ["reply_quality_review"],
-        }
+        return _business_local_style_route(
+            "common_recommendation_can_use_local_candidates",
+            advisor_mode="clear_common_sense_recommendation",
+            advisor_goal="recommend_catalog_candidates_matching_latest_need",
+        )
     if not soft_missing_evidence and (rag_reply.get("applied") or bool((evidence_pack.get("rag_evidence", {}) or {}).get("hits"))):
         return {
             **route,
@@ -1582,13 +1580,11 @@ def is_price_negotiation_question(text: str) -> bool:
     clean = normalize_text(text)
     if not clean:
         return False
-    # "车型 + 多少钱/报价" should be treated as a direct pricing intent
-    # instead of dropping to uncertain-message synthesis.
-    if contains_any(clean, ("多少钱", "什么价", "报价")) and (
-        contains_used_car_product_signal(clean)
-        or contains_any(clean, ("这台", "那台", "这辆", "那辆"))
-    ):
-        return True
+    # "车型/这辆 + 多少钱/报价" is a direct product quote intent. Do not route
+    # it through local negotiation templates; the synthesis layer must ground
+    # the answer in product master/context and final visible polish.
+    if is_direct_product_price_query(clean):
+        return False
     if not contains_any(clean, PRICE_NEGOTIATION_TERMS):
         return False
     if contains_any(clean, NO_DEPOSIT_VISIT_TERMS):
@@ -1596,6 +1592,63 @@ def is_price_negotiation_question(text: str) -> bool:
     if contains_any(clean, ("最低价", "底价", "今天就定", "现在就定", "保证", "绝对", "包过")):
         return False
     return contains_any(clean, ("能不能", "还能", "谈", "优惠", "贵", "少", "便宜", "现场", "合适"))
+
+
+def is_direct_product_price_query(text: str) -> bool:
+    clean = normalize_text(text)
+    if not clean or not contains_any(clean, PRICE_QUERY_TERMS):
+        return False
+    if "同价位" in clean and not contains_any(clean, ("多少钱", "什么价", "报价", "价格多少", "发报价", "发价格")):
+        return False
+    if is_catalog_price_list_request(clean) and not (contains_catalog_product_term(clean) or re.search(r"[\u4e00-\u9fffA-Za-z0-9]{2,16}(多少钱|什么价|价格多少)", clean)):
+        return False
+    if contains_any(clean, ("最低", "底价", "优惠", "便宜", "少点", "少一点", "包过", "赔", "赔偿", "保证", "绝对")):
+        return False
+    if contains_catalog_product_term(clean) or contains_used_car_product_signal(clean):
+        return True
+    model_price_match = re.search(r"([\u4e00-\u9fffA-Za-z0-9]{2,16})(多少钱|什么价|报价|价格)", clean)
+    if model_price_match:
+        candidate = normalize_text(model_price_match.group(1))
+        generic_prefixes = ("估个", "估一", "准", "预算", "车款", "抵", "给我", "这边", "你们", "现在")
+        if candidate and not contains_any(candidate, generic_prefixes):
+            return True
+    return contains_any(clean, ("这台", "那台", "这辆", "那辆", "刚才那台", "刚推荐", "上面那台"))
+
+
+def is_catalog_price_superlative_request(text: str) -> bool:
+    clean = normalize_text(text)
+    if not clean or requires_high_risk_boundary(clean):
+        return False
+    return contains_any(clean, CATALOG_PRICE_SUPERLATIVE_TERMS) and contains_any(clean, ("车", "车型", "车源", "款"))
+
+
+def is_catalog_price_list_request(text: str) -> bool:
+    clean = normalize_text(text)
+    if not clean or requires_high_risk_boundary(clean):
+        return False
+    if contains_any(clean, ("最低", "底价", "优惠", "便宜", "少点", "少一点", "包过", "保证", "绝对")):
+        return False
+    if not contains_any(clean, CATALOG_PRICE_LIST_TERMS):
+        return False
+    return contains_any(
+        clean,
+        (
+            "车",
+            "车型",
+            "车源",
+            "价格",
+            "价",
+            "报价",
+            "标价",
+            "贷款",
+            "分期",
+            "预算",
+            "手续",
+            "车况",
+            "合适",
+            "看车",
+        ),
+    )
 
 
 def is_warranty_guidance_question(text: str) -> bool:
@@ -1668,6 +1721,44 @@ def maybe_build_realtime_reply(
         "customer_challenge_needs_direct_answer",
     }:
         return {"applied": False, "reason": "prefer_foreground_llm_direct_resolution"}
+    if route_reason == "direct_product_price_requires_synthesis":
+        return {"applied": False, "reason": "prefer_foreground_llm_direct_resolution"}
+    if route_reason == "catalog_price_superlative_available":
+        products = catalog_products_by_public_price(limit=3)
+        reply, variant_index = build_catalog_price_superlative_reply(
+            current_combined,
+            products,
+            recent_reply_texts=recent_reply_texts,
+        )
+        if reply:
+            return {
+                "applied": True,
+                "rule_name": "realtime_catalog_price_fact",
+                "reason": "product_master_price_superlative",
+                "raw_reply_text": reply,
+                "reply_text": reply,
+                "variant_index": variant_index,
+                "used_product_ids": [str(item.get("id") or "") for item in products[:1] if item.get("id")],
+                "saved_reason": "foreground_llm_skipped_for_product_master_price_fact_draft",
+            }
+    if route_reason == "catalog_price_list_available":
+        products = catalog_products_by_public_price(limit=3)
+        reply, variant_index = build_catalog_price_list_reply(
+            current_combined,
+            products,
+            recent_reply_texts=recent_reply_texts,
+        )
+        if reply:
+            return {
+                "applied": True,
+                "rule_name": "realtime_catalog_price_fact",
+                "reason": "product_master_price_list",
+                "raw_reply_text": reply,
+                "reply_text": reply,
+                "variant_index": variant_index,
+                "used_product_ids": [str(item.get("id") or "") for item in products[:3] if item.get("id")],
+                "saved_reason": "foreground_llm_skipped_for_product_master_price_fact_draft",
+            }
     if route_reason == "uncertain_message_light_synthesis_allowed":
         recent_catalog_options = extract_recent_catalog_compare_products(recent_reply_texts, limit=2)
         if is_single_choice_compare_request(text) and len(recent_catalog_options) >= 2:
@@ -1700,7 +1791,12 @@ def maybe_build_realtime_reply(
             "saved_reason": "foreground_llm_skipped_for_uncertain_message",
         }
     followup_source_request = is_followup_vehicle_source_request(text, recent_reply_texts) or is_followup_vehicle_source_request(source_text, recent_reply_texts)
-    explicit_source_request = is_explicit_vehicle_source_request(text) or is_explicit_vehicle_source_request(source_text)
+    explicit_source_request = (
+        is_explicit_vehicle_source_request(text)
+        or is_explicit_vehicle_source_request(source_text)
+        or is_inventory_category_availability_request(text)
+        or is_inventory_category_availability_request(source_text)
+    )
     detailed_source_request = is_detailed_vehicle_need_ready(text) or is_detailed_vehicle_need_ready(source_text)
     if route_reason == "friendly_social_greeting":
         reply, variant_index = build_friendly_social_greeting_reply(current_combined, recent_reply_texts=recent_reply_texts)
@@ -1725,6 +1821,25 @@ def maybe_build_realtime_reply(
             "variant_index": variant_index,
             "used_product_ids": [],
             "saved_reason": "foreground_llm_skipped_for_friendly_farewell",
+        }
+    if route_reason == "small_talk":
+        reply = str(current_reply_text or "").strip()
+        if not reply:
+            reply, variant_index = build_friendly_social_greeting_reply(
+                current_combined,
+                recent_reply_texts=recent_reply_texts,
+            )
+        else:
+            variant_index = 0
+        return {
+            "applied": True,
+            "rule_name": "small_talk",
+            "reason": "intent_assist_small_talk",
+            "raw_reply_text": reply,
+            "reply_text": reply,
+            "variant_index": variant_index,
+            "used_product_ids": [],
+            "saved_reason": "foreground_llm_skipped_for_small_talk",
         }
     if route_reason == "offtopic_soft_redirect_needs_light_synthesis":
         reply, variant_index = build_offtopic_soft_redirect_reply(current_combined, recent_reply_texts=recent_reply_texts)
@@ -2275,9 +2390,9 @@ def build_uncertain_business_clarify_reply(query: str, *, recent_reply_texts: li
 def build_friendly_social_greeting_reply(query: str, *, recent_reply_texts: list[str] | None = None) -> tuple[str, int]:
     return choose_natural_reply_variant(
         [
-            "您好，在的。您要是看二手车，我可以马上按预算和用途给您一个清晰方向。",
-            "在呢，欢迎您来聊。您说下预算和主要用途，我这边直接给您筛车思路。",
-            "您好，收到。您更偏家用通勤还是周末出行？我按这个先给您推荐方向。",
+            "在的，您说。",
+            "你好呀，在呢，您慢慢说。",
+            "收到，我在，您直接说就行。",
         ],
         key_text=query or "friendly_social_greeting",
         recent_reply_texts=recent_reply_texts,
@@ -2287,9 +2402,9 @@ def build_friendly_social_greeting_reply(query: str, *, recent_reply_texts: list
 def build_friendly_farewell_reply(query: str, *, recent_reply_texts: list[str] | None = None) -> tuple[str, int]:
     return choose_natural_reply_variant(
         [
-            "好的，感谢您沟通。后面想看车或比车型，随时发我，我这边第一时间跟上。",
-            "明白，辛苦啦。您回头只要把预算和用途发我，我就能直接给您筛到位。",
-            "收到，祝您今天顺利。后续想看二手车随时来，我一直在线。",
+            "好嘞，您先忙，有需要随时喊我。",
+            "收到，那您先忙，回头再聊。",
+            "行，辛苦啦，有空再找我就行。",
         ],
         key_text=query or "friendly_farewell",
         recent_reply_texts=recent_reply_texts,
@@ -2942,7 +3057,7 @@ def build_single_choice_compare_reply(
 def build_vehicle_type_guidance_reply(query: str, *, recent_reply_texts: list[str] | None = None) -> tuple[str, int]:
     normalized = normalize_text(query)
     if contains_any(normalized, ("和suv比", "还是suv", "轿车还是suv", "轿车和suv")) or (
-        contains_any(normalized, ("帕萨特", "君威", "迈腾", "凯美瑞", "雅阁", "天籁"))
+        contains_any(normalized, ("中级车", "中型车", "b级车", "合资轿车", "轿车", "三厢"))
         and contains_any(normalized, ("suv", "方向"))
     ):
         if contains_any(normalized, ("公司", "接待", "商务", "客户", "活动")):
@@ -3426,6 +3541,52 @@ def is_explicit_vehicle_source_request(text: str) -> bool:
     return "具体" in text and contains_any(text, ("推荐", "车源", "给我", "挑", "看哪", "哪台", "哪款", "哪一辆"))
 
 
+def is_inventory_category_availability_request(text: str) -> bool:
+    normalized = normalize_text(text)
+    if not normalized:
+        return False
+    if requires_high_risk_boundary(normalized) or contains_any(normalized, OFF_TOPIC_OR_SECURITY_TERMS):
+        return False
+    has_availability_ask = contains_any(
+        normalized,
+        (
+            "有没有",
+            "有没",
+            "有吗",
+            "有不有",
+            "还有吗",
+            "还有没有",
+            "现车有",
+            "库存有",
+        ),
+    )
+    if not has_availability_ask and re.search(r"有.{0,16}(?:车|车型|车源|现车|库存).{0,4}吗", normalized):
+        has_availability_ask = True
+    if not has_availability_ask:
+        return False
+    if not contains_any(normalized, ("车", "车型", "车源", "现车", "库存")):
+        return False
+    category_terms = (
+        "德系",
+        "日系",
+        "美系",
+        "韩系",
+        "法系",
+        "国产",
+        "轿车",
+        "suv",
+        "mpv",
+        "新能源",
+        "油车",
+        "混动",
+        "七座",
+        "自动挡",
+        "豪华",
+        "合资",
+    )
+    return contains_any(normalized, category_terms) or contains_catalog_product_term(normalized)
+
+
 def is_direction_candidate_request(text: str) -> bool:
     normalized = normalize_text(text)
     if not normalized or "方向" not in normalized:
@@ -3470,6 +3631,7 @@ def contextual_vehicle_need_ready_for_candidates(text: str, recent_reply_texts: 
     return (
         is_followup_vehicle_source_request(clean, recent_reply_texts)
         or is_explicit_vehicle_source_request(clean)
+        or is_inventory_category_availability_request(clean)
         or is_detailed_vehicle_need_ready(clean)
     )
 
@@ -3662,10 +3824,11 @@ def current_customer_text(text: str) -> str:
     raw = str(text or "")
     marker = "当前客户问题："
     if marker in raw:
-        return raw.rsplit(marker, 1)[-1].strip()
+        return strip_leading_group_speaker_line(raw.rsplit(marker, 1)[-1].strip())
     stripped = raw.strip()
     if not stripped:
         return ""
+    stripped = strip_leading_group_speaker_line(stripped)
     lines = [line.strip() for line in stripped.splitlines() if line.strip()]
     if len(lines) >= 2:
         transcript_like_count = sum(1 for line in lines if is_transcript_line(line))
@@ -3676,6 +3839,11 @@ def current_customer_text(text: str) -> str:
             if candidate:
                 return candidate
     return stripped
+
+
+def strip_leading_group_speaker_line(text: str) -> str:
+    split = split_wechat_ocr_speaker_prefix(text)
+    return str(split.get("content") or "").strip() if split.get("changed") else str(text or "").strip()
 
 
 def is_transcript_line(line: str) -> bool:
@@ -3803,7 +3971,12 @@ def contains_used_car_product_signal(text: str) -> bool:
 
 
 def is_short_greeting(text: str) -> bool:
-    return len(text) <= 10 and contains_any(text, GREETING_TERMS)
+    clean = normalize_text(text)
+    if not clean or len(clean) > 14:
+        return False
+    if has_business_signal(clean):
+        return False
+    return contains_any(clean, GREETING_TERMS + SOCIAL_SUMMON_TERMS)
 
 
 def is_friendly_farewell_message(text: str) -> bool:
@@ -3825,6 +3998,7 @@ def is_offtopic_social_message(text: str, recent_reply_texts: list[str] | None =
         current_turn_preempts_vehicle_candidate_reply(clean, recent)
         or is_followup_vehicle_source_request(clean, recent)
         or is_explicit_vehicle_source_request(clean)
+        or is_inventory_category_availability_request(clean)
         or is_detailed_vehicle_need_ready(clean)
         or is_service_guidance_question(clean)
         or is_vehicle_compare_question(clean, recent)
@@ -4096,6 +4270,7 @@ def current_turn_preempts_vehicle_candidate_reply(text: str, recent_reply_texts:
     if (
         is_followup_vehicle_source_request(clean, recent_reply_texts)
         or is_explicit_vehicle_source_request(clean)
+        or is_inventory_category_availability_request(clean)
         or is_detailed_vehicle_need_ready(clean)
     ):
         return False
@@ -4157,6 +4332,7 @@ def rank_product_candidates(
     budget_range = extract_budget_range_wan(query)
     strict_budget_cap = has_strict_budget_cap(query)
     used_car_query = is_used_car_query(query)
+    requested_semantic_tags = requested_vehicle_semantic_tags(query)
     scored: list[tuple[float, dict[str, Any]]] = []
     score_product_items(
         query=query,
@@ -4165,6 +4341,7 @@ def rank_product_candidates(
         budget_range=budget_range,
         strict_budget_cap=strict_budget_cap,
         used_car_query=used_car_query,
+        requested_semantic_tags=requested_semantic_tags,
         scored=scored,
         allow_broad_fallback=allow_broad_fallback,
     )
@@ -4185,6 +4362,7 @@ def rank_product_candidates(
             budget_range=budget_range,
             strict_budget_cap=strict_budget_cap,
             used_car_query=used_car_query,
+            requested_semantic_tags=requested_semantic_tags,
             scored=scored,
             allow_broad_fallback=True,
         )
@@ -4199,6 +4377,7 @@ def score_product_items(
     budget: float,
     strict_budget_cap: bool,
     used_car_query: bool,
+    requested_semantic_tags: set[str],
     scored: list[tuple[float, dict[str, Any]]],
     allow_broad_fallback: bool,
     budget_range: tuple[float, float] | None = None,
@@ -4212,18 +4391,24 @@ def score_product_items(
             price = 0.0
         range_low, range_high = budget_range if budget_range else (0.0, budget)
         budget_upper = range_high or budget
+        searchable = product_search_text(item)
+        matched_aliases = explicit_product_aliases_for_query(item, query)
         # Used-car conversations commonly tolerate a small upward stretch when
         # the match is stronger, especially around "8万/10万预算" shorthand.
-        if budget_upper and price and strict_budget_cap and price > budget_upper:
+        if budget_upper and price and strict_budget_cap and price > budget_upper and not matched_aliases:
             continue
-        if budget_upper and price and not strict_budget_cap and price > max(budget_upper * 1.15, budget_upper + 0.8):
+        if budget_upper and price and not strict_budget_cap and price > max(budget_upper * 1.15, budget_upper + 0.8) and not matched_aliases:
             continue
-        searchable = product_search_text(item)
         if used_car_query and not is_used_car_product_search_text(searchable):
+            continue
+        item_semantic_tags = set(derived_vehicle_semantic_tags(item))
+        if requested_semantic_tags and not (requested_semantic_tags & item_semantic_tags):
             continue
         if requires_mpv_or_seven_seat_candidate(query) and not is_mpv_or_seven_seat_product_search_text(searchable):
             continue
         score = product_query_score(query, searchable)
+        if matched_aliases:
+            score += 80.0 + max(len(normalize_text(alias)) for alias in matched_aliases if normalize_text(alias))
         if budget and price:
             if budget_range:
                 score += budget_range_position_score(price=price, low=range_low, high=range_high, strict_budget_cap=strict_budget_cap)
@@ -4347,6 +4532,14 @@ def product_query_score(query: str, searchable: str) -> float:
         ("相机箱", 1.3),
         ("底盘高", 1.4),
         ("通过性", 1.4),
+        ("德系", 2.4),
+        ("日系", 2.4),
+        ("美系", 2.0),
+        ("国产", 1.8),
+        ("合资", 1.8),
+        ("新能源", 2.0),
+        ("混动", 1.8),
+        ("纯电", 1.8),
     ):
         if normalize_text(token) in query_text and normalize_text(token) in searchable_text:
             score += weight
@@ -4513,8 +4706,35 @@ def product_search_text(item: dict[str, Any]) -> str:
         str(item.get("recommendation") or ""),
         " ".join(str(alias) for alias in item.get("aliases", []) or []),
         " ".join(str(alias) for alias in item.get("matched_aliases", []) or []),
+        " ".join(derived_vehicle_semantic_tags(item)),
     ]
     return " ".join(parts)
+
+
+def derived_vehicle_semantic_tags(item: dict[str, Any]) -> list[str]:
+    """Read searchable vehicle class tags that are explicitly carried by product-master data."""
+    searchable = normalize_text(
+        " ".join(
+            [
+                str(item.get("category") or ""),
+                " ".join(str(alias) for alias in item.get("aliases", []) or []),
+                " ".join(str(alias) for alias in item.get("matched_aliases", []) or []),
+                " ".join(str(tag) for tag in item.get("tags", []) or []),
+            ]
+        )
+    )
+    if not searchable:
+        return []
+    return [tag for tag in ("德系", "日系", "美系", "韩系", "法系", "国产") if tag in searchable]
+
+
+def requested_vehicle_semantic_tags(query: str) -> set[str]:
+    normalized = normalize_text(query)
+    tags: set[str] = set()
+    for tag in ("德系", "日系", "美系", "韩系", "法系", "国产"):
+        if tag in normalized:
+            tags.add(tag)
+    return tags
 
 
 def load_catalog_product_candidates() -> list[dict[str, Any]]:
@@ -4780,6 +5000,166 @@ def build_recommendation_reply(
             f"先给您缩到{product_text}。车况没问题再谈下一步。",
         ]
     return choose_natural_reply_variant(variants, key_text=query + product_text, recent_reply_texts=recent_reply_texts)
+
+
+def catalog_products_by_public_price(*, limit: int = 3) -> list[dict[str, Any]]:
+    products = []
+    for item in load_catalog_product_candidates():
+        if not isinstance(item, dict):
+            continue
+        try:
+            price = float(item.get("price") or 0)
+        except (TypeError, ValueError):
+            price = 0.0
+        if price <= 0:
+            continue
+        copied = dict(item)
+        copied["_public_price_value"] = price
+        products.append(copied)
+    products.sort(key=lambda item: float(item.get("_public_price_value") or 0), reverse=True)
+    return products[: max(0, int(limit or 0))]
+
+
+def build_catalog_price_superlative_reply(
+    query: str,
+    products: list[dict[str, Any]],
+    *,
+    recent_reply_texts: list[str] | None = None,
+) -> tuple[str, int]:
+    if not products:
+        return "", 0
+    top = products[0]
+    product_text = product_price_label(top)
+    spec = brief_spec(str(top.get("spec") or top.get("specs") or ""))
+    spec_text = f"，{spec}" if spec else ""
+    variants = [
+        f"目前公开标价最高的是{product_text}{spec_text}。价格是商品库标价，最终成交空间要结合车况、付款方式和到店沟通。",
+        f"按现在商品库看，最高标价是{product_text}{spec_text}。我先按公开标价给您说，成交价还要看车况和具体谈法。",
+        f"现在库里标价最高的是{product_text}{spec_text}。这个属于公开标价，后面如果您真看这台，再核车况和成交空间。",
+    ]
+    return choose_natural_reply_variant(variants, key_text=query + product_text, recent_reply_texts=recent_reply_texts)
+
+
+def build_catalog_price_list_reply(
+    query: str,
+    products: list[dict[str, Any]],
+    *,
+    recent_reply_texts: list[str] | None = None,
+) -> tuple[str, int]:
+    if not products:
+        return "", 0
+    labels = [product_price_label(item) for item in products[:3] if product_price_label(item)]
+    if not labels:
+        return "", 0
+    joined = "、".join(labels)
+    variants = [
+        f"先按公开标价给您几台参考：{joined}。最终成交空间要结合车况、付款方式和到店沟通。",
+        f"可以，当前公开标价先看这几台：{joined}。标价能先给您，最终价格还要按实车和付款方式谈。",
+        f"我先给您发公开标价：{joined}。这不是最终成交价，后面看车况和付款方式再谈空间。",
+    ]
+    return choose_natural_reply_variant(variants, key_text=query + joined, recent_reply_texts=recent_reply_texts)
+
+
+def build_direct_catalog_price_reply(
+    query: str,
+    evidence_pack: dict[str, Any],
+    *,
+    recent_reply_texts: list[str] | None = None,
+) -> tuple[str, int, list[str]]:
+    products = rank_product_candidates(
+        query,
+        evidence_pack,
+        allow_catalog_fallback=True,
+        allow_broad_fallback=False,
+    )
+    explicit_products = [item for item in products if explicit_product_aliases_for_query(item, query)]
+    if not explicit_products:
+        return "", 0, []
+    primary = explicit_products[0]
+    label = product_price_label(primary)
+    if not label:
+        return "", 0, []
+
+    product_id = str(primary.get("id") or "")
+    used_product_ids = [product_id] if product_id else []
+    try:
+        price = float(primary.get("price") or 0)
+    except (TypeError, ValueError):
+        price = 0.0
+    budget = extract_budget_wan(query)
+    budget_hint = ""
+    if budget > 0 and price > 0:
+        if price > budget * 1.08:
+            budget_hint = f"按{budget:g}万预算看，这台会超一些。"
+        elif price <= budget:
+            budget_hint = f"按{budget:g}万预算看，这台在预算内。"
+
+    alternatives = [
+        item
+        for item in rank_product_candidates(
+            query,
+            evidence_pack,
+            allow_catalog_fallback=True,
+            allow_broad_fallback=True,
+        )
+        if str(item.get("id") or "") != product_id
+        and (not budget or 0 < float(item.get("price") or 0) <= max(budget * 1.05, budget + 0.5))
+    ][:1]
+    alternative_text = ""
+    if alternatives and budget > 0:
+        alternative_label = product_price_label(alternatives[0])
+        if alternative_label:
+            alternative_text = f"更贴预算的可以顺手看{alternative_label}。"
+            alt_id = str(alternatives[0].get("id") or "")
+            if alt_id:
+                used_product_ids.append(alt_id)
+
+    variants = [
+        f"{label}。{budget_hint}{alternative_text}我先按商品库公开标价说，成交价还要看车况和付款方式。",
+        f"这台是{label}。{budget_hint}{alternative_text}公开标价能先给您，最终成交空间要到店结合车况谈。",
+        f"{label}，这是当前商品库公开标价。{budget_hint}{alternative_text}后面重点看检测报告和实车。",
+    ]
+    reply, variant_index = choose_natural_reply_variant(
+        variants,
+        key_text=query + label + alternative_text,
+        recent_reply_texts=recent_reply_texts,
+    )
+    return reply, variant_index, used_product_ids
+
+
+def product_price_label(product: dict[str, Any]) -> str:
+    name = str(product.get("name") or "").strip()
+    if not name:
+        return ""
+    try:
+        price = float(product.get("price") or 0)
+    except (TypeError, ValueError):
+        price = 0.0
+    if price > 0:
+        return f"{name}（{price:g}万）"
+    return name
+
+
+def explicit_product_aliases_for_query(product: dict[str, Any], query: str) -> list[str]:
+    aliases = [
+        str(product.get("name") or ""),
+        str(product.get("sku") or ""),
+        *[str(alias) for alias in product.get("aliases", []) or []],
+    ]
+    matched = collect_matched_aliases(aliases, normalize_text(query))
+    if matched:
+        return matched
+    product_name_key = compact_match_text(product.get("name") or "")
+    query_key = compact_match_text(query)
+    for term in ("多少钱", "什么价", "报价", "价格", "价位", "落地价", "总价", "现在", "目前", "这台", "那台"):
+        query_key = query_key.replace(compact_match_text(term), "")
+    if len(query_key) >= 2 and query_key in product_name_key:
+        return [query_key]
+    folded_query = compact_match_text(fold_confusable_text(query_key))
+    folded_name = compact_match_text(fold_confusable_text(product_name_key))
+    if len(folded_query) >= 2 and folded_query in folded_name:
+        return [query_key]
+    return []
 
 
 def brief_spec(spec: str) -> str:

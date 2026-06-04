@@ -11,8 +11,6 @@ import argparse
 import json
 import re
 import sys
-import urllib.error
-import urllib.request
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
@@ -24,8 +22,7 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from customer_data_capture import extract_customer_data
 from apps.wechat_ai_customer_service.llm_config import (
-    apply_llm_reasoning_effort,
-    llm_urlopen,
+    call_llm_request_with_failover,
     read_secret,
     resolve_deepseek_max_tokens,
     resolve_effective_llm_provider,
@@ -820,73 +817,34 @@ def post_deepseek_chat(
     timeout: int,
     provider: str = "deepseek",
 ) -> dict[str, Any]:
-    url = base_url.rstrip("/") + "/chat/completions"
     schema_text = json.dumps(prompt_pack["response_schema"], ensure_ascii=False)
-    payload = {
-        "model": model,
-        "messages": [
-            {"role": "system", "content": prompt_pack["system"]},
-            {
-                "role": "user",
-                "content": (
-                    json.dumps(prompt_pack["user"], ensure_ascii=False)
-                    + "\n\nJSON schema:\n"
-                    + schema_text
-                    + "\n\n只输出 JSON 对象，不要 Markdown，不要解释。"
-                ),
-            },
-        ],
-        "temperature": 0.2,
-        "max_tokens": resolve_deepseek_max_tokens(1200, read_secret_fn=read_secret),
-        "stream": False,
-        "response_format": {"type": "json_object"},
-    }
-    apply_llm_reasoning_effort(payload, provider=provider, tier="flash", read_secret_fn=read_secret)
-    request = urllib.request.Request(
-        url,
-        data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
-        headers={
-            "Authorization": f"Bearer {api_key}",
-            "Content-Type": "application/json",
+    messages = [
+        {"role": "system", "content": prompt_pack["system"]},
+        {
+            "role": "user",
+            "content": (
+                json.dumps(prompt_pack["user"], ensure_ascii=False)
+                + "\n\nJSON schema:\n"
+                + schema_text
+                + "\n\n只输出 JSON 对象，不要 Markdown，不要解释。"
+            ),
         },
-        method="POST",
+    ]
+    result = call_llm_request_with_failover(
+        provider=provider,
+        api_key=api_key,
+        base_url=base_url,
+        model=model,
+        messages=messages,
+        timeout=max(1, timeout),
+        max_tokens=resolve_deepseek_max_tokens(1200, read_secret_fn=read_secret),
+        temperature=0.2,
+        tier="flash",
+        json_mode=True,
     )
-    try:
-        with llm_urlopen(request, timeout=max(1, timeout), provider=provider) as response:
-            raw = response.read().decode("utf-8", errors="replace")
-            data = json.loads(raw)
-            content = (
-                data.get("choices", [{}])[0]
-                .get("message", {})
-                .get("content", "")
-            )
-            return {
-                "ok": True,
-                "provider": provider,
-                "model": model,
-                "base_url": base_url,
-                "status": response.status,
-                "response_text": content,
-                "usage": data.get("usage", {}),
-            }
-    except urllib.error.HTTPError as exc:
-        body = exc.read().decode("utf-8", errors="replace")
-        return {
-            "ok": False,
-            "provider": provider,
-            "model": model,
-            "base_url": base_url,
-            "status": exc.code,
-            "error": summarize_error_body(body),
-        }
-    except Exception as exc:
-        return {
-            "ok": False,
-            "provider": provider,
-            "model": model,
-            "base_url": base_url,
-            "error": repr(exc),
-        }
+    if not result.get("ok"):
+        result["error"] = summarize_error_body(str(result.get("error") or ""))
+    return result
 
 
 def parse_json_object(text: str) -> dict[str, Any] | None:

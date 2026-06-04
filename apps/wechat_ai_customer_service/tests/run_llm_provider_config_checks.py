@@ -62,28 +62,34 @@ def run_checks() -> dict[str, Any]:
         llm_config_module._LLM_CONFIG_PATH = Path(temp_dir) / "llm_config.json"
 
         def fake_urlopen(request: Any, timeout: int = 0, **kwargs: Any) -> FakeResponse:
+            headers = {str(key).lower(): value for key, value in request.header_items()}
             calls.append(
                 {
                     "url": request.full_url,
-                    "headers": dict(request.header_items()),
+                    "headers": headers,
                     "body": json.loads(request.data.decode("utf-8")) if request.data else None,
                     "timeout": timeout,
                     "kwargs": kwargs,
                 }
             )
             if str(request.full_url).endswith("/models"):
+                if "x-api-key" in headers:
+                    return FakeResponse({"data": [{"id": "kimi-for-coding"}]})
                 return FakeResponse({"data": [{"id": "gpt-4o-mini"}, {"id": "gpt-4.1"}]})
+            if str(request.full_url).endswith("/messages"):
+                return FakeResponse({"content": [{"type": "text", "text": "OK"}]})
             return FakeResponse()
 
         llm_config_module.urllib.request.urlopen = fake_urlopen
         try:
             check_legacy_deepseek_defaults()
             check_openai_compatible_roundtrip_and_probe(calls)
+            check_fallback_roundtrip_and_anthropic_probe(calls)
             check_llm_config_permissions_allow_all_authenticated_users()
         finally:
             llm_config_module.urllib.request.urlopen = old_urlopen
             llm_config_module._LLM_CONFIG_PATH = old_path
-    return {"ok": True, "checks": 3}
+    return {"ok": True, "checks": 4}
 
 
 def check_legacy_deepseek_defaults() -> None:
@@ -146,7 +152,7 @@ def check_openai_compatible_roundtrip_and_probe(calls: list[dict[str, Any]]) -> 
     assert_equal(calls[-1]["url"], "https://relay.example/v1/chat/completions", "probe should call chat completions")
     assert_equal(calls[-1]["body"]["model"], "gpt-4o-mini", "probe should use flash model")
     assert_equal(calls[-1]["body"]["reasoning_effort"], "low", "probe should send flash reasoning effort")
-    assert_equal(calls[-1]["headers"].get("Authorization"), "Bearer sk-test-provider", "probe should send bearer key")
+    assert_equal(calls[-1]["headers"].get("authorization"), "Bearer sk-test-provider", "probe should send bearer key")
 
     pro_probe = client.post("/api/system/llm-config/test", json={"route": "pro"})
     assert_equal(pro_probe.status_code, 200, "pro probe status")
@@ -154,6 +160,41 @@ def check_openai_compatible_roundtrip_and_probe(calls: list[dict[str, Any]]) -> 
     assert_true(pro_payload.get("ok"), "pro probe should succeed through fake urlopen")
     assert_equal(calls[-1]["body"]["model"], "gpt-4.1", "pro probe should use pro model")
     assert_equal(calls[-1]["body"]["reasoning_effort"], "high", "pro probe should send pro reasoning effort")
+
+
+def check_fallback_roundtrip_and_anthropic_probe(calls: list[dict[str, Any]]) -> None:
+    client = TestClient(create_app())
+    response = client.put(
+        "/api/system/llm-config",
+        json={
+            "fallback_enabled": True,
+            "fallback_provider": "anthropic",
+            "fallback_base_url": "https://aiself.vip/v1/messages",
+            "fallback_flash_model": "kimi-for-coding",
+            "fallback_pro_model": "kimi-for-coding",
+            "fallback_api_key": "sk-fallback-kimi",
+        },
+    )
+    assert_equal(response.status_code, 200, "fallback save status")
+    saved = response.json()
+    fallback = saved.get("fallback") if isinstance(saved.get("fallback"), dict) else {}
+    assert_true(fallback.get("enabled") is True, "fallback should be enabled after save")
+    assert_equal(fallback.get("provider"), "anthropic", "fallback provider should roundtrip")
+    assert_equal(fallback.get("base_url"), "https://aiself.vip/v1", "fallback base URL should be normalized")
+    assert_equal(fallback.get("flash_model"), "kimi-for-coding", "fallback flash model should roundtrip")
+    assert_equal(fallback.get("pro_model"), "kimi-for-coding", "fallback pro model should roundtrip")
+    assert_true(fallback.get("api_key_configured"), "fallback API key should be marked configured")
+    assert_true("sk-fallback-kimi" not in json.dumps(saved), "fallback save payload must not leak raw key")
+
+    probe = client.post("/api/system/llm-config/test", json={"target": "fallback"})
+    assert_equal(probe.status_code, 200, "fallback probe status")
+    payload = probe.json()
+    assert_true(payload.get("ok"), "fallback probe should succeed through fake urlopen")
+    assert_equal(payload.get("provider"), "anthropic", "fallback probe should use anthropic provider")
+    assert_equal(calls[-1]["url"], "https://aiself.vip/v1/messages", "fallback probe should call anthropic messages endpoint")
+    assert_equal(calls[-1]["body"]["model"], "kimi-for-coding", "fallback probe should use fallback flash model")
+    assert_equal(calls[-1]["headers"].get("x-api-key"), "sk-fallback-kimi", "fallback probe should send anthropic API key header")
+    assert_equal(calls[-1]["headers"].get("anthropic-version"), "2023-06-01", "fallback probe should send anthropic version header")
 
 
 def check_llm_config_permissions_allow_all_authenticated_users() -> None:

@@ -135,13 +135,13 @@ DEFAULT_STRICT_SEND_FOCUS_GUARD = True
 DEFAULT_FOCUS_CLICK_FALLBACK = True
 DEFAULT_ALLOW_UNKNOWN_FOREGROUND_GUARD = True
 INPUT_TEXT_DARK_RATIO_MIN = 0.0025
+INPUT_TEXT_SOFT_BLANK_DARK_RATIO_MAX = 0.035
+INPUT_TEXT_SOFT_BLANK_MEAN_MIN = 242.0
 HUMANIZED_TYPO_CANDIDATES = "asdfjkl;,.?/[]"
 SENDINPUT_INPUT_KEYBOARD = 1
 SENDINPUT_KEYEVENTF_KEYUP = 0x0002
 SENDINPUT_KEYEVENTF_UNICODE = 0x0004
 BLOCKING_SCREEN_TOKENS = (
-    "登录",
-    "扫码",
     "选择文件",
     "文件名无效",
     "安全验证",
@@ -1236,10 +1236,16 @@ def merge_message_history_snapshots(snapshots: list[dict[str, Any]]) -> list[dic
     merged: list[dict[str, Any]] = []
     seen: set[str] = set()
     for snapshot in reversed(snapshots):
+        occurrence_counts: dict[str, int] = {}
         for message in snapshot.get("messages", []) or []:
             if not isinstance(message, dict):
                 continue
-            key = message_history_dedupe_key(message)
+            occurrence_hint = None
+            base_key = message_history_dedupe_base_key(message)
+            if base_key and message_history_requires_occurrence_hint(message, base_key=base_key):
+                occurrence_counts[base_key] = occurrence_counts.get(base_key, 0) + 1
+                occurrence_hint = occurrence_counts[base_key]
+            key = message_history_dedupe_key(message, occurrence_hint=occurrence_hint, base_key=base_key)
             if key and key in seen:
                 continue
             if key:
@@ -1248,13 +1254,40 @@ def merge_message_history_snapshots(snapshots: list[dict[str, Any]]) -> list[dic
     return merged
 
 
-def message_history_dedupe_key(message: dict[str, Any]) -> str:
+def message_history_dedupe_base_key(message: dict[str, Any]) -> str:
     content = str(message.get("content") or "")
     compact = re.sub(r"[\s_\-:：，。,.；;\[\]（）()]+", "", content).lower()
     sender = str(message.get("sender") or "")
     if not compact:
         return ""
     return f"{sender}:{compact}"
+
+
+def message_history_requires_occurrence_hint(
+    message: dict[str, Any],
+    *,
+    base_key: str | None = None,
+    short_len_threshold: int = 7,
+) -> bool:
+    key = str(base_key or message_history_dedupe_base_key(message))
+    if not key:
+        return False
+    compact = key.split(":", 1)[1] if ":" in key else key
+    return len(compact) <= max(1, int(short_len_threshold or 1))
+
+
+def message_history_dedupe_key(
+    message: dict[str, Any],
+    *,
+    occurrence_hint: int | None = None,
+    base_key: str | None = None,
+) -> str:
+    key = str(base_key or message_history_dedupe_base_key(message))
+    if not key:
+        return ""
+    if occurrence_hint and message_history_requires_occurrence_hint(message, base_key=key):
+        return f"{key}#occ{int(occurrence_hint)}"
+    return key
 
 
 def normalize_anchor_message_content(text: Any) -> str:
@@ -1312,7 +1345,10 @@ def send_payload(
     if reused_prevalidated_guard:
         validation = dict(validated_guard or {})
         # Re-check foreground/visibility quickly before using the cached target
-        # confirmation to avoid repeating OCR-heavy guard validation.
+        # confirmation, then re-run strict OCR target validation immediately
+        # before typing.  Cached confirmation can become stale when the
+        # scheduler switches between multiple chats; never let it authorize
+        # customer-visible text by itself.
         focus_guard = recover_send_window_guard(hwnd, max_attempts=1)
         if not focus_guard.get("ok"):
             # Fallback to full active target validation to keep behavior robust
@@ -1332,6 +1368,29 @@ def send_payload(
                 }
             geometry = validation["geometry"]
         else:
+            strict_validation = validate_active_send_target(hwnd, target, exact=exact, artifact_dir=artifact_dir)
+            if not strict_validation.get("ok"):
+                return {
+                    "ok": False,
+                    "online": bool(strict_validation.get("online", True)),
+                    "adapter": "win32_ocr",
+                    "state": "send_guard_blocked",
+                    "window_probe": probe,
+                    "target": target,
+                    "guard": {
+                        **strict_validation,
+                        "cached_prevalidated_guard": validation,
+                        "window_guard": focus_guard,
+                        "strict_recheck": True,
+                    },
+                    "error": str(strict_validation.get("error") or strict_validation.get("reason") or "send guard blocked"),
+                }
+            validation = {
+                **strict_validation,
+                "cached_prevalidated_guard": validation,
+                "window_guard": focus_guard,
+                "strict_recheck": True,
+            }
             geometry = get_window_geometry(hwnd)
             geometry_check = validate_send_geometry(geometry)
             if not geometry_check.get("ok"):
@@ -1478,7 +1537,8 @@ def send_payload(
             "mode": send_mode,
             "requested_mode": requested_send_mode,
             "humanized_method": settings.get("method"),
-            "validation_source": "prevalidated_guard" if reused_prevalidated_guard else "active_send_guard",
+            "validation_source": "prevalidated_guard_strict_recheck" if reused_prevalidated_guard else "active_send_guard",
+            "pre_send_guard": validation,
             "geometry": geometry,
             "input_point": points["input_point"],
             "send_point": points["send_point"],
@@ -2019,6 +2079,37 @@ def input_region_visual_delta_confirms(
     }
 
 
+def input_region_soft_blank_noise(state: dict[str, Any]) -> bool:
+    """Return True when a draft probe is likely toolbar/shadow noise, not text."""
+    if not isinstance(state, dict):
+        return False
+    try:
+        dark_ratio = float(state.get("dark_ratio") or 0.0)
+    except Exception:
+        dark_ratio = 0.0
+    try:
+        mean = float(state.get("mean") or 0.0)
+    except Exception:
+        mean = 0.0
+    try:
+        ocr_hits = int(state.get("ocr_hits") or 0)
+    except Exception:
+        ocr_hits = 0
+    return bool(
+        ocr_hits == 0
+        and dark_ratio <= INPUT_TEXT_SOFT_BLANK_DARK_RATIO_MAX
+        and mean >= INPUT_TEXT_SOFT_BLANK_MEAN_MIN
+    )
+
+
+def normalize_soft_blank_input_state(state: dict[str, Any], *, reason: str) -> dict[str, Any]:
+    normalized = dict(state or {})
+    normalized["has_visible_text"] = False
+    normalized["reason"] = reason
+    normalized["soft_blank_noise"] = True
+    return normalized
+
+
 def clear_existing_input_draft(
     hwnd: int,
     *,
@@ -2031,6 +2122,9 @@ def clear_existing_input_draft(
     """Clear a stale WeChat draft only when the input area is already non-empty."""
     if not before_state.get("has_visible_text"):
         return {"ok": True, "cleared": False, "reason": "input_region_already_blank", "before": before_state}
+    if input_region_soft_blank_noise(before_state):
+        blank = normalize_soft_blank_input_state(before_state, reason="input_region_soft_blank_noise")
+        return {"ok": True, "cleared": False, "reason": "input_region_soft_blank_noise", "before": blank}
     input_x, input_y = jitter_input_click_point(
         int(points["input_point"][0]),
         int(points["input_point"][1]),
@@ -2040,17 +2134,19 @@ def clear_existing_input_draft(
     time.sleep(random.uniform(0.08, 0.16))
     # Avoid Ctrl+A here: select-all artifacts can leak to chat history when
     # focus drifts. Use bounded backspace/delete bursts instead.
+    key_press(win32con.VK_END)
+    humanized_action_sleep(24, 70)
     backspaces = bounded_int(
         os.getenv("WECHAT_WIN32_OCR_INPUT_DRAFT_CLEAR_BACKSPACES"),
-        default=20,
-        minimum=6,
-        maximum=64,
+        default=96,
+        minimum=24,
+        maximum=160,
     )
     deletes = bounded_int(
         os.getenv("WECHAT_WIN32_OCR_INPUT_DRAFT_CLEAR_DELETES"),
-        default=4,
+        default=8,
         minimum=0,
-        maximum=18,
+        maximum=24,
     )
     for idx in range(backspaces):
         key_press(win32con.VK_BACK)
@@ -2064,7 +2160,9 @@ def clear_existing_input_draft(
     screenshot, _path = capture_wechat(hwnd, artifact_dir=artifact_dir, label=f"send_input_clear_{attempt}")
     ocr_items = run_ocr(screenshot)
     after_state = input_text_region_state(screenshot, ocr_items, geometry=geometry)
-    if not after_state.get("has_visible_text"):
+    if not after_state.get("has_visible_text") or input_region_soft_blank_noise(after_state):
+        if input_region_soft_blank_noise(after_state):
+            after_state = normalize_soft_blank_input_state(after_state, reason="input_region_soft_blank_after_clear")
         return {
             "ok": True,
             "cleared": True,
@@ -3959,7 +4057,21 @@ def jitter_send_click_point(x: int, y: int, geometry: dict[str, Any]) -> tuple[i
 def blocking_screen_reason(ocr_items: list[dict[str, Any]]) -> str:
     texts = [normalize_ocr_text(item.get("text")) for item in ocr_items if normalize_ocr_text(item.get("text"))]
     joined = "\n".join(texts)
-    if any(token in joined for token in ("登录", "扫码")):
+    login_card_tokens = (
+        "进入微信",
+        "切换账号",
+        "仅传输文件",
+    )
+    qr_login_tokens = (
+        "扫码登录",
+        "二维码登录",
+        "扫描二维码登录",
+        "请使用微信扫描二维码",
+        "手机确认登录",
+    )
+    if sum(1 for token in login_card_tokens if token in joined) >= 2:
+        return "login_or_qr"
+    if any(token in joined for token in qr_login_tokens):
         return "login_or_qr"
     for token in BLOCKING_SCREEN_TOKENS:
         if token in joined:
@@ -4671,6 +4783,7 @@ def parse_messages_from_ocr(ocr_items: list[dict[str, Any]], image_size: tuple[i
     width, height = image_size
     split_x = session_split_x(width)
     header_cutoff = chat_header_cutoff_y(height)
+    geometry = {"left": 0, "top": 0, "right": width, "bottom": height, "width": width, "height": height}
     bottom_exclude_px = bounded_int(
         os.getenv("WECHAT_WIN32_OCR_MESSAGE_BOTTOM_EXCLUDE_PX"),
         default=max(DEFAULT_MESSAGE_BOTTOM_EXCLUDE_PX, int(height * 0.10)),
@@ -4691,11 +4804,23 @@ def parse_messages_from_ocr(ocr_items: list[dict[str, Any]], image_size: tuple[i
             continue
         if is_message_noise(text):
             continue
-        rows.append(item)
+        side = classify_message_side(item, width=width)
+        rect = {
+            "left": int(float(item.get("left") or 0)),
+            "top": int(float(item.get("top") or 0)),
+            "right": int(float(item.get("right") or 0)),
+            "bottom": int(float(item.get("bottom") or 0)),
+        }
+        # The composer draft box lives above the send button, not only in the
+        # final bottom strip.  Exclude left/unknown-side OCR there so failed or
+        # partial drafts cannot be fed back to the LLM as customer messages.
+        if side != "self" and rect_in_input_area(rect, geometry):
+            continue
+        rows.append({**item, "side": side})
 
     grouped: list[list[dict[str, Any]]] = []
     for item in sorted(rows, key=lambda row: (float(row["center_y"]), float(row["left"]))):
-        side = classify_message_side(item, width=width)
+        side = str(item.get("side") or classify_message_side(item, width=width))
         if not grouped:
             grouped.append([{**item, "side": side}])
             continue

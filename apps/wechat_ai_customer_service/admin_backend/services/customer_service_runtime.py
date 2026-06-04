@@ -1002,7 +1002,11 @@ class CustomerServiceRuntime:
             return default_interval
         poll = payload.get("poll") if isinstance(payload, dict) else {}
         try:
-            interval = float((poll or {}).get("interval_seconds", default_interval))
+            interval = float(
+                (poll or {}).get("interval_min_seconds")
+                or (poll or {}).get("min_interval_seconds")
+                or (poll or {}).get("interval_seconds", default_interval)
+            )
         except (TypeError, ValueError):
             interval = default_interval
         return max(0.5, min(10.0, interval))

@@ -37,7 +37,10 @@
     "enabled": true,
     "workbook_path": "runtime/apps/wechat_ai_customer_service/test_artifacts/file_transfer_boundary_llm_customer_leads.xlsx",
     "sheet_name": "客户线索",
-    "required_fields": ["name", "phone"],
+    "required_fields": [
+      "name",
+      "phone"
+    ],
     "write_on_send_only": false,
     "success_reply": "资料我收到了，后面按这个继续跟进。",
     "incomplete_reply": "资料我看到了，还差：{missing_fields}。您发我一下，我这边补齐。"
@@ -66,7 +69,7 @@
     "advisory_only": false,
     "llm_advisory": {
       "enabled": true,
-      "provider": "deepseek",
+      "provider": "openai",
       "advisory_only": false,
       "apply_to_reply": true,
       "apply_to_matched_product": true,
@@ -75,8 +78,8 @@
       "allow_llm_handoff": true,
       "min_apply_confidence": 0.55,
       "include_prompt_in_audit": false,
-      "model": "deepseek-v4-flash",
-      "base_url": "https://api.deepseek.com",
+      "model": "gpt-5.4",
+      "base_url": "https://aiself.vip/v1",
       "timeout_seconds": 120,
       "candidate_json_path": ""
     }

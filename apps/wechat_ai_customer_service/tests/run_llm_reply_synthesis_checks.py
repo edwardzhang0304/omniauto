@@ -9,9 +9,12 @@ authorize sensitive commitments.
 from __future__ import annotations
 
 import copy
+import io
 import json
 import os
 import sys
+import tempfile
+import urllib.error
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -29,12 +32,13 @@ os.environ.setdefault("WECHAT_CLOUD_STRICT_ONLINE", "0")
 os.environ.setdefault("WECHAT_VPS_BASE_URL", "http://localhost:8000")
 
 from apps.wechat_ai_customer_service.knowledge_paths import shared_runtime_snapshot_path  # noqa: E402
+from apps.wechat_ai_customer_service import llm_config as llm_config_module  # noqa: E402
 
 import llm_reply_synthesis as synthesis_module  # noqa: E402
 from customer_service_loop import load_rules  # noqa: E402
 from listen_and_reply import ReplyDecision, load_config, parse_targets, process_target, resolve_path  # noqa: E402
 from llm_reply_guard import guard_synthesized_reply  # noqa: E402
-from llm_reply_synthesis import build_synthesis_prompt_pack, maybe_synthesize_reply  # noqa: E402
+from llm_reply_synthesis import build_synthesis_prompt_pack, maybe_synthesize_reply, normalize_advisor_synthesis_reply  # noqa: E402
 
 
 def _deep_merge(base: dict[str, Any], overlay: dict[str, Any]) -> dict[str, Any]:
@@ -47,8 +51,9 @@ def _deep_merge(base: dict[str, Any], overlay: dict[str, Any]) -> dict[str, Any]
     return merged
 
 
-def _ensure_cloud_snapshot() -> None:
+def _ensure_cloud_snapshot() -> tuple[Path, bytes | None]:
     snapshot_path = shared_runtime_snapshot_path()
+    previous = snapshot_path.read_bytes() if snapshot_path.exists() else None
     snapshot_path.parent.mkdir(parents=True, exist_ok=True)
     from datetime import datetime, timedelta, timezone
 
@@ -191,14 +196,19 @@ def _ensure_cloud_snapshot() -> None:
             }
         },
     }
-    existing: dict[str, Any] = {}
-    if snapshot_path.exists():
+    snapshot_path.write_text(json.dumps(minimal, ensure_ascii=False, indent=2), encoding="utf-8")
+    return snapshot_path, previous
+
+
+def _restore_cloud_snapshot(snapshot_path: Path, previous: bytes | None) -> None:
+    if previous is None:
         try:
-            existing = json.loads(snapshot_path.read_text(encoding="utf-8"))
-        except Exception:
-            existing = {}
-    snapshot = _deep_merge(existing, minimal) if existing else minimal
-    snapshot_path.write_text(json.dumps(snapshot, ensure_ascii=False, indent=2), encoding="utf-8")
+            snapshot_path.unlink()
+        except FileNotFoundError:
+            pass
+        return
+    snapshot_path.parent.mkdir(parents=True, exist_ok=True)
+    snapshot_path.write_bytes(previous)
 
 
 CONFIG_PATH = APP_ROOT / "configs" / "file_transfer_smoke.example.json"
@@ -226,7 +236,7 @@ def main() -> int:
 
 
 def run_checks() -> dict[str, Any]:
-    _ensure_cloud_snapshot()
+    snapshot_path, previous_snapshot = _ensure_cloud_snapshot()
     checks = [
         check_synthesis_applies_inside_process_target,
         check_rag_evidence_is_explicit_prompt_material,
@@ -236,14 +246,21 @@ def run_checks() -> dict[str, Any]:
         check_safe_llm_handoff_wording_is_preserved,
         check_shadow_mode_does_not_apply,
         check_deepseek_flash_pro_routing_and_cost_audit,
+        check_synthesis_primary_can_failover_to_backup_provider,
+        check_synthesis_visible_reply_surface_cleanup,
+        check_guard_allows_safe_store_visit_advisory_but_blocks_commitment,
+        check_conflicting_llm_price_falls_back_to_product_master_candidate,
     ]
     results = []
-    for check in checks:
-        try:
-            check()
-            results.append({"name": check.__name__, "ok": True})
-        except Exception as exc:
-            results.append({"name": check.__name__, "ok": False, "error": repr(exc)})
+    try:
+        for check in checks:
+            try:
+                check()
+                results.append({"name": check.__name__, "ok": True})
+            except Exception as exc:
+                results.append({"name": check.__name__, "ok": False, "error": repr(exc)})
+    finally:
+        _restore_cloud_snapshot(snapshot_path, previous_snapshot)
     failures = [item for item in results if not item.get("ok")]
     return {"ok": not failures, "count": len(results), "failures": failures, "results": results}
 
@@ -579,6 +596,194 @@ def check_deepseek_flash_pro_routing_and_cost_audit() -> None:
     assert_equal(risky.get("model_tier"), "pro", "risky authority synthesis should use Pro")
     assert_equal(risky.get("model"), "deepseek-v4-pro", "risky authority synthesis should select pro model")
     assert_true(len(captured) == 2, "fake DeepSeek should have been called exactly twice")
+
+
+def check_synthesis_primary_can_failover_to_backup_provider() -> None:
+    old_path = llm_config_module._LLM_CONFIG_PATH
+    old_urlopen = llm_config_module.urllib.request.urlopen
+
+    class FakeResponse:
+        status = 200
+
+        def __init__(self, body: dict[str, Any]) -> None:
+            self.body = body
+
+        def __enter__(self) -> "FakeResponse":
+            return self
+
+        def __exit__(self, exc_type: Any, exc: Any, tb: Any) -> None:
+            return None
+
+        def read(self) -> bytes:
+            return json.dumps(self.body, ensure_ascii=False).encode("utf-8")
+
+    calls: list[str] = []
+    with tempfile.TemporaryDirectory(prefix="omniauto-llm-failover-") as temp_dir:
+        llm_config_module._LLM_CONFIG_PATH = Path(temp_dir) / "llm_config.json"
+        llm_config_module.save_llm_config(
+            {
+                "LLM_FALLBACK_ENABLED": "1",
+                "LLM_FALLBACK_PROVIDER": "anthropic",
+                "LLM_FALLBACK_BASE_URL": "https://aiself.vip/v1",
+                "LLM_FALLBACK_FLASH_MODEL": "kimi-for-coding",
+                "LLM_FALLBACK_PRO_MODEL": "kimi-for-coding",
+                "LLM_FALLBACK_API_KEY": "sk-fallback-kimi",
+            }
+        )
+
+        def fake_urlopen(request: Any, timeout: int = 0, **kwargs: Any) -> FakeResponse:
+            calls.append(str(request.full_url))
+            if str(request.full_url).endswith("/chat/completions"):
+                body = io.BytesIO(b'{"error":"upstream unavailable"}')
+                raise urllib.error.HTTPError(str(request.full_url), 503, "Service Unavailable", hdrs=None, fp=body)
+            if str(request.full_url).endswith("/messages"):
+                return FakeResponse({"content": [{"type": "text", "text": "{\"reply\":\"好的\",\"confidence\":0.91}"}]})
+            raise AssertionError(f"unexpected url: {request.full_url}")
+
+        llm_config_module.urllib.request.urlopen = fake_urlopen
+        try:
+            result = synthesis_module.post_deepseek_synthesis(
+                provider="openai",
+                api_key="sk-primary-openai",
+                base_url="https://aiself.vip/v1",
+                model="gpt-5.4",
+                tier="flash",
+                prompt_pack={
+                    "system": "你是测试助手，只输出JSON。",
+                    "user": {"task": "reply"},
+                    "response_schema": {"type": "object"},
+                },
+                timeout=5,
+                max_tokens=120,
+                temperature=0.1,
+            )
+        finally:
+            llm_config_module.urllib.request.urlopen = old_urlopen
+            llm_config_module._LLM_CONFIG_PATH = old_path
+
+    assert_true(result.get("ok") is True, "fallback provider should rescue transient primary failure")
+    assert_equal(result.get("provider"), "anthropic", "fallback should switch provider to anthropic")
+    assert_true((result.get("failover") or {}).get("activated") is True, "result should record activated failover")
+    assert_equal(calls, ["https://aiself.vip/v1/chat/completions", "https://aiself.vip/v1/messages"], "request order should be primary then fallback")
+
+
+def check_synthesis_visible_reply_surface_cleanup() -> None:
+    evidence_pack = {
+        "current_message": "这台多少钱？",
+        "knowledge": {
+            "evidence": {
+                "products": [
+                    {"id": "p_test", "name": "2019款测试车A", "price": 12.8},
+                ],
+                "catalog_candidates": [
+                    {"id": "p_test", "name": "2019款测试车A", "price": 12.8},
+                ],
+            }
+        },
+    }
+    cleaned = normalize_advisor_synthesis_reply(
+        "先给您短结论：优先我在2019款测试车A（12.8万）、2019款测试车A（12.8万）。我会先看我在测试车A；我在测试车A、另一台先当备选。我在2019款测试车A、偶尔高速先放后面当备选，重点核车况。",
+        evidence_pack=evidence_pack,
+        settings={"advisor_mode": "direct_question_resolution"},
+    )
+    assert_true(cleaned.count("2019款测试车A（12.8万）") == 1, cleaned)
+    assert_true("我会先看我在" not in cleaned, cleaned)
+    assert_true("；我在" not in cleaned, cleaned)
+    assert_true("优先我在" not in cleaned, cleaned)
+    assert_true("我在2019款测试车A" not in cleaned, cleaned)
+    compare_cleaned = normalize_advisor_synthesis_reply(
+        "要说省心，优先凯美瑞，雅阁放第二。家用加偶尔高速，凯美瑞一般更偏稳定、好打理。",
+        evidence_pack={"current_message": "我在凯美瑞和雅阁之间纠结，主要家用，偶尔跑高速，哪个更省心？"},
+        settings={"advisor_mode": "clear_common_sense_recommendation"},
+    )
+    assert_true("我在" not in compare_cleaned and "先放后面" not in compare_cleaned, compare_cleaned)
+
+
+def check_guard_allows_safe_store_visit_advisory_but_blocks_commitment() -> None:
+    evidence_pack = synthetic_pack(intent_tags=["product_inquiry"], structured=True, rag=False, must_handoff=False)
+    safe = guard_synthesized_reply(
+        candidate={
+            "can_answer": True,
+            "reply": "凯美瑞可以优先看，到店先核车况、检测报告和实车状态，再决定要不要试驾。",
+            "confidence": 0.86,
+            "recommended_action": "send_reply",
+            "needs_handoff": False,
+            "used_evidence": ["product:chejin_camry_2021_20g"],
+            "structured_used": True,
+            "rag_used": False,
+        },
+        evidence_pack=evidence_pack,
+        settings={"require_evidence": False},
+    )
+    assert_true(safe.get("action") == "send_reply", safe)
+
+    commitment = guard_synthesized_reply(
+        candidate={
+            "can_answer": True,
+            "reply": "周六到店我给您约好了，直接过来就行。",
+            "confidence": 0.86,
+            "recommended_action": "send_reply",
+            "needs_handoff": False,
+            "used_evidence": ["product:chejin_camry_2021_20g"],
+            "structured_used": True,
+            "rag_used": False,
+        },
+        evidence_pack=evidence_pack,
+        settings={"require_evidence": False},
+    )
+    assert_true(commitment.get("action") == "handoff", commitment)
+    assert_true(str(commitment.get("reason") or "") == "appointment_or_reservation_commitment_requires_handoff", commitment)
+
+
+def check_conflicting_llm_price_falls_back_to_product_master_candidate() -> None:
+    original_builder = synthesis_module.build_reply_evidence_pack
+    try:
+        synthesis_module.build_reply_evidence_pack = lambda **kwargs: synthetic_pack(
+            intent_tags=["product", "quote"],
+            structured=True,
+            rag=False,
+            must_handoff=False,
+        )
+        result = maybe_synthesize_reply(
+            config={
+                "llm_reply_synthesis": {
+                    "enabled": True,
+                    "provider": "manual_json",
+                    "candidate": {
+                        "can_answer": True,
+                        "reply": "这台凯美瑞13万，车况透明。",
+                        "confidence": 0.9,
+                        "recommended_action": "send_reply",
+                        "needs_handoff": False,
+                        "used_evidence": ["product:chejin_camry_2021_20g"],
+                        "rag_used": False,
+                        "structured_used": True,
+                        "uncertain_points": [],
+                        "risk_tags": [],
+                    },
+                    "fallback_to_existing_reply": True,
+                    "require_structured_for_authority": True,
+                }
+            },
+            target_name="文件传输助手",
+            target_state={},
+            batch=[],
+            combined="凯美瑞多少钱？",
+            decision=ReplyDecision("", "no_rule_matched", False, False, "no_rule_matched"),
+            reply_text="2021款丰田凯美瑞2.0G豪华版（13.98万），这是当前商品库公开标价。",
+            intent_assist={},
+            rag_reply={},
+            llm_reply={},
+            product_knowledge={},
+            data_capture={},
+            raw_capture={},
+        )
+    finally:
+        synthesis_module.build_reply_evidence_pack = original_builder
+    assert_true(result.get("applied"), result)
+    assert_true(not result.get("needs_handoff"), result)
+    assert_true("13.98万" in str(result.get("raw_reply_text") or ""), result)
+    assert_true("guard_rejected_llm_used_existing_reply:product_price_conflicts_with_product_master" == str(result.get("reason") or ""), result)
 
 
 def synthetic_pack(*, intent_tags: list[str], structured: bool, rag: bool, must_handoff: bool = False) -> dict[str, Any]:

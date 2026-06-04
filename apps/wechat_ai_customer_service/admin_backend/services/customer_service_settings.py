@@ -25,6 +25,7 @@ DEFAULT_SETTINGS = {
     "identity_guard_enabled": True,
     "style_adapter_enabled": True,
     "final_visible_llm_polish_enabled": True,
+    "customer_service_brain_mode": "off",
     "respond_all_unread_sessions": False,
     "session_targets_managed": False,
     "session_targets": [],
@@ -35,6 +36,12 @@ REPLY_MODES = {
     "manual_assist": "只给建议，人工发送",
     "guarded_auto": "谨慎自动回复",
     "full_auto": "全自动回复",
+}
+
+CUSTOMER_SERVICE_BRAIN_MODES = {
+    "off": "关闭：沿用现有稳定链路",
+    "shadow": "影子观察：只记录客服大脑判断",
+    "brain_first": "客服大脑优先：由大模型先思考再回复",
 }
 
 
@@ -61,6 +68,8 @@ class CustomerServiceSettings:
         settings["identity_guard_enabled"] = bool(settings.get("identity_guard_enabled", True))
         settings["style_adapter_enabled"] = bool(settings.get("style_adapter_enabled", True))
         settings["final_visible_llm_polish_enabled"] = bool(settings.get("final_visible_llm_polish_enabled", True))
+        if settings.get("customer_service_brain_mode") not in CUSTOMER_SERVICE_BRAIN_MODES:
+            settings["customer_service_brain_mode"] = DEFAULT_SETTINGS["customer_service_brain_mode"]
         settings["respond_all_unread_sessions"] = bool(settings.get("respond_all_unread_sessions", False))
         settings["session_targets_managed"] = bool(settings.get("session_targets_managed", False))
         settings["session_targets"] = normalize_session_targets(settings.get("session_targets"))
@@ -74,6 +83,9 @@ class CustomerServiceSettings:
             allowed["style_adapter_enabled"] = bool(allowed.get("style_adapter_enabled", True))
         if "final_visible_llm_polish_enabled" in allowed:
             allowed["final_visible_llm_polish_enabled"] = bool(allowed.get("final_visible_llm_polish_enabled", True))
+        if "customer_service_brain_mode" in allowed:
+            mode = str(allowed.get("customer_service_brain_mode") or "").strip()
+            allowed["customer_service_brain_mode"] = mode if mode in CUSTOMER_SERVICE_BRAIN_MODES else DEFAULT_SETTINGS["customer_service_brain_mode"]
         if "respond_all_unread_sessions" in allowed:
             allowed["respond_all_unread_sessions"] = bool(allowed.get("respond_all_unread_sessions", False))
         if "session_targets_managed" in allowed:
@@ -86,6 +98,8 @@ class CustomerServiceSettings:
         settings["identity_guard_enabled"] = bool(settings.get("identity_guard_enabled", True))
         settings["style_adapter_enabled"] = bool(settings.get("style_adapter_enabled", True))
         settings["final_visible_llm_polish_enabled"] = bool(settings.get("final_visible_llm_polish_enabled", True))
+        if settings.get("customer_service_brain_mode") not in CUSTOMER_SERVICE_BRAIN_MODES:
+            settings["customer_service_brain_mode"] = DEFAULT_SETTINGS["customer_service_brain_mode"]
         settings["respond_all_unread_sessions"] = bool(settings.get("respond_all_unread_sessions", False))
         settings["session_targets_managed"] = bool(settings.get("session_targets_managed", False))
         settings["session_targets"] = normalize_session_targets(settings.get("session_targets"))
@@ -102,6 +116,9 @@ class CustomerServiceSettings:
         return {
             "settings": settings,
             "reply_modes": [{"id": key, "label": label} for key, label in REPLY_MODES.items()],
+            "customer_service_brain_modes": [
+                {"id": key, "label": label} for key, label in CUSTOMER_SERVICE_BRAIN_MODES.items()
+            ],
             "status": self.status_text(settings),
             "session_targets": targets,
             "session_target_counts": {

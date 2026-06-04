@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import copy
 import json
+import os
 import sys
 import tempfile
 import time
@@ -25,9 +27,11 @@ from apps.wechat_ai_customer_service.admin_backend.services.customer_service_sch
     SchedulerStateStore,
     complete_llm_task,
     enqueue_llm_task,
+    enqueue_polish_task,
     enqueue_pending_session,
     mark_capture_started,
     mark_llm_started,
+    mark_polish_started,
     mark_reply_sending,
     mark_reply_sent,
     record_capture_result,
@@ -41,18 +45,30 @@ from apps.wechat_ai_customer_service.admin_backend.services.customer_service_sch
     CustomerServiceSchedulerRuntime,
     ManagedListenerSchedulerBridge,
     mark_session_capture_failed,
+    merge_scheduler_conversation_context,
     plan_reply_with_listen_workflow,
+    polish_reply_with_listen_workflow,
 )
 import apps.wechat_ai_customer_service.admin_backend.services.customer_service_scheduler as scheduler_module  # noqa: E402
+import apps.wechat_ai_customer_service.admin_backend.services.customer_service_scheduler_state as scheduler_state_module  # noqa: E402
 from apps.wechat_ai_customer_service.admin_backend.services.customer_profile_store import CustomerProfileStore  # noqa: E402
-from apps.wechat_ai_customer_service.admin_backend.services.session_monitor import SessionMonitor  # noqa: E402
+from apps.wechat_ai_customer_service.admin_backend.services.session_monitor import SessionMonitor, SessionState  # noqa: E402
 from apps.wechat_ai_customer_service.customer_service_live_safety import apply_customer_service_live_safety_guard  # noqa: E402
 from apps.wechat_ai_customer_service.workflows.llm_intent_router import route_intent  # noqa: E402
 from apps.wechat_ai_customer_service.scripts.run_customer_service_listener import (  # noqa: E402
     load_concurrency_scheduler_enabled,
+    load_managed_poll_interval_settings,
     load_rpa_humanized_send_settings,
+    scheduler_bridge_has_active_work,
 )
-from listen_and_reply import TargetConfig, load_config, load_rules, maybe_enrich_messages_with_history  # noqa: E402
+from listen_and_reply import (  # noqa: E402
+    TargetConfig,
+    customer_service_anchor_payload,
+    load_config,
+    load_rules,
+    maybe_enrich_messages_with_history,
+    select_batch_details,
+)
 
 
 def assert_true(value: bool, message: str) -> None:
@@ -67,11 +83,12 @@ def assert_equal(actual: Any, expected: Any, message: str) -> None:
 
 def empty_state() -> dict[str, Any]:
     return {
-        "version": 1,
+        "version": 2,
         "tenant_id": "unit",
         "sessions": {},
         "captures": {},
         "llm_tasks": {},
+        "polish_tasks": {},
         "ready_replies": {},
         "send_sequence": 0,
         "events": [],
@@ -361,6 +378,128 @@ def check_session_monitor_visual_unread_badge_retriggers_after_reset(tmp_dir: Pa
         ])
     )
     assert_equal([item.name for item in red_again], ["客户A"], "a new visual badge after reset should retrigger capture")
+
+
+def check_passive_probe_defers_when_monitor_has_unread_signal() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        monitor = SessionMonitor(
+            state_path=root / "session_monitor_probe_defer.json",
+            max_targets_per_iteration=2,
+            initial_preview_can_raise_unread=False,
+            preview_change_can_raise_unread=False,
+            short_preview_can_raise_unread=True,
+        )
+        connector = FakeSessionConnector([
+            {"name": "客户A", "content": "在吗", "time": "13:01", "unread_badge": "visual_red_dot", "conversation_type": "private"}
+        ])
+        store = SchedulerStateStore(tenant_id="unit_probe_defer", path=root / "scheduler_state.json")
+        bridge = SimpleNamespace(enabled=True, store=store, session_monitor=monitor, connector=connector)
+        assert_true(
+            scheduler_bridge_has_active_work(bridge),
+            "passive probe should defer when low-disturbance monitor can see an unread short signal",
+        )
+
+
+def check_session_monitor_high_sensitivity_short_signal_waits_merge_window(tmp_dir: Path | None = None) -> None:
+    state_path = (tmp_dir or (PROJECT_ROOT / "runtime" / "apps" / "wechat_ai_customer_service" / "test_artifacts")) / "session_monitor_short_merge_window_unit.json"
+    try:
+        state_path.unlink()
+    except FileNotFoundError:
+        pass
+    monitor = SessionMonitor(
+        state_path=state_path,
+        max_targets_per_iteration=3,
+        high_sensitivity_short_merge_window_seconds=0.4,
+    )
+    monitor.poll(
+        FakeSessionConnector(
+            [{"name": "客户A", "content": "在吗", "time": "10:00", "conversation_type": "private"}]
+        )
+    )
+    assert_equal(monitor.pending_targets(), [], "short greeting should wait a brief merge window before dispatch")
+    time.sleep(0.45)
+    assert_equal([item.name for item in monitor.pending_targets()], ["客户A"], "short greeting should become dispatchable after merge window")
+
+
+def check_session_monitor_preserves_high_sensitivity_pending_after_empty_capture(tmp_dir: Path | None = None) -> None:
+    state_path = (tmp_dir or (PROJECT_ROOT / "runtime" / "apps" / "wechat_ai_customer_service" / "test_artifacts")) / "session_monitor_short_empty_capture_unit.json"
+    try:
+        state_path.unlink()
+    except FileNotFoundError:
+        pass
+    monitor = SessionMonitor(
+        state_path=state_path,
+        max_targets_per_iteration=3,
+        high_sensitivity_short_merge_window_seconds=0.0,
+        empty_capture_retry_seconds=0.0,
+    )
+    monitor.poll(
+        FakeSessionConnector(
+            [{"name": "客户A", "content": "地址", "time": "10:00", "conversation_type": "private"}]
+        )
+    )
+    assert_equal([item.name for item in monitor.pending_targets()], ["客户A"], "short business phrase should enter pending queue")
+    assert_true(monitor.should_preserve_pending_after_empty_capture("客户A"), "short high-sensitivity signal should request empty-capture retry preservation")
+    monitor.reset_unread("客户A", preserve_pending=True, retry_after_seconds=0.0)
+    assert_equal([item.name for item in monitor.pending_targets()], ["客户A"], "empty capture must not silently consume high-sensitivity short signal")
+    monitor.reset_unread("客户A")
+    assert_equal(monitor.pending_targets(), [], "normal reset should still clear preserved short signal")
+
+
+def check_session_monitor_low_disturbance_ignores_normal_preview_without_badge(tmp_dir: Path | None = None) -> None:
+    state_path = (tmp_dir or (PROJECT_ROOT / "runtime" / "apps" / "wechat_ai_customer_service" / "test_artifacts")) / "session_monitor_low_disturbance_preview_unit.json"
+    try:
+        state_path.unlink()
+    except FileNotFoundError:
+        pass
+    monitor = SessionMonitor(
+        state_path=state_path,
+        max_targets_per_iteration=3,
+        initial_preview_can_raise_unread=False,
+        preview_change_can_raise_unread=False,
+        short_preview_can_raise_unread=True,
+    )
+    initial = monitor.poll(
+        FakeSessionConnector(
+            [{"name": "客户A", "content": "昨天聊到的预算和车型方向", "time": "10:00", "conversation_type": "private"}]
+        )
+    )
+    assert_equal(initial, [], "ordinary first-seen preview should become baseline, not unread work")
+    changed = monitor.poll(
+        FakeSessionConnector(
+            [{"name": "客户A", "content": "列表预览轻微变化但没有角标", "time": "10:01", "conversation_type": "private"}]
+        )
+    )
+    assert_equal(changed, [], "ordinary preview drift without badge should not trigger foreground switching")
+    badge = monitor.poll(
+        FakeSessionConnector(
+            [{"name": "客户A", "content": "真正新消息", "time": "10:02", "unread_badge": "visual_red_dot", "conversation_type": "private"}]
+        )
+    )
+    assert_equal([item.name for item in badge], ["客户A"], "visual unread badge must still trigger capture")
+
+
+def check_session_monitor_low_disturbance_keeps_short_preview_signal(tmp_dir: Path | None = None) -> None:
+    state_path = (tmp_dir or (PROJECT_ROOT / "runtime" / "apps" / "wechat_ai_customer_service" / "test_artifacts")) / "session_monitor_low_disturbance_short_unit.json"
+    try:
+        state_path.unlink()
+    except FileNotFoundError:
+        pass
+    monitor = SessionMonitor(
+        state_path=state_path,
+        max_targets_per_iteration=3,
+        initial_preview_can_raise_unread=False,
+        preview_change_can_raise_unread=False,
+        short_preview_can_raise_unread=True,
+        high_sensitivity_short_merge_window_seconds=0.0,
+    )
+    short_signal = monitor.poll(
+        FakeSessionConnector(
+            [{"name": "客户A", "content": "在吗", "time": "10:00", "conversation_type": "private"}]
+        )
+    )
+    assert_equal([item.name for item in short_signal], ["客户A"], "short high-sensitivity preview should remain dispatchable")
 
 
 def check_session_monitor_event_driven_dispatch_keeps_sticky_target(tmp_dir: Path | None = None) -> None:
@@ -876,6 +1015,235 @@ def check_runtime_recovers_orphaned_running_llm_task_after_restart() -> None:
             runtime.shutdown()
 
 
+def check_runtime_restores_missing_llm_task_from_in_memory_snapshot() -> None:
+    with tempfile.TemporaryDirectory() as temp:
+        path = Path(temp) / "scheduler_state.json"
+        store = SchedulerStateStore(tenant_id="unit", path=path)
+
+        def capture_fn(session: dict[str, Any]) -> dict[str, Any]:
+            msg = message("A", 1, content="你好")
+            return {"messages": [msg], "batch": [msg]}
+
+        def planner(capture: dict[str, Any], task: dict[str, Any]) -> dict[str, Any]:
+            time.sleep(0.05)
+            return {"ok": True, "reply_text": "您好，在的。", "decision": {"rule_name": "unit"}}
+
+        runtime = CustomerServiceSchedulerRuntime(
+            store=store,
+            config=SchedulerConfig(enabled=True, capture_max_sessions_per_round=1, llm_max_concurrency=1, planner_max_concurrency=1, send_max_replies_per_round=1),
+            capture_fn=capture_fn,
+            plan_reply_fn=planner,
+        )
+        try:
+            runtime.tick(
+                session_signals=[{"name": "客户A", "content": "你好", "time": "10:00"}],
+                allow_send=False,
+                now="2026-06-02T18:15:00",
+            )
+            state = store.load()
+            state["llm_tasks"] = {}
+            store.save(state)
+            time.sleep(0.08)
+            result = runtime.tick(allow_send=False, now="2026-06-02T18:15:01")
+            assert_equal(
+                result["summary"].get("reply_ready", 0),
+                1,
+                "missing persisted llm task should be restored from in-memory snapshot",
+            )
+            restored = store.load()
+            assert_true(bool(restored.get("ready_replies") or {}), "restored llm completion should still enqueue ready reply")
+        finally:
+            runtime.shutdown()
+
+
+def check_runtime_recovers_orphaned_running_polish_task_after_restart() -> None:
+    with tempfile.TemporaryDirectory() as temp:
+        path = Path(temp) / "scheduler_state.json"
+        store = SchedulerStateStore(tenant_id="unit", path=path)
+        state = store.load()
+        capture = record_capture_result(
+            state,
+            "客户A",
+            messages=[message("A", 1)],
+            batch=[message("A", 1)],
+            now="2026-06-02T18:10:00",
+        )
+        task = enqueue_llm_task(state, capture["capture_id"], now="2026-06-02T18:10:01")
+        mark_llm_started(state, task["task_id"], now="2026-06-02T18:10:02")
+        complete_llm_task(
+            state,
+            task["task_id"],
+            reply_text="待润色草稿",
+            decision={"rule_name": "unit"},
+            create_ready_reply=False,
+            now="2026-06-02T18:10:03",
+        )
+        polish_task = enqueue_polish_task(state, task["task_id"], now="2026-06-02T18:10:04")
+        mark_polish_started(state, polish_task["task_id"], now="2026-06-02T18:10:05")
+        store.save(state)
+
+        def capture_fn(session: dict[str, Any]) -> dict[str, Any]:
+            return {"messages": [message("A", 2)], "batch": [message("A", 2)]}
+
+        def planner(_capture_payload: dict[str, Any], _task_payload: dict[str, Any]) -> dict[str, Any]:
+            return {"ok": True, "reply_text": "不会被调用", "decision": {"rule_name": "unit"}}
+
+        def polish(_planner_task: dict[str, Any], _task_payload: dict[str, Any]) -> dict[str, Any]:
+            return {"ok": True, "reply_text": "重启后恢复润色回复", "decision": {"rule_name": "unit", "polished": True}}
+
+        runtime = CustomerServiceSchedulerRuntime(
+            store=store,
+            config=SchedulerConfig(
+                enabled=True,
+                capture_max_sessions_per_round=1,
+                llm_max_concurrency=1,
+                planner_max_concurrency=1,
+                polish_max_concurrency=1,
+                send_max_replies_per_round=1,
+            ),
+            capture_fn=capture_fn,
+            plan_reply_fn=planner,
+            polish_reply_fn=polish,
+        )
+        try:
+            first = runtime.tick(allow_send=False, now="2026-06-02T18:10:06")
+            assert_true(
+                any(item.get("event") == "polish_task_orphan_requeued" for item in first.get("events") or []),
+                f"orphaned running polish task should be requeued: {first}",
+            )
+            time.sleep(0.03)
+            second = runtime.tick(allow_send=False, now="2026-06-02T18:10:07")
+            assert_equal(second["summary"]["reply_ready"], 1, "recovered polish task should complete into ready reply")
+        finally:
+            runtime.shutdown()
+
+
+def check_runtime_restores_missing_polish_task_from_in_memory_snapshot() -> None:
+    with tempfile.TemporaryDirectory() as temp:
+        path = Path(temp) / "scheduler_state.json"
+        store = SchedulerStateStore(tenant_id="unit", path=path)
+
+        def capture_fn(session: dict[str, Any]) -> dict[str, Any]:
+            msg = message("A", 1, content="在吗？")
+            return {"messages": [msg], "batch": [msg]}
+
+        def planner(capture: dict[str, Any], task: dict[str, Any]) -> dict[str, Any]:
+            time.sleep(0.05)
+            return {"ok": True, "reply_text": "在的，您说。", "decision": {"rule_name": "unit"}}
+
+        def polish(planner_task: dict[str, Any], task: dict[str, Any]) -> dict[str, Any]:
+            time.sleep(0.05)
+            return {"ok": True, "reply_text": "在的，您说。", "decision": {"rule_name": "unit", "polished": True}}
+
+        runtime = CustomerServiceSchedulerRuntime(
+            store=store,
+            config=SchedulerConfig(
+                enabled=True,
+                capture_max_sessions_per_round=1,
+                llm_max_concurrency=1,
+                planner_max_concurrency=1,
+                polish_max_concurrency=1,
+                send_max_replies_per_round=1,
+            ),
+            capture_fn=capture_fn,
+            plan_reply_fn=planner,
+            polish_reply_fn=polish,
+        )
+        try:
+            runtime.tick(
+                session_signals=[{"name": "客户A", "content": "在吗？", "time": "10:00"}],
+                allow_send=False,
+                now="2026-06-02T18:20:00",
+            )
+            time.sleep(0.08)
+            runtime.tick(allow_send=False, now="2026-06-02T18:20:01")
+            state = store.load()
+            state["polish_tasks"] = {}
+            store.save(state)
+            time.sleep(0.08)
+            result = runtime.tick(allow_send=False, now="2026-06-02T18:20:02")
+            assert_equal(
+                result["summary"].get("reply_ready", 0),
+                1,
+                "missing persisted polish task should be restored from in-memory snapshot",
+            )
+            restored = store.load()
+            assert_true(bool(restored.get("ready_replies") or {}), "restored polish completion should still enqueue ready reply")
+        finally:
+            runtime.shutdown()
+
+
+def check_runtime_degraded_polish_reply_still_sends() -> None:
+    with tempfile.TemporaryDirectory() as temp:
+        path = Path(temp) / "scheduler_state.json"
+        store = SchedulerStateStore(tenant_id="unit", path=path)
+        sent: list[dict[str, Any]] = []
+
+        def capture_fn(session: dict[str, Any]) -> dict[str, Any]:
+            return {"messages": [message("A", 1)], "batch": [message("A", 1)]}
+
+        def planner(capture: dict[str, Any], task: dict[str, Any]) -> dict[str, Any]:
+            return {"ok": True, "reply_text": f"草稿 {capture.get('target_name')}", "decision": {"rule_name": "unit"}}
+
+        def polish(planner_task: dict[str, Any], task: dict[str, Any]) -> dict[str, Any]:
+            result = planner_task.get("result") if isinstance(planner_task.get("result"), dict) else {}
+            draft = str(result.get("reply_text") or "")
+            return {
+                "ok": True,
+                "reply_text": draft,
+                "decision": {"rule_name": "unit", "used_safe_draft": True},
+                "degraded": True,
+            }
+
+        def sender(reply: dict[str, Any]) -> dict[str, Any]:
+            sent.append(copy.deepcopy(reply))
+            return {"ok": True, "verified": True}
+
+        runtime = CustomerServiceSchedulerRuntime(
+            store=store,
+            config=SchedulerConfig(
+                enabled=True,
+                capture_max_sessions_per_round=1,
+                llm_max_concurrency=1,
+                planner_max_concurrency=1,
+                polish_max_concurrency=1,
+                send_max_replies_per_round=1,
+            ),
+            capture_fn=capture_fn,
+            plan_reply_fn=planner,
+            polish_reply_fn=polish,
+            freshness_fn=lambda reply: {"ok": True, "stale": False},
+            send_fn=sender,
+        )
+        try:
+            runtime.tick(
+                session_signals=[{"name": "客户A", "content": "A新消息", "time": "10:00"}],
+                allow_send=False,
+                now="2026-06-02T18:12:00",
+            )
+            result = None
+            for index, now_text in enumerate(
+                [
+                    "2026-06-02T18:12:01",
+                    "2026-06-02T18:12:02",
+                    "2026-06-02T18:12:03",
+                    "2026-06-02T18:12:04",
+                ],
+                start=1,
+            ):
+                time.sleep(0.03)
+                result = runtime.tick(allow_send=index >= 2, now=now_text)
+                if sent:
+                    break
+            assert_true(isinstance(result, dict), "runtime should return a result dict during degraded-polish send loop")
+            assert_equal(len(sent), 1, "degraded polish reply should still be sendable")
+            assert_equal(str(sent[0].get("task_kind") or ""), "polish", "sent reply should originate from polish task when dual-pool mode is enabled")
+            assert_true(bool(((sent[0].get("decision") or {}) if isinstance(sent[0].get("decision"), dict) else {}).get("used_safe_draft")), f"degraded polish metadata should survive send path: {sent[0]}")
+            assert_equal(result["summary"]["reply_sent"], 1, "degraded polish reply should reach sent state")
+        finally:
+            runtime.shutdown()
+
+
 def check_captured_messages_connector_accepts_history_kwargs() -> None:
     capture = {
         "capture_id": "capture-history-kwargs",
@@ -895,6 +1263,40 @@ def check_captured_messages_connector_accepts_history_kwargs() -> None:
     )
     assert_true(payload.get("ok") is True, f"captured connector should ignore RPA history kwargs safely: {payload}")
     assert_equal(payload.get("scheduler_capture_id"), "capture-history-kwargs", "capture id should be preserved")
+
+
+def check_captured_messages_connector_uses_batch_when_messages_empty() -> None:
+    capture = {
+        "capture_id": "capture-short-pending-batch",
+        "target_name": "客户A",
+        "context_version": 2,
+        "messages": [],
+        "batch": [
+            {
+                "id": "short_pending:客户A:unit",
+                "type": "text",
+                "sender": "unknown",
+                "sender_role": "unknown",
+                "content": "在吗",
+                "short_pending_recovered": True,
+                "short_pending_synthesized_from_monitor": True,
+            }
+        ],
+        "history_backfill": {
+            "enabled": True,
+            "reason": "visible_anchor_found_no_scroll",
+            "short_pending_recovered_from_anchor_empty": True,
+        },
+    }
+    payload = CapturedMessagesConnector(capture).get_messages("客户A", exact=True)
+    assert_true(payload.get("ok") is True, f"captured connector should return ok: {payload}")
+    assert_true(payload.get("scheduler_used_batch_fallback") is True, f"empty messages should fall back to batch: {payload}")
+    assert_equal(payload.get("messages", [{}])[0].get("content"), "在吗", "short pending batch content must reach the planner")
+    assert_equal(
+        payload.get("_history_backfill", {}).get("short_pending_recovered_from_anchor_empty"),
+        True,
+        "history recovery metadata should be preserved for audit",
+    )
 
 
 def check_scheduler_planner_reuses_capture_history_backfill_verdict() -> None:
@@ -962,11 +1364,107 @@ def check_workflow_planner_uses_captured_messages_without_sending() -> None:
         f"planned reply should use friendly greeting rule: {planned}",
     )
     assert_true(
-        ("预算" in reply_text) or ("用途" in reply_text),
-        f"planned greeting reply should guide user back to buying context: {planned}",
+        ("您说" in reply_text) or ("慢慢说" in reply_text) or ("直接说" in reply_text),
+        f"planned greeting reply should stay brief and warm: {planned}",
     )
+    assert_true("预算" not in reply_text and "用途" not in reply_text and "二手车" not in reply_text, f"pure greeting should not force sales redirect: {planned}")
     event = planned.get("event") or {}
     assert_equal(event.get("action"), "planned", "planner must not send through captured connector")
+
+
+def check_workflow_planner_handles_short_pending_batch_fallback() -> None:
+    config = load_config(APP_ROOT / "configs" / "file_transfer_smoke.example.json")
+    config.setdefault("operator_alert", {})["enabled"] = False
+    config.setdefault("raw_messages", {})["enabled"] = False
+    config.setdefault("customer_profiles", {})["enabled"] = False
+    rules = load_rules(Path(config["rules_path"]))
+    target = TargetConfig(
+        name="文件传输助手",
+        enabled=True,
+        exact=True,
+        allow_self_for_test=True,
+        max_batch_messages=3,
+    )
+    capture = {
+        "capture_id": "capture-short-pending-planner",
+        "target_name": "文件传输助手",
+        "context_version": 3,
+        "messages": [],
+        "batch": [
+            {
+                "id": "short_pending:file-transfer:unit",
+                "type": "text",
+                "sender": "unknown",
+                "sender_role": "unknown",
+                "content": "在吗",
+                "short_pending_recovered": True,
+                "short_pending_synthesized_from_monitor": True,
+            }
+        ],
+        "history_backfill": {
+            "enabled": True,
+            "reason": "visible_anchor_found_no_scroll",
+            "short_pending_recovered_from_anchor_empty": True,
+        },
+    }
+    planned = plan_reply_with_listen_workflow(
+        capture,
+        {"task_id": "task-short-pending-planner"},
+        target_config=target,
+        config=config,
+        rules=rules,
+        workflow_state={"targets": {}},
+        allow_fallback_send=True,
+    )
+    assert_true(bool(planned.get("ok")), f"workflow planner should reply to short pending batch fallback: {planned}")
+    reply_text = str(planned.get("reply_text") or "")
+    decision = planned.get("decision") if isinstance(planned.get("decision"), dict) else {}
+    assert_true(decision.get("rule_name") == "realtime_friendly_social_greeting", f"short pending greeting should stay social: {planned}")
+    assert_true(reply_text.strip(), f"short pending fallback should produce visible reply text: {planned}")
+    assert_true("预算" not in reply_text and "用途" not in reply_text and "二手车" not in reply_text, f"short pending greeting should not force sales redirect: {planned}")
+
+
+def check_workflow_planner_uses_warm_short_farewell_without_sales_redirect() -> None:
+    config = load_config(APP_ROOT / "configs" / "file_transfer_smoke.example.json")
+    config.setdefault("operator_alert", {})["enabled"] = False
+    config.setdefault("raw_messages", {})["enabled"] = False
+    config.setdefault("customer_profiles", {})["enabled"] = False
+    rules = load_rules(Path(config["rules_path"]))
+    target = TargetConfig(
+        name="文件传输助手",
+        enabled=True,
+        exact=True,
+        allow_self_for_test=True,
+        max_batch_messages=3,
+    )
+    capture = {
+        "capture_id": "capture-unit-farewell",
+        "target_name": "文件传输助手",
+        "context_version": 1,
+        "messages": [{"id": "unit-bye-1", "type": "text", "sender": "self", "content": "再见"}],
+        "history_backfill": {"enabled": False},
+    }
+    planned = plan_reply_with_listen_workflow(
+        capture,
+        {"task_id": "task-unit-farewell"},
+        target_config=target,
+        config=config,
+        rules=rules,
+        workflow_state={"targets": {}},
+        allow_fallback_send=True,
+    )
+    assert_true(bool(planned.get("ok")), f"workflow planner should build farewell reply from captured messages: {planned}")
+    reply_text = str(planned.get("reply_text") or "")
+    decision = planned.get("decision") if isinstance(planned.get("decision"), dict) else {}
+    assert_true(
+        decision.get("rule_name") == "realtime_friendly_farewell",
+        f"planned farewell reply should use local farewell rule: {planned}",
+    )
+    assert_true(
+        ("先忙" in reply_text) or ("再聊" in reply_text) or ("喊我" in reply_text) or ("辛苦" in reply_text),
+        f"farewell reply should stay warm and concise: {planned}",
+    )
+    assert_true("预算" not in reply_text and "用途" not in reply_text and "二手车" not in reply_text, f"farewell should not force sales redirect: {planned}")
 
 
 def check_scheduler_planner_applies_final_visible_polish_without_sending() -> None:
@@ -1018,6 +1516,143 @@ def check_scheduler_planner_applies_final_visible_polish_without_sending() -> No
     assert_true("send_result" not in event, f"planner must still avoid RPA send: {event}")
 
 
+def check_scheduler_split_polish_stage_preserves_final_visible_polish_quality() -> None:
+    config = load_config(APP_ROOT / "configs" / "file_transfer_smoke.example.json")
+    config.setdefault("operator_alert", {})["enabled"] = False
+    config.setdefault("raw_messages", {})["enabled"] = False
+    config.setdefault("customer_profiles", {})["enabled"] = False
+    config["final_visible_llm_polish"] = {
+        "enabled": True,
+        "required_for_send": True,
+        "provider": "manual_json",
+        "candidate": {
+            "reply": "您好，这边在的，您直接说需求就行。",
+            "confidence": 1.0,
+            "reason": "unit test split polish stage",
+        },
+    }
+    rules = load_rules(Path(config["rules_path"]))
+    target = TargetConfig(
+        name="文件传输助手",
+        enabled=True,
+        exact=True,
+        allow_self_for_test=True,
+        max_batch_messages=3,
+    )
+    capture = {
+        "capture_id": "capture-unit-polish-split",
+        "target_name": "文件传输助手",
+        "context_version": 1,
+        "messages": [{"id": "unit-polish-split-1", "type": "text", "sender": "self", "content": "你好"}],
+        "history_backfill": {"enabled": False},
+    }
+    planned = plan_reply_with_listen_workflow(
+        capture,
+        {"task_id": "task-unit-polish-split"},
+        target_config=target,
+        config=config,
+        rules=rules,
+        workflow_state={"targets": {}},
+        allow_fallback_send=True,
+        apply_final_visible_polish=False,
+    )
+    assert_true(bool(planned.get("ok")), f"planner-only stage should build a draft reply: {planned}")
+    planned_decision = planned.get("decision") if isinstance(planned.get("decision"), dict) else {}
+    assert_true(
+        not isinstance(planned_decision.get("final_visible_llm_polish"), dict),
+        f"planner-only stage should not already finalize visible polish: {planned}",
+    )
+    planner_task = {
+        "task_id": "planner-task-unit-polish-split",
+        "target_name": target.name,
+        "capture_ids": [capture["capture_id"]],
+        "input_context_version": capture["context_version"],
+        "input_message_ids": [],
+        "input_content_keys": [],
+        "result": planned,
+    }
+    polished = polish_reply_with_listen_workflow(
+        planner_task,
+        {"task_id": "polish-task-unit-polish-split"},
+        target_config=target,
+        config=config,
+        workflow_state={"targets": {}},
+    )
+    assert_true(bool(polished.get("ok")), f"split polish stage should pass final polish: {polished}")
+    reply_text = str(polished.get("reply_text") or "")
+    assert_true(reply_text.endswith("您好，这边在的，您直接说需求就行。"), f"split polish should append polished body: {polished}")
+    decision = polished.get("decision") if isinstance(polished.get("decision"), dict) else {}
+    polish = decision.get("final_visible_llm_polish") if isinstance(decision.get("final_visible_llm_polish"), dict) else {}
+    assert_true(polish.get("passed") is True, f"split polish metadata should be retained: {polished}")
+
+
+def check_runtime_dual_backend_pools_keep_planner_moving_while_polish_runs() -> None:
+    with tempfile.TemporaryDirectory() as temp:
+        path = Path(temp) / "scheduler_state.json"
+        store = SchedulerStateStore(tenant_id="unit", path=path)
+        messages_by_target = {
+            "客户A": [message("A", 1)],
+            "客户B": [message("B", 1)],
+        }
+
+        def capture_fn(session: dict[str, Any]) -> dict[str, Any]:
+            target = str(session.get("target_name") or "")
+            return {"messages": messages_by_target[target], "batch": messages_by_target[target]}
+
+        def planner(capture: dict[str, Any], task: dict[str, Any]) -> dict[str, Any]:
+            time.sleep(0.02)
+            return {"ok": True, "reply_text": f"草稿 {capture.get('target_name')}", "decision": {"rule_name": "unit"}}
+
+        def polish(planner_task: dict[str, Any], task: dict[str, Any]) -> dict[str, Any]:
+            target = str(planner_task.get("target_name") or "")
+            if target == "客户A":
+                time.sleep(0.22)
+            else:
+                time.sleep(0.02)
+            result = planner_task.get("result") if isinstance(planner_task.get("result"), dict) else {}
+            reply_text = str(result.get("reply_text") or "")
+            return {"ok": True, "reply_text": f"{reply_text} 已润色", "decision": {"rule_name": "unit", "polished": True}}
+
+        runtime = CustomerServiceSchedulerRuntime(
+            store=store,
+            config=SchedulerConfig(
+                enabled=True,
+                capture_max_sessions_per_round=1,
+                llm_max_concurrency=1,
+                planner_max_concurrency=1,
+                polish_max_concurrency=1,
+                send_max_replies_per_round=1,
+            ),
+            capture_fn=capture_fn,
+            plan_reply_fn=planner,
+            polish_reply_fn=polish,
+        )
+        try:
+            runtime.tick(
+                session_signals=[{"name": "客户A", "content": "A新消息", "time": "10:00"}],
+                allow_send=False,
+                now="2026-06-02T18:00:00",
+            )
+            time.sleep(0.03)
+            second = runtime.tick(
+                session_signals=[{"name": "客户B", "content": "B新消息", "time": "10:01"}],
+                allow_send=False,
+                now="2026-06-02T18:00:01",
+            )
+            assert_equal(second["summary"]["planner_running"], 1, "planner pool should still accept a new session while polish is active")
+            assert_equal(second["summary"]["polish_running"], 1, "polish pool should run independently from planner pool")
+            time.sleep(0.03)
+            third = runtime.tick(allow_send=False, now="2026-06-02T18:00:02")
+            assert_equal(third["summary"]["planner_running"], 0, "fast planner should finish without being blocked by slow polish")
+            assert_true(third["summary"]["polish_running"] >= 1, "slow polish should still be running for the older session")
+            assert_true(third["summary"]["polish_queued"] >= 1, "second session polish should queue while the first polish is still busy")
+            time.sleep(0.25)
+            final = runtime.tick(allow_send=False, now="2026-06-02T18:00:03")
+            assert_true(final["summary"]["reply_ready"] >= 1, "completed polish should produce ready replies")
+        finally:
+            runtime.shutdown()
+
+
 def check_listener_scheduler_config_gate() -> None:
     with tempfile.TemporaryDirectory() as temp:
         path = Path(temp) / "config.json"
@@ -1050,6 +1685,27 @@ def check_listener_scheduler_config_gate() -> None:
         )
 
 
+def check_listener_poll_interval_uses_randomized_window_config() -> None:
+    with tempfile.TemporaryDirectory() as temp:
+        path = Path(temp) / "config.json"
+        path.write_text(
+            json.dumps(
+                {
+                    "poll": {
+                        "interval_seconds": 3,
+                        "interval_min_seconds": 3,
+                        "interval_max_seconds": 5,
+                    }
+                },
+                ensure_ascii=False,
+            ),
+            encoding="utf-8",
+        )
+        settings = load_managed_poll_interval_settings(path, fallback_seconds=5)
+    assert_equal(settings.get("min_seconds"), 3.0, "listener should respect randomized poll minimum")
+    assert_equal(settings.get("max_seconds"), 5.0, "listener should respect randomized poll maximum")
+
+
 def check_live_safety_applies_backend_scheduler_defaults() -> None:
     raw = {
         "targets": [{"name": "客户A", "enabled": True, "exact": True}],
@@ -1062,12 +1718,38 @@ def check_live_safety_applies_backend_scheduler_defaults() -> None:
     }
     merged = apply_customer_service_live_safety_guard(raw, settings={})
     scheduler = merged.get("concurrency_scheduler") if isinstance(merged.get("concurrency_scheduler"), dict) else {}
+    multi_target = merged.get("multi_target") if isinstance(merged.get("multi_target"), dict) else {}
     assert_true(scheduler.get("enabled") is True, "live safety should turn on backend scheduler defaults")
-    assert_equal(scheduler.get("llm_max_concurrency"), 2, "scheduler should use conservative concurrent LLM default")
+    assert_equal(scheduler.get("llm_max_concurrency"), 4, "scheduler should use high-concurrency LLM default")
+    assert_equal(scheduler.get("planner_max_concurrency"), 4, "planner concurrency should default to the high-concurrency standard value")
+    assert_equal(scheduler.get("polish_max_concurrency"), 4, "polish concurrency should default to the high-concurrency standard value")
+    assert_true(multi_target.get("initial_preview_can_raise_unread") is False, "live safety should baseline first-seen previews")
+    assert_true(multi_target.get("preview_change_can_raise_unread") is False, "live safety should ignore ordinary preview drift")
+    assert_true(multi_target.get("short_preview_can_raise_unread") is True, "live safety should keep short-message fallback")
     raw["concurrency_scheduler"] = {"enabled": False}
     rollback = apply_customer_service_live_safety_guard(raw, settings={})
     rollback_scheduler = rollback.get("concurrency_scheduler") if isinstance(rollback.get("concurrency_scheduler"), dict) else {}
     assert_true(rollback_scheduler.get("enabled") is False, "explicit scheduler false should survive live safety normalization")
+
+
+def check_live_safety_file_transfer_defaults_to_self_test_target() -> None:
+    raw = {
+        "targets": [
+            {"name": "文件传输助手", "enabled": True, "exact": True},
+            {"name": "客户A", "enabled": True, "exact": True, "allow_self_for_test": True},
+        ],
+        "multi_target": {"enabled": True, "rpa_low_risk_mode": True},
+        "live_safety_guard": {
+            "enabled": True,
+            "allowed_targets": ["文件传输助手", "客户A"],
+            "require_recent_bootstrap": False,
+        },
+    }
+    merged = apply_customer_service_live_safety_guard(raw, settings={})
+    targets = {str(item.get("name") or ""): item for item in merged.get("targets", []) if isinstance(item, dict)}
+    assert_true(targets.get("文件传输助手", {}).get("allow_self_for_test") is True, "File Transfer Assistant should be explicit self-test target")
+    assert_true(int(targets.get("文件传输助手", {}).get("max_batch_messages") or 0) >= 8, "File Transfer Assistant self-test should accept multi-message batches")
+    assert_true(targets.get("客户A", {}).get("allow_self_for_test") is False, "normal customer targets must never allow self messages")
 
 
 def check_listener_rpa_send_rate_zero_is_preserved() -> None:
@@ -1102,6 +1784,64 @@ def check_listener_rpa_send_rate_zero_is_preserved() -> None:
             20,
             "burst limit should preserve configured value",
         )
+
+
+def check_managed_bridge_applies_rpa_fast_send_confirmation_env() -> None:
+    keys = [
+        "WECHAT_WIN32_OCR_FAST_SEND_CONFIRMATION",
+        "WECHAT_WIN32_OCR_SEND_INPUT_CONFIRM_ATTEMPTS",
+        "WECHAT_WIN32_OCR_SEND_TRIGGER_MODE",
+    ]
+    previous = {key: os.environ.get(key) for key in keys}
+    bridge: ManagedListenerSchedulerBridge | None = None
+    try:
+        for key in keys:
+            os.environ.pop(key, None)
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            config_path = root / "listener_config.json"
+            config = {
+                "state_path": str(root / "workflow_state.json"),
+                "audit_log_path": str(root / "audit.jsonl"),
+                "targets": [{"name": "customer_a", "enabled": True, "exact": True}],
+                "rpa_humanized_send": {
+                    "enabled": True,
+                    "fast_send_confirmation_enabled": True,
+                    "send_input_confirm_attempts": 1,
+                    "send_trigger_mode": "enter_only",
+                },
+                "concurrency_scheduler": {"enabled": True},
+            }
+            config_path.write_text(json.dumps(config, ensure_ascii=False, indent=2), encoding="utf-8")
+            bridge = ManagedListenerSchedulerBridge(
+                tenant_id="unit_bridge_env",
+                config_path=config_path,
+                allow_send=False,
+                write_data=False,
+            )
+            assert_equal(
+                os.environ.get("WECHAT_WIN32_OCR_FAST_SEND_CONFIRMATION"),
+                "1",
+                "bridge reload should enable fast send confirmation for in-process sends",
+            )
+            assert_equal(
+                os.environ.get("WECHAT_WIN32_OCR_SEND_INPUT_CONFIRM_ATTEMPTS"),
+                "1",
+                "bridge reload should apply send-input confirmation attempts",
+            )
+            assert_equal(
+                os.environ.get("WECHAT_WIN32_OCR_SEND_TRIGGER_MODE"),
+                "enter_only",
+                "bridge reload should apply send trigger mode",
+            )
+    finally:
+        if bridge is not None:
+            bridge.shutdown()
+        for key, value in previous.items():
+            if value is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = value
 
 
 def check_managed_bridge_capture_send_marks_workflow_state() -> None:
@@ -1229,7 +1969,7 @@ def check_managed_bridge_freshness_preview_fast_pass_without_strict_scan() -> No
         assert_equal(detect_calls["count"], 0, "preview fast pass should skip strict detect scanner")
 
 
-def check_managed_bridge_freshness_preview_unread_marks_stale() -> None:
+def check_managed_bridge_freshness_preview_unread_uses_strict_scan() -> None:
     with tempfile.TemporaryDirectory() as temp:
         root = Path(temp)
         config_path = root / "listener_config.json"
@@ -1265,7 +2005,7 @@ def check_managed_bridge_freshness_preview_unread_marks_stale() -> None:
 
         def detect_stub(**_kwargs: Any) -> dict[str, Any]:
             detect_calls["count"] += 1
-            return {"ok": True, "has_newer_messages": False}
+            return {"ok": True, "has_newer_messages": True, "gap_risk": False}
 
         bridge._workflow["detect_newer_messages_before_send"] = detect_stub
         reply = {
@@ -1283,9 +2023,161 @@ def check_managed_bridge_freshness_preview_unread_marks_stale() -> None:
         finally:
             bridge.shutdown()
         assert_true(result.get("ok") is True, f"preview unread should still produce ok freshness payload: {result}")
-        assert_true(result.get("stale") is True, f"preview unread must stale the in-flight reply: {result}")
-        assert_true(result.get("has_newer_messages") is True, f"preview unread should mark newer messages: {result}")
-        assert_equal(detect_calls["count"], 0, "preview unread stale should not trigger strict detect scanner")
+        assert_true(result.get("stale") is True, f"preview unread with strict detect newer result must stale the in-flight reply: {result}")
+        assert_true(result.get("has_newer_messages") is True, f"preview unread strict scan should mark newer messages: {result}")
+        assert_equal(str(result.get("freshness_mode") or ""), "strict_message_scan", "preview unread should fall back to strict freshness scan")
+        assert_equal(detect_calls["count"], 1, "preview unread should trigger exactly one strict detect scan")
+
+
+def check_managed_bridge_freshness_same_short_signal_fast_passes_without_strict_scan() -> None:
+    with tempfile.TemporaryDirectory() as temp:
+        root = Path(temp)
+        config_path = root / "listener_config.json"
+        config = {
+            "state_path": str(root / "workflow_state.json"),
+            "audit_log_path": str(root / "audit.jsonl"),
+            "targets": [{"name": "客户A", "enabled": True, "exact": True}],
+            "history_backfill": {"enabled": False},
+            "scheduler_freshness": {
+                "enabled": True,
+                "mode": "preview_first",
+                "strict_check_interval_seconds": 0,
+                "strict_check_after_llm_seconds": 0,
+            },
+        }
+        config_path.write_text(json.dumps(config, ensure_ascii=False, indent=2), encoding="utf-8")
+        bridge = ManagedListenerSchedulerBridge(
+            tenant_id="unit_preview_same_short_signal",
+            config_path=config_path,
+            allow_send=False,
+            write_data=False,
+        )
+        bridge.config["scheduler_freshness"] = {
+            "enabled": True,
+            "mode": "preview_first",
+            "strict_check_interval_seconds": 0,
+            "strict_check_after_llm_seconds": 0,
+        }
+        detect_calls = {"count": 0}
+        bridge.session_monitor = FakePreviewSessionMonitor(
+            [
+                {
+                    "name": "客户A",
+                    "unread_detected": True,
+                    "last_detected_at": "2026-05-25T10:00:03",
+                    "pending_since": "2026-05-25T10:00:03",
+                    "pending_signal_text": "在吗？",
+                    "pending_signal_kind": "high_sensitivity_short",
+                }
+            ]
+        )
+
+        def detect_stub(**_kwargs: Any) -> dict[str, Any]:
+            detect_calls["count"] += 1
+            return {"ok": True, "has_newer_messages": False, "gap_risk": False}
+
+        bridge._workflow["detect_newer_messages_before_send"] = detect_stub
+        reply = {
+            "reply_id": "reply-preview-same-short",
+            "target_name": "客户A",
+            "_capture": {
+                "capture_id": "capture-preview-same-short",
+                "target_name": "客户A",
+                "exact": True,
+                "batch": [{"id": "msg-1", "sender": "customer", "content": "在吗？"}],
+            },
+        }
+        try:
+            result = bridge._freshness_check(reply)
+        finally:
+            bridge.shutdown()
+        assert_true(result.get("ok") is True, f"same short signal fast pass should still return freshness payload: {result}")
+        assert_true(result.get("stale") is False, f"same short signal without newer content must not stale reply: {result}")
+        assert_equal(str(result.get("freshness_mode") or ""), "session_preview_fastpath", "same short signal should use preview fastpath")
+        assert_equal(
+            str(result.get("reason") or ""),
+            "session_monitor_unread_matches_capture_fast_pass",
+            f"same short preview should be recognized as the captured message: {result}",
+        )
+        assert_equal(detect_calls["count"], 0, "same short signal should not force a fragile strict OCR scan")
+
+
+def check_managed_bridge_pending_capture_same_signal_does_not_stale_ready_reply() -> None:
+    with tempfile.TemporaryDirectory() as temp:
+        root = Path(temp)
+        config_path = root / "listener_config.json"
+        config = {
+            "state_path": str(root / "workflow_state.json"),
+            "audit_log_path": str(root / "audit.jsonl"),
+            "targets": [{"name": "客户A", "enabled": True, "exact": True}],
+            "history_backfill": {"enabled": False},
+            "scheduler_freshness": {
+                "enabled": True,
+                "mode": "preview_first",
+                "strict_check_interval_seconds": 0,
+                "strict_check_after_llm_seconds": 0,
+            },
+        }
+        config_path.write_text(json.dumps(config, ensure_ascii=False, indent=2), encoding="utf-8")
+        bridge = ManagedListenerSchedulerBridge(
+            tenant_id="unit_pending_capture_same_signal",
+            config_path=config_path,
+            allow_send=False,
+            write_data=False,
+        )
+        bridge.config["scheduler_freshness"] = {
+            "enabled": True,
+            "mode": "preview_first",
+            "strict_check_interval_seconds": 0,
+            "strict_check_after_llm_seconds": 0,
+        }
+        bridge.session_monitor = FakePreviewSessionMonitor(
+            [
+                {
+                    "name": "客户A",
+                    "unread_detected": True,
+                    "last_detected_at": "2026-05-25T10:00:04",
+                    "pending_since": "2026-05-25T10:00:04",
+                    "pending_signal_text": "在吗？",
+                    "pending_signal_kind": "high_sensitivity_short",
+                }
+            ]
+        )
+
+        def seed_state(state: dict[str, Any]) -> None:
+            session = scheduler_state_module.ensure_session(
+                state,
+                "客户A",
+                exact=True,
+                conversation_type="private",
+                now="2026-05-25T10:00:04",
+            )
+            session["pending_capture"] = True
+            session["status"] = "capture_pending"
+            session["pending_message_count"] = 1
+
+        bridge.store.update(seed_state)
+        reply = {
+            "reply_id": "reply-pending-same-short",
+            "target_name": "客户A",
+            "_capture": {
+                "capture_id": "capture-pending-same-short",
+                "target_name": "客户A",
+                "exact": True,
+                "batch": [{"id": "msg-1", "sender": "customer", "content": "在吗？"}],
+            },
+        }
+        try:
+            result = bridge._freshness_check(reply)
+        finally:
+            bridge.shutdown()
+        assert_true(result.get("ok") is True, f"pending same signal fast pass should return ok payload: {result}")
+        assert_true(result.get("stale") is False, f"same pending signal must not stale the ready reply: {result}")
+        assert_equal(
+            str(result.get("reason") or ""),
+            "scheduler_pending_capture_matches_capture_fast_pass",
+            f"pending same signal should be recognized before stale guard: {result}",
+        )
 
 
 def check_managed_bridge_freshness_strict_interval_fallback() -> None:
@@ -1692,22 +2584,14 @@ def check_managed_bridge_collect_signals_skips_busy_sticky_target() -> None:
             bridge.shutdown()
 
 
-def check_managed_bridge_collect_signals_applies_humanized_switch_delay() -> None:
-    class FakeDispatchMonitor:
+def check_managed_bridge_capture_applies_humanized_switch_delay() -> None:
+    class FakeConnector:
         def __init__(self) -> None:
-            self._round = 0
+            self.calls: list[str] = []
 
-        def poll(self, connector: Any) -> list[Any]:
-            return []
-
-        def select_dispatch_targets(self, *, limit: int | None = None) -> list[Any]:
-            self._round += 1
-            if self._round == 1:
-                return [SimpleNamespace(name="客户A", exact=True, unread_detected=True, conversation_type="private")]
-            return [SimpleNamespace(name="客户B", exact=True, unread_detected=True, conversation_type="private")]
-
-        def pending_targets(self, *, limit: int | None = None) -> list[Any]:
-            return []
+        def get_messages(self, name: str, *, exact: bool = True) -> dict[str, Any]:
+            self.calls.append(name)
+            return {"ok": True, "messages": []}
 
     with tempfile.TemporaryDirectory() as temp:
         root = Path(temp)
@@ -1724,7 +2608,8 @@ def check_managed_bridge_collect_signals_applies_humanized_switch_delay() -> Non
                 "switch_human_delay_enabled": True,
                 "switch_human_delay_min_seconds": 1.25,
                 "switch_human_delay_max_seconds": 1.25,
-                "capture_one_target_per_round": True,
+                "max_targets_per_iteration": 2,
+                "capture_one_target_per_round": False,
             },
             "history_backfill": {"enabled": False},
             "raw_messages": {"enabled": False},
@@ -1741,24 +2626,262 @@ def check_managed_bridge_collect_signals_applies_humanized_switch_delay() -> Non
         original_sleep = scheduler_module.time.sleep
         original_uniform = scheduler_module.random.uniform
         sleeps: list[float] = []
+        fake_connector = FakeConnector()
         try:
-            bridge.session_monitor = FakeDispatchMonitor()
+            bridge.connector = fake_connector
             scheduler_module.random.uniform = lambda _low, _high: 1.25
             scheduler_module.time.sleep = lambda seconds: sleeps.append(round(float(seconds), 3))
-            first = bridge._collect_session_signals()
-            second = bridge._collect_session_signals()
-            assert_equal([str(item.get("name") or "") for item in first], ["客户A"], "first unread signal should pick first target")
-            assert_equal([str(item.get("name") or "") for item in second], ["客户B"], "second unread signal should switch to next target")
-            assert_true(any(abs(delay - 1.25) < 0.001 for delay in sleeps), f"switch delay should be applied: {sleeps}")
+            first = bridge._capture_session({"target_name": "客户A", "exact": True, "conversation_type": "private"})
+            second = bridge._capture_session({"target_name": "客户B", "exact": True, "conversation_type": "private"})
+            assert_true(first.get("ok") is True and second.get("ok") is True, f"captures should pass: {first}, {second}")
+            assert_equal(fake_connector.calls, ["客户A", "客户B"], "capture should call connector in target order")
+            assert_true(any(abs(delay - 1.25) < 0.001 for delay in sleeps), f"switch delay should be applied before actual capture: {sleeps}")
             assert_equal(
                 int(bridge.scheduler_config.capture_max_sessions_per_round),
-                1,
-                "capture_one_target_per_round should clamp capture round width",
+                3,
+                "two-target unread mode should not clamp scheduler capture width back to 1",
             )
         finally:
             scheduler_module.time.sleep = original_sleep
             scheduler_module.random.uniform = original_uniform
             bridge.shutdown()
+
+
+def check_session_monitor_event_driven_can_batch_two_unread_targets_without_whitelist_scan() -> None:
+    with tempfile.TemporaryDirectory() as temp:
+        root = Path(temp)
+        monitor = SessionMonitor(
+            tenant_id="unit_monitor_two_unread",
+            state_path=root / "session_monitor.json",
+            whitelist={"客户A", "客户B", "客户C"},
+            max_targets_per_iteration=2,
+            min_switch_interval_seconds=1,
+            dispatch_strategy="event_driven",
+        )
+        now = "2026-06-03T03:10:00"
+        monitor._sessions["客户A"] = SessionState(name="客户A", first_seen_at=now, last_seen_at=now, conversation_type="private")
+        monitor._sessions["客户B"] = SessionState(name="客户B", first_seen_at=now, last_seen_at=now, conversation_type="private")
+        monitor._sessions["客户C"] = SessionState(name="客户C", first_seen_at=now, last_seen_at=now, conversation_type="private")
+        monitor._mark_pending_signal(
+            monitor._sessions["客户A"],
+            content="预算15万以内",
+            now_iso=now,
+            priority=50,
+        )
+        monitor._mark_pending_signal(
+            monitor._sessions["客户B"],
+            content="想看SUV",
+            now_iso=now,
+            priority=45,
+        )
+        selected = monitor.select_dispatch_targets(limit=3)
+        assert_equal([item.name for item in selected], ["客户A", "客户B"], "event-driven monitor should batch two already-unread targets")
+
+
+def check_managed_bridge_normalizes_legacy_switch_interval_to_humanized_window() -> None:
+    with tempfile.TemporaryDirectory() as temp:
+        root = Path(temp)
+        config_path = root / "listener_config.json"
+        config = {
+            "state_path": str(root / "workflow_state.json"),
+            "audit_log_path": str(root / "audit.jsonl"),
+            "targets": [
+                {"name": "客户A", "enabled": True, "exact": True},
+                {"name": "客户B", "enabled": True, "exact": True},
+            ],
+            "multi_target": {
+                "enabled": True,
+                "dispatch_strategy": "event_driven",
+                "min_switch_interval_seconds": 25,
+            },
+            "history_backfill": {"enabled": False},
+            "raw_messages": {"enabled": False},
+            "customer_profiles": {"enabled": False},
+            "concurrency_scheduler": {"enabled": True, "capture_max_sessions_per_round": 3},
+        }
+        config_path.write_text(json.dumps(config, ensure_ascii=False, indent=2), encoding="utf-8")
+        bridge = ManagedListenerSchedulerBridge(
+            tenant_id="unit_switch_interval_normalize",
+            config_path=config_path,
+            allow_send=False,
+            write_data=False,
+        )
+        try:
+            assert_true(not bool(bridge._switch_human_delay_enabled), "event-driven multi-target mode should not add a default 1-3s switch delay")
+            assert_equal(int(bridge.session_monitor.min_switch_interval_seconds), 1, "legacy hard switch interval should be normalized to 1s anti-bounce gate")
+            assert_equal(float(bridge._switch_human_delay_min_seconds), 0.0, "normalized switch delay min should default to 0s")
+            assert_equal(float(bridge._switch_human_delay_max_seconds), 0.0, "normalized switch delay max should default to 0s")
+            assert_true(not bool(bridge._capture_one_target_per_round), "normalized event-driven multi-target mode should allow two unread captures per round")
+            assert_equal(int(bridge.session_monitor.max_targets_per_iteration), 2, "event-driven low-risk mode should allow two pending unread targets")
+            assert_equal(
+                int(bridge.scheduler_config.capture_max_sessions_per_round),
+                3,
+                "scheduler capture width should remain available for the two unread target batch",
+            )
+        finally:
+            bridge.shutdown()
+
+
+def check_repeatable_short_greeting_is_not_blocked_by_processed_content_keys() -> None:
+    target_state = {
+        "processed_message_ids": ["old-hello-1"],
+        "processed_content_keys": [
+            "unknown\x1ftext\x1f在吗",
+            "unknown\x1ftext\x1f在",
+        ],
+        "handoff_message_ids": [],
+        "sent_replies": [],
+    }
+    selection = select_batch_details(
+        [
+            {
+                "id": "new-hello-2",
+                "type": "text",
+                "sender": "unknown",
+                "content": "在吗？",
+                "time": "2026-06-02T20:11:00",
+            }
+        ],
+        target_state=target_state,
+        allow_self_for_test=False,
+        max_batch_messages=8,
+        config={},
+    )
+    assert_equal([item["id"] for item in selection.batch], ["new-hello-2"], "repeatable greeting should remain reply-eligible")
+
+
+def check_anchor_payload_skips_repeatable_short_greeting_keys() -> None:
+    target_state = {
+        "processed_message_ids": ["old-1"],
+        "processed_content_keys": [
+            "unknown\x1ftext\x1f在吗",
+            "unknown\x1ftext\x1f在",
+            "unknown\x1ftext\x1f预算12万想买个省油车",
+        ],
+        "last_successful_reply_anchor": {
+            "message_ids": ["reply-anchor-1"],
+            "message_content_keys": [
+                "unknown\x1ftext\x1f在吗",
+                "unknown\x1ftext\x1f预算12万想买个省油车",
+            ],
+        },
+    }
+    payload = customer_service_anchor_payload(target_state)
+    anchor_keys = set(payload.get("anchor_content_keys", []) or [])
+    assert_true("unknown\x1ftext\x1f预算12万想买个省油车" in anchor_keys, "business content keys must remain anchors")
+    assert_true("unknown\x1ftext\x1f在吗" not in anchor_keys, "repeatable greeting must not become a hard anchor")
+    assert_true("content\x1f在吗" not in anchor_keys, "repeatable greeting content-only anchor must be filtered")
+
+
+def check_scheduler_capture_allows_repeated_short_greeting_after_previous_reply() -> None:
+    state = empty_state()
+    session = scheduler_state_module.ensure_session(state, "客户A", exact=True, conversation_type="private", now="2026-06-02T20:12:00")
+    session["processed_message_ids"] = ["old-greet-id"]
+    session["processed_content_keys"] = ["b3e8613c7787e8c5ca7cf467"]
+    capture = record_capture_result(
+        state,
+        "客户A",
+        messages=[{"id": "new-greet-id", "type": "text", "sender": "unknown", "content": "在？", "time": "2026-06-02T20:12:01"}],
+        batch=[{"id": "new-greet-id", "type": "text", "sender": "unknown", "content": "在？", "time": "2026-06-02T20:12:01"}],
+        now="2026-06-02T20:12:01",
+    )
+    assert_equal(capture.get("status"), "captured", "repeated short greeting should still enter capture queue with a new message id")
+    assert_equal(capture.get("message_ids"), ["new-greet-id"], "capture should keep the new greeting message")
+
+
+def check_short_pending_signal_recovers_anchor_empty_batch() -> None:
+    recovered = scheduler_module.recover_high_sensitivity_short_pending_batch(
+        [
+            {
+                "id": "bootstrap-visible-short-id",
+                "type": "text",
+                "sender": "unknown",
+                "content": "许聪\n在吗",
+                "time": "2026-06-03T15:35:00",
+            }
+        ],
+        {
+            "pending_signal_kind": "high_sensitivity_short",
+            "pending_signal_text": "在吗",
+            "pending_since": "2026-06-03T15:31:48",
+        },
+        target_name="许聪",
+        allow_self_for_test=False,
+        max_batch_messages=2,
+    )
+    assert_true(recovered, "short pending signal should recover a visible matching short message")
+    assert_true(
+        recovered[0].get("id") != "bootstrap-visible-short-id",
+        "recovered short signal should get a synthetic id so stale bootstrap OCR ids do not block it",
+    )
+    assert_equal(recovered[0].get("content"), "在吗", "speaker-prefixed OCR content should be reduced to the pending short probe")
+    assert_equal(
+        recovered[0].get("original_message_id"),
+        "bootstrap-visible-short-id",
+        "recovery should retain the original OCR id for audit",
+    )
+    state = empty_state()
+    session = scheduler_state_module.ensure_session(state, "许聪", exact=True, conversation_type="private", now="2026-06-03T15:31:30")
+    session["processed_message_ids"] = ["bootstrap-visible-short-id"]
+    capture = record_capture_result(
+        state,
+        "许聪",
+        messages=[
+            {
+                "id": "bootstrap-visible-short-id",
+                "type": "text",
+                "sender": "unknown",
+                "content": "许聪\n在吗",
+                "time": "2026-06-03T15:35:00",
+            }
+        ],
+        batch=recovered,
+        now="2026-06-03T15:35:01",
+    )
+    assert_equal(capture.get("status"), "captured", "synthetic short pending id should enter the LLM queue once")
+
+
+def check_short_pending_signal_synthesizes_monitor_only_group_preview() -> None:
+    recovered = scheduler_module.recover_high_sensitivity_short_pending_batch(
+        [],
+        {
+            "pending_signal_kind": "high_sensitivity_short",
+            "pending_signal_text": "许聪：在不",
+            "pending_since": "2026-06-04T11:56:20",
+        },
+        target_name="新数据测试",
+        allow_self_for_test=False,
+        max_batch_messages=2,
+    )
+    assert_true(recovered, "monitor-only short group preview should synthesize a reply-eligible message")
+    assert_true(
+        str(recovered[0].get("id") or "").startswith("short_pending:"),
+        f"synthesized short signal should use a stable synthetic id: {recovered}",
+    )
+    assert_equal(recovered[0].get("content"), "在不", "group speaker prefix must not enter semantic content")
+    assert_equal(recovered[0].get("speaker_name"), "许聪", "group speaker should stay as metadata")
+    assert_true(
+        recovered[0].get("short_pending_synthesized_from_monitor") is True,
+        "synthetic recovery should be auditable",
+    )
+    state = empty_state()
+    session = scheduler_state_module.ensure_session(
+        state,
+        "新数据测试",
+        exact=True,
+        conversation_type="group",
+        now="2026-06-04T11:56:20",
+    )
+    session["processed_content_keys"] = ["legacy-short-content-key"]
+    capture = record_capture_result(
+        state,
+        "新数据测试",
+        messages=[],
+        batch=recovered,
+        now="2026-06-04T11:56:21",
+    )
+    assert_equal(capture.get("status"), "captured", "monitor-only short preview should not be dropped as old history")
+    assert_equal(capture.get("message_ids"), [recovered[0]["id"]], "capture should retain the synthetic short id")
 
 
 def check_mixed_greeting_budget_intent_prefers_product() -> None:
@@ -1788,6 +2911,34 @@ def check_handoff_keyword_requires_explicit_customer_request() -> None:
     assert_equal(explicit.intent, "handoff_request", "explicit manual handoff request should still route to handoff")
 
 
+def check_scheduler_conversation_context_update_does_not_advance_context_version() -> None:
+    state = empty_state()
+    session = scheduler_state_module.ensure_session(
+        state,
+        "新数据测试",
+        exact=True,
+        conversation_type="private",
+        now="2026-06-03T13:00:00",
+    )
+    original_version = int(session.get("context_version") or 0)
+    merge_scheduler_conversation_context(
+        state,
+        "新数据测试",
+        {
+            "last_product_id": "chejin_qinplus_2022_dmi55",
+            "last_product_name": "2022款比亚迪秦PLUS DM-i 55KM",
+            "last_unit_price": 8.68,
+            "last_product_source": "product_master",
+        },
+        now="2026-06-03T13:00:01",
+    )
+    updated = state["sessions"]["新数据测试"]
+    context = updated.get("conversation_context", {})
+    assert_equal(context.get("last_product_id"), "chejin_qinplus_2022_dmi55", "scheduler should persist product context per session")
+    assert_equal(context.get("last_unit_price"), 8.68, "scheduler should persist product price context")
+    assert_equal(int(updated.get("context_version") or 0), original_version, "product context update should not stale current LLM task")
+
+
 def run_checks() -> dict[str, Any]:
     checks = [
         check_pending_sessions_survive_round_limit,
@@ -1800,6 +2951,11 @@ def run_checks() -> dict[str, Any]:
         check_session_monitor_keeps_overflow_pending,
         check_session_monitor_empty_preview_does_not_clear_pending,
         check_session_monitor_visual_unread_badge_retriggers_after_reset,
+        check_passive_probe_defers_when_monitor_has_unread_signal,
+        check_session_monitor_high_sensitivity_short_signal_waits_merge_window,
+        check_session_monitor_preserves_high_sensitivity_pending_after_empty_capture,
+        check_session_monitor_low_disturbance_ignores_normal_preview_without_badge,
+        check_session_monitor_low_disturbance_keeps_short_preview_signal,
         check_session_monitor_event_driven_dispatch_keeps_sticky_target,
         check_session_monitor_event_driven_dispatch_rotates_under_hot_target,
         check_capture_failed_backoff_blocks_immediate_requeue,
@@ -1812,25 +2968,47 @@ def run_checks() -> dict[str, Any]:
         check_runtime_send_event_includes_observability,
         check_runtime_prioritizes_ready_send_before_new_capture,
         check_runtime_recovers_orphaned_running_llm_task_after_restart,
+        check_runtime_restores_missing_llm_task_from_in_memory_snapshot,
+        check_runtime_recovers_orphaned_running_polish_task_after_restart,
+        check_runtime_restores_missing_polish_task_from_in_memory_snapshot,
+        check_runtime_degraded_polish_reply_still_sends,
         check_captured_messages_connector_accepts_history_kwargs,
+        check_captured_messages_connector_uses_batch_when_messages_empty,
         check_scheduler_planner_reuses_capture_history_backfill_verdict,
         check_workflow_planner_uses_captured_messages_without_sending,
+        check_workflow_planner_handles_short_pending_batch_fallback,
+        check_workflow_planner_uses_warm_short_farewell_without_sales_redirect,
         check_scheduler_planner_applies_final_visible_polish_without_sending,
+        check_scheduler_split_polish_stage_preserves_final_visible_polish_quality,
+        check_runtime_dual_backend_pools_keep_planner_moving_while_polish_runs,
         check_listener_scheduler_config_gate,
+        check_listener_poll_interval_uses_randomized_window_config,
         check_live_safety_applies_backend_scheduler_defaults,
+        check_live_safety_file_transfer_defaults_to_self_test_target,
         check_listener_rpa_send_rate_zero_is_preserved,
+        check_managed_bridge_applies_rpa_fast_send_confirmation_env,
         check_managed_bridge_capture_send_marks_workflow_state,
         check_managed_bridge_freshness_preview_fast_pass_without_strict_scan,
-        check_managed_bridge_freshness_preview_unread_marks_stale,
+        check_managed_bridge_freshness_preview_unread_uses_strict_scan,
+        check_managed_bridge_freshness_same_short_signal_fast_passes_without_strict_scan,
+        check_managed_bridge_pending_capture_same_signal_does_not_stale_ready_reply,
         check_managed_bridge_freshness_session_list_preview_fast_pass_without_monitor,
         check_managed_bridge_freshness_session_list_mismatch_falls_back_to_strict_scan,
         check_managed_bridge_freshness_session_list_mismatch_soft_pass_by_default,
         check_managed_bridge_freshness_strict_interval_fallback,
         check_managed_bridge_freshness_long_llm_uses_task_runtime_not_queue_age,
         check_managed_bridge_collect_signals_skips_busy_sticky_target,
-        check_managed_bridge_collect_signals_applies_humanized_switch_delay,
+        check_managed_bridge_capture_applies_humanized_switch_delay,
+        check_session_monitor_event_driven_can_batch_two_unread_targets_without_whitelist_scan,
+        check_managed_bridge_normalizes_legacy_switch_interval_to_humanized_window,
+        check_repeatable_short_greeting_is_not_blocked_by_processed_content_keys,
+        check_anchor_payload_skips_repeatable_short_greeting_keys,
+        check_scheduler_capture_allows_repeated_short_greeting_after_previous_reply,
+        check_short_pending_signal_recovers_anchor_empty_batch,
+        check_short_pending_signal_synthesizes_monitor_only_group_preview,
         check_mixed_greeting_budget_intent_prefers_product,
         check_handoff_keyword_requires_explicit_customer_request,
+        check_scheduler_conversation_context_update_does_not_advance_context_version,
     ]
     results = []
     for check in checks:

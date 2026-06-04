@@ -47,15 +47,26 @@ from customer_intent_assist import (
 )
 from customer_service_loop import BOT_PREFIX, ReplyDecision, decide_reply, format_reply, load_rules
 from apps.wechat_ai_customer_service.cloud_gate import cloud_gate_status, cloud_required_enabled
-from apps.wechat_ai_customer_service.llm_config import resolve_effective_llm_provider
+from apps.wechat_ai_customer_service.llm_config import (
+    resolve_effective_llm_provider,
+    resolve_llm_base_url,
+    resolve_llm_tier_model,
+)
 from apps.wechat_ai_customer_service.platform_safety_rules import guard_term_set, load_platform_safety_rules
+from apps.wechat_ai_customer_service.wechat_message_normalizer import normalize_wechat_message_record
 from final_visible_llm_polish import maybe_polish_customer_visible_reply
 from knowledge_loader import build_evidence_pack
 from llm_intent_router import route_intent, IntentRouteResult
-from llm_reply_synthesis import maybe_synthesize_reply
+from llm_reply_synthesis import maybe_synthesize_reply, normalize_visible_reply_surface_noise
+from customer_service_brain import (
+    build_brain_safe_fallback_payload,
+    effective_brain_settings,
+    maybe_run_customer_service_brain,
+)
 from product_knowledge import decide_product_knowledge_reply, load_product_knowledge
 from rag_answer_layer import maybe_build_rag_reply
 from rag_experience_store import record_rag_reply_experience
+from reply_evidence_builder import compact_knowledge_pack
 from realtime_reply_router import (
     build_synthesis_config_for_route,
     choose_reply_variant,
@@ -66,6 +77,7 @@ from realtime_reply_router import (
     initial_token_budget,
     maybe_build_realtime_reply,
     reply_similarity,
+    strip_leading_group_speaker_line,
     update_token_budget_from_synthesis,
 )
 from reply_style_adapter import adapt_reply_style, infer_source_channel
@@ -148,6 +160,29 @@ STANDALONE_GREETING_TERMS = {
     "hi",
     "哈喽",
     "嗨",
+}
+REPEATABLE_GREETING_PROBE_TERMS = STANDALONE_GREETING_TERMS | {
+    "在",
+    "在不",
+    "在么",
+    "在嘛",
+    "在呢",
+    "再见",
+    "拜拜",
+    "88",
+    "地址",
+    "电话",
+    "手机",
+    "贷款",
+    "分期",
+    "置换",
+    "定位",
+    "导航",
+    "报价",
+    "价格",
+    "有吗",
+    "能看吗",
+    "在店吗",
 }
 GREETING_BUSINESS_HINT_TERMS = tuple(
     unique
@@ -616,6 +651,7 @@ def process_target(
         target_state=target_state,
     )
     write_workflow_phase("history_backfill_done", target=target.name, message_count=len(payload.get("messages") or []))
+    payload = normalize_capture_payload_for_semantic_processing(payload, target=target, config=config)
     raw_capture = maybe_record_raw_messages(target, config, payload.get("messages", []) or [])
     selection = select_batch_details(
         payload.get("messages", []) or [],
@@ -680,10 +716,11 @@ def process_target(
             "greeting_preference": {},
         }
 
-    semantic_batch_plan = plan_message_batch_semantics(batch, config)
+    routing_batch = normalize_batch_content_for_reply_routing(batch)
+    semantic_batch_plan = plan_message_batch_semantics(routing_batch, config)
     combined = str(semantic_batch_plan.get("combined_text") or "\n".join(str(item.get("content") or "") for item in batch))
     message_ids = [str(item.get("id") or "") for item in batch]
-    if send and should_defer_standalone_greeting(config, batch, combined):
+    if send and should_defer_standalone_greeting(config, routing_batch, combined):
         mark_coalesced_messages(
             target_state,
             batch,
@@ -705,6 +742,7 @@ def process_target(
                 "raw_capture": raw_capture,
                 "batch_selection": batch_selection_payload(selection),
                 "semantic_batch_plan": semantic_batch_plan,
+                "reply_routing_normalization": batch_routing_normalization_payload(batch, routing_batch),
                 "dry_run": False,
             },
         )
@@ -834,6 +872,7 @@ def process_target(
             "raw_capture": raw_capture,
             "batch_selection": batch_selection_payload(selection),
             "semantic_batch_plan": semantic_batch_plan,
+            "reply_routing_normalization": batch_routing_normalization_payload(batch, routing_batch),
             "history_backfill": payload.get("_history_backfill", {}),
             "product_knowledge": product_knowledge,
             "intent_result": intent_result.to_dict(),
@@ -871,6 +910,59 @@ def process_target(
         needs_handoff=bool(event["intent_assist"].get("needs_handoff")),
         llm_status=((event["intent_assist"].get("llm_advisory") or {}).get("status") if isinstance(event["intent_assist"].get("llm_advisory"), dict) else ""),
     )
+    write_workflow_phase("customer_service_brain_start", target=target.name)
+    try:
+        event["customer_service_brain"] = maybe_run_customer_service_brain(
+            config=config,
+            target_name=target.name,
+            target_state=target_state,
+            batch=batch,
+            combined=combined,
+            decision=decision,
+            reply_text=reply_text,
+            intent_assist=event["intent_assist"],
+            rag_reply={},
+            llm_reply={},
+            product_knowledge=product_knowledge,
+            data_capture=data_capture,
+            raw_capture=raw_capture,
+            customer_profile=profile,
+        )
+    except Exception as exc:
+        brain_settings = effective_brain_settings(config)
+        event["customer_service_brain"] = {
+            "enabled": bool(brain_settings.get("enabled", False)),
+            "mode": str(brain_settings.get("mode") or "off"),
+            "applied": False,
+            "adoptable": False,
+            "reason": "customer_service_brain_exception",
+            "error": repr(exc),
+        }
+        if (
+            event["customer_service_brain"]["enabled"]
+            and event["customer_service_brain"]["mode"] == "brain_first"
+            and brain_settings.get("fallback_to_legacy_on_error", False) is False
+        ):
+            event["customer_service_brain"] = build_brain_safe_fallback_payload(
+                event["customer_service_brain"],
+                combined=combined,
+                reason="customer_service_brain_exception",
+            )
+    write_workflow_phase(
+        "customer_service_brain_done",
+        target=target.name,
+        enabled=bool(event["customer_service_brain"].get("enabled")),
+        applied=bool(event["customer_service_brain"].get("applied")),
+        adoptable=bool(event["customer_service_brain"].get("adoptable")),
+        reason=event["customer_service_brain"].get("reason"),
+    )
+    if should_adopt_customer_service_brain(event["customer_service_brain"]):
+        config = config_with_legacy_reply_generators_disabled_for_brain(config)
+        event["customer_service_brain_legacy_generators"] = {
+            "disabled": True,
+            "reason": "brain_first_reply_ready",
+            "disabled_modules": ["rag_response", "realtime_reply", "llm_reply_synthesis"],
+        }
     write_workflow_phase("rag_reply_start", target=target.name)
     rag_reply = maybe_build_rag_reply(
         config=config,
@@ -940,6 +1032,11 @@ def process_target(
         "text": realtime_combined[:1200] if realtime_combined != combined else "",
     }
     write_workflow_phase("realtime_route_start", target=target.name)
+    realtime_evidence_pack = build_realtime_router_evidence_pack(
+        combined=realtime_combined,
+        evidence_pack=evidence_pack,
+        config=config,
+    )
     runtime_route = decide_realtime_reply_route(
         config=config,
         combined=realtime_combined,
@@ -950,7 +1047,7 @@ def process_target(
         llm_reply=llm_reply,
         product_knowledge=product_knowledge,
         data_capture=data_capture,
-        evidence_pack=evidence_pack,
+        evidence_pack=realtime_evidence_pack,
         recent_reply_texts=recent_reply_texts,
     )
     write_workflow_phase(
@@ -986,7 +1083,7 @@ def process_target(
         config=config,
         route=runtime_route,
         combined=realtime_combined,
-        evidence_pack=evidence_pack,
+        evidence_pack=realtime_evidence_pack,
         current_reply_text=reply_text,
         recent_reply_texts=recent_reply_texts,
     )
@@ -1010,13 +1107,21 @@ def process_target(
 
     synthesis_enabled = bool((config.get("llm_reply_synthesis", {}) or {}).get("enabled", False))
     explicit_synthesis_override = llm_synthesis_explicit_override(config)
-    if runtime_route.get("enabled") is not False and not runtime_route.get("foreground_llm_allowed") and not explicit_synthesis_override:
+    deterministic_realtime_fact_reply = bool(realtime_reply.get("applied")) and str(realtime_reply.get("rule_name") or "") in {
+        "realtime_catalog_price_fact",
+    }
+    if (
+        runtime_route.get("enabled") is not False
+        and (not runtime_route.get("foreground_llm_allowed") or deterministic_realtime_fact_reply)
+        and not explicit_synthesis_override
+    ):
         llm_synthesis = {
             "enabled": synthesis_enabled,
             "applied": False,
             "reason": "skipped_by_realtime_route",
             "route_level": runtime_route.get("level"),
             "route_reason": runtime_route.get("reason"),
+            "realtime_fact_reply": deterministic_realtime_fact_reply,
         }
     else:
         synthesis_config = build_synthesis_config_for_route(config, runtime_route)
@@ -1063,23 +1168,92 @@ def process_target(
             "raw_reply_text": decision.reply_text,
             "reply_text": reply_text,
         }
+    brain_result = event.get("customer_service_brain") if isinstance(event.get("customer_service_brain"), dict) else {}
+    if should_adopt_customer_service_brain(brain_result):
+        decision = ReplyDecision(
+            reply_text=str(brain_result.get("raw_reply_text") or ""),
+            rule_name=str(brain_result.get("rule_name") or "customer_service_brain_reply"),
+            matched=True,
+            need_handoff=bool(brain_result.get("needs_handoff")),
+            reason=str(brain_result.get("reason") or "customer_service_brain_adopted"),
+        )
+        if decision.need_handoff and not decision.reply_text:
+            decision = ReplyDecision(
+                reply_text=handoff_acknowledgement_text(config),
+                rule_name=decision.rule_name,
+                matched=True,
+                need_handoff=True,
+                reason=decision.reason,
+            )
+        reply_text = format_reply(decision.reply_text, configured_reply_prefix(config))
+        event["customer_service_brain_adopted"] = {
+            "applied": True,
+            "mode": brain_result.get("mode"),
+            "rule_name": decision.rule_name,
+            "reason": decision.reason,
+        }
+        event["decision"] = {
+            **decision.__dict__,
+            "raw_reply_text": decision.reply_text,
+            "reply_text": reply_text,
+        }
+        clear_no_relevant_handoff_after_safe_brain_reply(event["intent_assist"], brain_result)
+    visible_reply_before_context = reply_text
+    reply_text = sanitize_customer_visible_reply_text(
+        reply_text,
+        config=config,
+        combined=combined,
+        reason=str(event.get("reason") or (event.get("decision") or {}).get("reason") or decision.reason or ""),
+        force_handoff_style=bool(decision.need_handoff),
+        recent_reply_texts=recent_reply_texts,
+    )
+    if reply_text != visible_reply_before_context:
+        decision = ReplyDecision(
+            reply_text=split_reply_prefix(reply_text, config)[1],
+            rule_name=decision.rule_name,
+            matched=decision.matched,
+            need_handoff=decision.need_handoff,
+            reason=decision.reason,
+        )
+        event["decision"] = {
+            **decision.__dict__,
+            "raw_reply_text": decision.reply_text,
+            "reply_text": reply_text,
+        }
+        event["visible_reply_surface_cleanup"] = {"applied": True}
+    context_update = update_conversation_context_from_reply_event(target_state, event)
+    if context_update:
+        event["conversation_context_update"] = context_update
 
-    style_channel = infer_source_channel(
-        realtime_reply=realtime_reply,
-        llm_synthesis=llm_synthesis,
-        llm_reply=llm_reply,
-        rag_reply=rag_reply,
+    brain_reply_adopted = bool(event.get("customer_service_brain_adopted"))
+    style_channel = (
+        "brain"
+        if brain_reply_adopted
+        else infer_source_channel(
+            realtime_reply=realtime_reply,
+            llm_synthesis=llm_synthesis,
+            llm_reply=llm_reply,
+            rag_reply=rag_reply,
+        )
     )
     write_workflow_phase("reply_style_start", target=target.name, source_channel=style_channel)
-    style_adaptation = adapt_reply_style(
-        config=config,
-        customer_message=combined,
-        reply_text=reply_text,
-        source_channel=style_channel,
-        evidence_pack=evidence_pack,
-        recent_reply_texts=recent_reply_texts,
-        needs_handoff=bool(decision.need_handoff),
-    )
+    if brain_reply_adopted:
+        style_adaptation = {
+            "applied": False,
+            "reason": "skipped_for_customer_service_brain",
+            "reply_text": reply_text,
+            "source_channel": style_channel,
+        }
+    else:
+        style_adaptation = adapt_reply_style(
+            config=config,
+            customer_message=combined,
+            reply_text=reply_text,
+            source_channel=style_channel,
+            evidence_pack=evidence_pack,
+            recent_reply_texts=recent_reply_texts,
+            needs_handoff=bool(decision.need_handoff),
+        )
     write_workflow_phase("reply_style_done", target=target.name, applied=bool(style_adaptation.get("applied")), reason=style_adaptation.get("reason"))
     event["reply_style_adapter"] = style_adaptation
     if style_adaptation.get("applied"):
@@ -1384,12 +1558,19 @@ def process_target(
             force_handoff_style=False,
             recent_reply_texts=recent_reply_texts,
         )
-        outbound_naturalness = polish_customer_visible_reply_text(
-            reply_text,
-            config=config,
-            combined=combined,
-            recent_reply_texts=recent_reply_texts,
-        )
+        if brain_reply_adopted:
+            outbound_naturalness = {
+                "applied": False,
+                "reason": "skipped_for_customer_service_brain",
+                "reply_text": reply_text,
+            }
+        else:
+            outbound_naturalness = polish_customer_visible_reply_text(
+                reply_text,
+                config=config,
+                combined=combined,
+                recent_reply_texts=recent_reply_texts,
+            )
         event["outbound_naturalness"] = outbound_naturalness
         if outbound_naturalness.get("applied"):
             reply_text = str(outbound_naturalness.get("reply_text") or reply_text)
@@ -1400,7 +1581,7 @@ def process_target(
             combined=combined,
             recent_reply_texts=recent_reply_texts,
             source_channel=str(style_channel or "normal"),
-            needs_handoff=False,
+            needs_handoff=bool(decision.need_handoff),
         )
         write_workflow_phase("final_polish_done", target=target.name, passed=bool(final_polish.get("passed")), reason=final_polish.get("reason"))
         event["final_visible_llm_polish"] = final_polish
@@ -1410,6 +1591,21 @@ def process_target(
             return block_for_final_visible_polish_failure(event, target, final_polish)
         elif final_visible_polish_degraded(final_polish, config=config):
             event["final_visible_llm_polish_degraded"] = True
+        post_polish_reply = sanitize_customer_visible_reply_text(
+            reply_text,
+            config=config,
+            combined=combined,
+            reason=str(event.get("reason") or event["decision"].get("reason") or ""),
+            force_handoff_style=False,
+            recent_reply_texts=recent_reply_texts,
+        )
+        if post_polish_reply != reply_text:
+            event["post_final_visible_surface_cleanup"] = {
+                "applied": True,
+                "original_reply_text": reply_text,
+                "reply_text": post_polish_reply,
+            }
+            reply_text = post_polish_reply
         if decision.rule_name == "customer_data_capture":
             guarded_data_reply = ensure_data_capture_success_context(reply_text, data_capture)
             if guarded_data_reply != reply_text:
@@ -1551,6 +1747,36 @@ def infer_raw_conversation_type(target_name: str) -> str:
     if "群" in target_name or "chatroom" in target_name.lower():
         return "group"
     return "private"
+
+
+def known_speaker_names_for_target(target: TargetConfig, config: dict[str, Any] | None = None) -> list[str]:
+    cfg = config if isinstance(config, dict) else {}
+    names: list[str] = [str(target.name or "")]
+    routing = cfg.get("_local_customer_service_session_routing") if isinstance(cfg.get("_local_customer_service_session_routing"), dict) else {}
+    for key in ("enabled_names", "ignored_names"):
+        for item in (routing or {}).get(key, []) or []:
+            text = str(item or "").strip()
+            if text:
+                names.append(text)
+    for item in cfg.get("targets", []) or []:
+        if not isinstance(item, dict):
+            continue
+        text = str(item.get("name") or item.get("target_name") or "").strip()
+        if text:
+            names.append(text)
+    deduped: list[str] = []
+    seen: set[str] = set()
+    for name in names:
+        key = normalize_speaker_key(name)
+        if not key or key in seen:
+            continue
+        seen.add(key)
+        deduped.append(name)
+    return deduped
+
+
+def normalize_speaker_key(value: Any) -> str:
+    return re.sub(r"[^0-9A-Za-z_\u4e00-\u9fff]+", "", str(value or "")).lower()
 
 
 def handle_rate_limit_block(
@@ -1814,6 +2040,26 @@ def is_standalone_greeting_text(text: str) -> bool:
     if any(term.lower() in compact for term in GREETING_BUSINESS_HINT_TERMS):
         return False
     return compact in STANDALONE_GREETING_TERMS
+
+
+def is_repeatable_customer_probe_text(text: str) -> bool:
+    compact = normalize_greeting_probe_text(text)
+    if not compact:
+        return False
+    if compact in REPEATABLE_GREETING_PROBE_TERMS:
+        return True
+    return compact.startswith("在") and len(compact) <= 3
+
+
+def message_has_repeatable_probe_content(message: dict[str, Any]) -> bool:
+    return is_repeatable_customer_probe_text(str(message.get("content") or ""))
+
+
+def processed_content_key_is_repeatable_probe(key: str) -> bool:
+    parts = str(key or "").split("\x1f")
+    if len(parts) != 3:
+        return False
+    return is_repeatable_customer_probe_text(parts[2])
 
 
 def should_defer_standalone_greeting(config: dict[str, Any], batch: list[dict[str, Any]], combined: str) -> bool:
@@ -2730,10 +2976,14 @@ def sanitize_customer_visible_reply_text(
     force_handoff_style: bool = False,
     recent_reply_texts: list[str] | None = None,
 ) -> str:
-    if not identity_guard_enabled_for_customer_reply(config):
-        return str(reply_text or "").strip()
     prefix, body = split_reply_prefix(reply_text, config)
     if not body:
+        return str(reply_text or "").strip()
+    cleaned_body = normalize_visible_reply_surface_noise(body, evidence_pack={})
+    if cleaned_body != body:
+        reply_text = format_reply(cleaned_body, prefix)
+        body = cleaned_body
+    if not identity_guard_enabled_for_customer_reply(config):
         return str(reply_text or "").strip()
     # Preserve social off-topic soft redirect text even when the caller requests
     # handoff-style concealment; otherwise it gets overwritten into a generic
@@ -2742,11 +2992,45 @@ def sanitize_customer_visible_reply_text(
         social_redirect = soft_social_redirect_for_handoff(combined)
         if social_redirect:
             return format_reply(social_redirect, prefix or configured_reply_prefix(config))
-    if not force_handoff_style and not has_explicit_handoff_phrase(body):
+    if not force_handoff_style:
+        if has_explicit_handoff_phrase(body):
+            softened_body = soften_customer_visible_handoff_terms(body)
+            softened_body = normalize_customer_visible_mechanics(
+                softened_body,
+                combined=combined,
+                recent_reply_texts=recent_reply_texts,
+            )
+            return format_reply(softened_body, prefix or configured_reply_prefix(config))
         return str(reply_text or "").strip()
     safe_body = concealed_handoff_reply(combined=combined, reason=reason, recent_reply_texts=recent_reply_texts)
     effective_prefix = prefix or configured_reply_prefix(config)
     return format_reply(safe_body, effective_prefix)
+
+
+def normalize_customer_visible_surface_only(reply_text: str, *, config: dict[str, Any]) -> str:
+    prefix, body = split_reply_prefix(reply_text, config)
+    if not body:
+        return str(reply_text or "").strip()
+    cleaned_body = normalize_visible_reply_surface_noise(body, evidence_pack={})
+    return format_reply(cleaned_body, prefix or configured_reply_prefix(config))
+
+
+def soften_customer_visible_handoff_terms(text: str) -> str:
+    clean = str(text or "")
+    replacements = (
+        ("转人工确认", "帮您确认"),
+        ("转人工处理", "帮您继续处理"),
+        ("转人工", "请负责同事接着确认"),
+        ("人工客服", "负责同事"),
+        ("真人客服", "负责同事"),
+        ("销售人工确认", "门店确认"),
+        ("人工确认", "核实确认"),
+        ("人工核实", "核实确认"),
+        ("请联系顾问", "我帮您确认"),
+    )
+    for src, dst in replacements:
+        clean = clean.replace(src, dst)
+    return clean
 
 
 def polish_customer_visible_reply_text(
@@ -2780,7 +3064,7 @@ def polish_customer_visible_reply_text(
 
 def final_visible_polish_speed_settings(config: dict[str, Any]) -> dict[str, Any]:
     polish = config.get("final_visible_llm_polish") if isinstance(config.get("final_visible_llm_polish"), dict) else {}
-    short_skip_enabled = polish.get("skip_short_reply_fast_path_enabled", True) is not False
+    short_skip_enabled = polish.get("skip_short_reply_fast_path_enabled", False) is True
     short_skip_max_chars = positive_int(polish.get("skip_short_reply_max_chars"), 46)
     short_skip_max_sentences = positive_int(polish.get("skip_short_reply_max_sentences"), 2)
     final_cap = positive_int(polish.get("max_reply_chars"), 620)
@@ -2816,6 +3100,10 @@ def should_fast_skip_final_visible_polish(
     source_channel: str,
     needs_handoff: bool,
 ) -> bool:
+    # Brain First baseline requires every customer-visible reply to pass
+    # through final polish. Optimize latency around the LLM path, not by
+    # bypassing polish for short greetings or simple answers.
+    return False
     if needs_handoff:
         return False
     settings = final_visible_polish_speed_settings(config)
@@ -2903,9 +3191,23 @@ def final_visible_polish_is_degradable_failure(result: dict[str, Any]) -> bool:
     reason = str(result.get("reason") or "").lower()
     llm_status = result.get("llm_status") if isinstance(result.get("llm_status"), dict) else {}
     fallback_reply = str(result.get("reply_text") or "").strip()
+    if fallback_reply and llm_status.get("ok") is False:
+        # Final visible polish is a last-mile wording pass on top of an already
+        # safe draft. If the polish provider/model/auth/config fails, we should
+        # fall back to the draft instead of failing the whole customer reply.
+        return True
     if (reason.startswith("polish_") or reason.startswith("polished_")) and fallback_reply:
         # Guard rejected only the polished variant; fallback draft reply stays
         # unchanged and is safer than blocking runtime delivery.
+        return True
+    if fallback_reply and (
+        "final_polish_guard_rejected" in reason
+        or "invalid_request_error" in reason
+        or "unsupported" in reason
+        or "api key is not set" in reason
+        or "unauthorized" in reason
+        or "forbidden" in reason
+    ):
         return True
     status_value = llm_status.get("status")
     status_code = 0
@@ -3544,7 +3846,7 @@ def apply_local_customer_service_settings(config: dict[str, Any]) -> dict[str, A
     """Overlay Local Console switches onto the workflow config used by the listener."""
     merged = copy.deepcopy(config)
     try:
-        settings = CustomerServiceSettings().get()
+        settings = CustomerServiceSettings(tenant_id=active_tenant_id()).get()
     except Exception:
         return merged
     merged["_local_customer_service_settings"] = settings
@@ -3622,13 +3924,61 @@ def apply_local_customer_service_settings(config: dict[str, Any]) -> dict[str, A
     raw_messages["use_llm"] = use_llm
     merged["raw_messages"] = raw_messages
 
+    def normalize_llm_module_settings(
+        raw_settings: dict[str, Any] | None,
+        *,
+        enabled: bool,
+        default_tier: str = "flash",
+        normalize_model_routing: bool = False,
+        manual_candidate_keys: tuple[str, ...] = ("candidate_json_path",),
+    ) -> dict[str, Any]:
+        module = dict(raw_settings or {})
+        if not enabled:
+            return module
+        provider_text = str(module.get("provider") or "manual_json").strip()
+        has_manual_candidate = any(str(module.get(key) or "").strip() for key in manual_candidate_keys)
+        if provider_text.lower() == "manual_json" and not has_manual_candidate and isinstance(module.get("candidate"), dict):
+            has_manual_candidate = True
+        if provider_text.lower() == "manual_json" and has_manual_candidate:
+            return module
+
+        effective_provider = resolve_effective_llm_provider(
+            provider_text if provider_text.lower() != "manual_json" else None
+        )
+        module["provider"] = effective_provider
+        module["base_url"] = resolve_llm_base_url(
+            provider=effective_provider,
+            explicit_base_url=str(module.get("base_url") or ""),
+        )
+        model_tier = str(module.get("model_tier") or default_tier or "flash").strip() or "flash"
+        module["model"] = resolve_llm_tier_model(
+            provider=effective_provider,
+            tier=model_tier,
+            explicit_model=str(module.get("model") or ""),
+        )
+        if normalize_model_routing:
+            routing = dict(module.get("model_routing", {}) or {})
+            routing["flash_model"] = resolve_llm_tier_model(
+                provider=effective_provider,
+                tier="flash",
+                explicit_model=str(routing.get("flash_model") or module.get("model") or ""),
+            )
+            routing["pro_model"] = resolve_llm_tier_model(
+                provider=effective_provider,
+                tier="pro",
+                explicit_model=str(routing.get("pro_model") or module.get("model") or ""),
+            )
+            module["model_routing"] = routing
+        return module
+
     intent_assist = dict(merged.get("intent_assist", {}) or {})
     intent_assist["enabled"] = use_llm
     intent_assist["mode"] = str(intent_assist.get("mode") or "heuristic")
-    llm_advisory = dict(intent_assist.get("llm_advisory", {}) or {})
+    llm_advisory = normalize_llm_module_settings(
+        intent_assist.get("llm_advisory", {}) or {},
+        enabled=use_llm,
+    )
     llm_advisory["enabled"] = use_llm
-    if use_llm and str(llm_advisory.get("provider") or "manual_json") == "manual_json" and not str(llm_advisory.get("candidate_json_path") or "").strip():
-        llm_advisory["provider"] = "deepseek"
     llm_advisory.setdefault("advisory_only", True)
     llm_advisory.setdefault("apply_to_reply", False)
     intent_assist["llm_advisory"] = llm_advisory
@@ -3644,21 +3994,55 @@ def apply_local_customer_service_settings(config: dict[str, Any]) -> dict[str, A
     style_adapter.setdefault("identity_guard_aware", True)
     merged["reply_style_adapter"] = style_adapter
 
-    llm_synthesis = dict(merged.get("llm_reply_synthesis", {}) or {})
+    llm_synthesis = normalize_llm_module_settings(
+        merged.get("llm_reply_synthesis", {}) or {},
+        enabled=use_llm,
+        normalize_model_routing=True,
+        manual_candidate_keys=("candidate_json_path",),
+    )
     llm_synthesis["enabled"] = use_llm and settings.get("llm_reply_synthesis_enabled", True) is not False
     llm_synthesis["identity_guard_enabled"] = settings.get("identity_guard_enabled", True) is not False
-    if use_llm and str(llm_synthesis.get("provider") or "manual_json") == "manual_json" and not str(llm_synthesis.get("candidate_json_path") or "").strip() and not isinstance(llm_synthesis.get("candidate"), dict):
-        llm_synthesis["provider"] = "deepseek"
     llm_synthesis.setdefault("mode", "guarded_auto")
     llm_synthesis.setdefault("require_evidence", True)
     llm_synthesis.setdefault("require_structured_for_authority", True)
     llm_synthesis.setdefault("fallback_to_existing_reply", True)
     merged["llm_reply_synthesis"] = llm_synthesis
 
-    product_entity_resolution = dict(merged.get("product_entity_resolution", {}) or {})
+    brain_mode = str(settings.get("customer_service_brain_mode") or "off").strip()
+    if brain_mode not in {"off", "shadow", "brain_first", "hybrid_shadow"}:
+        brain_mode = "off"
+    customer_service_brain = normalize_llm_module_settings(
+        merged.get("customer_service_brain", {}) or {},
+        enabled=use_llm and brain_mode != "off",
+        default_tier="pro",
+    )
+    customer_service_brain["enabled"] = use_llm and brain_mode != "off"
+    customer_service_brain["mode"] = brain_mode
+    customer_service_brain.setdefault("model_tier", "pro")
+    customer_service_brain.setdefault("timeout_seconds", 18)
+    customer_service_brain.setdefault("max_tokens", 2600)
+    customer_service_brain.setdefault("temperature", 0.35)
+    customer_service_brain.setdefault("max_reply_segments", 3)
+    customer_service_brain.setdefault("require_fact_claims", True)
+    customer_service_brain.setdefault("require_final_visible_polish", True)
+    customer_service_brain.setdefault("fallback_to_legacy_on_error", False)
+    customer_service_brain.setdefault("blocking_shadow_enabled", False)
+    customer_service_brain.setdefault("history_char_budget", 1200)
+    customer_service_brain.setdefault("summary_char_budget", 280)
+    customer_service_brain.setdefault("current_batch_char_budget", 420)
+    customer_service_brain.setdefault("max_prompt_product_items", 5)
+    customer_service_brain.setdefault("max_prompt_formal_items", 3)
+    customer_service_brain.setdefault("max_prompt_style_examples", 1)
+    customer_service_brain.setdefault("max_prompt_rag_hits", 1)
+    customer_service_brain.setdefault("prompt_item_text_chars", 220)
+    merged["customer_service_brain"] = customer_service_brain
+
+    product_entity_resolution = normalize_llm_module_settings(
+        merged.get("product_entity_resolution", {}) or {},
+        enabled=use_llm and (merged.get("product_entity_resolution", {}) or {}).get("enabled", True) is not False,
+        default_tier="flash",
+    )
     product_entity_resolution["enabled"] = use_llm and product_entity_resolution.get("enabled", True) is not False
-    if product_entity_resolution.get("enabled", False) and str(product_entity_resolution.get("provider") or "manual_json") == "manual_json":
-        product_entity_resolution["provider"] = "deepseek"
     product_entity_resolution.setdefault("model_tier", "flash")
     product_entity_resolution.setdefault("timeout_seconds", 3)
     product_entity_resolution.setdefault("max_candidates", 12)
@@ -3667,11 +4051,13 @@ def apply_local_customer_service_settings(config: dict[str, Any]) -> dict[str, A
     product_entity_resolution.setdefault("max_tokens", 240)
     merged["product_entity_resolution"] = product_entity_resolution
 
-    final_polish = dict(merged.get("final_visible_llm_polish", {}) or {})
+    final_polish = normalize_llm_module_settings(
+        merged.get("final_visible_llm_polish", {}) or {},
+        enabled=use_llm,
+        default_tier="flash",
+    )
     final_polish["enabled"] = use_llm and settings.get("final_visible_llm_polish_enabled", True) is not False
     final_polish["identity_guard_enabled"] = settings.get("identity_guard_enabled", True) is not False
-    if use_llm and str(final_polish.get("provider") or "manual_json") == "manual_json" and not isinstance(final_polish.get("candidate"), dict):
-        final_polish["provider"] = "deepseek"
     final_polish.setdefault("required_for_send", True)
     final_polish.setdefault("model_tier", "flash")
     final_polish.setdefault("max_tokens", 260)
@@ -3680,7 +4066,7 @@ def apply_local_customer_service_settings(config: dict[str, Any]) -> dict[str, A
     final_polish.setdefault("temperature", 0.45)
     final_polish.setdefault("max_reply_chars", 620)
     final_polish.setdefault("allow_send_when_unavailable", True)
-    final_polish.setdefault("skip_short_reply_fast_path_enabled", True)
+    final_polish.setdefault("skip_short_reply_fast_path_enabled", False)
     final_polish.setdefault("skip_short_reply_max_chars", 46)
     final_polish.setdefault("skip_short_reply_max_sentences", 2)
     merged["final_visible_llm_polish"] = final_polish
@@ -3746,6 +4132,106 @@ def update_conversation_context(target_state: dict[str, Any], product_knowledge:
     target_state["conversation_context"] = context
 
 
+def update_conversation_context_from_reply_event(target_state: dict[str, Any], event: dict[str, Any]) -> dict[str, Any]:
+    product_id = select_single_product_id_from_reply_event(event)
+    if not product_id:
+        return {}
+    product_context = load_product_context_by_id(product_id)
+    if not product_context:
+        return {}
+    context = dict(target_state.get("conversation_context", {}) or {})
+    context.update(product_context)
+    context["updated_at"] = datetime.now().isoformat(timespec="seconds")
+    target_state["conversation_context"] = context
+    return dict(product_context)
+
+
+def select_single_product_id_from_reply_event(event: dict[str, Any]) -> str:
+    ids: list[str] = []
+    product_knowledge = event.get("product_knowledge") if isinstance(event.get("product_knowledge"), dict) else {}
+    if (
+        product_knowledge
+        and product_knowledge.get("matched")
+        and str(product_knowledge.get("match_type") or "") == "product"
+        and str(product_knowledge.get("product_id") or "").strip()
+    ):
+        ids.append(str(product_knowledge.get("product_id") or "").strip())
+    synthesis = event.get("llm_reply_synthesis") if isinstance(event.get("llm_reply_synthesis"), dict) else {}
+    ids.extend(product_ids_from_synthesis_payload(synthesis))
+    normalized: list[str] = []
+    seen: set[str] = set()
+    for item in ids:
+        product_id = str(item or "").strip()
+        if not product_id or product_id in seen:
+            continue
+        seen.add(product_id)
+        normalized.append(product_id)
+    return normalized[0] if len(normalized) == 1 else ""
+
+
+def product_ids_from_synthesis_payload(payload: dict[str, Any]) -> list[str]:
+    if not isinstance(payload, dict):
+        return []
+    ids: list[str] = []
+    summary = payload.get("evidence_summary") if isinstance(payload.get("evidence_summary"), dict) else {}
+    primary_ids: list[str] = []
+    for item in summary.get("product_ids", []) or []:
+        if str(item or "").strip():
+            primary_ids.append(str(item).strip())
+    unique_primary = []
+    seen_primary: set[str] = set()
+    for item in primary_ids:
+        if item in seen_primary:
+            continue
+        seen_primary.add(item)
+        unique_primary.append(item)
+    if len(unique_primary) == 1:
+        return unique_primary
+    for item in summary.get("evidence_ids", []) or []:
+        product_id = parse_product_id_marker(item)
+        if product_id:
+            ids.append(product_id)
+    candidate = payload.get("candidate") if isinstance(payload.get("candidate"), dict) else {}
+    for item in candidate.get("used_evidence", []) or []:
+        product_id = parse_product_id_marker(item)
+        if product_id:
+            ids.append(product_id)
+    return ids
+
+
+def parse_product_id_marker(value: Any) -> str:
+    text = str(value or "").strip()
+    for prefix in ("product:", "catalog_product:", "product_master:"):
+        if text.startswith(prefix):
+            return text.split(":", 1)[1].strip()
+    return ""
+
+
+def load_product_context_by_id(product_id: str) -> dict[str, Any]:
+    try:
+        from knowledge_runtime import KnowledgeRuntime
+
+        item = KnowledgeRuntime().get_item("products", product_id)
+    except Exception:
+        return {}
+    if not isinstance(item, dict):
+        return {}
+    data = item.get("data") if isinstance(item.get("data"), dict) else {}
+    name = str(data.get("name") or item.get("name") or "").strip()
+    unit = str(data.get("unit") or item.get("unit") or "").strip()
+    price = data.get("price", item.get("price"))
+    context = {
+        "last_product_id": product_id,
+        "last_product_name": name,
+        "last_product_unit": unit,
+        "last_product_source": "product_master",
+    }
+    if price not in (None, ""):
+        context["last_product_price"] = price
+        context["last_unit_price"] = price
+    return {key: value for key, value in context.items() if value not in (None, "", [], {})}
+
+
 def maybe_analyze_intent(
     config: dict[str, Any],
     combined: str,
@@ -3802,6 +4288,11 @@ def maybe_analyze_intent(
         safety["must_handoff"] = False
         safety["reasons"] = []
         payload["social_offtopic_soft_redirect"] = True
+    clear_soft_handoff_for_customer_data_incomplete_prompt(
+        payload,
+        decision=decision,
+        data_capture=data_capture,
+    )
     if isinstance(safety, dict) and safety.get("must_handoff"):
         reasons = [str(item) for item in safety.get("reasons", []) or [] if str(item)]
         payload["needs_handoff"] = True
@@ -3809,6 +4300,12 @@ def maybe_analyze_intent(
         intent_tags = payload.get("evidence", {}).get("intent_tags", []) or []
         payload["recommended_action"] = "handoff_for_approval" if "discount" in intent_tags else "handoff"
         payload["reason"] = "evidence_safety:" + ",".join(reasons) if reasons else "evidence_safety_must_handoff"
+    clear_soft_handoff_for_customer_data_complete_ack(
+        payload,
+        decision=decision,
+        data_capture=data_capture,
+        combined=combined,
+    )
     suggested_reply = str(payload.get("suggested_reply") or "")
     payload["would_change_reply"] = bool(suggested_reply and suggested_reply not in reply_text)
 
@@ -3954,6 +4451,17 @@ def build_intent_context(
 def conversation_context_from_product_result(product_knowledge: dict[str, Any]) -> dict[str, Any]:
     if not product_knowledge:
         return {}
+    if product_knowledge.get("last_product_id"):
+        return {
+            "last_product_id": product_knowledge.get("last_product_id"),
+            "last_product_name": product_knowledge.get("last_product_name"),
+            "last_quantity": product_knowledge.get("last_quantity"),
+            "last_unit_price": product_knowledge.get("last_unit_price") or product_knowledge.get("last_product_price"),
+            "last_total": product_knowledge.get("last_total"),
+            "last_shipping_city": product_knowledge.get("last_shipping_city"),
+            "last_product_price": product_knowledge.get("last_product_price"),
+            "last_product_source": product_knowledge.get("last_product_source"),
+        }
     return {
         "last_product_id": product_knowledge.get("product_id"),
         "last_product_name": product_knowledge.get("product_name"),
@@ -3969,6 +4477,21 @@ def product_entity_resolution_settings(config: dict[str, Any]) -> dict[str, Any]
     normalized = dict(settings)
     normalized["enabled"] = bool(normalized.get("enabled", False))
     return normalized
+
+
+def build_realtime_router_evidence_pack(*, combined: str, evidence_pack: dict[str, Any], config: dict[str, Any]) -> dict[str, Any]:
+    """Normalize retrieval output into the compact shape expected by realtime routing."""
+    settings = config.get("llm_reply_synthesis", {}) if isinstance(config.get("llm_reply_synthesis"), dict) else {}
+    try:
+        return compact_knowledge_pack(
+            combined,
+            evidence_pack,
+            max_rag_hits=int(settings.get("max_rag_hits", 5) or 5),
+            max_rag_text_chars=int(settings.get("max_rag_text_chars", 900) or 900),
+            max_catalog_candidates=int(settings.get("max_catalog_candidates", 8) or 8),
+        )
+    except Exception:
+        return evidence_pack
 
 
 def build_evidence_context_for_pack(config: dict[str, Any], base_context: dict[str, Any]) -> dict[str, Any]:
@@ -4571,6 +5094,78 @@ def evidence_handoff_reason(intent_assist: dict[str, Any] | None) -> str:
     return "evidence_safety_must_handoff"
 
 
+def clear_soft_handoff_for_customer_data_complete_ack(
+    intent_assist: dict[str, Any] | None,
+    *,
+    decision: ReplyDecision,
+    data_capture: dict[str, Any],
+    combined: str,
+) -> None:
+    """Completed lead capture can acknowledge receipt without inventing facts."""
+    if not isinstance(intent_assist, dict):
+        return
+    if decision.rule_name != "customer_data_capture" or decision.need_handoff:
+        return
+    if not data_capture.get("is_customer_data") or not data_capture.get("complete"):
+        return
+    if not customer_data_complete_can_auto_ack(combined):
+        return
+
+    safety = evidence_safety(intent_assist)
+    reasons = {str(item) for item in safety.get("reasons", []) or [] if str(item)}
+    soft_handoff_reasons = {"no_relevant_business_evidence", "auto_reply_disabled"}
+    if safety.get("must_handoff") and (not reasons or not reasons <= soft_handoff_reasons):
+        return
+
+    safety["must_handoff"] = False
+    safety["allowed_auto_reply"] = True
+    safety["reasons"] = []
+    safety["customer_data_complete_auto_ack_override"] = True
+    intent_assist["needs_handoff"] = False
+    intent_assist["safe_to_auto_send"] = True
+    intent_assist["recommended_action"] = "capture_data_and_confirm"
+    reason = str(intent_assist.get("reason") or "").strip()
+    if "customer_data_complete_auto_ack" not in reason:
+        intent_assist["reason"] = (
+            f"{reason}; customer_data_complete_auto_ack" if reason else "customer_data_complete_auto_ack"
+        )
+
+
+def clear_soft_handoff_for_customer_data_incomplete_prompt(
+    intent_assist: dict[str, Any] | None,
+    *,
+    decision: ReplyDecision,
+    data_capture: dict[str, Any],
+) -> None:
+    """Missing required lead fields may be requested without treating it as privacy over-collection."""
+    if not isinstance(intent_assist, dict):
+        return
+    if decision.rule_name != "customer_data_incomplete" or decision.need_handoff:
+        return
+    if not data_capture.get("is_customer_data") or data_capture.get("complete"):
+        return
+    missing = [str(item) for item in data_capture.get("missing_required_fields", []) or [] if str(item)]
+    if not missing:
+        return
+    safety = evidence_safety(intent_assist)
+    reasons = {str(item) for item in safety.get("reasons", []) or [] if str(item)}
+    allowed_reasons = {"matched_faq_requires_handoff", "shared_risk_control", "no_relevant_business_evidence", "auto_reply_disabled"}
+    if safety.get("must_handoff") and (not reasons or not reasons <= allowed_reasons):
+        return
+    safety["must_handoff"] = False
+    safety["allowed_auto_reply"] = True
+    safety["reasons"] = []
+    safety["customer_data_incomplete_prompt_override"] = True
+    intent_assist["needs_handoff"] = False
+    intent_assist["safe_to_auto_send"] = True
+    intent_assist["recommended_action"] = "ask_for_missing_customer_data"
+    reason = str(intent_assist.get("reason") or "").strip()
+    if "customer_data_incomplete_prompt" not in reason:
+        intent_assist["reason"] = (
+            f"{reason}; customer_data_incomplete_prompt" if reason else "customer_data_incomplete_prompt"
+        )
+
+
 def clear_no_relevant_handoff_after_safe_synthesis(
     intent_assist: dict[str, Any] | None,
     llm_synthesis: dict[str, Any],
@@ -4592,12 +5187,30 @@ def clear_no_relevant_handoff_after_safe_synthesis(
         return
     safety = evidence_safety(intent_assist)
     reasons = {str(item) for item in safety.get("reasons", []) or [] if str(item)}
-    if not reasons or not reasons <= {"no_relevant_business_evidence", "auto_reply_disabled"}:
+    intent_tags = {str(item) for item in llm_synthesis.get("intent_tags", []) or [] if str(item)}
+    structured_count = int(summary.get("structured_evidence_count") or 0)
+    no_relevant_soft_reasons = {"no_relevant_business_evidence", "auto_reply_disabled"}
+    product_quote_soft_reasons = {
+        "matched_faq_requires_handoff",
+        "shared_risk_control",
+        "missing_authoritative_evidence",
+        "no_relevant_business_evidence",
+    }
+    safe_product_master_quote_reply = (
+        {"product", "quote"} <= intent_tags
+        and structured_count > 0
+        and bool(reasons)
+        and reasons <= product_quote_soft_reasons
+    )
+    if not reasons or not (reasons <= no_relevant_soft_reasons or safe_product_master_quote_reply):
         return
     safety["must_handoff"] = False
     safety["allowed_auto_reply"] = True
     safety["reasons"] = []
-    safety["llm_synthesis_soft_evidence_override"] = True
+    if safe_product_master_quote_reply:
+        safety["llm_synthesis_product_master_quote_override"] = True
+    else:
+        safety["llm_synthesis_soft_evidence_override"] = True
 
 
 def clear_no_relevant_handoff_after_safe_realtime_reply(
@@ -4628,6 +5241,12 @@ def clear_no_relevant_handoff_after_safe_realtime_reply(
         "realtime_local_recommendation",
     }
     rule_name = str(realtime_reply.get("rule_name") or "")
+    if rule_name == "realtime_catalog_price_fact" and any(str(item) for item in realtime_reply.get("used_product_ids", []) or []):
+        safety["must_handoff"] = False
+        safety["allowed_auto_reply"] = True
+        safety["reasons"] = []
+        safety["realtime_reply_safe_rule_override"] = rule_name
+        return
     if rule_name in safe_rule_names:
         safety["must_handoff"] = False
         safety["allowed_auto_reply"] = True
@@ -4640,6 +5259,36 @@ def clear_no_relevant_handoff_after_safe_realtime_reply(
     safety["allowed_auto_reply"] = True
     safety["reasons"] = []
     safety["realtime_reply_soft_evidence_override"] = True
+
+
+def clear_no_relevant_handoff_after_safe_brain_reply(
+    intent_assist: dict[str, Any] | None,
+    brain_result: dict[str, Any],
+) -> None:
+    if not isinstance(intent_assist, dict):
+        return
+    if not brain_result.get("applied") or brain_result.get("needs_handoff"):
+        return
+    guard = brain_result.get("guard", {}) or {}
+    if guard.get("action") != "send_reply" or guard.get("reason") not in {"guard_passed", "llm_soft_handoff_downgraded"}:
+        return
+    plan = brain_result.get("brain_plan") if isinstance(brain_result.get("brain_plan"), dict) else {}
+    evidence = plan.get("evidence_used") if isinstance(plan.get("evidence_used"), dict) else {}
+    common_sense_advisory = bool(evidence.get("common_sense_topics")) and not (
+        evidence.get("product_ids") or evidence.get("formal_knowledge_ids") or plan.get("facts_claimed")
+    )
+    audit = brain_result.get("audit_summary") if isinstance(brain_result.get("audit_summary"), dict) else {}
+    has_authoritative_evidence = int(audit.get("structured_evidence_count") or 0) > 0
+    if not (common_sense_advisory or has_authoritative_evidence):
+        return
+    safety = evidence_safety(intent_assist)
+    reasons = {str(item) for item in safety.get("reasons", []) or [] if str(item)}
+    if not reasons or not reasons <= {"no_relevant_business_evidence", "auto_reply_disabled"}:
+        return
+    safety["must_handoff"] = False
+    safety["allowed_auto_reply"] = True
+    safety["reasons"] = []
+    safety["customer_service_brain_soft_evidence_override"] = True
 
 
 def maybe_enrich_messages_with_history(
@@ -5351,6 +6000,8 @@ def message_dedupe_key(message: dict[str, Any]) -> str:
 
 
 def message_content_dedupe_key(message: dict[str, Any]) -> str:
+    if message_has_repeatable_probe_content(message):
+        return ""
     content = normalize_ocr_content_for_dedupe(str(message.get("content") or ""))
     if not content:
         return ""
@@ -5552,9 +6203,14 @@ def message_is_reply_candidate(
     sender = str(message.get("sender") or "")
     if not message_id or message_id in processed or message_id in handoff:
         return False
+    repeatable_probe = message_has_repeatable_probe_content(message)
     stable_key = message_stable_content_key(message)
     content_key = message_content_dedupe_key(message)
-    if processed_content_keys and ((stable_key and stable_key in processed_content_keys) or (content_key and content_key in processed_content_keys)):
+    if (
+        not repeatable_probe
+        and processed_content_keys
+        and ((stable_key and stable_key in processed_content_keys) or (content_key and content_key in processed_content_keys))
+    ):
         return False
     if message.get("type") != "text" or not content:
         return False
@@ -5577,6 +6233,117 @@ def batch_selection_payload(selection: BatchSelection) -> dict[str, Any]:
         "eligible_count": selection.eligible_count,
         "max_batch_messages": selection.max_batch_messages,
         "truncated": selection.truncated,
+    }
+
+
+def normalize_capture_payload_for_semantic_processing(payload: dict[str, Any], *, target: TargetConfig, config: dict[str, Any] | None = None) -> dict[str, Any]:
+    if not isinstance(payload, dict):
+        return payload
+    conversation_type = str(((config or {}).get("raw_messages", {}) or {}).get("conversation_type") or infer_raw_conversation_type(target.name))
+    known_speakers = known_speaker_names_for_target(target, config)
+    normalized_payload = dict(payload)
+    normalized_messages, meta = normalize_messages_for_semantic_processing(
+        [item for item in payload.get("messages", []) or [] if isinstance(item, dict)],
+        conversation_type=conversation_type,
+        target_name=target.name,
+        known_speakers=known_speakers,
+        allow_unlisted_name_like_prefix=True,
+    )
+    normalized_payload["messages"] = normalized_messages
+    if meta["changed_count"]:
+        normalized_payload["_content_normalization"] = meta
+    latest_snapshot = payload.get("_bootstrap_latest_snapshot")
+    if isinstance(latest_snapshot, dict):
+        latest_messages, latest_meta = normalize_messages_for_semantic_processing(
+            [item for item in latest_snapshot.get("messages", []) or [] if isinstance(item, dict)],
+            conversation_type=conversation_type,
+            target_name=target.name,
+            known_speakers=known_speakers,
+            allow_unlisted_name_like_prefix=True,
+        )
+        normalized_payload["_bootstrap_latest_snapshot"] = {
+            **latest_snapshot,
+            "messages": latest_messages,
+            **({"_content_normalization": latest_meta} if latest_meta["changed_count"] else {}),
+        }
+    return normalized_payload
+
+
+def normalize_messages_for_semantic_processing(
+    messages: list[dict[str, Any]],
+    *,
+    conversation_type: str,
+    target_name: str,
+    known_speakers: list[str] | tuple[str, ...] | set[str] | None = None,
+    allow_unlisted_name_like_prefix: bool = False,
+) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    normalized: list[dict[str, Any]] = []
+    changed: list[dict[str, Any]] = []
+    for item in messages:
+        if not isinstance(item, dict):
+            continue
+        next_item = normalize_wechat_message_record(
+            item,
+            conversation_type=conversation_type,
+            target_name=target_name,
+            known_speakers=known_speakers,
+            allow_unlisted_name_like_prefix=allow_unlisted_name_like_prefix,
+        )
+        if next_item.get("ocr_speaker_prefix"):
+            changed.append(
+                {
+                    "id": str(next_item.get("id") or next_item.get("message_id") or ""),
+                    "speaker_name": str(next_item.get("speaker_name") or ""),
+                    "original_preview": str(next_item.get("original_content") or "")[:120],
+                    "content_preview": str(next_item.get("content") or "")[:120],
+                }
+            )
+        normalized.append(next_item)
+    return normalized, {
+        "changed_count": len(changed),
+        "changed_messages": changed[:20],
+        "conversation_type": conversation_type,
+        "target_name": target_name,
+    }
+
+
+def normalize_batch_content_for_reply_routing(batch: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    normalized: list[dict[str, Any]] = []
+    for item in batch:
+        if not isinstance(item, dict):
+            continue
+        next_item = dict(item)
+        content = str(next_item.get("content") or "")
+        cleaned = strip_leading_group_speaker_line(content)
+        if cleaned != content:
+            next_item["content"] = cleaned
+            next_item["_reply_routing_content_normalized"] = True
+            next_item["_reply_routing_original_content"] = content
+        normalized.append(next_item)
+    return normalized
+
+
+def batch_routing_normalization_payload(original: list[dict[str, Any]], normalized: list[dict[str, Any]]) -> dict[str, Any]:
+    changed: list[dict[str, Any]] = []
+    for before, after in zip(original, normalized):
+        if not isinstance(before, dict) or not isinstance(after, dict):
+            continue
+        before_text = str(before.get("content") or "")
+        after_text = str(after.get("content") or "")
+        if before_text == after_text:
+            continue
+        changed.append(
+            {
+                "message_id": str(before.get("id") or ""),
+                "reason": "leading_group_speaker_prefix_removed",
+                "before_preview": before_text[:80],
+                "after_preview": after_text[:80],
+            }
+        )
+    return {
+        "applied": bool(changed),
+        "changed_count": len(changed),
+        "changed": changed[:8],
     }
 
 
@@ -5882,6 +6649,15 @@ def detect_newer_messages_before_send(
             )
             and not message_matches_original_batch(message, original_set, original_content_keys)
         ]
+        if target.allow_self_for_test:
+            # File Transfer Assistant loopback keeps older self-sent synthetic
+            # prompts visible for a long time. When the original batch is no
+            # longer visible, those legacy self messages are not reliable proof
+            # of a newer unread customer event, so ignore them in this
+            # last-resort stale heuristic. Real newer loopback messages are
+            # still caught by the ordered branch below when the original batch
+            # remains visible.
+            visible_unprocessed = [item for item in visible_unprocessed if str(item.get("sender") or "").strip().lower() != "self"]
         gap_risk = bool(history_meta.get("gap_risk"))
         return {
             "ok": True,
@@ -5988,6 +6764,8 @@ def customer_service_anchor_payload(target_state: dict[str, Any]) -> dict[str, l
         key = str(item).strip()
         if not key:
             continue
+        if processed_content_key_is_repeatable_probe(key):
+            continue
         anchor_content_keys.add(key)
         normalized_key = normalized_processed_content_key(key)
         if normalized_key:
@@ -6006,6 +6784,8 @@ def customer_service_anchor_payload(target_state: dict[str, Any]) -> dict[str, l
         for item in last_anchor.get("message_content_keys", []) or []:
             value = str(item or "").strip()
             if not value:
+                continue
+            if processed_content_key_is_repeatable_probe(value):
                 continue
             anchor_content_keys.add(value)
             normalized_value = normalized_processed_content_key(value)
@@ -6073,6 +6853,8 @@ def find_latest_customer_service_anchor_index(
 
 
 def message_processed_content_keys(message: dict[str, Any]) -> list[str]:
+    if message_has_repeatable_probe_content(message):
+        return []
     keys: list[str] = []
     for key in (
         message_stable_content_key(message),
@@ -6499,6 +7281,33 @@ def base_event(target: TargetConfig, action: str, extra: dict[str, Any]) -> dict
     }
     event.update(extra)
     return event
+
+
+def should_adopt_customer_service_brain(result: dict[str, Any] | None) -> bool:
+    """Return whether the guarded Brain First reply should become the draft."""
+
+    payload = result if isinstance(result, dict) else {}
+    if str(payload.get("mode") or "") != "brain_first":
+        return False
+    if not payload.get("applied"):
+        return False
+    return bool(str(payload.get("raw_reply_text") or "").strip())
+
+
+def config_with_legacy_reply_generators_disabled_for_brain(config: dict[str, Any]) -> dict[str, Any]:
+    """Disable legacy reply generators once a guarded Brain reply is ready."""
+
+    next_config = copy.deepcopy(config)
+    rag = dict(next_config.get("rag_response", {}) or {})
+    rag["enabled"] = False
+    next_config["rag_response"] = rag
+    realtime = dict(next_config.get("realtime_reply", {}) or {})
+    realtime["enabled"] = False
+    next_config["realtime_reply"] = realtime
+    synthesis = dict(next_config.get("llm_reply_synthesis", {}) or {})
+    synthesis["enabled"] = False
+    next_config["llm_reply_synthesis"] = synthesis
+    return next_config
 
 
 LEADING_CUSTOMER_GREETING_RE = re.compile(

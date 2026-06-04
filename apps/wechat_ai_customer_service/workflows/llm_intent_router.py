@@ -16,8 +16,6 @@ import json
 import re
 import sys
 import time
-import urllib.error
-import urllib.request
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -30,8 +28,7 @@ for path in (PROJECT_ROOT, APP_ROOT):
         sys.path.insert(0, str(path))
 
 from apps.wechat_ai_customer_service.llm_config import (
-    apply_llm_reasoning_effort,
-    llm_urlopen,
+    call_llm_request_with_failover,
     read_secret,
     resolve_deepseek_base_url,
     resolve_deepseek_tier_model,
@@ -290,43 +287,24 @@ def _call_llm_intent_analysis(
         ensure_ascii=False,
     )
 
-    payload = {
-        "model": model,
-        "messages": [
+    result = call_llm_request_with_failover(
+        provider="deepseek",
+        api_key=api_key,
+        base_url=base_url,
+        model=model,
+        messages=[
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_content},
         ],
-        "temperature": 0.1,
-        "max_tokens": max_tokens,
-        "stream": False,
-        "response_format": {"type": "json_object"},
-    }
-    apply_llm_reasoning_effort(payload, tier="flash", read_secret_fn=read_secret)
-
-    url = base_url.rstrip("/") + "/chat/completions"
-    request = urllib.request.Request(
-        url,
-        data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
-        headers={
-            "Authorization": f"Bearer {api_key}",
-            "Content-Type": "application/json",
-        },
-        method="POST",
+        timeout=max(1, timeout),
+        max_tokens=max_tokens,
+        temperature=0.1,
+        tier="flash",
+        json_mode=True,
     )
-
-    try:
-        with llm_urlopen(request, timeout=max(1, timeout)) as response:
-            raw = response.read().decode("utf-8", errors="replace")
-            data = json.loads(raw)
-            content = (
-                data.get("choices", [{}])[0]
-                .get("message", {})
-                .get("content", "")
-            )
-    except urllib.error.HTTPError as exc:
+    if not result.get("ok"):
         return None
-    except Exception:
-        return None
+    content = str(result.get("response_text") or "")
 
     parsed = _parse_intent_json(content)
     if parsed:

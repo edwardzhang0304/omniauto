@@ -41,6 +41,7 @@ def main() -> int:
             cleanup_runtime()
             results = [
                 check_raw_message_store_and_learning(candidate_ids),
+                check_group_speaker_prefix_is_stored_as_metadata(),
                 check_ocr_near_duplicate_deduplication(),
                 check_raw_wechat_product_master_is_blocked(),
                 check_rag_product_master_promotion_is_blocked(),
@@ -117,6 +118,45 @@ def check_raw_message_store_and_learning(candidate_ids: list[str]) -> dict[str, 
             f"promotion failure should be explainable when auto review discarded the experience: {promoted}",
         )
     return {"name": "raw_message_store_and_learning", "ok": True, "candidate_ids": candidate_ids}
+
+
+def check_group_speaker_prefix_is_stored_as_metadata() -> dict[str, Any]:
+    store = RawMessageStore()
+    conversation = {
+        "target_name": "新数据测试",
+        "display_name": "新数据测试",
+        "conversation_type": "group",
+        "selected_by_user": True,
+        "learning_enabled": False,
+        "source": {"type": "test"},
+    }
+    result = store.upsert_messages(
+        conversation,
+        [
+            {
+                "id": "speaker-prefix-001",
+                "type": "text",
+                "sender": "unknown",
+                "sender_role": "unknown",
+                "source_adapter": "win32_ocr",
+                "content": "许聪\n在不在",
+            }
+        ],
+        source_module="smart_recorder",
+        learning_enabled=False,
+        create_batch=False,
+    )
+    messages = store.list_messages_advanced(conversation_id=result["conversation"]["conversation_id"], limit=20)
+    assert_equal(result["inserted_count"], 1, "speaker-prefixed OCR message should insert once")
+    assert_equal(len(messages), 1, "speaker-prefixed OCR message should be listed")
+    stored = messages[0]
+    assert_equal(stored.get("content"), "在不在", "stored content should be body-only")
+    assert_equal(stored.get("speaker_name"), "许聪", "speaker name should be preserved")
+    assert_equal(stored.get("group_member_name"), "许聪", "group member should use OCR speaker prefix")
+    assert_equal(stored.get("sender_role"), "group_member", "speaker-prefixed group message should be group_member")
+    assert_true("许聪" not in str(stored.get("content") or ""), "speaker must not pollute semantic content")
+    assert_true("许聪\n在不在" in str(stored.get("original_content") or ""), "original content should remain auditable")
+    return {"name": "group_speaker_prefix_is_stored_as_metadata", "ok": True}
 
 
 def check_ocr_near_duplicate_deduplication() -> dict[str, Any]:

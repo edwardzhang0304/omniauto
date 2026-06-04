@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "authority": "product_master",
+  "category_id": "products",
+  "tenant_id": "three_session_pressure_ssf_rfix0601",
+  "updated_at": "2026-06-01T14:11:02",
+  "items_path": "items",
+  "compatibility": {
+    "legacy_read_fallback": "knowledge_bases/products",
+    "new_writes_to_legacy": false
+  }
+}

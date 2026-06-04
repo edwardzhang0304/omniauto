@@ -100,12 +100,14 @@ def authority_order_payload() -> list[dict[str, Any]]:
             "level": PRODUCT_MASTER,
             "rank": authority_rank(PRODUCT_MASTER),
             "can_authorize_product_facts": True,
+            "can_authorize_product_master_facts": True,
             "description": "商品事实唯一最高权威源：价格、库存、规格、状态、数量/使用记录、SKU、物流/售后等事实必须以此为准。",
         },
         {
             "level": PRODUCT_SCOPED_FORMAL,
             "rank": authority_rank(PRODUCT_SCOPED_FORMAL),
-            "can_authorize_product_facts": True,
+            "can_authorize_product_facts": False,
+            "can_authorize_product_scoped_rules": True,
             "description": "商品专属 FAQ/规则/解释，可补充商品相关流程和禁用承诺，但不得覆盖商品主数据事实。",
         },
         {
@@ -224,7 +226,7 @@ def can_authorize_product_fact(
     source_type: str | None = None,
 ) -> bool:
     level = classify_evidence(item, category_id=category_id, source_type=source_type)
-    return level in {PRODUCT_MASTER, PRODUCT_SCOPED_FORMAL}
+    return level == PRODUCT_MASTER
 
 
 def can_authorize_formal_rule(
