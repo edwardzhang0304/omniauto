@@ -53,6 +53,13 @@
     "timeout_seconds": 120,
     "stale_seconds": 900
   },
+  "message_envelope": {
+    "message_envelope_enabled": true,
+    "ocr_bubble_geometry_enabled": true,
+    "recorder_strict_clean_content_enabled": true,
+    "recorder_auto_learn_default_enabled": false,
+    "customer_service_reference_context_enabled": true
+  },
   "rate_limits": {
     "min_seconds_between_replies": 0,
     "max_replies_per_10_minutes": 20,

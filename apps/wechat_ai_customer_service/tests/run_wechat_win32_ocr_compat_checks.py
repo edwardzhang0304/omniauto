@@ -231,6 +231,24 @@ def test_parse_messages_classifies_wide_right_bubbles_as_self() -> None:
     )
 
 
+def test_parse_messages_outputs_message_envelope_fields() -> None:
+    items = [
+        {"text": "许聪", "confidence": 0.99, "left": 390, "right": 443, "top": 210, "bottom": 232, "center_x": 416, "center_y": 221},
+        {"text": "[引用 张老师：旧订单 试剂盒 9盒 1元]", "confidence": 0.96, "left": 390, "right": 688, "top": 236, "bottom": 258, "center_x": 539, "center_y": 247},
+        {"text": "枪头 2盒 30元", "confidence": 0.98, "left": 390, "right": 558, "top": 262, "bottom": 286, "center_x": 474, "center_y": 274},
+    ]
+    messages = parse_messages_from_ocr(items, (980, 860), target="实验订货群")
+    assert_true(len(messages) == 1, f"speaker/quote/current bubble should remain one cleaned message: {messages}")
+    message = messages[0]
+    assert_true(message.get("content") == "枪头 2盒 30元", f"content should be body-only: {message}")
+    assert_true(message.get("content_body") == "枪头 2盒 30元", f"content_body should be body-only: {message}")
+    assert_true(message.get("speaker_name") == "许聪", f"speaker should be metadata: {message}")
+    assert_true(message.get("quoted_fragments"), f"quote fragment should be retained: {message}")
+    assert_true("quote_contamination" in set(message.get("quality_flags") or []), f"quote risk should be flagged: {message}")
+    assert_true(str(message.get("captured_at") or "").count(":") >= 2, f"captured_at should include seconds: {message}")
+    assert_true(isinstance(message.get("message_envelope"), dict), f"message envelope should be attached: {message}")
+
+
 def test_history_snapshot_merge_orders_and_dedupes() -> None:
     latest = {
         "messages": [
@@ -2480,6 +2498,7 @@ def main() -> int:
         test_parse_messages_keeps_low_visible_bubble_lines,
         test_parse_messages_excludes_left_input_draft_residue,
         test_parse_messages_classifies_wide_right_bubbles_as_self,
+        test_parse_messages_outputs_message_envelope_fields,
         test_history_snapshot_merge_orders_and_dedupes,
         test_anchor_match_supports_content_and_reply_keys,
         test_message_noise_filters_relative_timestamps,

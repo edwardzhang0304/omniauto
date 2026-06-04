@@ -6794,13 +6794,27 @@ function renderRecorderDetail() {
       ${recorderMessages.map((item) => `
         <div class="compact-row">
           <strong>${escapeHtml(item.sender || item.sender_role || "unknown")}</strong>
-          <span>${escapeHtml(item.message_time || item.observed_at || "")}</span>
-          <p>${escapeHtml(item.content || "")}</p>
+          <span>${escapeHtml(item.captured_at || item.message_time || item.observed_at || "")}</span>
+          <p>${escapeHtml(item.content_clean || item.content_body || item.content || "")}</p>
+          ${recorderMessageQualityHtml(item)}
         </div>
       `).join("") || `<div class="empty-state">暂无原始消息。</div>`}
     </div>
   `;
   detail.querySelector(".recorder-refresh-messages")?.addEventListener("click", () => loadRecorderMessages().catch((error) => alert(error.message)));
+}
+
+function recorderMessageQualityHtml(item = {}) {
+  const flags = Array.isArray(item.quality_flags) ? item.quality_flags.filter(Boolean) : [];
+  const quoted = Array.isArray(item.quoted_fragments) ? item.quoted_fragments : [];
+  const excluded = Array.isArray(item.excluded_fragments) ? item.excluded_fragments : [];
+  const parts = [];
+  if (item.screen_time_text) parts.push(`屏幕时间: ${escapeHtml(item.screen_time_text)}`);
+  if (item.speaker_name || item.group_member_name) parts.push(`群成员: ${escapeHtml(item.speaker_name || item.group_member_name)}`);
+  if (flags.length) parts.push(`质量: ${escapeHtml(flags.join(", "))}`);
+  if (quoted.length) parts.push(`引用已排除: ${escapeHtml(quoted.map((fragment) => fragment?.text || fragment).filter(Boolean).join("；"))}`);
+  if (excluded.length) parts.push(`排除片段: ${escapeHtml(excluded.map((fragment) => fragment?.reason || "").filter(Boolean).join(", "))}`);
+  return parts.length ? `<small class="muted">${parts.join(" · ")}</small>` : "";
 }
 
 function formatRecorderConversationStatus(item) {

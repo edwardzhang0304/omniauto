@@ -27,13 +27,14 @@ from apps.wechat_ai_customer_service.admin_backend.services.formal_review_state 
 from apps.wechat_ai_customer_service.admin_backend.services.learning_service import LearningService  # noqa: E402
 from apps.wechat_ai_customer_service.admin_backend.services.rag_admin_service import RagAdminService, annotate_experience, build_candidate_from_experience  # noqa: E402
 from apps.wechat_ai_customer_service.admin_backend.services.raw_message_learning_service import RawMessageLearningService  # noqa: E402
-from apps.wechat_ai_customer_service.admin_backend.services.raw_message_store import RawMessageStore  # noqa: E402
+from apps.wechat_ai_customer_service.admin_backend.services.raw_message_store import RawMessageStore, find_ocr_near_duplicate, merge_message  # noqa: E402
+from apps.wechat_ai_customer_service.admin_backend.services.recorder_service import RecorderService  # noqa: E402
 from apps.wechat_ai_customer_service.admin_backend.services.upload_store import UploadStore  # noqa: E402
 from apps.wechat_ai_customer_service.knowledge_paths import tenant_context, tenant_raw_inbox_root, tenant_review_candidates_root, tenant_root, tenant_runtime_root  # noqa: E402
 from apps.wechat_ai_customer_service.workflows.rag_experience_store import RagExperienceStore  # noqa: E402
 
 
-TEST_TENANT = "smart_recorder_test"
+TEST_TENANT = "smart_recorder_envelope_test"
 def main() -> int:
     candidate_ids: list[str] = []
     try:
@@ -42,6 +43,8 @@ def main() -> int:
             results = [
                 check_raw_message_store_and_learning(candidate_ids),
                 check_group_speaker_prefix_is_stored_as_metadata(),
+                check_message_envelope_quote_blocks_learning_and_uses_captured_at(),
+                check_recorder_default_auto_learn_is_disabled(),
                 check_ocr_near_duplicate_deduplication(),
                 check_raw_wechat_product_master_is_blocked(),
                 check_rag_product_master_promotion_is_blocked(),
@@ -159,6 +162,59 @@ def check_group_speaker_prefix_is_stored_as_metadata() -> dict[str, Any]:
     return {"name": "group_speaker_prefix_is_stored_as_metadata", "ok": True}
 
 
+def check_message_envelope_quote_blocks_learning_and_uses_captured_at() -> dict[str, Any]:
+    store = RawMessageStore()
+    conversation = {
+        "target_name": "记录员引用测试群",
+        "display_name": "记录员引用测试群",
+        "conversation_type": "group",
+        "selected_by_user": True,
+        "learning_enabled": True,
+        "source": {"type": "test"},
+    }
+    captured_at = "2026-06-04T15:09:10"
+    result = store.upsert_messages(
+        conversation,
+        [
+            {
+                "id": "envelope-quote-001",
+                "type": "text",
+                "sender": "unknown",
+                "sender_role": "unknown",
+                "source_adapter": "win32_ocr",
+                "content": "许聪\n[引用 张老师：旧订单 试剂盒 9盒 1元]\n枪头 2盒 30元",
+                "time": "昨天03:02",
+                "captured_at": captured_at,
+                "ocr_confidence": 0.98,
+            }
+        ],
+        source_module="smart_recorder",
+        learning_enabled=True,
+        create_batch=True,
+        batch_reason="recorder_capture",
+    )
+    messages = store.list_messages_advanced(conversation_id=result["conversation"]["conversation_id"], limit=20)
+    assert_equal(result["inserted_count"], 1, "quoted OCR message should insert")
+    assert_equal(result.get("batch"), None, "quality-risk quoted OCR message should not create learning batch")
+    stored = messages[0]
+    assert_equal(stored.get("content"), "枪头 2盒 30元", "quote and speaker should be stripped from current content")
+    assert_true(stored.get("captured_at") != captured_at, "OCR captured_at should use actual program read time, not screen time")
+    assert_equal(stored.get("screen_time_text"), "昨天03:02", "OCR screen time should remain auditable")
+    assert_equal(stored.get("message_time"), stored.get("captured_at"), "OCR message_time should use actual read time")
+    assert_true(stored.get("learning_enabled") is False, "quote contamination should block learning")
+    assert_true(stored.get("quoted_fragments"), "quote fragments should remain auditable")
+    assert_true("quote_contamination" in set(stored.get("quality_flags") or []), "quality flags should record quote contamination")
+    raw_payload = stored.get("raw_payload") if isinstance(stored.get("raw_payload"), dict) else {}
+    assert_true(isinstance(raw_payload.get("message_envelope"), dict), "raw payload should store message envelope")
+    return {"name": "message_envelope_quote_blocks_learning_and_uses_captured_at", "ok": True}
+
+
+def check_recorder_default_auto_learn_is_disabled() -> dict[str, Any]:
+    settings = RecorderService().settings()
+    assert_true(settings.get("auto_learn") is False, f"recorder auto_learn should default false: {settings}")
+    return {"name": "recorder_default_auto_learn_is_disabled", "ok": True}
+
+
 def check_ocr_near_duplicate_deduplication() -> dict[str, Any]:
     store = RawMessageStore()
     conversation = {
@@ -232,6 +288,107 @@ def check_ocr_near_duplicate_deduplication() -> dict[str, Any]:
     merged = store.list_messages_advanced(conversation_id=fragment_insert["conversation"]["conversation_id"], query="LABTDEDUP-L20", limit=20)
     assert_equal(len(merged), 1, "partial OCR fragment should not leave a second raw record")
     assert_true("UFC901096" in str(merged[0].get("content") or ""), "merged OCR record should keep the more complete content")
+    short_order = {
+        "type": "text",
+        "sender": "self",
+        "sender_role": "self",
+        "source_adapter": "win32_ocr",
+        "observed_at": "2026-05-24T20:01:00",
+        "captured_at": "2026-05-24T20:01:00",
+        "bubble_id": "short-order-bubble-a",
+        "content": "白鲨 50ml离心管 订2包 60元 周梦老师",
+    }
+    short_order_repeat = {
+        **short_order,
+        "observed_at": "2026-05-24T20:01:38",
+        "captured_at": "2026-05-24T20:01:38",
+        "bubble_id": "short-order-bubble-b",
+    }
+    short_insert = store.upsert_messages(
+        conversation,
+        [short_order],
+        source_module="smart_recorder",
+        learning_enabled=False,
+        create_batch=False,
+    )
+    short_duplicate = store.upsert_messages(
+        conversation,
+        [short_order_repeat],
+        source_module="smart_recorder",
+        learning_enabled=False,
+        create_batch=False,
+    )
+    assert_equal(short_insert["inserted_count"], 1, "short OCR order should insert once")
+    assert_equal(short_duplicate["inserted_count"], 0, "exact short OCR repeat with new bubble_id should merge")
+    assert_equal(short_duplicate["duplicate_count"], 1, "short OCR repeat should be reported as duplicate")
+    short_listed = store.list_messages_advanced(conversation_id=short_insert["conversation"]["conversation_id"], query="白鲨", limit=20)
+    assert_equal(len(short_listed), 1, "short OCR exact repeat should keep one raw record")
+    far_existing = {
+        "conversation_id": "conv_far_source_time",
+        "sender": "self",
+        "content_type": "text",
+        "source_modules": ["smart_recorder"],
+        "source_adapter": "win32_ocr",
+        "content": "白鲨 50ml离心管 订2包 60元 周梦老师",
+        "observed_at": "2026-05-24T20:01:00",
+        "message_time": "2026-05-24T20:01:00",
+        "screen_time_text": "2026-05-24T16:23:42",
+    }
+    far_incoming = {
+        **far_existing,
+        "observed_at": "2026-05-24T21:15:00",
+        "message_time": "2026-05-24T21:15:00",
+        "captured_at": "2026-05-24T21:15:00",
+    }
+    assert_true(
+        find_ocr_near_duplicate([far_existing], far_incoming) is far_existing,
+        "same OCR source screen time should dedupe old visible messages even when read times are far apart",
+    )
+    repeat_later = {
+        **far_existing,
+        "message_id": "repeat-later-message",
+        "bubble_id": "repeat-later-bubble",
+        "observed_at": "2026-05-24T20:06:30",
+        "message_time": "2026-05-24T20:06:30",
+        "screen_time_text": "2026-05-24T20:06:30",
+    }
+    assert_true(
+        find_ocr_near_duplicate([far_existing], repeat_later) is None,
+        "same OCR text several minutes later should be kept as a possible real repeated order",
+    )
+    far_existing["captured_at"] = "2026-05-24T20:01:00"
+    far_existing["bubble_id"] = "old-visible-bubble"
+    merged_far = merge_message(far_existing, far_incoming, source_module="smart_recorder")
+    assert_equal(
+        merged_far.get("captured_at"),
+        "2026-05-24T20:01:00",
+        "far old visible duplicate should not refresh captured_at into a new export window",
+    )
+    assert_equal(merged_far.get("screen_time_text"), "2026-05-24T16:23:42", "far duplicate should not refresh screen time")
+    assert_equal(merged_far.get("bubble_id"), "old-visible-bubble", "far duplicate should not refresh bubble id")
+    fragment_existing = {
+        "source_modules": ["smart_recorder"],
+        "source_adapter": "win32_ocr",
+        "content": "老师LABTDEDUP-L21",
+        "content_body": "老师LABTDEDUP-L21",
+        "message_fingerprint": "old",
+        "captured_at": "2026-05-24T20:00:00",
+        "message_time": "2026-05-24T20:00:00",
+        "observed_at": "2026-05-24T20:00:00",
+    }
+    full_incoming = {
+        **fragment_existing,
+        "content": "LABTDEDUP-L21密理博UFC901096超滤管[15ml10KD]订2根共计101*8=808元顾欣-陈秋平老师LABTDEDUP-L21",
+        "content_body": "LABTDEDUP-L21密理博UFC901096超滤管[15ml10KD]订2根共计101*8=808元顾欣-陈秋平老师LABTDEDUP-L21",
+        "message_fingerprint": "new",
+        "captured_at": "2026-05-24T20:00:07",
+        "message_time": "2026-05-24T20:00:07",
+        "observed_at": "2026-05-24T20:00:07",
+    }
+    merged_complete = merge_message(fragment_existing, full_incoming, source_module="smart_recorder")
+    assert_equal(merged_complete.get("message_time"), "2026-05-24T20:00:07", "more-complete OCR merge should use program-read message time")
+    assert_equal(merged_complete.get("observed_at"), "2026-05-24T20:00:07", "more-complete OCR merge should refresh observed_at")
+    assert_true("UFC901096" in str(merged_complete.get("content") or ""), "more-complete OCR merge should keep full content")
     return {"name": "ocr_near_duplicate_deduplication", "ok": True}
 
 
@@ -378,13 +535,41 @@ def check_admin_api_surfaces() -> dict[str, Any]:
 def cleanup_runtime() -> None:
     root = tenant_runtime_root(TEST_TENANT)
     if root.exists():
-        shutil.rmtree(root)
+        remove_tree_tolerating_locked_logs(root)
     rag_root = tenant_root(TEST_TENANT) / "rag_experience"
     if rag_root.exists():
-        shutil.rmtree(rag_root)
+        remove_tree_tolerating_locked_logs(rag_root)
     raw_inbox = tenant_raw_inbox_root(TEST_TENANT)
     if raw_inbox.exists():
-        shutil.rmtree(raw_inbox)
+        remove_tree_tolerating_locked_logs(raw_inbox)
+
+
+def remove_tree_tolerating_locked_logs(path: Path) -> None:
+    try:
+        shutil.rmtree(path)
+        return
+    except PermissionError:
+        pass
+    if not path.exists():
+        return
+    for child in path.iterdir():
+        try:
+            if child.is_dir():
+                remove_tree_tolerating_locked_logs(child)
+                if child.exists():
+                    try:
+                        child.rmdir()
+                    except OSError:
+                        pass
+            else:
+                child.unlink()
+        except PermissionError:
+            if child.suffix.lower() != ".log":
+                raise
+    try:
+        path.rmdir()
+    except OSError:
+        pass
 
 
 def cleanup_candidates(candidate_ids: list[str]) -> None:

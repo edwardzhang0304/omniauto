@@ -63,6 +63,7 @@ def main() -> int:
         check_quality_gate_requires_clear_recommendation(),
         check_brain_prompt_separates_style_from_content_basis(),
         check_brain_prompt_includes_runtime_principles_without_authorizing_facts(),
+        check_brain_input_keeps_referenced_context_auxiliary(),
         check_brain_prompt_compacts_large_context_under_timeout_budget(),
         check_repair_prompt_preserves_authority_boundaries(),
         check_shadow_non_blocking_defers_without_llm(),
@@ -504,6 +505,46 @@ def check_brain_prompt_includes_runtime_principles_without_authorizing_facts() -
             "identity_guard": (principles.get("identity_guard") or {}).get("enabled"),
             "authority": principles.get("authority"),
         },
+    )
+
+
+def check_brain_input_keeps_referenced_context_auxiliary() -> CaseResult:
+    settings = brain_module.effective_brain_settings(base_config(base_plan()))
+    evidence_pack = fake_evidence_pack(include_product=True)
+    brain_input = brain_module.build_brain_input(
+        settings=settings,
+        target_name="实验订货群",
+        target_state={"conversation_context": {}},
+        batch=[
+            {
+                "id": "msg-ref-1",
+                "sender": "许聪",
+                "content": "这个还有吗",
+                "quoted_fragments": [{"text": "张老师：旧消息 试剂盒 9盒 1元", "reason": "quote_line"}],
+                "quality_flags": ["quote_contamination"],
+            }
+        ],
+        combined="这个还有吗",
+        raw_capture={"conversation": {"conversation_id": "c1", "chat_type": "group"}},
+        evidence_pack=evidence_pack,
+    )
+    current = brain_input["current_message"]
+    assert_true(current.get("clean_text") == "这个还有吗", "clean current text should not include quote content")
+    assert_true(current.get("referenced_context"), "quote should be preserved as referenced context")
+    assert_true(
+        "试剂盒" in current["referenced_context"][0]["text"],
+        f"referenced context should carry quote text for pronoun understanding: {current}",
+    )
+    prompt_pack = brain_module.build_brain_prompt_pack(settings=settings, brain_input=brain_input)
+    slim_current = prompt_pack["user"]["brain_input"]["current_message"]
+    assert_true(
+        "referenced_context_policy" in slim_current,
+        "prompt should state quote context policy separately from current message",
+    )
+    return CaseResult(
+        "brain_input_keeps_referenced_context_auxiliary",
+        True,
+        {"referenced_context_count": len(current.get("referenced_context") or [])},
     )
 
 

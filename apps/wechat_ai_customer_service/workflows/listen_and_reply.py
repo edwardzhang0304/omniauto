@@ -53,6 +53,10 @@ from apps.wechat_ai_customer_service.llm_config import (
     resolve_llm_tier_model,
 )
 from apps.wechat_ai_customer_service.platform_safety_rules import guard_term_set, load_platform_safety_rules
+from apps.wechat_ai_customer_service.wechat_message_envelope import (
+    apply_message_envelope_to_record,
+    build_message_envelope,
+)
 from apps.wechat_ai_customer_service.wechat_message_normalizer import normalize_wechat_message_record
 from final_visible_llm_polish import maybe_polish_customer_visible_reply
 from knowledge_loader import build_evidence_pack
@@ -6289,13 +6293,24 @@ def normalize_messages_for_semantic_processing(
             known_speakers=known_speakers,
             allow_unlisted_name_like_prefix=allow_unlisted_name_like_prefix,
         )
-        if next_item.get("ocr_speaker_prefix"):
+        envelope = build_message_envelope(
+            next_item,
+            source_adapter=str(next_item.get("source_adapter") or ""),
+            conversation={
+                "target_name": target_name,
+                "conversation_type": conversation_type,
+            },
+        )
+        next_item = apply_message_envelope_to_record(next_item, envelope)
+        if next_item.get("ocr_speaker_prefix") or next_item.get("quoted_fragments") or next_item.get("quality_flags"):
             changed.append(
                 {
                     "id": str(next_item.get("id") or next_item.get("message_id") or ""),
                     "speaker_name": str(next_item.get("speaker_name") or ""),
                     "original_preview": str(next_item.get("original_content") or "")[:120],
                     "content_preview": str(next_item.get("content") or "")[:120],
+                    "quality_flags": list(next_item.get("quality_flags") or []),
+                    "quoted_fragment_count": len(next_item.get("quoted_fragments") or []),
                 }
             )
         normalized.append(next_item)

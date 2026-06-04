@@ -86,6 +86,13 @@
     "use_llm": true,
     "notify_enabled": false
   },
+  "message_envelope": {
+    "message_envelope_enabled": true,
+    "ocr_bubble_geometry_enabled": true,
+    "recorder_strict_clean_content_enabled": true,
+    "recorder_auto_learn_default_enabled": false,
+    "customer_service_reference_context_enabled": true
+  },
   "history_backfill": {
     "enabled": true,
     "mode": "anchor_until_found",

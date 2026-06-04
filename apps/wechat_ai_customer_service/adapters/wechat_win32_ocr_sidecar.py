@@ -60,6 +60,11 @@ except Exception as exc:  # pragma: no cover - allows pure parser tests without 
     win32con = _Win32ConFallback()  # type: ignore[assignment]
 from PIL import Image, ImageGrab, ImageStat
 
+from apps.wechat_ai_customer_service.wechat_message_envelope import (
+    apply_message_envelope_to_record,
+    build_message_envelope,
+)
+
 try:
     from rapidocr_onnxruntime import RapidOCR
     _OCR_IMPORT_ERROR = ""
@@ -4834,25 +4839,53 @@ def parse_messages_from_ocr(ocr_items: list[dict[str, Any]], image_size: tuple[i
 
     messages: list[dict[str, Any]] = []
     for group in grouped:
-        content = "\n".join(str(item.get("text") or "").strip() for item in group if str(item.get("text") or "").strip())
-        content = normalize_message_content(content)
+        raw_content = "\n".join(str(item.get("text") or "").strip() for item in group if str(item.get("text") or "").strip())
+        content = normalize_message_content(raw_content)
         if not content:
             continue
         side = str(group[0].get("side") or "unknown")
         y = float(group[0].get("center_y") or 0)
+        rect = {
+            "left": int(min(float(item.get("left") or 0) for item in group)),
+            "top": int(min(float(item.get("top") or 0) for item in group)),
+            "right": int(max(float(item.get("right") or 0) for item in group)),
+            "bottom": int(max(float(item.get("bottom") or 0) for item in group)),
+        }
+        quality_flags: list[str] = []
+        if len(group) > 1:
+            gaps = [
+                max(0.0, float(group[index].get("top") or 0) - float(group[index - 1].get("bottom") or 0))
+                for index in range(1, len(group))
+            ]
+            avg_height = sum(max(1.0, float(item.get("bottom") or 0) - float(item.get("top") or 0)) for item in group) / len(group)
+            if any(gap > max(18.0, avg_height * 1.8) for gap in gaps):
+                quality_flags.append("multi_bubble_possible_merge")
+        ocr_confidence = min(float(item.get("confidence") or 0) for item in group)
         digest = hashlib.sha1(f"{target}|{side}|{round(y)}|{content}".encode("utf-8")).hexdigest()[:16]
-        messages.append(
-            {
-                "id": f"win32_ocr:{digest}",
-                "type": "text",
-                "sender": "self" if side == "self" else "unknown",
-                "sender_role": "self" if side == "self" else "unknown",
-                "content": content,
-                "time": "",
-                "source_adapter": "win32_ocr",
-                "ocr_confidence": min(float(item.get("confidence") or 0) for item in group),
-            }
+        record = {
+            "id": f"win32_ocr:{digest}",
+            "type": "text",
+            "sender": "self" if side == "self" else "unknown",
+            "sender_role": "self" if side == "self" else "unknown",
+            "content": content,
+            "content_raw_ocr": raw_content,
+            "time": "",
+            "source_adapter": "win32_ocr",
+            "ocr_confidence": ocr_confidence,
+            "bubble_rect": rect,
+            "ocr_items": group,
+            "quality_flags": quality_flags,
+        }
+        envelope = build_message_envelope(
+            record,
+            source_adapter="win32_ocr",
+            conversation={"target_name": target, "conversation_type": "group" if "群" in str(target or "") else "unknown"},
+            ocr_items=group,
+            bubble_rect=rect,
         )
+        message = apply_message_envelope_to_record(record, envelope)
+        if str(message.get("content") or "").strip():
+            messages.append(message)
     return messages
 
 

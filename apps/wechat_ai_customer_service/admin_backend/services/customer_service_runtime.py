@@ -147,7 +147,17 @@ def write_runtime_status(
     }
     payload.update({key: value for key, value in extra.items() if value is not None})
     path = runtime_status_path(tenant_id)
-    atomic_write_json(path, payload)
+    try:
+        atomic_write_json(path, payload)
+    except OSError as exc:
+        payload.update(
+            {
+                "ok": False,
+                "write_failed": True,
+                "write_error": repr(exc),
+                "write_path": str(path),
+            }
+        )
     return payload
 
 

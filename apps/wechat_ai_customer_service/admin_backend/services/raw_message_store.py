@@ -18,6 +18,11 @@ from apps.wechat_ai_customer_service.admin_backend.services.knowledge_contaminat
     message_learning_exclusion_reason,
 )
 from apps.wechat_ai_customer_service.wechat_message_normalizer import normalize_wechat_message_record
+from apps.wechat_ai_customer_service.wechat_message_envelope import (
+    OCR_RPA_ADAPTERS,
+    apply_message_envelope_to_record,
+    build_message_envelope,
+)
 
 
 MAX_FILE_RECORDS = 10000
@@ -366,30 +371,57 @@ def normalize_message(
     learning_enabled: bool,
 ) -> dict[str, Any]:
     original_record = record
-    record = normalize_wechat_message_record(
+    raw_source_adapter = str(record.get("source_adapter") or "wxauto4")
+    has_ocr_payload = bool(record.get("ocr_items") or record.get("content_raw_ocr") or record.get("raw_ocr_text"))
+    is_ocr_record = raw_source_adapter in OCR_RPA_ADAPTERS or has_ocr_payload
+    timestamp = now()
+    ocr_screen_time_text = ""
+    if is_ocr_record:
+        ocr_screen_time_text = str(record.get("screen_time_text") or record.get("time") or record.get("message_time") or "").strip()
+    if raw_source_adapter in OCR_RPA_ADAPTERS or has_ocr_payload:
+        record = normalize_wechat_message_record(
+            record,
+            conversation_type=str(conversation.get("conversation_type") or "unknown"),
+            target_name=str(conversation.get("target_name") or ""),
+        )
+    else:
+        record = dict(record)
+    if is_ocr_record and ocr_screen_time_text and not str(record.get("screen_time_text") or "").strip():
+        record["screen_time_text"] = ocr_screen_time_text
+    envelope = build_message_envelope(
         record,
-        conversation_type=str(conversation.get("conversation_type") or "unknown"),
-        target_name=str(conversation.get("target_name") or ""),
+        source_adapter=str(record.get("source_adapter") or ""),
+        conversation=conversation,
+        captured_at=timestamp if is_ocr_record else None,
     )
+    record = apply_message_envelope_to_record(record, envelope)
     content = str(record.get("content") or record.get("text") or "")
     message_id = str(record.get("id") or record.get("message_id") or "")
     sender = str(record.get("sender") or "")
-    message_time = str(record.get("time") or record.get("message_time") or "")
+    source_adapter = str(record.get("source_adapter") or "wxauto4")
+    captured_at = str(record.get("captured_at") or envelope.get("captured_at") or "")
+    if source_adapter in OCR_RPA_ADAPTERS:
+        message_time = captured_at
+    else:
+        message_time = str(record.get("time") or record.get("message_time") or captured_at or "")
     content_type = str(record.get("type") or record.get("content_type") or "text")
     sender_role = normalize_sender_role(record, sender=sender)
     if conversation.get("conversation_type") == "group" and record.get("speaker_name") and sender_role == "unknown":
         sender_role = "group_member"
     content_fingerprint = normalized_content_fingerprint(content)
     explicit_dedupe_key = str(record.get("dedupe_key") or "").strip()
+    bubble_id = str(record.get("bubble_id") or envelope.get("bubble_id") or "").strip()
     if explicit_dedupe_key:
         dedupe_seed = explicit_dedupe_key
+    elif bubble_id:
+        dedupe_seed = "|".join([conversation["conversation_id"], sender, content_type, "bubble", bubble_id])
     elif content_fingerprint:
         dedupe_seed = "|".join([conversation["conversation_id"], sender, content_type, content_fingerprint, message_time])
     else:
         dedupe_seed = message_id or "|".join([conversation["conversation_id"], sender, content_type, message_time])
     dedupe_key = stable_digest(f"{tenant_id}:{conversation['conversation_id']}:{dedupe_seed}", 32)
     raw_message_id = "raw_msg_" + dedupe_key[:20]
-    timestamp = now()
+    observed_at = captured_at if source_adapter in OCR_RPA_ADAPTERS and captured_at else str(record.get("observed_at") or timestamp)
     requested_learning = bool(learning_enabled)
     exclusion_reason = message_learning_exclusion_reason(
         record,
@@ -405,6 +437,7 @@ def normalize_message(
         "target_name": conversation.get("target_name") or "",
         "group_name": conversation.get("group_name") or "",
         "message_id": message_id,
+        "bubble_id": bubble_id,
         "sender": sender,
         "sender_role": sender_role,
         "group_member_name": str(record.get("group_member_name") or record.get("speaker_name") or (sender if conversation.get("conversation_type") == "group" else "")),
@@ -413,16 +446,30 @@ def normalize_message(
         "ocr_speaker_prefix": record.get("ocr_speaker_prefix") if isinstance(record.get("ocr_speaker_prefix"), dict) else {},
         "content_type": content_type,
         "content": content,
+        "content_body": content,
+        "content_clean": content,
+        "content_raw_ocr": str(record.get("content_raw_ocr") or ""),
+        "quoted_fragments": record.get("quoted_fragments") if isinstance(record.get("quoted_fragments"), list) else [],
+        "excluded_fragments": record.get("excluded_fragments") if isinstance(record.get("excluded_fragments"), list) else [],
+        "quality_flags": record.get("quality_flags") if isinstance(record.get("quality_flags"), list) else [],
+        "captured_at": captured_at,
+        "screen_time_text": str(record.get("screen_time_text") or ""),
+        "bubble_rect": record.get("bubble_rect") if isinstance(record.get("bubble_rect"), dict) else {},
+        "ocr_items": record.get("ocr_items") if isinstance(record.get("ocr_items"), list) else [],
         "message_time": message_time,
         "message_fingerprint": content_fingerprint,
-        "observed_at": str(record.get("observed_at") or timestamp),
+        "observed_at": observed_at,
         "updated_at": timestamp,
         "source_modules": [source_module],
-        "source_adapter": str(record.get("source_adapter") or "wxauto4"),
+        "source_adapter": source_adapter,
         "learning_enabled": final_learning_enabled,
         "excluded_reason": str(record.get("excluded_reason") or exclusion_reason or ""),
         "dedupe_key": dedupe_key,
-        "raw_payload": {**record, "_original_raw_payload": original_record} if record is not original_record else record,
+        "raw_payload": {
+            **record,
+            "message_envelope": envelope,
+            "_original_raw_payload": original_record,
+        },
     }
 
 
@@ -436,11 +483,15 @@ def merge_message(existing: dict[str, Any], incoming: dict[str, Any], *, source_
     merged["learning_enabled"] = bool(merged.get("learning_enabled", True)) and bool(incoming.get("learning_enabled", True))
     existing_key = fuzzy_ocr_content_key(str(merged.get("content") or ""))
     incoming_key = fuzzy_ocr_content_key(str(incoming.get("content") or ""))
-    if (
+    exact_ocr_content_repeat = bool(existing_key and incoming_key and existing_key == incoming_key)
+    incoming_more_complete = bool(
         existing_key
         and incoming_key
         and len(incoming_key) > len(existing_key) + 4
         and existing_key in incoming_key
+    )
+    if (
+        incoming_more_complete
     ):
         merged["content"] = str(incoming.get("content") or merged.get("content") or "")
         merged["message_fingerprint"] = str(incoming.get("message_fingerprint") or merged.get("message_fingerprint") or "")
@@ -449,6 +500,25 @@ def merge_message(existing: dict[str, Any], incoming: dict[str, Any], *, source_
             merged["message_id"] = str(incoming.get("message_id") or "")
     if incoming.get("excluded_reason") and not merged["learning_enabled"]:
         merged["excluded_reason"] = str(incoming.get("excluded_reason") or merged.get("excluded_reason") or "")
+    for key in (
+        "content_body",
+        "content_clean",
+        "content_raw_ocr",
+        "captured_at",
+        "message_time",
+        "observed_at",
+        "screen_time_text",
+        "bubble_id",
+    ):
+        if incoming.get(key):
+            if key in {"captured_at", "message_time", "observed_at", "screen_time_text", "bubble_id"} and merged.get(key) and not incoming_more_complete:
+                continue
+            merged[key] = incoming.get(key)
+    for key in ("quoted_fragments", "excluded_fragments", "quality_flags", "ocr_items"):
+        if incoming.get(key):
+            merged[key] = incoming.get(key)
+    if incoming.get("bubble_rect"):
+        merged["bubble_rect"] = incoming.get("bubble_rect")
     return merged
 
 
@@ -470,15 +540,19 @@ def find_ocr_near_duplicate(existing_records: Any, incoming: dict[str, Any]) -> 
             continue
         if str(candidate.get("content_type") or "") != str(incoming.get("content_type") or ""):
             continue
-        incoming_time = str(incoming.get("message_time") or "")
-        candidate_time = str(candidate.get("message_time") or "")
-        if incoming_time and candidate_time and incoming_time != candidate_time:
-            continue
         candidate_modules = {str(item) for item in candidate.get("source_modules", []) if str(item)}
         if "smart_recorder" not in candidate_modules and str(candidate.get("source_adapter") or "") != "win32_ocr":
             continue
         candidate_key = fuzzy_ocr_content_key(str(candidate.get("content") or ""))
         if len(candidate_key) < OCR_PARTIAL_DEDUPE_MIN_LENGTH:
+            continue
+        if incoming_key == candidate_key and (
+            ocr_message_identity_same(incoming, candidate)
+            or ocr_source_times_same(incoming, candidate)
+            or ocr_observed_times_very_close(incoming, candidate)
+        ):
+            if best is None or 2.0 > best[0]:
+                best = (2.0, candidate)
             continue
         partial_score = ocr_partial_duplicate_score(incoming_key, candidate_key)
         if partial_score and ocr_observed_times_close(incoming, candidate):
@@ -524,6 +598,50 @@ def ocr_observed_times_close(left: dict[str, Any], right: dict[str, Any]) -> boo
     return abs((left_time - right_time).total_seconds()) <= OCR_PARTIAL_DEDUPE_WINDOW_SECONDS
 
 
+def ocr_observed_times_very_close(left: dict[str, Any], right: dict[str, Any]) -> bool:
+    left_time = parse_time_text(str(left.get("observed_at") or left.get("message_time") or ""))
+    right_time = parse_time_text(str(right.get("observed_at") or right.get("message_time") or ""))
+    if left_time is None or right_time is None:
+        return False
+    return abs((left_time - right_time).total_seconds()) <= 45
+
+
+def ocr_message_identity_same(left: dict[str, Any], right: dict[str, Any]) -> bool:
+    for key in ("message_id", "bubble_id"):
+        left_value = str(left.get(key) or "").strip()
+        right_value = str(right.get(key) or "").strip()
+        if left_value and right_value and left_value == right_value:
+            return True
+    return False
+
+
+def ocr_source_times_same(left: dict[str, Any], right: dict[str, Any]) -> bool:
+    left_text = ocr_source_time_text(left)
+    right_text = ocr_source_time_text(right)
+    if not left_text or not right_text:
+        return False
+    if left_text == right_text:
+        return True
+    left_time = parse_time_text(left_text)
+    right_time = parse_time_text(right_text)
+    if left_time is None or right_time is None:
+        return False
+    return abs((left_time - right_time).total_seconds()) <= 1
+
+
+def ocr_source_time_text(record: dict[str, Any]) -> str:
+    direct = str(record.get("screen_time_text") or "").strip()
+    if direct:
+        return direct
+    raw_payload = record.get("raw_payload") if isinstance(record.get("raw_payload"), dict) else {}
+    original = raw_payload.get("_original_raw_payload") if isinstance(raw_payload.get("_original_raw_payload"), dict) else {}
+    for key in ("screen_time_text", "time", "message_time", "captured_at"):
+        value = str(original.get(key) or "").strip()
+        if value:
+            return value
+    return str(record.get("message_time") or "").strip()
+
+
 def normalize_conversation_type(value: str) -> str:
     text = str(value or "").strip().lower()
     if text in {"private", "group", "file_transfer", "system", "unknown"}:
@@ -564,7 +682,10 @@ def now() -> str:
 
 
 def message_time_text(message: dict[str, Any]) -> str:
-    return str(message.get("message_time") or message.get("observed_at") or "")
+    source_adapter = str(message.get("source_adapter") or "").strip().lower()
+    if source_adapter in OCR_RPA_ADAPTERS:
+        return str(message.get("captured_at") or message.get("observed_at") or message.get("message_time") or "")
+    return str(message.get("message_time") or message.get("time") or message.get("observed_at") or message.get("captured_at") or "")
 
 
 def parse_time_text(value: str) -> datetime | None:

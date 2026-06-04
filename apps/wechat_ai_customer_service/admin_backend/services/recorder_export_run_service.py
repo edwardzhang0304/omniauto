@@ -19,6 +19,7 @@ from apps.wechat_ai_customer_service.admin_backend.services.raw_message_store im
 from apps.wechat_ai_customer_service.admin_backend.services.recorder_module_registry import RecorderModuleRegistryService
 from apps.wechat_ai_customer_service.admin_backend.services.work_queue import WorkQueueService
 from apps.wechat_ai_customer_service.knowledge_paths import active_tenant_id, tenant_runtime_root
+from apps.wechat_ai_customer_service.wechat_message_envelope import OCR_RPA_ADAPTERS, recorder_view_from_message
 from apps.wechat_ai_customer_service.workflows.generate_review_candidates import call_deepseek_json
 
 
@@ -76,6 +77,7 @@ LLM_ORDER_INTENT_TERMS = ("订", "下单", "代付", "补订", "再订", "买", 
 DEFAULT_INCLUDE_RECORD_TYPES = ("order_item", "gift_item")
 FOLLOWUP_CONFIRM_RE = re.compile(r"^(?:是的|对|好的|嗯|行|确认|收到|ok|OK|嗯嗯)\s*[,，:：]?\s*(?P<body>.+)?$")
 FOLLOWUP_SETTLEMENT_HINTS = ("合计", "共计", "满减", "优惠", "抹零", "返款", "抵扣", "欠款", "预存")
+VALIDATION_MARKER_RE = re.compile(r"【\s*验收标记[^】]*】|验收标记\s*[:：]?\s*[A-Za-z0-9_.-]{6,}", re.IGNORECASE)
 INVENTORY_STATUS_RE = re.compile(
     r"(?:^|[\s，,。；;])(?:现货|库存)(?:[^，,。；;\n\r]{0,24})?(?:差|缺)\s*\d+(?:\.\d+)?\s*(?:瓶|盒|箱|包|支|套|个|件|板|提|组)(?:[^，,。；;\n\r]{0,24})?(?:满|凑)\s*\d+\s*(?:箱|盒|包|件|套)",
     re.IGNORECASE,
@@ -131,10 +133,30 @@ DEFAULT_LAB_BRAND_ALIASES = (
     "毕得医药",
     "白鲨",
     "杰乐普",
+    "思科捷",
 )
 CONFIDENCE_COLOR_GREEN = PatternFill("solid", fgColor="E8F7EE")
 CONFIDENCE_COLOR_YELLOW = PatternFill("solid", fgColor="FFF6DB")
 CONFIDENCE_COLOR_RED = PatternFill("solid", fgColor="FDE8E8")
+EXPORT_RED_RISK_FLAGS = {
+    "bubble_boundary_ambiguous",
+    "multi_bubble_possible_merge",
+    "quote_contamination",
+    "long_press_overlay_detected",
+    "missing_product",
+    "person_as_brand_candidate",
+    "sender_name_in_content",
+}
+EXPORT_YELLOW_RISK_FLAGS = {
+    "ocr_low_confidence",
+    "speaker_prefix_split_from_ocr_text",
+    "missing_quantity",
+    "missing_price",
+    "name_from_recent_context",
+    "quantity_defaulted_to_one",
+    "brand_from_weak_context",
+    "spec_from_weak_context",
+}
 
 
 def now_iso() -> str:
@@ -149,6 +171,49 @@ def progress_between(start: float, end: float, current: int, total: int) -> floa
 
 def stable_digest(value: str, length: int = 16) -> str:
     return hashlib.sha256(value.encode("utf-8")).hexdigest()[:length]
+
+
+def recorder_message_view(message: dict[str, Any]) -> dict[str, Any]:
+    return recorder_view_from_message(message if isinstance(message, dict) else {})
+
+
+def recorder_content_text(message: dict[str, Any]) -> str:
+    view = recorder_message_view(message)
+    return str(view.get("content_for_export") or message.get("content_clean") or message.get("content_body") or message.get("content") or "").strip()
+
+
+def recorder_time_text(message: dict[str, Any]) -> str:
+    view = recorder_message_view(message)
+    source_adapter = str(message.get("source_adapter") or "").strip().lower()
+    if source_adapter in OCR_RPA_ADAPTERS:
+        return str(view.get("captured_at") or message.get("captured_at") or message.get("observed_at") or message.get("message_time") or "")
+    return str(message.get("message_time") or message.get("time") or message.get("observed_at") or view.get("captured_at") or message.get("captured_at") or "")
+
+
+def recorder_message_for_export(message: dict[str, Any]) -> dict[str, Any]:
+    item = dict(message or {})
+    view = recorder_message_view(item)
+    content = str(view.get("content_for_export") or "").strip()
+    captured_at = str(view.get("captured_at") or "").strip()
+    if content:
+        item["content"] = content
+        item["content_body"] = content
+        item["content_clean"] = content
+    if captured_at:
+        item["captured_at"] = captured_at
+        source_adapter = str(item.get("source_adapter") or "").strip().lower()
+        if source_adapter in OCR_RPA_ADAPTERS:
+            item["message_time"] = captured_at
+            item.setdefault("observed_at", captured_at)
+        elif not str(item.get("message_time") or "").strip():
+            item["message_time"] = str(item.get("time") or item.get("observed_at") or captured_at)
+    item["risk_flags"] = list(view.get("risk_flags") or [])
+    item["quality_flags"] = list(view.get("quality_flags") or item.get("quality_flags") or [])
+    item["quoted_fragments"] = list(view.get("quoted_fragments") or item.get("quoted_fragments") or [])
+    item["excluded_fragments"] = list(view.get("excluded_fragments") or item.get("excluded_fragments") or [])
+    item["bubble_id"] = str(view.get("bubble_id") or item.get("bubble_id") or "")
+    item["speaker_name"] = str(view.get("speaker_name") or item.get("speaker_name") or "")
+    return item
 
 
 class RecorderExportRunService:
@@ -602,7 +667,7 @@ class RecorderExportRunService:
                 message_id = str(item.get("raw_message_id") or item.get("dedupe_key") or "")
                 if message_id:
                     merged[message_id] = item
-        return sorted(merged.values(), key=lambda item: str(item.get("observed_at") or ""), reverse=True)
+        return sorted(merged.values(), key=recorder_time_text, reverse=True)
 
     def _build_workbook(self, run: dict[str, Any], messages: list[dict[str, Any]], *, run_id: str = "") -> dict[str, Any]:
         module_key = str(run.get("module_key") or "")
@@ -640,7 +705,7 @@ class RecorderExportRunService:
         workbook = Workbook()
         sheet = workbook.active
         sheet.title = "记录导出"
-        headers = ["会话ID", "会话类型", "发送人", "消息类型", "消息时间", "消息内容", "原始消息ID"]
+        headers = ["会话ID", "会话类型", "发送人", "消息类型", "程序读取时间", "消息内容", "原始消息ID", "群成员名", "OCR质量标志", "被排除引用"]
         header_fill = PatternFill("solid", fgColor="EAF2F8")
         for column, header in enumerate(headers, start=1):
             cell = sheet.cell(row=1, column=column, value=header)
@@ -652,13 +717,16 @@ class RecorderExportRunService:
                 item.get("conversation_type") or "",
                 item.get("sender") or item.get("sender_role") or "",
                 item.get("content_type") or "",
-                item.get("message_time") or item.get("observed_at") or "",
-                item.get("content") or "",
+                recorder_time_text(item),
+                recorder_content_text(item),
                 item.get("raw_message_id") or "",
+                item.get("speaker_name") or item.get("group_member_name") or "",
+                ",".join(str(flag) for flag in item.get("quality_flags", []) if str(flag)),
+                "; ".join(str(fragment.get("text") or "") for fragment in item.get("quoted_fragments", []) if isinstance(fragment, dict)),
             ]
             for column, value in enumerate(values, start=1):
                 sheet.cell(row=row_index, column=column, value=value)
-        widths = [24, 14, 16, 12, 20, 80, 28]
+        widths = [24, 14, 16, 12, 20, 80, 28, 16, 28, 42]
         for idx, width in enumerate(widths, start=1):
             sheet.column_dimensions[sheet.cell(row=1, column=idx).column_letter].width = width
 
@@ -670,7 +738,7 @@ class RecorderExportRunService:
     def _build_raw_message_csv(self, run: dict[str, Any], messages: list[dict[str, Any]]) -> Path:
         self.files_root.mkdir(parents=True, exist_ok=True)
         output_path = self.files_root / f"{run['run_id']}.csv"
-        headers = ["会话ID", "会话类型", "发送人", "消息类型", "消息时间", "消息内容", "原始消息ID"]
+        headers = ["会话ID", "会话类型", "发送人", "消息类型", "程序读取时间", "消息内容", "原始消息ID", "群成员名", "OCR质量标志", "被排除引用"]
         with output_path.open("w", encoding="utf-8-sig", newline="") as handle:
             writer = csv.writer(handle)
             writer.writerow(headers)
@@ -681,9 +749,12 @@ class RecorderExportRunService:
                         item.get("conversation_type") or "",
                         item.get("sender") or item.get("sender_role") or "",
                         item.get("content_type") or "",
-                        item.get("message_time") or item.get("observed_at") or "",
-                        item.get("content") or "",
+                        recorder_time_text(item),
+                        recorder_content_text(item),
                         item.get("raw_message_id") or "",
+                        item.get("speaker_name") or item.get("group_member_name") or "",
+                        ",".join(str(flag) for flag in item.get("quality_flags", []) if str(flag)),
+                        "; ".join(str(fragment.get("text") or "") for fragment in item.get("quoted_fragments", []) if isinstance(fragment, dict)),
                     ]
                 )
         return output_path
@@ -740,7 +811,7 @@ class RecorderExportRunService:
             meta.cell(row=index, column=1, value=key).font = Font(bold=True)
             meta.cell(row=index, column=2, value=value)
         meta.cell(row=8, column=1, value="抽取结果（完整）").font = Font(bold=True)
-        report_headers = ["日期", "时间", "姓名", "责任人", "货品", "数量", "单位", "售价", "总售价", "置信度", "需复核", "记录类型", "证据消息ID", "证据片段"]
+        report_headers = ["日期", "时间", "姓名", "责任人", "货品", "数量", "单位", "售价", "总售价", "置信度", "需复核", "记录类型", "风险标志", "证据消息ID", "证据片段"]
         for column, header in enumerate(report_headers, start=1):
             cell = meta.cell(row=9, column=column, value=header)
             cell.font = Font(bold=True)
@@ -759,12 +830,13 @@ class RecorderExportRunService:
                 float(item.get("confidence") or 0),
                 "是" if item.get("needs_review") else "",
                 item.get("record_type") or "order_item",
+                ",".join(str(x) for x in item.get("risk_flags", []) if str(x)),
                 ",".join(str(x) for x in item.get("evidence_message_ids", []) if str(x)),
                 item.get("evidence_text") or "",
             ]
             for column, value in enumerate(values, start=1):
                 meta.cell(row=row_index, column=column, value=value)
-        for idx, width in enumerate([10, 10, 14, 14, 24, 10, 10, 10, 10, 10, 10, 12, 24, 42], start=1):
+        for idx, width in enumerate([10, 10, 14, 14, 24, 10, 10, 10, 10, 10, 10, 12, 22, 24, 42], start=1):
             meta.column_dimensions[meta.cell(row=9, column=idx).column_letter].width = width
 
         self.files_root.mkdir(parents=True, exist_ok=True)
@@ -883,7 +955,10 @@ class RecorderExportRunService:
         content_types = {str(item).lower() for item in (config.get("supported_content_types") or ["text", "quote"])}
         self._active_brand_aliases = self._normalize_brand_aliases(config.get("brand_aliases"))
 
-        ordered_messages = sorted(messages, key=lambda item: str(item.get("message_time") or item.get("observed_at") or ""))
+        ordered_messages = sorted(
+            [recorder_message_for_export(item) for item in messages if isinstance(item, dict)],
+            key=recorder_time_text,
+        )
         total_messages = len(ordered_messages)
         candidates: list[dict[str, Any]] = []
         rows: list[dict[str, Any]] = []
@@ -1255,12 +1330,133 @@ class RecorderExportRunService:
                 stage_detail="正在汇总抽取结果并准备生成 Excel",
                 extra={"unit_label": "消息"},
             )
+        rows = self._dedupe_close_export_rows(rows)
         return rows, {
             "llm_calls": llm_extract_calls,
             "llm_segment_calls": llm_segment_calls,
             "llm_repair_calls": llm_repair_calls,
             "llm_brand_calls": llm_brand_calls,
         }
+
+    def _dedupe_close_export_rows(self, rows: list[dict[str, Any]], *, max_minutes: int = 10) -> list[dict[str, Any]]:
+        if not rows:
+            return []
+        max_seconds = max(1, int(max_minutes or 10)) * 60
+        kept: list[dict[str, Any]] = []
+        index_by_key: dict[tuple[str, ...], list[int]] = {}
+        for row in rows:
+            candidate = dict(row) if isinstance(row, dict) else {}
+            if not candidate:
+                continue
+            key = self._close_export_duplicate_key(candidate)
+            if not key:
+                kept.append(candidate)
+                continue
+            candidate_seconds = self._export_row_time_seconds(candidate)
+            duplicate_index: int | None = None
+            for kept_index in reversed(index_by_key.get(key, [])):
+                existing = kept[kept_index]
+                existing_seconds = self._export_row_time_seconds(existing)
+                if candidate_seconds is None or existing_seconds is None:
+                    continue
+                if abs(candidate_seconds - existing_seconds) <= max_seconds:
+                    duplicate_index = kept_index
+                    break
+            if duplicate_index is None:
+                index_by_key.setdefault(key, []).append(len(kept))
+                kept.append(candidate)
+                continue
+            kept[duplicate_index] = self._prefer_close_duplicate_export_row(kept[duplicate_index], candidate)
+        return kept
+
+    def _close_export_duplicate_key(self, row: dict[str, Any]) -> tuple[str, ...]:
+        product = self._normalize_export_duplicate_text(row.get("product_name"), remove_spaces=True)
+        sale_price = self._normalize_export_duplicate_number(row.get("sale_price"))
+        total_sale = self._normalize_export_duplicate_number(row.get("total_sale"))
+        if not product or not (sale_price or total_sale):
+            return ()
+        return (
+            self._normalize_export_duplicate_text(row.get("date")),
+            self._normalize_export_duplicate_text(row.get("name"), remove_spaces=True),
+            self._normalize_export_duplicate_text(row.get("owner"), remove_spaces=True),
+            self._normalize_export_duplicate_text(row.get("receiver"), remove_spaces=True),
+            self._normalize_export_duplicate_text(row.get("record_type")),
+            self._normalize_export_duplicate_text(row.get("brand"), remove_spaces=True),
+            product,
+            self._normalize_spec_key(str(row.get("spec") or "")),
+            self._normalize_export_duplicate_number(row.get("quantity")),
+            self._normalize_export_duplicate_text(row.get("unit"), remove_spaces=True),
+            sale_price,
+            total_sale,
+        )
+
+    @staticmethod
+    def _normalize_export_duplicate_text(value: Any, *, remove_spaces: bool = False) -> str:
+        text = re.sub(r"\s+", " ", str(value or "").replace("\xa0", " ")).strip().lower()
+        if remove_spaces:
+            text = re.sub(r"\s+", "", text)
+        return text
+
+    def _normalize_export_duplicate_number(self, value: Any) -> str:
+        text = str(value or "").strip()
+        if not text:
+            return ""
+        number = self._to_number(text)
+        if number:
+            return self._format_number(number)
+        return self._normalize_export_duplicate_text(text, remove_spaces=True)
+
+    @staticmethod
+    def _export_row_time_seconds(row: dict[str, Any]) -> int | None:
+        text = str(row.get("time") or "").strip()
+        match = re.fullmatch(r"(?P<hour>\d{1,2}):(?P<minute>\d{2})(?::(?P<second>\d{2}))?", text)
+        if not match:
+            return None
+        hour = int(match.group("hour"))
+        minute = int(match.group("minute"))
+        second = int(match.group("second") or 0)
+        if hour > 23 or minute > 59 or second > 59:
+            return None
+        return hour * 3600 + minute * 60 + second
+
+    def _prefer_close_duplicate_export_row(self, existing: dict[str, Any], candidate: dict[str, Any]) -> dict[str, Any]:
+        existing_score = self._duplicate_row_quality_score(existing)
+        candidate_score = self._duplicate_row_quality_score(candidate)
+        candidate_wins = candidate_score > existing_score + 0.02
+        winner = dict(candidate if candidate_wins else existing)
+        loser = existing if candidate_wins else candidate
+        winner["evidence_message_ids"] = self._merge_unique_list_values(
+            winner.get("evidence_message_ids"),
+            loser.get("evidence_message_ids"),
+        )
+        winner["risk_flags"] = self._merge_unique_list_values(winner.get("risk_flags"), loser.get("risk_flags"))
+        for key in ("remark", "evidence_text"):
+            if not str(winner.get(key) or "").strip() and str(loser.get(key) or "").strip():
+                winner[key] = loser.get(key)
+        return winner
+
+    def _duplicate_row_quality_score(self, row: dict[str, Any]) -> float:
+        score = self._coerce_confidence(row.get("confidence"))
+        if not row.get("needs_review"):
+            score += 0.04
+        for key in ("brand", "product_name", "spec", "quantity", "unit", "sale_price", "total_sale", "name"):
+            if str(row.get(key) or "").strip():
+                score += 0.01
+        return score
+
+    @staticmethod
+    def _merge_unique_list_values(*values: Any) -> list[str]:
+        merged: list[str] = []
+        seen: set[str] = set()
+        for value in values:
+            items = value if isinstance(value, list) else [value]
+            for item in items:
+                text = str(item or "").strip()
+                if not text or text in seen:
+                    continue
+                seen.add(text)
+                merged.append(text)
+        return merged
 
     def _candidate_needs_llm_upgrade(self, candidate: dict[str, Any]) -> bool:
         if bool(candidate.get("force_multi_split")):
@@ -1312,20 +1508,33 @@ class RecorderExportRunService:
 
     def _extract_brand_name(self, text: str, *, fallback: str = "") -> str:
         normalized = self._normalize_order_text(text)
+        fallback_token = self._normalize_order_text(fallback)
         if not normalized:
-            return self._normalize_order_text(fallback)
+            return fallback_token
         aliases = self._active_brand_aliases or list(DEFAULT_LAB_BRAND_ALIASES)
+        alias_keys = {self._normalize_order_text(item).lower() for item in aliases}
         for alias in aliases:
             escaped = re.escape(alias)
             if re.search(rf"(^|[\s，,；;:：/]){escaped}($|[\s，,；;:：/])", normalized):
                 return alias
+            if normalized.startswith(alias):
+                rest = self._normalize_order_text(normalized[len(alias) :].lstrip("：: "))
+                if self._looks_like_product_body(rest):
+                    return alias
         english_head = self._extract_english_brand_head(normalized)
         if english_head:
             return english_head
         inferred = self._infer_brand_from_leading_phrase(normalized)
         if inferred:
+            if fallback_token and inferred != fallback_token:
+                inferred_key = inferred.lower()
+                is_explicit_known = inferred_key in alias_keys or bool(re.fullmatch(r"[A-Za-z][A-Za-z-]{2,24}", inferred))
+                if not is_explicit_known:
+                    # In a message-level brand context, generic Chinese leading tokens are
+                    # more often product names (e.g. 秦皮乙素) than a safe brand override.
+                    return fallback_token
             return inferred
-        return self._normalize_order_text(fallback)
+        return fallback_token
 
     def _looks_like_brand_token(self, text: str) -> bool:
         token = self._normalize_order_text(text).strip("：:")
@@ -1479,6 +1688,20 @@ class RecorderExportRunService:
         lines = [self._normalize_order_text(line) for line in re.split(r"[\r\n]+", str(content or "")) if self._normalize_order_text(line)]
         mentions: list[dict[str, Any]] = []
         alias_keys = {self._normalize_order_text(item).lower() for item in (self._active_brand_aliases or list(DEFAULT_LAB_BRAND_ALIASES))}
+        message_brand_context = self._extract_message_brand_context(content)
+
+        def suppress_generic_context_shadow(brand_value: str, source_kind_value: str, line_index: int) -> bool:
+            brand_token = self._normalize_order_text(brand_value)
+            if not brand_token or not message_brand_context or line_index <= 0:
+                return False
+            if brand_token == message_brand_context:
+                return False
+            if brand_token.lower() in alias_keys:
+                return False
+            if re.fullmatch(r"[A-Za-z][A-Za-z-]{2,24}", brand_token):
+                return False
+            return source_kind_value in {"line_extract", "head_line"}
+
         for idx, line in enumerate(lines):
             source_kind = ""
             brand = self._extract_brand_name(line)
@@ -1524,6 +1747,8 @@ class RecorderExportRunService:
                                 source_kind = "tail_hint"
             brand = self._normalize_order_text(brand)
             if not brand:
+                continue
+            if suppress_generic_context_shadow(brand, source_kind, idx):
                 continue
             if self._brand_token_looks_like_person_in_source(brand, line):
                 continue
@@ -1826,7 +2051,12 @@ class RecorderExportRunService:
         message_brand = self._extract_message_brand_context(content)
         date_code = self._extract_date_code(str(message.get("message_time") or message.get("observed_at") or ""))
         deterministic_segments = self._split_message_by_price_terminator(content, max_segments=12)
-        preseg_mode = len(deterministic_segments) >= 2
+        normalized_content = self._normalize_order_text(content)
+        preseg_mode = len(deterministic_segments) >= 2 or (
+            len(deterministic_segments) == 1
+            and ("\n" in content or "\r" in content)
+            and deterministic_segments[0] != normalized_content
+        )
         if preseg_mode:
             lines = [self._normalize_order_text(item) for item in deterministic_segments if self._normalize_order_text(item)]
         else:
@@ -2325,7 +2555,7 @@ class RecorderExportRunService:
         spec_key = self._normalize_spec_key(normalized_spec)
         formulation_key = self._normalize_spec_key(formulation)
         if formulation_key and formulation_key in spec_key:
-            return normalized_spec
+            return self._dedupe_spec_formulation_size(normalized_spec)
         code_text = self._extract_primary_spec_code(normalized_spec)
         if not code_text:
             return normalized_spec
@@ -2340,7 +2570,29 @@ class RecorderExportRunService:
                     base = self._normalize_spec_text(normalized_spec[: tail_match.start()].strip())
                     if base and self._extract_primary_spec_code(base):
                         normalized_spec = base
-        return self._normalize_spec_text(f"{normalized_spec} {formulation}")
+        return self._dedupe_spec_formulation_size(f"{normalized_spec} {formulation}")
+
+    def _dedupe_spec_formulation_size(self, spec: str) -> str:
+        normalized_spec = self._normalize_spec_text(spec)
+        if not normalized_spec:
+            return ""
+        formulation_match = FORMULATION_SPEC_RE.search(normalized_spec)
+        if not formulation_match:
+            return normalized_spec
+        formulation = self._normalize_spec_text(str(formulation_match.group(0) or ""))
+        formulation_size_matches = list(SPEC_SIZE_RE.finditer(formulation))
+        if not formulation_size_matches:
+            return normalized_spec
+        formulation_size = self._normalize_spec_text(str(formulation_size_matches[-1].group(0) or ""))
+        before = normalized_spec[: formulation_match.start()].strip(" -_/")
+        after = normalized_spec[formulation_match.end() :].strip(" -_/")
+        before_size_matches = list(SPEC_SIZE_RE.finditer(before))
+        if before_size_matches and formulation_size:
+            tail_match = before_size_matches[-1]
+            tail_size = self._normalize_spec_text(str(tail_match.group(0) or ""))
+            if tail_size and self._normalize_spec_key(tail_size) == self._normalize_spec_key(formulation_size):
+                before = before[: tail_match.start()].strip(" -_/")
+        return self._normalize_spec_text(" ".join(item for item in (before, formulation, after) if item))
 
     def _extract_product_spec(self, text: str, *, product_name: str = "", brand_hint: str = "") -> str:
         normalized_text = self._normalize_order_text(text)
@@ -2573,14 +2825,7 @@ class RecorderExportRunService:
             if fallback_name:
                 candidate = fallback_name
         if "[引用" in candidate and "]" in candidate:
-            quoted = candidate.split("[引用", 1)[1].rsplit("]", 1)[0]
-            if "：" in quoted:
-                candidate = quoted.split("：", 1)[1]
-            elif ":" in quoted:
-                candidate = quoted.split(":", 1)[1]
-            else:
-                candidate = quoted
-            candidate = self._normalize_order_text(candidate)
+            candidate = self._normalize_order_text(re.sub(r"\[引用[^\]]*\]", " ", candidate))
 
         marker_match = re.search(r"(各订|订|下单|代付|买)\s*[一二两俩三四五六七八九十百半\d]", candidate)
         cut_index = marker_match.start() if marker_match else len(candidate)
@@ -2624,6 +2869,7 @@ class RecorderExportRunService:
     @staticmethod
     def _normalize_order_text(text: str) -> str:
         normalized = str(text or "").replace("\xa0", " ")
+        normalized = VALIDATION_MARKER_RE.sub(" ", normalized)
         normalized = re.sub(r"\s+", " ", normalized)
         return normalized.strip()
 
@@ -2746,9 +2992,9 @@ class RecorderExportRunService:
         sanitized_text = self._strip_mentions_for_name(text)
         match = NAME_OWNER_RE.search(sanitized_text)
         if not match:
-            single = re.search(r"(?P<name>[\u4e00-\u9fa5A-Za-z0-9]{1,24})老师", sanitized_text)
+            single = re.search(r"(?P<name>(?:[\u4e00-\u9fa5A-Za-z0-9]\s*){1,24})老师", sanitized_text)
             if single:
-                name = self._sanitize_person_name(str(single.group("name") or ""))
+                name = self._sanitize_person_name(re.sub(r"\s+", "", str(single.group("name") or "")))
                 return name, name
             # Fallback: many orders end with a plain contact name line like "冯世浩".
             tail_name = re.search(r"(?:^|[\r\n\s])(?P<name>[\u4e00-\u9fa5]{2,4})\s*$", str(sanitized_text or ""))
@@ -3062,6 +3308,8 @@ class RecorderExportRunService:
             # No explicit confirmation prefix: only consider very short numeric replies like "2瓶".
             if len(normalized) > 18:
                 return False
+            if PRICE_RE.search(normalized) or self._extract_formula_total(normalized):
+                return False
             if any(term in normalized for term in ORDER_ACTION_TERMS):
                 return False
             if re.search(r"(试剂|离心管|细胞|抗体|蛋白|货号|型号|培养|滤膜|孔板|手套)", normalized):
@@ -3209,12 +3457,28 @@ class RecorderExportRunService:
                     segments.append(normalized_item)
             buffer.clear()
 
-        for line in lines:
+        pending_prefix = ""
+        for idx, line in enumerate(lines):
+            if pending_prefix:
+                line = self._normalize_order_text(f"{pending_prefix}{line}")
+                pending_prefix = ""
             if re.match(r"^[\u4e00-\u9fa5A-Za-z0-9]{2,24}老师$", line):
                 flush_buffer()
                 continue
             if self._looks_like_non_product_line(line) and not (PRICE_RE.search(line) or self._extract_formula_total(line)):
                 continue
+            yuan_matches = list(re.finditer(r"元", line))
+            if yuan_matches and idx + 1 < len(lines):
+                tail = self._normalize_order_text(line[yuan_matches[-1].end() :])
+                next_line = lines[idx + 1]
+                if (
+                    tail
+                    and len(tail) <= 12
+                    and not re.search(r"(老师|收货|合计|共计|运费|优惠)", tail)
+                    and (PRICE_RE.search(next_line) or self._extract_formula_total(next_line))
+                ):
+                    line = self._normalize_order_text(line[: yuan_matches[-1].end()])
+                    pending_prefix = tail
             buffer.append(line)
             if PRICE_RE.search(line) or self._extract_formula_total(line):
                 flush_buffer()
@@ -3461,7 +3725,72 @@ class RecorderExportRunService:
         scope = self._normalize_order_text(scope_text)
         if "元" in product and not any(token in product for token in ("试剂", "管", "盒", "瓶", "水", "膜", "板", "酶", "酸")):
             return ""
+        product = re.sub(r"(?<=[\u4e00-\u9fa5])\s+(?=[\u4e00-\u9fa5])", "", product)
         return product
+
+    def _remove_spec_tokens_from_product_name(self, product_name: str, spec: str) -> str:
+        product = self._normalize_order_text(product_name)
+        normalized_spec = self._normalize_spec_text(spec)
+        if not product or not normalized_spec:
+            return product
+        cleaned = product
+        primary_code = self._extract_primary_spec_code(normalized_spec)
+        if primary_code:
+            cleaned = re.sub(re.escape(primary_code), " ", cleaned, flags=re.IGNORECASE)
+        for marker_match in SPEC_MARKER_RE.finditer(cleaned):
+            token = self._normalize_spec_text(str(marker_match.group("spec") or ""))
+            if token and self._normalize_spec_key(token) in self._normalize_spec_key(normalized_spec):
+                cleaned = cleaned.replace(str(marker_match.group(0) or ""), " ")
+        for formulation_match in FORMULATION_SPEC_RE.finditer(cleaned):
+            formulation = self._normalize_spec_text(str(formulation_match.group(0) or ""))
+            if formulation and self._normalize_spec_key(formulation) in self._normalize_spec_key(normalized_spec):
+                cleaned = cleaned.replace(str(formulation_match.group(0) or ""), " ")
+        cleaned = self._normalize_order_text(cleaned).strip("：:，,；;。 -")
+        cleaned = re.sub(r"(?<=[\u4e00-\u9fa5])\s+(?=[\u4e00-\u9fa5])", "", cleaned)
+        return cleaned or product
+
+    def _repair_split_spec_prefix_from_product(
+        self,
+        *,
+        product_name: str,
+        spec: str,
+        context_text: str,
+    ) -> tuple[str, str]:
+        product = self._normalize_order_text(product_name)
+        normalized_spec = self._normalize_spec_text(spec)
+        if not product or not normalized_spec:
+            return product, normalized_spec
+        first_token_match = re.match(r"(?P<token>[A-Za-z0-9][A-Za-z0-9._/\-*]{1,32})", normalized_spec)
+        if not first_token_match:
+            return product, normalized_spec
+        first_token = self._normalize_spec_text(str(first_token_match.group("token") or ""))
+        if not first_token or not re.search(r"[A-Za-z]", first_token) or not re.search(r"\d", first_token):
+            return product, normalized_spec
+        inline_prefix_match = re.search(
+            rf"(?P<prefix>[A-Za-z]{{2,6}})\s*[-－–—]?\s*{re.escape(first_token)}(?=$|[\s，,；;:：])",
+            product,
+        )
+        prefix_match = inline_prefix_match or re.search(r"(?P<prefix>[A-Za-z]{2,6})$", product)
+        if not prefix_match:
+            return product, normalized_spec
+        prefix = self._normalize_spec_text(str(prefix_match.group("prefix") or ""))
+        if prefix.upper() in NON_BRAND_STOPWORDS or prefix.lower() in {"mg", "kg", "ml", "ul", "mm", "cm"}:
+            return product, normalized_spec
+        joined_dash = self._normalize_spec_text(f"{prefix}-{first_token}")
+        joined_plain = self._normalize_spec_text(f"{prefix}{first_token}")
+        context_key = self._normalize_spec_key(context_text)
+        joined = ""
+        if self._normalize_spec_key(joined_dash) in context_key:
+            joined = joined_dash
+        elif self._normalize_spec_key(joined_plain) in context_key:
+            joined = joined_dash if self._looks_like_spec_candidate(joined_dash, allow_numeric_only=True) else joined_plain
+        elif len(prefix) >= 2 and self._looks_like_spec_candidate(joined_dash, allow_numeric_only=True):
+            joined = joined_dash
+        if not joined:
+            return product, normalized_spec
+        repaired_product = self._normalize_order_text(product[: prefix_match.start()].strip(" -_/，,；;:："))
+        repaired_spec = self._normalize_spec_text(re.sub(re.escape(first_token), joined, normalized_spec, count=1))
+        return repaired_product or product, repaired_spec or normalized_spec
 
     def _scope_supports_quantity(self, quantity: str, unit: str, *, scope_text: str) -> bool:
         qty_value = self._to_number(quantity)
@@ -3602,6 +3931,9 @@ class RecorderExportRunService:
             "candidate_segments": extraction_scope,
             "rules": [
                 "允许拆分成多条 rows。",
+                "群成员名、发送人姓名、speaker_name 不是订单正文，不能当作品牌或产品。",
+                "引用/回复/历史预览内容不是当前订单，不能从引用内容提取产品、品牌、规格、价格或姓名。",
+                "一个气泡是一条独立订单语义范围，不同气泡之间不能串用品牌、规格、产品或价格。",
                 "人名、老师名不能作为 product_name。",
                 "括号内容优先写入 remark，不要替代主产品名。",
                 "当出现多个产品名（尤其带多个货号/多行产品）时，必须拆成多条 rows，而不是合并为一条。",
@@ -3871,6 +4203,7 @@ class RecorderExportRunService:
         product = self._normalize_order_text(str(row.get("product_name") or ""))
         remark = self._normalize_order_text(str(row.get("remark") or ""))
         name = self._normalize_order_text(str(row.get("name") or ""))
+        brand = self._normalize_order_text(str(row.get("brand") or ""))
         quantity = self._to_number(str(row.get("quantity") or ""))
         total = self._to_number(str(row.get("total_sale") or ""))
         sale_price = self._to_number(str(row.get("sale_price") or ""))
@@ -3894,6 +4227,11 @@ class RecorderExportRunService:
         if product.lower() in {"μ", "ul", "μl", "μl。", "ul。"}:
             return True
         if re.fullmatch(r"\d+\s*(?:μ|μl|ul|ml)", product.lower()):
+            return True
+        if re.search(r"(?:\bmM\b|DMSO)", product, flags=re.IGNORECASE) and not re.search(r"[\u4e00-\u9fa5]", product):
+            if not re.search(r"\b(?:acid|antibody|protein|kit|buffer|medium|reagent|tube|membrane)\b", product, flags=re.IGNORECASE):
+                return True
+        if brand.lower() in {"none", "null", "unknown"} and re.search(r"(?:\bmM\b|DMSO|/)", product, flags=re.IGNORECASE):
             return True
         if any(term in product for term in ("象牙宝平台", "走平台", "给登记", "登记下", "登记一下")):
             return True
@@ -3944,6 +4282,7 @@ class RecorderExportRunService:
             "confidence": 0.0,
             "needs_review": True,
             "evidence_message_ids": [],
+            "risk_flags": [],
         }
 
     def _estimate_confidence(self, row: dict[str, Any]) -> float:
@@ -3965,6 +4304,11 @@ class RecorderExportRunService:
         return max(0.0, min(confidence, 0.95))
 
     def _confidence_fill_for_row(self, row: dict[str, Any]) -> PatternFill | None:
+        risk_flags = {str(flag) for flag in row.get("risk_flags", []) if str(flag)}
+        if risk_flags & EXPORT_RED_RISK_FLAGS:
+            return CONFIDENCE_COLOR_RED
+        if risk_flags & EXPORT_YELLOW_RISK_FLAGS:
+            return CONFIDENCE_COLOR_YELLOW
         confidence = self._coerce_confidence(row.get("confidence"))
         if confidence >= 0.95:
             return None
@@ -4094,8 +4438,16 @@ class RecorderExportRunService:
             if value is None:
                 output[key] = ""
         output["confidence"] = self._coerce_confidence(output.get("confidence"))
-        fallback_date = self._extract_date_code(str(message.get("message_time") or message.get("observed_at") or ""))
-        fallback_time = self._extract_time_code(str(message.get("message_time") or message.get("observed_at") or ""))
+        source_time = recorder_time_text(message)
+        fallback_date = self._extract_date_code(source_time)
+        fallback_time = self._extract_time_code(source_time)
+        risk_flags = {
+            str(flag)
+            for flag in (output.get("risk_flags") or [])
+            if str(flag)
+        }
+        risk_flags.update(str(flag) for flag in (message.get("risk_flags") or []) if str(flag))
+        risk_flags.update(str(flag) for flag in recorder_message_view(message).get("risk_flags", []) if str(flag))
         output["date"] = self._normalize_order_date(
             output.get("date"),
             fallback_date=fallback_date,
@@ -4196,6 +4548,17 @@ class RecorderExportRunService:
             if rich_code and (not chosen_code or len(rich_code) >= len(chosen_code) + 1):
                 best_spec = rich_best
         output["spec"] = best_spec if (best_score > 0 or (best_spec and rich_candidates)) else ""
+        if output["spec"]:
+            repaired_product, repaired_spec = self._repair_split_spec_prefix_from_product(
+                product_name=str(output.get("product_name") or ""),
+                spec=str(output.get("spec") or ""),
+                context_text=context_text,
+            )
+            output["product_name"] = repaired_product
+            output["spec"] = repaired_spec
+            trimmed_product = self._remove_spec_tokens_from_product_name(str(output.get("product_name") or ""), str(output.get("spec") or ""))
+            if trimmed_product and trimmed_product != self._normalize_order_text(str(output.get("product_name") or "")):
+                output["product_name"] = trimmed_product
         if explicit_scope:
             output = self._clear_unsupported_quantity_from_scope(output, scope_text=explicit_scope)
         output = self._default_single_quantity_for_priced_row(output)
@@ -4205,6 +4568,19 @@ class RecorderExportRunService:
             or not output.get("product_name")
             or not output.get("quantity")
         )
+        if not output.get("product_name"):
+            risk_flags.add("missing_product")
+        if not output.get("quantity"):
+            risk_flags.add("missing_quantity")
+        if not output.get("sale_price") and not output.get("total_sale"):
+            risk_flags.add("missing_price")
+        if risk_flags:
+            output["risk_flags"] = sorted(risk_flags)
+            output["needs_review"] = True
+            if risk_flags & EXPORT_RED_RISK_FLAGS:
+                output["confidence"] = min(float(output.get("confidence") or 0), 0.59)
+            elif risk_flags & EXPORT_YELLOW_RISK_FLAGS:
+                output["confidence"] = min(float(output.get("confidence") or 0), 0.79)
         ids = [str(item) for item in output.get("evidence_message_ids", []) if str(item)]
         if not ids:
             raw_message_id = str(message.get("raw_message_id") or "")
@@ -4212,7 +4588,7 @@ class RecorderExportRunService:
                 ids = [raw_message_id]
         output["evidence_message_ids"] = ids
         if not str(output.get("evidence_text") or "").strip():
-            output["evidence_text"] = self._normalize_order_text(str(message.get("content") or ""))[:300]
+            output["evidence_text"] = self._normalize_order_text(recorder_content_text(message))[:300]
         numeric_fields = ("quantity", "sale_price", "total_sale", "cost_price", "total_cost")
         for field in numeric_fields:
             raw_value = str(output.get(field) or "").strip()
@@ -4263,8 +4639,13 @@ class RecorderExportRunService:
         if not content:
             return None
         prompt = {
-            "task": "从微信订货聊天中提取一行结构化订货数据。只允许依据source_text，不允许虚构。",
+            "task": "从微信订货聊天中提取一行结构化订货数据。只允许依据source_text，不允许虚构；群成员名和引用历史不是当前订单事实。",
             "source_text": content,
+            "rules": [
+                "群成员名、发送人姓名不是品牌或产品。",
+                "引用/回复/历史预览内容不得作为产品、品牌、规格、价格或姓名证据。",
+                "一个气泡是一条独立订单语义范围，不同气泡不能串用品牌、规格、产品或价格。",
+            ],
             "required_schema": {
                 "date": "日期文本，优先YYYY-MM-DD，可为空",
                 "name": "姓名，可为空",

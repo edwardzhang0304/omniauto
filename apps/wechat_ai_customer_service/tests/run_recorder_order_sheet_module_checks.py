@@ -80,7 +80,10 @@ def run_checks() -> None:
         validate_date_range_runs(client, headers)
         validate_name_context_inference_rules()
         validate_name_owner_price_prefix_cleanup()
+        validate_ocr_broken_line_order_rules()
         validate_brand_single_use_rules()
+        validate_close_duplicate_export_row_dedupe()
+        validate_message_envelope_quote_timestamp_and_risk_flags()
     finally:
         export_run_module.call_deepseek_json = original_call_deepseek_json
 
@@ -195,6 +198,13 @@ def seed_order_messages(client: TestClient, headers: dict[str, str]) -> None:
                 "content": "葡萄糖 1瓶 10元",
                 "time": "2025-03-04 08:28:10",
             },
+            {
+                "id": "order_sheet_015",
+                "type": "text",
+                "sender": "罗永志 企点",
+                "content": "思科捷\nCY-09（NLRP3抑制剂）  SJ-MX0745\n10 mM * 1mL in DMSO  订1个  700*0.95=665元\n俞\n淑芳老师",
+                "time": "2025-03-04 08:32:00",
+            },
         ],
         "source_module": "order_sheet_test",
         "auto_learn": False,
@@ -296,6 +306,7 @@ def validate_export(client: TestClient, headers: dict[str, str], run_id: str) ->
     yuanye_rows = []
     baisha_rows = []
     jielepu_rows = []
+    sikejie_rows = []
     context_name_rows = []
     late_rows = []
     mention_rows = []
@@ -318,6 +329,9 @@ def validate_export(client: TestClient, headers: dict[str, str], run_id: str) ->
             baisha_rows.append((product_name, brand))
         if "透析袋" in product_name and ("杰乐普" in product_name or brand == "杰乐普"):
             jielepu_rows.append((product_name, brand))
+        if "CY-09" in product_name or "SJ-MX0745" in str(sheet.cell(row=row_index, column=12).value or ""):
+            spec = str(sheet.cell(row=row_index, column=12).value or "")
+            sikejie_rows.append((product_name, brand, spec, name))
         if "15ml离心管" in product_name or "PBS缓冲液" in product_name:
             context_name_rows.append((product_name, name, remark))
         if "葡萄糖" in product_name:
@@ -332,11 +346,15 @@ def validate_export(client: TestClient, headers: dict[str, str], run_id: str) ->
     assert_true(bool(gift_rows), "gift item should remain in exported sheet")
     assert_true(len(yuanye_rows) >= 2, f"yuanye multi-product should split into 2 rows: {yuanye_rows}")
     assert_true(
-        all(item[1] in {"源叶", "羟基酪醇", "秦皮乙素", ""} for item in yuanye_rows),
-        f"yuanye rows should keep stable split and structured brand-like signal: {yuanye_rows}",
+        all(item[1] == "源叶" for item in yuanye_rows),
+        f"yuanye child product rows should inherit the standalone brand, not promote product names to brands: {yuanye_rows}",
     )
     assert_true(any("白鲨" in item[0] and item[1] == "白鲨" for item in baisha_rows), f"baisha row should carry brand and keep brand in product name: {baisha_rows}")
     assert_true(any("杰乐普" in item[0] and item[1] == "杰乐普" for item in jielepu_rows), f"jielepu row should carry brand and keep brand in product name: {jielepu_rows}")
+    assert_true(
+        any(item[1] == "思科捷" and "SJ-MX0745" in item[2] and "10 mM" in item[2] and item[3] == "俞淑芳" for item in sikejie_rows),
+        f"sikejie multiline product should keep brand, product/spec, and whitespace-split teacher name: {sikejie_rows}",
+    )
     assert_true(
         all(item[1] == "周梦" and "姓名来自近3句上下文" in item[2] for item in context_name_rows),
         f"context fallback should infer 周梦 with remark note: {context_name_rows}",
@@ -363,6 +381,40 @@ def validate_export(client: TestClient, headers: dict[str, str], run_id: str) ->
     assert_true(str((svc._confidence_fill_for_row({"confidence": 0.85}) or {}).fill_type) == "solid", "green band should be solid fill")
     assert_true(str((svc._confidence_fill_for_row({"confidence": 0.70}) or {}).fill_type) == "solid", "yellow band should be solid fill")
     assert_true(str((svc._confidence_fill_for_row({"confidence": 0.40}) or {}).fill_type) == "solid", "red band should be solid fill")
+
+
+def validate_message_envelope_quote_timestamp_and_risk_flags() -> None:
+    svc = RecorderExportRunService(tenant_id=TEST_TENANT)
+    captured_at = "2026-06-04T15:10:11"
+    rows, _meta = svc._extract_order_rows(
+        {"module_key": "order_sheet_lab_v1", "module_version": "test"},
+        [
+            {
+                "raw_message_id": "raw_env_quote_001",
+                "id": "env-quote-001",
+                "type": "text",
+                "sender": "unknown",
+                "sender_role": "unknown",
+                "source_adapter": "win32_ocr",
+                "content": "许聪\n[引用 张老师：旧订单 试剂盒 9盒 1元]\n枪头 2盒 30元",
+                "time": "昨天03:02",
+                "captured_at": captured_at,
+                "ocr_confidence": 0.98,
+                "conversation_type": "group",
+                "target_name": "实验订货群",
+            }
+        ],
+    )
+    assert_true(rows, "clean current OCR body should produce an order row")
+    row = rows[0]
+    assert_equal(row.get("date"), "2026-06-04", "export date should use captured_at")
+    assert_equal(row.get("time"), "15:10:11", "export time should use captured_at seconds")
+    assert_true("枪头" in str(row.get("product_name") or ""), f"current body product should be extracted: {row}")
+    assert_true("试剂盒" not in str(row.get("product_name") or ""), f"quoted product must not be extracted: {row}")
+    assert_true("quote_contamination" in set(row.get("risk_flags") or []), f"quote risk should force review: {row}")
+    assert_true(row.get("needs_review") is True, f"quote risk should force review: {row}")
+    fill = svc._confidence_fill_for_row(row)
+    assert_true(fill is not None and str(fill.fill_type) == "solid", f"quote risk should color the row: {fill}")
 
 
 def validate_date_range_runs(client: TestClient, headers: dict[str, str]) -> None:
@@ -447,6 +499,7 @@ def validate_name_owner_price_prefix_cleanup() -> None:
         ("普通5ml离心管1包25元卢南-戚向阳老师", "卢南", "戚向阳"),
         ("alrabbitpAb订一个20u360元朱宁伟-胡升老师", "朱宁伟", "胡升"),
         ("细胞培养瓶1箱640元崔明辉-姚晓敏老师", "崔明辉", "姚晓敏"),
+        ("思科捷\nCY-09（NLRP3抑制剂）  SJ-MX0745\n10 mM * 1mL in DMSO  订1个  700*0.95=665元\n俞\n淑芳老师", "俞淑芳", "俞淑芳"),
     ]
     for text, expected_name, expected_owner in examples:
         name, owner = svc._extract_name_owner(text)
@@ -523,6 +576,64 @@ def validate_name_owner_price_prefix_cleanup() -> None:
     missing_product_row = svc._empty_order_row()
     missing_product_row.update({"name": "俞淑芳", "quantity": "1", "unit": "支", "sale_price": "140", "confidence": 0.79})
     assert_true(svc._should_drop_order_row(missing_product_row), "rows without product name should not enter the main order sheet")
+    formulation_noise_row = svc._empty_order_row()
+    formulation_noise_row.update({"product_name": "01C/nVIAI-rC mM *1mL in DMSO", "brand": "None", "quantity": "1", "sale_price": "665", "confidence": 0.55})
+    assert_true(svc._should_drop_order_row(formulation_noise_row), "OCR formulation fragments should not enter the main order sheet")
+
+
+def validate_ocr_broken_line_order_rules() -> None:
+    svc = RecorderExportRunService(tenant_id=TEST_TENANT)
+    examples = [
+        (
+            "源叶羟基酪醇S25716-1g 384*0.9=345.6元 秦皮\n乙素S31424-1g100*0.9=90元赵伟睿老师",
+            [
+                ("源叶", "源叶羟基酪醇", "S25716-1g", "赵伟睿"),
+                ("源叶", "源叶秦皮乙素", "S31424-1g", "赵伟睿"),
+            ],
+        ),
+        (
+            "思科捷 CY-09（NLRP3抑制剂）SJ-MX0745 10\nmM*1mL in DMSO订1个700*0.95=665元俞\n淑芳老师",
+            [
+                ("思科捷", "思科捷 CY-09（NLRP3抑制剂）", "SJ-MX0745 10 mM*1mL in DMSO", "俞淑芳"),
+            ],
+        ),
+        (
+            "思科捷Deoxycholic acid（去氧胆酸）SJ\nMN0579 10 mM * 1mL in DMSO 订1个 380*0.95=361元俞淑芳老师",
+            [
+                ("思科捷", "思科捷Deoxycholic acid（去氧胆酸）", "SJ-MN0579 10 mM * 1mL in DMSO", "俞淑芳"),
+            ],
+        ),
+        (
+            "【验收标记 LIVE_OCR_FIX_20260604_1743_B】\n思科捷Deoxycholic acid（去氧胆酸）SJ-\nMN0579 10 mM * 1mL in DMSO 订1个 380*0.95=361元俞淑芳老师",
+            [
+                ("思科捷", "思科捷Deoxycholic acid（去氧胆酸）", "SJ-MN0579 10 mM * 1mL in DMSO", "俞淑芳"),
+            ],
+        ),
+    ]
+    for content, expected_rows in examples:
+        rows = svc._rule_extract_rows_from_message(
+            {
+                "raw_message_id": "ocr_broken_line_case",
+                "content": content,
+                "message_time": "2026-06-04T16:40:30",
+                "captured_at": "2026-06-04T16:40:30",
+                "source_adapter": "win32_ocr",
+                "type": "text",
+            }
+        )
+        compact = [
+            (
+                str(row.get("brand") or ""),
+                str(row.get("product_name") or ""),
+                str(row.get("spec") or ""),
+                str(row.get("name") or ""),
+            )
+            for row in rows
+        ]
+        for expected in expected_rows:
+            assert_true(expected in compact, f"OCR broken-line extraction should include {expected}: {compact}")
+        joined = " ".join(" ".join(item) for item in compact)
+        assert_true("LIVE_OCR_FIX" not in joined, f"validation marker should not pollute extracted rows: {compact}")
 
 
 def validate_brand_single_use_rules() -> None:
@@ -547,6 +658,52 @@ def validate_brand_single_use_rules() -> None:
     assert_true(str(out[0].get("product_name") or "").startswith("源叶 "), "brand should be displayed in product name")
     assert_true(str(out[1].get("product_name") or "").startswith("源叶 "), "inherited brand should be displayed in product name")
     assert_true(str(out[2].get("product_name") or "").startswith("白鲨 "), "brand should be displayed in product name")
+
+
+def validate_close_duplicate_export_row_dedupe() -> None:
+    svc = RecorderExportRunService(tenant_id=TEST_TENANT)
+    base = {
+        "date": "2026-06-04",
+        "name": "周梦",
+        "owner": "周梦",
+        "receiver": "周梦",
+        "record_type": "order_item",
+        "brand": "白鲨",
+        "product_name": "白鲨15ml离心管",
+        "spec": "15ml",
+        "quantity": "2",
+        "unit": "包",
+        "sale_price": "66",
+        "total_sale": "132",
+        "confidence": 0.9,
+        "needs_review": False,
+        "evidence_message_ids": ["first"],
+    }
+    rows = [
+        {**base, "time": "17:10:04"},
+        {**base, "time": "17:11:20", "confidence": 0.91, "evidence_message_ids": ["second"]},
+        {**base, "time": "17:25:05", "evidence_message_ids": ["late"]},
+        {**base, "time": "17:11:30", "spec": "50ml", "product_name": "白鲨50ml离心管", "sale_price": "60", "total_sale": "120"},
+    ]
+    out = svc._dedupe_close_export_rows(rows, max_minutes=10)
+    assert_equal(len(out), 3, "close duplicate rows should be collapsed without merging later/different-SKU orders")
+    merged = [
+        row
+        for row in out
+        if str(row.get("product_name") or "") == "白鲨15ml离心管"
+        and str(row.get("time") or "") in {"17:10:04", "17:11:20"}
+    ]
+    assert_equal(len(merged), 1, "near duplicate white shark 15ml row should keep one representative")
+    evidence_ids = set(merged[0].get("evidence_message_ids") or [])
+    assert_true({"first", "second"}.issubset(evidence_ids), "dedupe should retain both source message ids")
+    assert_true(
+        any(str(row.get("time") or "") == "17:25:05" for row in out),
+        "same order outside the close OCR repeat window should remain",
+    )
+    assert_true(
+        any(str(row.get("product_name") or "") == "白鲨50ml离心管" for row in out),
+        "different SKU should not be merged",
+    )
 
 
 def fetch_run_item(client: TestClient, headers: dict[str, str], run_id: str) -> dict[str, Any]:

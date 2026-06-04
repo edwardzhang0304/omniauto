@@ -274,6 +274,7 @@ def run_checks() -> dict[str, Any]:
         check_configured_bot_prefix_is_skipped,
         check_rpa_ocr_speaker_prefix_is_metadata_not_body,
         check_scheduler_capture_normalizes_cross_session_speaker_prefix,
+        check_scheduler_capture_preserves_reference_context_separately,
         check_empty_or_prefix_only_reply_is_guarded,
         check_continuous_customer_messages_are_batched_with_overflow_guard,
         check_missing_original_batch_is_treated_as_stale_when_new_messages_visible,
@@ -449,6 +450,35 @@ def check_scheduler_capture_normalizes_cross_session_speaker_prefix() -> None:
     assert_true(
         normalized.get("_content_normalization", {}).get("changed_count") == 1,
         "normalization metadata should expose cleaned OCR messages",
+    )
+
+
+def check_scheduler_capture_preserves_reference_context_separately() -> None:
+    config = load_smoke_config()
+    target = SimpleNamespace(name="实验订货群", exact=True)
+    payload = {
+        "ok": True,
+        "messages": [
+            {
+                "id": "ref-1",
+                "type": "text",
+                "sender": "unknown",
+                "sender_role": "unknown",
+                "source_adapter": "win32_ocr",
+                "content": "许聪\n[引用 张老师：旧消息 试剂盒 9盒 1元]\n这个还有吗",
+                "captured_at": "2026-06-04T15:11:12",
+            },
+        ],
+    }
+    normalized = normalize_capture_payload_for_semantic_processing(payload, target=target, config=config)
+    message = normalized["messages"][0]
+    assert_equal(message.get("content"), "这个还有吗", "current reply content should be quote-free")
+    assert_equal(message.get("speaker_name"), "许聪", "speaker should be metadata")
+    assert_true(message.get("quoted_fragments"), "quoted context should be retained separately")
+    assert_true("quote_contamination" in set(message.get("quality_flags") or []), "quote risk should be flagged")
+    assert_true(
+        normalized.get("_content_normalization", {}).get("changed_count") == 1,
+        "normalization metadata should expose reference cleanup",
     )
 
 

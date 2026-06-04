@@ -380,6 +380,16 @@ def build_brain_input(
             "clean_text": str(combined or ""),
             "raw_text": "\n".join(str(item.get("content") or "") for item in batch),
             "message_ids": [str(item.get("id") or item.get("message_id") or "") for item in batch],
+            "referenced_context": collect_referenced_context(batch),
+            "quality_flags": sorted(
+                {
+                    str(flag)
+                    for item in batch
+                    if isinstance(item, dict)
+                    for flag in (item.get("quality_flags") or [])
+                    if str(flag)
+                }
+            ),
         },
         "conversation": {
             "context": dict(target_state.get("conversation_context", {}) or {}),
@@ -405,8 +415,30 @@ def compact_brain_input(brain_input: dict[str, Any]) -> dict[str, Any]:
         "target": brain_input.get("target", {}),
         "message_ids": current.get("message_ids", []),
         "clean_text": str(current.get("clean_text") or "")[:300],
+        "referenced_context_count": len(current.get("referenced_context", []) or []),
+        "quality_flags": current.get("quality_flags", []),
         "audit_summary": evidence.get("audit_summary", {}),
     }
+
+
+def collect_referenced_context(batch: list[dict[str, Any]]) -> list[dict[str, str]]:
+    items: list[dict[str, str]] = []
+    for message in batch:
+        if not isinstance(message, dict):
+            continue
+        message_id = str(message.get("id") or message.get("message_id") or "")
+        for fragment in message.get("quoted_fragments", []) or []:
+            if isinstance(fragment, dict):
+                text = str(fragment.get("text") or fragment.get("content") or "").strip()
+                reason = str(fragment.get("reason") or "quote_preview").strip() or "quote_preview"
+            else:
+                text = str(fragment or "").strip()
+                reason = "quote_preview"
+            if text:
+                items.append({"message_id": message_id, "text": text[:300], "reason": reason})
+        if len(items) >= 5:
+            break
+    return items
 
 
 def raw_conversation_id(raw_capture: dict[str, Any]) -> str:
@@ -505,6 +537,7 @@ def build_brain_prompt_pack(*, settings: dict[str, Any], brain_input: dict[str, 
         "你的任务是先理解客户真实意图，再基于允许的证据规划自然、简短、像真人客服的回复。"
         "商品事实只能来自 product_master；政策、流程和边界只能来自 formal_knowledge；"
         "当前会话事实只在当前会话内有效；AI经验池、历史聊天和style_context只能影响表达方式，不能作为事实依据；"
+        "OCR引用/回复预览只能作为客户指代的辅助上下文，不能当作当前新消息、事实来源或学习依据；"
         "LLM常识只能做通用取舍分析，不能编造价格、库存、车况、贷款、售后或业务承诺。"
         "客户问泛化选车、用车取舍、避坑方向、油耗舒适性、维修便利性等问题时，"
         "只要不需要编造具体车源/价格/库存/政策承诺，就应当用常识给出明确、实用的判断，"
@@ -567,7 +600,10 @@ def slim_brain_input_for_prompt(brain_input: dict[str, Any], *, settings: dict[s
     rag = compact_rag_for_prompt(evidence.get("rag", {}) if isinstance(evidence.get("rag"), dict) else {}, max_hits=max_rag_hits, max_text_chars=item_text_chars)
     return {
         "target": brain_input.get("target", {}),
-        "current_message": brain_input.get("current_message", {}),
+        "current_message": {
+            **(brain_input.get("current_message", {}) if isinstance(brain_input.get("current_message"), dict) else {}),
+            "referenced_context_policy": "引用只辅助理解指代，不授权新事实、订单抽取或自动学习。",
+        },
         "conversation": {
             "context": conversation.get("context", {}),
             "summary": clip(str(conversation.get("summary") or ""), int(settings.get("summary_char_budget") or 360)),

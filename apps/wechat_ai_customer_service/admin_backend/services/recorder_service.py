@@ -16,6 +16,11 @@ from .raw_message_store import RawMessageStore
 from apps.wechat_ai_customer_service.adapters.wechat_connector import WeChatConnector
 from apps.wechat_ai_customer_service.knowledge_paths import tenant_runtime_root
 from apps.wechat_ai_customer_service.wechat_message_normalizer import normalize_wechat_message_record
+from apps.wechat_ai_customer_service.wechat_message_envelope import (
+    apply_message_envelope_to_record,
+    build_message_envelope,
+    export_risk_flags,
+)
 
 
 DEFAULT_SETTINGS = {
@@ -24,7 +29,7 @@ DEFAULT_SETTINGS = {
     "group_recording_enabled": True,
     "file_transfer_recording_enabled": True,
     "notify_on_collect": False,
-    "auto_learn": True,
+    "auto_learn": False,
     "use_llm": True,
     "capture_interval_seconds": 5,
     "history_backfill_enabled": True,
@@ -259,10 +264,11 @@ class RecorderService:
             conversation,
             [item for item in recovered_payload.get("messages", []) or [] if isinstance(item, dict)],
             source_module="smart_recorder",
-            learning_enabled=conversation.get("learning_enabled", True) is not False,
+            learning_enabled=bool(auto_learn) and conversation.get("learning_enabled", True) is not False,
             create_batch=True,
             batch_reason="recorder_capture",
         )
+        result["capture_quality"] = summarize_capture_quality(recovered_payload.get("messages", []) or [])
         if recovered_payload.get("_capture_recovery"):
             result["capture_recovery"] = recovered_payload["_capture_recovery"]
         if auto_learn and result.get("batch"):
@@ -270,7 +276,7 @@ class RecorderService:
         if send_notification and result.get("inserted_count"):
             result["notification"] = self.connector.send_text(
                 target_name,
-                f"已自动记录 {result['inserted_count']} 条新消息，整理结果会进入后台候选知识待确认。",
+                f"已自动记录 {result['inserted_count']} 条新消息，后续可在后台导出或复核。",
                 exact=conversation.get("exact", True) is not False,
             )
         return result
@@ -476,12 +482,20 @@ def normalize_recorder_capture_payload(payload: dict[str, Any], conversation: di
             known_speakers=known_speakers,
             allow_unlisted_name_like_prefix=True,
         )
-        if next_item.get("ocr_speaker_prefix"):
+        envelope = build_message_envelope(
+            next_item,
+            source_adapter=str(next_item.get("source_adapter") or ""),
+            conversation=conversation,
+        )
+        next_item = apply_message_envelope_to_record(next_item, envelope)
+        if next_item.get("ocr_speaker_prefix") or next_item.get("quality_flags") or next_item.get("quoted_fragments"):
             changed.append(
                 {
                     "id": str(next_item.get("id") or next_item.get("message_id") or ""),
                     "speaker_name": str(next_item.get("speaker_name") or ""),
                     "content_preview": str(next_item.get("content") or "")[:120],
+                    "quality_flags": list(next_item.get("quality_flags") or []),
+                    "risk_flags": export_risk_flags(envelope),
                 }
             )
         normalized_messages.append(next_item)
@@ -527,6 +541,28 @@ def recorder_known_speaker_names(conversation: dict[str, Any]) -> list[str]:
         seen.add(key)
         deduped.append(name)
     return deduped
+
+
+def summarize_capture_quality(messages: list[dict[str, Any]]) -> dict[str, Any]:
+    flags: dict[str, int] = {}
+    quoted_count = 0
+    risk_count = 0
+    for item in messages:
+        if not isinstance(item, dict):
+            continue
+        item_flags = [str(flag) for flag in (item.get("quality_flags") or []) if str(flag)]
+        for flag in item_flags:
+            flags[flag] = flags.get(flag, 0) + 1
+        if item.get("quoted_fragments"):
+            quoted_count += 1
+        if export_risk_flags(build_message_envelope(item, source_adapter=str(item.get("source_adapter") or ""))):
+            risk_count += 1
+    return {
+        "message_count": len([item for item in messages if isinstance(item, dict)]),
+        "quality_flags": flags,
+        "quoted_message_count": quoted_count,
+        "risk_message_count": risk_count,
+    }
 
 
 def infer_conversation_type(name: str, session: dict[str, Any]) -> str:
