@@ -54,6 +54,9 @@ def check_authority_classification() -> dict[str, Any]:
         and classify_evidence({"chunk_id": "rag_1", "source_type": "rag"}) == AI_EXPERIENCE_POOL
         and classify_evidence({"source_type": "llm_common_sense"}) == LLM_COMMON_SENSE
         and order[0]["level"] == PRODUCT_MASTER
+        and order[0].get("can_authorize_product_master_facts") is True
+        and order[1].get("can_authorize_product_facts") is False
+        and order[1].get("can_authorize_product_scoped_rules") is True
     )
     return {"name": "authority_classification", "ok": ok, "order": order[:3]}
 

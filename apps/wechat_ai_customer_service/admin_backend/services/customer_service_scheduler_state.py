@@ -11,6 +11,7 @@ import copy
 import hashlib
 import json
 import os
+import re
 import time
 from dataclasses import dataclass
 from datetime import datetime
@@ -20,7 +21,7 @@ from typing import Any, Callable
 from apps.wechat_ai_customer_service.knowledge_paths import active_tenant_id, tenant_runtime_root
 
 
-STATE_VERSION = 1
+STATE_VERSION = 2
 DEFAULT_PENDING_SESSION_TTL_SECONDS = 1800
 DEFAULT_READY_REPLY_TTL_SECONDS = 900
 MAX_STORED_EVENTS = 500
@@ -50,12 +51,30 @@ def normalize_target_name(name: Any) -> str:
 
 
 def message_content_key(message: dict[str, Any]) -> str:
+    if message_has_repeatable_probe_content(message):
+        return ""
     sender = str(message.get("sender") or "")
     content = " ".join(str(message.get("content") or "").split())
     msg_type = str(message.get("type") or "")
     if not content:
         return ""
     return hashlib.sha256(f"{sender}|{msg_type}|{content}".encode("utf-8")).hexdigest()[:24]
+
+
+def normalize_repeatable_probe_text(text: Any) -> str:
+    compact = re.sub(r"[\s，。,.！？!、~～：:；;“”\"'（）()]+", "", str(text or "")).lower()
+    return compact.strip()
+
+
+def message_has_repeatable_probe_content(message: dict[str, Any]) -> bool:
+    compact = normalize_repeatable_probe_text(message.get("content"))
+    if not compact:
+        return False
+    if len(compact) <= 7:
+        return True
+    if compact in {"你好", "您好", "在吗", "有人吗", "老板在吗", "hello", "hi", "哈喽", "嗨", "在", "在不", "在么", "在嘛", "在呢"}:
+        return True
+    return compact.startswith("在") and len(compact) <= 3
 
 
 def message_identity(message: dict[str, Any]) -> str:
@@ -70,6 +89,8 @@ class SchedulerConfig:
     enabled: bool = False
     capture_max_sessions_per_round: int = 3
     llm_max_concurrency: int = 2
+    planner_max_concurrency: int = 2
+    polish_max_concurrency: int = 2
     send_max_replies_per_round: int = 1
     same_session_single_inflight: bool = True
     stale_reply_policy: str = "discard_and_requeue"
@@ -91,10 +112,13 @@ class SchedulerConfig:
                 value = default
             return max(minimum, min(maximum, value))
 
+        legacy_llm_concurrency = bounded_int("llm_max_concurrency", 2, 1, 10)
         return cls(
             enabled=raw.get("enabled", False) is True,
             capture_max_sessions_per_round=bounded_int("capture_max_sessions_per_round", 3, 1, 20),
-            llm_max_concurrency=bounded_int("llm_max_concurrency", 2, 1, 10),
+            llm_max_concurrency=legacy_llm_concurrency,
+            planner_max_concurrency=bounded_int("planner_max_concurrency", legacy_llm_concurrency, 1, 12),
+            polish_max_concurrency=bounded_int("polish_max_concurrency", legacy_llm_concurrency, 1, 12),
             send_max_replies_per_round=bounded_int("send_max_replies_per_round", 1, 1, 10),
             same_session_single_inflight=raw.get("same_session_single_inflight", True) is not False,
             stale_reply_policy=str(raw.get("stale_reply_policy") or "discard_and_requeue"),
@@ -170,6 +194,7 @@ class SchedulerStateStore:
             "sessions": {},
             "captures": {},
             "llm_tasks": {},
+            "polish_tasks": {},
             "ready_replies": {},
             "send_sequence": 0,
             "events": [],
@@ -191,6 +216,7 @@ class SchedulerStateStore:
         state.setdefault("sessions", {})
         state.setdefault("captures", {})
         state.setdefault("llm_tasks", {})
+        state.setdefault("polish_tasks", {})
         state.setdefault("ready_replies", {})
         state.setdefault("send_sequence", 0)
         state.setdefault("events", [])
@@ -242,6 +268,7 @@ def ensure_session(
             "last_capture_at": "",
             "oldest_unreplied_at": "",
             "llm_inflight_task_id": "",
+            "polish_inflight_task_id": "",
             "ready_reply_ids": [],
             "processed_message_ids": [],
             "processed_content_keys": [],
@@ -279,9 +306,21 @@ def has_active_session_work(state: dict[str, Any], target_name: str) -> bool:
             task = (state.get("llm_tasks", {}) or {}).get(inflight)
             if isinstance(task, dict) and task.get("status") in {"queued", "running"}:
                 return True
+        polish_inflight = str(session.get("polish_inflight_task_id") or "")
+        if polish_inflight:
+            task = (state.get("polish_tasks", {}) or {}).get(polish_inflight)
+            if isinstance(task, dict) and task.get("status") in {"queued", "running"}:
+                return True
         if str(session.get("status") or "") in {"capturing", "sending"}:
             return True
     for task in (state.get("llm_tasks", {}) or {}).values():
+        if (
+            isinstance(task, dict)
+            and str(task.get("target_name") or "") == name
+            and task.get("status") in {"queued", "running"}
+        ):
+            return True
+    for task in (state.get("polish_tasks", {}) or {}).values():
         if (
             isinstance(task, dict)
             and str(task.get("target_name") or "") == name
@@ -307,6 +346,14 @@ def active_input_identity_sets(state: dict[str, Any], target_name: str) -> tuple
     if not name:
         return ids, keys
     for task in (state.get("llm_tasks", {}) or {}).values():
+        if (
+            isinstance(task, dict)
+            and str(task.get("target_name") or "") == name
+            and task.get("status") in {"queued", "running"}
+        ):
+            ids.update(str(item) for item in task.get("input_message_ids", []) if str(item))
+            keys.update(str(item) for item in task.get("input_content_keys", []) if str(item))
+    for task in (state.get("polish_tasks", {}) or {}).values():
         if (
             isinstance(task, dict)
             and str(task.get("target_name") or "") == name
@@ -626,6 +673,8 @@ def complete_llm_task(
     *,
     reply_text: str,
     decision: dict[str, Any] | None = None,
+    result_payload: dict[str, Any] | None = None,
+    create_ready_reply: bool = True,
     now: str | None = None,
 ) -> dict[str, Any]:
     now = now or utcnow_iso()
@@ -637,7 +686,10 @@ def complete_llm_task(
     input_version = int(task.get("input_context_version") or 0)
     current_version = int(session.get("context_version") or 0)
     task["finished_at"] = now
-    task["result"] = {"reply_text": reply_text, "decision": decision or {}}
+    payload = copy.deepcopy(result_payload if isinstance(result_payload, dict) else {})
+    payload["reply_text"] = reply_text
+    payload["decision"] = decision or {}
+    task["result"] = payload
     if input_version < current_version:
         task["status"] = "stale"
         if session.get("llm_inflight_task_id") == task_id:
@@ -648,8 +700,12 @@ def complete_llm_task(
     task["status"] = "completed"
     if session.get("llm_inflight_task_id") == task_id:
         session["llm_inflight_task_id"] = ""
+    if not create_ready_reply:
+        session["status"] = "planner_done_waiting_polish"
+        append_event(state, "scheduler_llm_task_completed", target_name=target_name, task_id=task_id, ready_reply_created=False)
+        return {"status": "completed", "task": task, "reply": None}
     reply = enqueue_ready_reply(state, task_id, reply_text=reply_text, decision=decision or {}, now=now)
-    append_event(state, "scheduler_llm_task_completed", target_name=target_name, task_id=task_id, reply_id=reply["reply_id"])
+    append_event(state, "scheduler_llm_task_completed", target_name=target_name, task_id=task_id, reply_id=reply["reply_id"], ready_reply_created=True)
     return {"status": "completed", "task": task, "reply": reply}
 
 
@@ -669,30 +725,212 @@ def fail_llm_task(state: dict[str, Any], task_id: str, *, reason: str, now: str 
     return task
 
 
-def enqueue_ready_reply(
+def enqueue_polish_task(
+    state: dict[str, Any],
+    planner_task_id: str,
+    *,
+    timeout_seconds: int = 15,
+    now: str | None = None,
+) -> dict[str, Any]:
+    now = now or utcnow_iso()
+    planner_task = state.setdefault("llm_tasks", {}).get(planner_task_id)
+    if not isinstance(planner_task, dict):
+        raise KeyError(f"llm task not found: {planner_task_id}")
+    target_name = str(planner_task.get("target_name") or "")
+    session = ensure_session(state, target_name, now=now)
+    inflight = str(session.get("polish_inflight_task_id") or "")
+    if inflight:
+        task = state.setdefault("polish_tasks", {}).get(inflight)
+        if isinstance(task, dict) and task.get("status") in {"queued", "running"}:
+            return task
+    result = planner_task.get("result") if isinstance(planner_task.get("result"), dict) else {}
+    reply_text = str(result.get("reply_text") or "").strip()
+    if not reply_text:
+        raise ValueError(f"planner task missing reply_text: {planner_task_id}")
+    task_id = stable_id("polish_task", target_name, planner_task_id, planner_task.get("input_context_version"), now)
+    task = {
+        "task_id": task_id,
+        "planner_task_id": planner_task_id,
+        "target_name": target_name,
+        "input_context_version": int(planner_task.get("input_context_version") or 0),
+        "capture_ids": list(planner_task.get("capture_ids") or []),
+        "input_message_ids": list(planner_task.get("input_message_ids") or []),
+        "input_content_keys": list(planner_task.get("input_content_keys") or []),
+        "reply_text": reply_text,
+        "decision": copy.deepcopy(result.get("decision") if isinstance(result.get("decision"), dict) else {}),
+        "event": copy.deepcopy(result.get("event") if isinstance(result.get("event"), dict) else {}),
+        "status": "queued",
+        "created_at": now,
+        "started_at": "",
+        "finished_at": "",
+        "timeout_seconds": max(1, int(timeout_seconds or 15)),
+        "attempt": 1,
+        "result": None,
+        "error": None,
+    }
+    state.setdefault("polish_tasks", {})[task_id] = task
+    session["polish_inflight_task_id"] = task_id
+    session["status"] = "polish_queued"
+    append_event(
+        state,
+        "scheduler_polish_task_enqueued",
+        target_name=target_name,
+        task_id=task_id,
+        planner_task_id=planner_task_id,
+        context_version=task["input_context_version"],
+    )
+    return task
+
+
+def mark_polish_started(state: dict[str, Any], task_id: str, *, now: str | None = None) -> dict[str, Any]:
+    now = now or utcnow_iso()
+    task = state.setdefault("polish_tasks", {}).get(task_id)
+    if not isinstance(task, dict):
+        raise KeyError(f"polish task not found: {task_id}")
+    task["status"] = "running"
+    task["started_at"] = now
+    session = ensure_session(state, str(task.get("target_name") or ""), now=now)
+    session["status"] = "polish_running"
+    session["polish_inflight_task_id"] = task_id
+    append_event(state, "scheduler_polish_task_started", target_name=session["target_name"], task_id=task_id)
+    return task
+
+
+def recover_orphaned_running_polish_tasks(
+    state: dict[str, Any],
+    *,
+    active_task_ids: set[str],
+    now: str | None = None,
+) -> list[dict[str, Any]]:
+    now = now or utcnow_iso()
+    recovered: list[dict[str, Any]] = []
+    for task_id, task in list((state.get("polish_tasks", {}) or {}).items()):
+        if not isinstance(task, dict):
+            continue
+        normalized_task_id = str(task.get("task_id") or task_id)
+        if task.get("status") != "running" or normalized_task_id in active_task_ids:
+            continue
+        task["status"] = "queued"
+        task["requeued_at"] = now
+        task["orphan_recovery_count"] = int(task.get("orphan_recovery_count") or 0) + 1
+        target_name = str(task.get("target_name") or "")
+        session = ensure_session(state, target_name, now=now)
+        session["status"] = "polish_queued"
+        session["polish_inflight_task_id"] = normalized_task_id
+        append_event(
+            state,
+            "scheduler_polish_task_orphan_requeued",
+            target_name=session["target_name"],
+            task_id=normalized_task_id,
+            orphan_recovery_count=task["orphan_recovery_count"],
+        )
+        recovered.append(copy.deepcopy(task))
+    return recovered
+
+
+def complete_polish_task(
     state: dict[str, Any],
     task_id: str,
     *,
     reply_text: str,
     decision: dict[str, Any] | None = None,
+    degraded: bool = False,
     now: str | None = None,
 ) -> dict[str, Any]:
     now = now or utcnow_iso()
-    task = state.setdefault("llm_tasks", {}).get(task_id)
+    task = state.setdefault("polish_tasks", {}).get(task_id)
     if not isinstance(task, dict):
-        raise KeyError(f"llm task not found: {task_id}")
+        raise KeyError(f"polish task not found: {task_id}")
+    target_name = str(task.get("target_name") or "")
+    session = ensure_session(state, target_name, now=now)
+    input_version = int(task.get("input_context_version") or 0)
+    current_version = int(session.get("context_version") or 0)
+    task["finished_at"] = now
+    task["result"] = {"reply_text": reply_text, "decision": decision or {}, "degraded": bool(degraded)}
+    if input_version < current_version:
+        task["status"] = "stale"
+        if session.get("polish_inflight_task_id") == task_id:
+            session["polish_inflight_task_id"] = ""
+        append_event(
+            state,
+            "scheduler_polish_task_stale",
+            target_name=target_name,
+            task_id=task_id,
+            input_context_version=input_version,
+            current_context_version=current_version,
+        )
+        return {"status": "stale", "task": task}
+
+    task["status"] = "degraded" if degraded else "completed"
+    if session.get("polish_inflight_task_id") == task_id:
+        session["polish_inflight_task_id"] = ""
+    reply = _enqueue_ready_reply_from_payload(
+        state,
+        source_task_id=task_id,
+        source_task_kind="polish",
+        target_name=target_name,
+        input_context_version=input_version,
+        capture_ids=list(task.get("capture_ids") or []),
+        input_message_ids=list(task.get("input_message_ids") or []),
+        input_content_keys=list(task.get("input_content_keys") or []),
+        reply_text=reply_text,
+        decision=decision or {},
+        now=now,
+    )
+    append_event(
+        state,
+        "scheduler_polish_task_completed",
+        target_name=target_name,
+        task_id=task_id,
+        reply_id=reply["reply_id"],
+        degraded=bool(degraded),
+    )
+    return {"status": "completed", "task": task, "reply": reply}
+
+
+def fail_polish_task(state: dict[str, Any], task_id: str, *, reason: str, now: str | None = None) -> dict[str, Any]:
+    now = now or utcnow_iso()
+    task = state.setdefault("polish_tasks", {}).get(task_id)
+    if not isinstance(task, dict):
+        raise KeyError(f"polish task not found: {task_id}")
+    task["status"] = "failed"
+    task["finished_at"] = now
+    task["error"] = reason
+    session = ensure_session(state, str(task.get("target_name") or ""), now=now)
+    if session.get("polish_inflight_task_id") == task_id:
+        session["polish_inflight_task_id"] = ""
+    session["status"] = "failed"
+    append_event(state, "scheduler_polish_task_failed", target_name=session["target_name"], task_id=task_id, reason=reason)
+    return task
+
+
+def _enqueue_ready_reply_from_payload(
+    state: dict[str, Any],
+    *,
+    source_task_id: str,
+    source_task_kind: str,
+    target_name: str,
+    input_context_version: int,
+    capture_ids: list[str],
+    input_message_ids: list[str],
+    input_content_keys: list[str],
+    reply_text: str,
+    decision: dict[str, Any] | None,
+    now: str | None = None,
+) -> dict[str, Any]:
+    now = now or utcnow_iso()
     sequence = int(state.get("send_sequence") or 0) + 1
     state["send_sequence"] = sequence
-    target_name = str(task.get("target_name") or "")
-    reply_id = stable_id("reply", target_name, task_id, sequence)
+    reply_id = stable_id("reply", target_name, source_task_id, sequence)
     reply = {
         "reply_id": reply_id,
-        "task_id": task_id,
+        "task_id": source_task_id,
+        "task_kind": source_task_kind,
         "target_name": target_name,
-        "input_context_version": int(task.get("input_context_version") or 0),
-        "capture_ids": list(task.get("capture_ids") or []),
-        "input_message_ids": list(task.get("input_message_ids") or []),
-        "input_content_keys": list(task.get("input_content_keys") or []),
+        "input_context_version": int(input_context_version or 0),
+        "capture_ids": list(capture_ids or []),
+        "input_message_ids": list(input_message_ids or []),
+        "input_content_keys": list(input_content_keys or []),
         "reply_text": reply_text,
         "decision": decision or {},
         "status": "ready",
@@ -709,8 +947,43 @@ def enqueue_ready_reply(
         ids.append(reply_id)
     session["ready_reply_ids"] = ids[-20:]
     session["status"] = "reply_ready"
-    append_event(state, "scheduler_reply_ready", target_name=target_name, task_id=task_id, reply_id=reply_id, context_version=reply["input_context_version"])
+    append_event(
+        state,
+        "scheduler_reply_ready",
+        target_name=target_name,
+        task_id=source_task_id,
+        task_kind=source_task_kind,
+        reply_id=reply_id,
+        context_version=reply["input_context_version"],
+    )
     return reply
+
+
+def enqueue_ready_reply(
+    state: dict[str, Any],
+    task_id: str,
+    *,
+    reply_text: str,
+    decision: dict[str, Any] | None = None,
+    now: str | None = None,
+) -> dict[str, Any]:
+    now = now or utcnow_iso()
+    task = state.setdefault("llm_tasks", {}).get(task_id)
+    if not isinstance(task, dict):
+        raise KeyError(f"llm task not found: {task_id}")
+    return _enqueue_ready_reply_from_payload(
+        state,
+        source_task_id=task_id,
+        source_task_kind="planner",
+        target_name=str(task.get("target_name") or ""),
+        input_context_version=int(task.get("input_context_version") or 0),
+        capture_ids=list(task.get("capture_ids") or []),
+        input_message_ids=list(task.get("input_message_ids") or []),
+        input_content_keys=list(task.get("input_content_keys") or []),
+        reply_text=reply_text,
+        decision=decision or {},
+        now=now,
+    )
 
 
 def select_ready_replies(state: dict[str, Any], *, limit: int) -> list[dict[str, Any]]:
@@ -828,13 +1101,22 @@ def mark_reply_failed(state: dict[str, Any], reply_id: str, *, reason: str, send
 
 def state_summary(state: dict[str, Any]) -> dict[str, Any]:
     sessions = [item for item in (state.get("sessions", {}) or {}).values() if isinstance(item, dict)]
-    tasks = [item for item in (state.get("llm_tasks", {}) or {}).values() if isinstance(item, dict)]
+    planner_tasks = [item for item in (state.get("llm_tasks", {}) or {}).values() if isinstance(item, dict)]
+    polish_tasks = [item for item in (state.get("polish_tasks", {}) or {}).values() if isinstance(item, dict)]
     replies = [item for item in (state.get("ready_replies", {}) or {}).values() if isinstance(item, dict)]
+    planner_queued = sum(1 for item in planner_tasks if item.get("status") == "queued")
+    planner_running = sum(1 for item in planner_tasks if item.get("status") == "running")
+    polish_queued = sum(1 for item in polish_tasks if item.get("status") == "queued")
+    polish_running = sum(1 for item in polish_tasks if item.get("status") == "running")
     return {
         "sessions": len(sessions),
         "pending_sessions": sum(1 for item in sessions if item.get("pending_capture")),
-        "llm_queued": sum(1 for item in tasks if item.get("status") == "queued"),
-        "llm_running": sum(1 for item in tasks if item.get("status") == "running"),
+        "planner_queued": planner_queued,
+        "planner_running": planner_running,
+        "polish_queued": polish_queued,
+        "polish_running": polish_running,
+        "llm_queued": planner_queued + polish_queued,
+        "llm_running": planner_running + polish_running,
         "reply_ready": sum(1 for item in replies if item.get("status") == "ready"),
         "reply_stale": sum(1 for item in replies if item.get("status") == "stale"),
         "reply_sent": sum(1 for item in replies if item.get("status") == "sent"),

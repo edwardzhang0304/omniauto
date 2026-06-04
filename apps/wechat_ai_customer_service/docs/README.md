@@ -7,6 +7,10 @@
 - [`rpa_backend_state_machine_optimization.md`](rpa_backend_state_machine_optimization.md)
 - [`rpa_backend_state_machine_test_plan.md`](rpa_backend_state_machine_test_plan.md)
 - [`rpa_low_disturbance_listener_design.md`](rpa_low_disturbance_listener_design.md)
+- [`rpa_high_concurrency_quality_preserving_architecture_20260602.md`](rpa_high_concurrency_quality_preserving_architecture_20260602.md)
+- [`rpa_high_concurrency_quality_preserving_implementation_checklist_20260602.md`](rpa_high_concurrency_quality_preserving_implementation_checklist_20260602.md)
+- [`rpa_high_concurrency_quality_preserving_test_plan_20260602.md`](rpa_high_concurrency_quality_preserving_test_plan_20260602.md)
+- [`rpa_high_concurrency_quality_preserving_runtime_parameter_recommendation_20260602.md`](rpa_high_concurrency_quality_preserving_runtime_parameter_recommendation_20260602.md)
 - [`rpa_multi_session_dispatch_hardening_architecture_20260601.md`](rpa_multi_session_dispatch_hardening_architecture_20260601.md)
 - [`rpa_multi_session_dispatch_hardening_implementation_checklist_20260601.md`](rpa_multi_session_dispatch_hardening_implementation_checklist_20260601.md)
 - [`rpa_multi_session_dispatch_hardening_test_plan_20260601.md`](rpa_multi_session_dispatch_hardening_test_plan_20260601.md)
@@ -14,6 +18,8 @@
 
 当前知识与 RAG 架构说明：
 
+- [`brain_v2_customer_service_quality_gate_20260604/00_INDEX.md`](brain_v2_customer_service_quality_gate_20260604/00_INDEX.md)
+- [`brain_first_customer_service_20260603/00_INDEX.md`](brain_first_customer_service_20260603/00_INDEX.md)
 - [`product_master_formal_knowledge_common_sense_refactor_design.md`](product_master_formal_knowledge_common_sense_refactor_design.md)
 - [`authority_gated_rag_ai_experience_pool_design.md`](authority_gated_rag_ai_experience_pool_design.md)
 - [`authority_gated_rag_implementation_plan.md`](authority_gated_rag_implementation_plan.md)

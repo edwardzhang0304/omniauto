@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import ssl
+import urllib.error
 import urllib.request
 from collections.abc import Callable
 from pathlib import Path
@@ -18,10 +19,34 @@ DEFAULT_DEEPSEEK_MODEL = DEFAULT_DEEPSEEK_FLASH_MODEL
 DEFAULT_DEEPSEEK_CONTEXT_WINDOW_TOKENS = 1_000_000
 DEFAULT_DEEPSEEK_TIMEOUT_SECONDS = 120
 DEFAULT_OPENAI_BASE_URL = "https://api.openai.com/v1"
-DEFAULT_OPENAI_FLASH_MODEL = "gpt-4o-mini"
-DEFAULT_OPENAI_PRO_MODEL = "gpt-4.1"
+DEFAULT_OPENAI_FLASH_MODEL = "gpt-5.4"
+DEFAULT_OPENAI_PRO_MODEL = "gpt-5.4"
+DEFAULT_ANTHROPIC_BASE_URL = "https://api.anthropic.com/v1"
 DEFAULT_LLM_PROVIDER = "deepseek"
 LLM_REASONING_EFFORT_OPTIONS = ("", "none", "minimal", "low", "medium", "high", "xhigh")
+TRANSIENT_LLM_HTTP_STATUSES = {408, 409, 425, 429, 500, 502, 503, 504, 520, 521, 522, 523, 524}
+TRANSIENT_LLM_ERROR_MARKERS = (
+    "timeout",
+    "timed out",
+    "temporarily unavailable",
+    "temporary unavailable",
+    "connection reset",
+    "connection aborted",
+    "remote end closed connection",
+    "remotedisconnected",
+    "connection refused",
+    "connection closed",
+    "gateway timeout",
+    "service unavailable",
+    "too many requests",
+    "rate limit",
+    "read operation timed out",
+    "name or service not known",
+    "nodename nor servname provided",
+    "temporary failure in name resolution",
+    "network is unreachable",
+    "eof occurred in violation of protocol",
+)
 
 
 LLM_PROVIDER_PRESETS: dict[str, dict[str, Any]] = {
@@ -59,7 +84,7 @@ LLM_PROVIDER_PRESETS: dict[str, dict[str, Any]] = {
         "default_base_url": DEFAULT_OPENAI_BASE_URL,
         "default_flash_model": DEFAULT_OPENAI_FLASH_MODEL,
         "default_pro_model": DEFAULT_OPENAI_PRO_MODEL,
-        "model_options": ["gpt-5.5", "gpt-5.4", "gpt-5.2", "gpt-4o-mini", "gpt-4.1-mini", "gpt-4.1", "gpt-4o"],
+        "model_options": ["gpt-5.5", "gpt-5.4", "gpt-5.4-mini", "gpt-4.1", "gpt-4.1-mini", "gpt-4o", "gpt-4o-mini"],
         "aliases": ("openai", "gpt", "chatgpt"),
     },
     "openai_compatible": {
@@ -77,6 +102,24 @@ LLM_PROVIDER_PRESETS: dict[str, dict[str, Any]] = {
         "default_pro_model": "",
         "model_options": [],
         "aliases": ("openai-compatible", "openai_compatible", "compatible", "custom", "third_party", "third-party"),
+    },
+    "anthropic": {
+        "label": "Anthropic Compatible / Claude & Kimi",
+        "api_key_env": "ANTHROPIC_AUTH_TOKEN",
+        "api_key_env_aliases": ["ANTHROPIC_API_KEY"],
+        "base_url_env": "ANTHROPIC_BASE_URL",
+        "model_env": "ANTHROPIC_MODEL",
+        "flash_model_env": "ANTHROPIC_FLASH_MODEL",
+        "pro_model_env": "ANTHROPIC_PRO_MODEL",
+        "flash_reasoning_effort_env": "ANTHROPIC_FLASH_REASONING_EFFORT",
+        "pro_reasoning_effort_env": "ANTHROPIC_PRO_REASONING_EFFORT",
+        "allow_insecure_tls_env": "ANTHROPIC_ALLOW_INSECURE_TLS",
+        "default_base_url": DEFAULT_ANTHROPIC_BASE_URL,
+        "default_flash_model": "",
+        "default_pro_model": "",
+        "model_options": ["kimi-for-coding"],
+        "aliases": ("anthropic", "claude", "anthropic-compatible", "anthropic_compatible"),
+        "request_style": "anthropic_messages",
     },
     "qwen": {
         "label": "Alibaba Qwen",
@@ -290,7 +333,7 @@ def llm_provider_preset(provider: Any) -> dict[str, Any]:
 def explicit_model_matches_provider(provider: Any, model: Any) -> bool:
     """Guard against stale provider-scoped model names after provider switches."""
     provider_id = normalize_llm_provider(provider)
-    if provider_id == "openai_compatible":
+    if provider_id in {"openai_compatible", "anthropic"}:
         return True
     detected = detect_provider_from_model_name(model)
     return not detected or detected == provider_id
@@ -316,7 +359,7 @@ def detect_provider_from_model_name(model: Any) -> str:
 def explicit_base_url_matches_provider(provider: Any, base_url: Any) -> bool:
     """Allow custom gateways, but ignore URLs that clearly belong to another provider."""
     provider_id = normalize_llm_provider(provider)
-    if provider_id == "openai_compatible":
+    if provider_id in {"openai_compatible", "anthropic"}:
         return True
     detected = detect_provider_from_base_url(base_url)
     return not detected or detected == provider_id
@@ -369,7 +412,7 @@ def resolve_llm_api_key(
 ) -> str:
     provider_id = normalize_llm_provider(provider or active_llm_provider(config=config))
     preset = llm_provider_preset(provider_id)
-    names = [str(preset.get("api_key_env") or "")]
+    names = [str(preset.get("api_key_env") or ""), *[str(item or "") for item in (preset.get("api_key_env_aliases") or [])]]
     if provider_id == "openai_compatible":
         names.append("LLM_API_KEY")
     return _first_value(names, config=config, read_secret_fn=read_secret_fn)
@@ -535,11 +578,344 @@ def llm_urlopen(
 def normalize_llm_base_url(value: str | None) -> str:
     text = str(value or "").strip().rstrip("/")
     lower = text.lower()
-    for suffix in ("/chat/completions", "/models"):
+    for suffix in ("/chat/completions", "/models", "/messages"):
         if lower.endswith(suffix):
             text = text[: -len(suffix)].rstrip("/")
             lower = text.lower()
     return text
+
+
+def llm_provider_request_style(provider: Any) -> str:
+    preset = llm_provider_preset(provider)
+    return str(preset.get("request_style") or "openai_chat").strip() or "openai_chat"
+
+
+def llm_provider_supports_reasoning_effort(provider: Any) -> bool:
+    return llm_provider_request_style(provider) == "openai_chat"
+
+
+def resolve_llm_fallback_provider(*, config: dict[str, str] | None = None) -> str:
+    payload = config if config is not None else load_llm_config()
+    raw = payload.get("LLM_FALLBACK_PROVIDER") or os.getenv("LLM_FALLBACK_PROVIDER") or _read_registry_value("LLM_FALLBACK_PROVIDER")
+    return normalize_llm_provider(raw) if raw else ""
+
+
+def llm_fallback_enabled(*, config: dict[str, str] | None = None) -> bool:
+    payload = config if config is not None else load_llm_config()
+    value = payload.get("LLM_FALLBACK_ENABLED")
+    if value is None:
+        value = os.getenv("LLM_FALLBACK_ENABLED") or _read_registry_value("LLM_FALLBACK_ENABLED")
+    return parse_bool(value, default=False)
+
+
+def resolve_llm_fallback_settings(*, config: dict[str, str] | None = None, tier: str = "flash") -> dict[str, Any]:
+    payload = config if config is not None else load_llm_config()
+    provider = resolve_llm_fallback_provider(config=payload)
+    if not provider:
+        return {"enabled": False, "provider": ""}
+    normalized_tier = normalize_deepseek_model_tier(tier)
+    explicit_base_url = payload.get("LLM_FALLBACK_BASE_URL") or None
+    explicit_model = (
+        payload.get("LLM_FALLBACK_PRO_MODEL")
+        if normalized_tier == "pro"
+        else payload.get("LLM_FALLBACK_FLASH_MODEL")
+    ) or payload.get("LLM_FALLBACK_MODEL") or None
+    explicit_reasoning = (
+        payload.get("LLM_FALLBACK_PRO_REASONING_EFFORT")
+        if normalized_tier == "pro"
+        else payload.get("LLM_FALLBACK_FLASH_REASONING_EFFORT")
+    )
+    explicit_key = str(payload.get("LLM_FALLBACK_API_KEY") or "").strip()
+    allow_insecure_tls = parse_bool(
+        payload.get("LLM_FALLBACK_ALLOW_INSECURE_TLS"),
+        default=resolve_llm_allow_insecure_tls(provider=provider, config=payload),
+    )
+    return {
+        "enabled": llm_fallback_enabled(config=payload),
+        "provider": provider,
+        "provider_label": str(llm_provider_preset(provider).get("label") or provider),
+        "base_url": resolve_llm_base_url(provider=provider, explicit_base_url=explicit_base_url, config=payload),
+        "model": resolve_llm_tier_model(provider=provider, tier=normalized_tier, explicit_model=explicit_model, config=payload),
+        "flash_model": resolve_llm_tier_model(
+            provider=provider,
+            tier="flash",
+            explicit_model=payload.get("LLM_FALLBACK_FLASH_MODEL") or payload.get("LLM_FALLBACK_MODEL") or None,
+            config=payload,
+        ),
+        "pro_model": resolve_llm_tier_model(
+            provider=provider,
+            tier="pro",
+            explicit_model=payload.get("LLM_FALLBACK_PRO_MODEL") or payload.get("LLM_FALLBACK_MODEL") or None,
+            config=payload,
+        ),
+        "api_key": explicit_key or resolve_llm_api_key(provider=provider, config=payload),
+        "flash_reasoning_effort": normalize_llm_reasoning_effort(
+            payload.get("LLM_FALLBACK_FLASH_REASONING_EFFORT")
+            or resolve_llm_reasoning_effort(provider=provider, tier="flash", config=payload)
+        ),
+        "pro_reasoning_effort": normalize_llm_reasoning_effort(
+            payload.get("LLM_FALLBACK_PRO_REASONING_EFFORT")
+            or resolve_llm_reasoning_effort(provider=provider, tier="pro", config=payload)
+        ),
+        "allow_insecure_tls": allow_insecure_tls,
+        "request_style": llm_provider_request_style(provider),
+    }
+
+
+def llm_route_signature(*, provider: Any, base_url: str, model: str, api_key: str) -> tuple[str, str, str, str]:
+    return (
+        normalize_llm_provider(provider),
+        normalize_llm_base_url(base_url),
+        str(model or "").strip(),
+        str(api_key or "").strip(),
+    )
+
+
+def is_transient_llm_failure(result: dict[str, Any] | None) -> bool:
+    payload = result if isinstance(result, dict) else {}
+    try:
+        status = int(payload.get("status") or 0)
+    except (TypeError, ValueError):
+        status = 0
+    if status in TRANSIENT_LLM_HTTP_STATUSES:
+        return True
+    text = " ".join(
+        str(payload.get(key) or "")
+        for key in ("error", "reason", "message", "detail")
+    ).lower()
+    return any(marker in text for marker in TRANSIENT_LLM_ERROR_MARKERS)
+
+
+def extract_llm_response_text(*, provider: Any, data: Any) -> str:
+    provider_id = normalize_llm_provider(provider)
+    if llm_provider_request_style(provider_id) == "anthropic_messages":
+        items = data.get("content") if isinstance(data, dict) else []
+        texts: list[str] = []
+        if isinstance(items, list):
+            for item in items:
+                if not isinstance(item, dict):
+                    continue
+                text = str(item.get("text") or item.get("content") or "").strip()
+                if text:
+                    texts.append(text)
+        return "\n".join(texts).strip()
+    return str(((data.get("choices", [{}])[0] if isinstance(data, dict) else {}).get("message", {}) or {}).get("content", "") or "").strip()
+
+
+def call_llm_request_once(
+    *,
+    provider: Any,
+    api_key: str,
+    base_url: str,
+    model: str,
+    messages: list[dict[str, Any]],
+    timeout: int | float,
+    max_tokens: int,
+    temperature: float | None = None,
+    tier: str = "flash",
+    json_mode: bool = False,
+    explicit_reasoning_effort: Any | None = None,
+    allow_insecure_tls: Any | None = None,
+) -> dict[str, Any]:
+    provider_id = normalize_llm_provider(provider)
+    request_style = llm_provider_request_style(provider_id)
+    if request_style == "anthropic_messages":
+        system_parts: list[str] = []
+        request_messages: list[dict[str, Any]] = []
+        for message in messages or []:
+            role = str((message or {}).get("role") or "user").strip().lower()
+            content = str((message or {}).get("content") or "")
+            if role == "system":
+                if content:
+                    system_parts.append(content)
+                continue
+            normalized_role = "assistant" if role == "assistant" else "user"
+            request_messages.append({"role": normalized_role, "content": content})
+        payload: dict[str, Any] = {
+            "model": model,
+            "messages": request_messages,
+            "max_tokens": max(1, int(max_tokens)),
+            "stream": False,
+        }
+        if system_parts:
+            payload["system"] = "\n\n".join(system_parts)
+        if temperature is not None:
+            payload["temperature"] = float(temperature)
+        url = normalize_llm_base_url(base_url).rstrip("/") + "/messages"
+        headers = {
+            "x-api-key": api_key,
+            "anthropic-version": "2023-06-01",
+            "Content-Type": "application/json",
+            "Accept": "application/json",
+        }
+    else:
+        payload = {
+            "model": model,
+            "messages": messages,
+            "max_tokens": max(1, int(max_tokens)),
+            "stream": False,
+        }
+        if temperature is not None:
+            payload["temperature"] = float(temperature)
+        if json_mode:
+            payload["response_format"] = {"type": "json_object"}
+        if llm_provider_supports_reasoning_effort(provider_id):
+            apply_llm_reasoning_effort(
+                payload,
+                provider=provider_id,
+                tier=tier,
+                explicit_value=explicit_reasoning_effort,
+            )
+        url = normalize_llm_base_url(base_url).rstrip("/") + "/chat/completions"
+        headers = {
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+            "Accept": "application/json",
+        }
+    request = urllib.request.Request(
+        url,
+        data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
+        headers=headers,
+        method="POST",
+    )
+    try:
+        with llm_urlopen(
+            request,
+            timeout=max(1, timeout),
+            provider=provider_id,
+            allow_insecure_tls=allow_insecure_tls,
+        ) as response:
+            raw = response.read().decode("utf-8", errors="replace")
+            data = json.loads(raw)
+            return {
+                "ok": True,
+                "provider": provider_id,
+                "model": model,
+                "base_url": normalize_llm_base_url(base_url),
+                "status": int(getattr(response, "status", 200) or 200),
+                "response_text": extract_llm_response_text(provider=provider_id, data=data),
+                "usage": data.get("usage", {}) if isinstance(data, dict) else {},
+                "request_style": request_style,
+            }
+    except urllib.error.HTTPError as exc:
+        body = exc.read().decode("utf-8", errors="replace")
+        return {
+            "ok": False,
+            "provider": provider_id,
+            "model": model,
+            "base_url": normalize_llm_base_url(base_url),
+            "status": int(getattr(exc, "code", 0) or 0),
+            "error": body[:1000],
+            "request_style": request_style,
+        }
+    except Exception as exc:  # noqa: BLE001 - caller converts to user-visible diagnostics
+        return {
+            "ok": False,
+            "provider": provider_id,
+            "model": model,
+            "base_url": normalize_llm_base_url(base_url),
+            "status": 0,
+            "error": repr(exc),
+            "request_style": request_style,
+        }
+
+
+def call_llm_request_with_failover(
+    *,
+    provider: Any,
+    api_key: str,
+    base_url: str,
+    model: str,
+    messages: list[dict[str, Any]],
+    timeout: int | float,
+    max_tokens: int,
+    temperature: float | None = None,
+    tier: str = "flash",
+    json_mode: bool = False,
+    explicit_reasoning_effort: Any | None = None,
+    allow_insecure_tls: Any | None = None,
+    config: dict[str, str] | None = None,
+) -> dict[str, Any]:
+    primary = call_llm_request_once(
+        provider=provider,
+        api_key=api_key,
+        base_url=base_url,
+        model=model,
+        messages=messages,
+        timeout=timeout,
+        max_tokens=max_tokens,
+        temperature=temperature,
+        tier=tier,
+        json_mode=json_mode,
+        explicit_reasoning_effort=explicit_reasoning_effort,
+        allow_insecure_tls=allow_insecure_tls,
+    )
+    if primary.get("ok"):
+        primary["failover"] = {"attempted": False, "activated": False, "reason": "primary_ok"}
+        return primary
+    fallback = resolve_llm_fallback_settings(config=config, tier=tier)
+    if not fallback.get("enabled"):
+        primary["failover"] = {"attempted": False, "activated": False, "reason": "fallback_disabled"}
+        return primary
+    if not is_transient_llm_failure(primary):
+        primary["failover"] = {"attempted": False, "activated": False, "reason": "primary_error_not_transient"}
+        return primary
+    fallback_provider = str(fallback.get("provider") or "").strip()
+    fallback_api_key = str(fallback.get("api_key") or "").strip()
+    fallback_base_url = str(fallback.get("base_url") or "").strip()
+    fallback_model = str(fallback.get("model") or "").strip()
+    if not (fallback_provider and fallback_api_key and fallback_base_url and fallback_model):
+        primary["failover"] = {"attempted": False, "activated": False, "reason": "fallback_not_ready"}
+        return primary
+    if llm_route_signature(provider=provider, base_url=base_url, model=model, api_key=api_key) == llm_route_signature(
+        provider=fallback_provider,
+        base_url=fallback_base_url,
+        model=fallback_model,
+        api_key=fallback_api_key,
+    ):
+        primary["failover"] = {"attempted": False, "activated": False, "reason": "fallback_same_as_primary"}
+        return primary
+    fallback_result = call_llm_request_once(
+        provider=fallback_provider,
+        api_key=fallback_api_key,
+        base_url=fallback_base_url,
+        model=fallback_model,
+        messages=messages,
+        timeout=timeout,
+        max_tokens=max_tokens,
+        temperature=temperature,
+        tier=tier,
+        json_mode=json_mode,
+        explicit_reasoning_effort=(
+            fallback.get("pro_reasoning_effort")
+            if normalize_deepseek_model_tier(tier) == "pro"
+            else fallback.get("flash_reasoning_effort")
+        ),
+        allow_insecure_tls=fallback.get("allow_insecure_tls"),
+    )
+    if fallback_result.get("ok"):
+        fallback_result["failover"] = {
+            "attempted": True,
+            "activated": True,
+            "reason": "fallback_success",
+            "primary_provider": normalize_llm_provider(provider),
+            "primary_status": primary.get("status", 0),
+            "primary_error": str(primary.get("error") or ""),
+            "fallback_provider": fallback_provider,
+        }
+        return fallback_result
+    primary["failover"] = {
+        "attempted": True,
+        "activated": False,
+        "reason": "fallback_failed",
+        "primary_provider": normalize_llm_provider(provider),
+        "primary_status": primary.get("status", 0),
+        "primary_error": str(primary.get("error") or ""),
+        "fallback_provider": fallback_provider,
+        "fallback_status": fallback_result.get("status", 0),
+        "fallback_error": str(fallback_result.get("error") or ""),
+    }
+    return primary
 
 
 def _legacy_provider_for_reader(read_secret_fn: SecretReader) -> str:

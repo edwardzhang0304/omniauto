@@ -41,6 +41,7 @@ from listen_and_reply import (  # noqa: E402
     apply_local_customer_service_settings,
     build_iteration_targets,
     build_operator_handoff_reply_text,
+    clear_no_relevant_handoff_after_safe_brain_reply,
     coalesce_active_targets,
     concealed_handoff_reply,
     configured_reply_prefix,
@@ -55,6 +56,7 @@ from listen_and_reply import (  # noqa: E402
     load_config,
     load_rules,
     maybe_enrich_messages_with_history,
+    normalize_capture_payload_for_semantic_processing,
     plan_message_batch_semantics,
     maybe_apply_llm_reply,
     maybe_analyze_intent,
@@ -71,11 +73,13 @@ from listen_and_reply import (  # noqa: E402
     split_reply_prefix,
     should_operator_handoff,
     should_defer_standalone_greeting,
+    should_fast_skip_final_visible_polish,
     rpa_reply_content_char_count,
     send_reply_with_optional_multi_bubble,
     split_customer_visible_reply_for_multi_bubble,
     _apply_greeting,
 )
+from apps.wechat_ai_customer_service.wechat_message_normalizer import normalize_wechat_message_record  # noqa: E402
 from apps.wechat_ai_customer_service.admin_backend.services.customer_service_settings import CustomerServiceSettings  # noqa: E402
 from apps.wechat_ai_customer_service.llm_config import (  # noqa: E402
     DEFAULT_DEEPSEEK_CONTEXT_WINDOW_TOKENS,
@@ -84,7 +88,7 @@ from apps.wechat_ai_customer_service.llm_config import (  # noqa: E402
     resolve_llm_base_url,
     resolve_llm_tier_model,
 )
-from final_visible_llm_polish import guard_polished_reply, maybe_polish_customer_visible_reply, normalized_cache_text  # noqa: E402
+from final_visible_llm_polish import guard_polished_reply, maybe_polish_customer_visible_reply, min_similarity_for_source, normalized_cache_text, resolve_polish_runtime_budget  # noqa: E402
 from llm_reply_guard import guard_synthesized_reply  # noqa: E402
 from realtime_reply_router import reply_similarity  # noqa: E402
 from reply_style_adapter import adapt_reply_style  # noqa: E402
@@ -268,12 +272,15 @@ def main() -> int:
 def run_checks() -> dict[str, Any]:
     checks = [
         check_configured_bot_prefix_is_skipped,
+        check_rpa_ocr_speaker_prefix_is_metadata_not_body,
+        check_scheduler_capture_normalizes_cross_session_speaker_prefix,
         check_empty_or_prefix_only_reply_is_guarded,
         check_continuous_customer_messages_are_batched_with_overflow_guard,
         check_missing_original_batch_is_treated_as_stale_when_new_messages_visible,
         check_freshness_anchor_mode_does_not_scroll_by_default,
         check_freshness_matches_original_after_ocr_rewrap,
         check_freshness_matches_visible_ocr_fragment_of_original,
+        check_freshness_missing_anchor_ignores_old_self_loopback_noise,
         check_history_backfill_uses_connector_rpa_load_more,
         check_anchor_history_does_not_scroll_when_anchor_visible,
         check_anchor_history_does_not_scroll_when_anchor_visible_but_sender_drifted,
@@ -326,7 +333,10 @@ def run_checks() -> dict[str, Any]:
         check_final_visible_polish_gate_applies_before_normal_send,
         check_final_visible_polish_blocks_unpolished_send_when_required,
         check_final_visible_polish_transient_failure_can_degrade_when_enabled,
-        check_final_visible_polish_fast_path_skips_short_reply,
+        check_final_visible_polish_lightweight_budget_covers_realtime_and_llm,
+        check_final_visible_polish_brain_source_is_lightweight_but_stricter,
+        check_final_visible_polish_does_not_fast_skip_short_reply_by_default,
+        check_safe_brain_reply_clears_soft_no_evidence_handoff,
         check_customer_data_write_allows_soft_handoff_only,
         check_multi_target_iteration_scans_whitelist_even_without_active_changes,
         check_multi_target_default_rpa_low_risk_prefers_active_only,
@@ -334,6 +344,8 @@ def run_checks() -> dict[str, Any]:
         check_multi_target_change_warmup_is_bounded_and_coalesces,
         check_deepseek_flash_is_default,
         check_provider_switch_ignores_stale_provider_scoped_overrides,
+        check_local_customer_service_settings_follow_active_tenant_for_brain_mode,
+        check_local_customer_service_settings_follow_active_provider_for_llm_modules,
         check_llm_reply_application_guards,
         check_llm_boundary_fallback_on_invalid_model_output,
         check_review_queue_reports_pending_and_handoff_items,
@@ -374,6 +386,70 @@ def check_configured_bot_prefix_is_skipped() -> None:
         config=config,
     )
     assert_equal([item["id"] for item in batch], ["m-1"], "batch should exclude configured bot prefix")
+
+
+def check_rpa_ocr_speaker_prefix_is_metadata_not_body() -> None:
+    record = {
+        "id": "ocr-1",
+        "type": "text",
+        "sender": "unknown",
+        "content": "许聪\n在不在",
+    }
+    normalized = normalize_wechat_message_record(
+        record,
+        conversation_type="private",
+        target_name="新数据测试",
+        known_speakers=["许聪", "新数据测试"],
+        allow_unlisted_name_like_prefix=True,
+    )
+    assert_equal(normalized.get("content"), "在不在", "OCR speaker name should not enter semantic body")
+    assert_equal(normalized.get("speaker_name"), "许聪", "OCR speaker name should be preserved as metadata")
+    assert_equal(normalized.get("original_content"), "许聪\n在不在", "raw OCR content should stay auditable")
+
+    salutation = normalize_wechat_message_record(
+        {
+            "id": "ocr-2",
+            "type": "text",
+            "sender": "unknown",
+            "content": "老师\n这个多少钱",
+        },
+        conversation_type="private",
+        target_name="客户A",
+        allow_unlisted_name_like_prefix=True,
+    )
+    assert_equal(
+        salutation.get("content"),
+        "老师\n这个多少钱",
+        "real two-line salutation should not be stripped as a speaker label",
+    )
+
+
+def check_scheduler_capture_normalizes_cross_session_speaker_prefix() -> None:
+    config = load_smoke_config()
+    config["targets"] = [
+        {"name": "许聪", "enabled": True, "exact": True},
+        {"name": "新数据测试", "enabled": True, "exact": True},
+    ]
+    config["_local_customer_service_session_routing"] = {
+        "managed": True,
+        "enabled_names": ["许聪", "新数据测试"],
+        "ignored_names": [],
+    }
+    target = SimpleNamespace(name="新数据测试", exact=True)
+    payload = {
+        "ok": True,
+        "messages": [
+            {"id": "m1", "type": "text", "sender": "unknown", "content": "许聪\n秦PLUS多少钱？"},
+        ],
+    }
+    normalized = normalize_capture_payload_for_semantic_processing(payload, target=target, config=config)
+    message = normalized["messages"][0]
+    assert_equal(message.get("content"), "秦PLUS多少钱？", "scheduler capture should clean cross-session speaker prefix")
+    assert_equal(message.get("speaker_name"), "许聪", "scheduler capture should keep speaker metadata")
+    assert_true(
+        normalized.get("_content_normalization", {}).get("changed_count") == 1,
+        "normalization metadata should expose cleaned OCR messages",
+    )
 
 
 def check_empty_or_prefix_only_reply_is_guarded() -> None:
@@ -528,6 +604,38 @@ def check_freshness_matches_visible_ocr_fragment_of_original() -> None:
     )
     assert_equal(connector.history_mode_calls, [], "visible OCR fragments of the original loopback message should not scroll")
     assert_true(result.get("has_newer_messages") is False, "original OCR fragments should not stale the reply")
+
+
+def check_freshness_missing_anchor_ignores_old_self_loopback_noise() -> None:
+    connector = FakeConnector(
+        [
+            {"id": "old-self-1", "type": "text", "content": "在吗？", "sender": "self"},
+            {"id": "old-self-2", "type": "text", "content": "12万左右，省油点的轿车有推荐吗？", "sender": "self"},
+        ]
+    )
+    result = detect_newer_messages_before_send(
+        connector=connector,  # type: ignore[arg-type]
+        target=SimpleNamespace(name="文件传输助手", exact=True, allow_self_for_test=True),
+        target_state={"processed_message_ids": [], "handoff_message_ids": []},
+        batch=[
+            {
+                "id": "loopback-current",
+                "type": "text",
+                "content": "优先车况透明，别太老",
+                "sender": "unknown",
+            }
+        ],
+        config={"history_backfill": {"enabled": True, "mode": "anchor_until_found", "max_scroll_steps": 4}},
+    )
+    assert_true(
+        result.get("has_newer_messages") is False,
+        "missing original in File Transfer Assistant loopback should ignore older visible self-test prompts",
+    )
+    assert_equal(
+        result.get("reason"),
+        "original_batch_not_found_no_visible_unprocessed",
+        "self-test loopback noise should not force stale when the current batch anchor is simply off-screen",
+    )
 
 
 def check_history_backfill_uses_connector_rpa_load_more() -> None:
@@ -1394,6 +1502,7 @@ def check_customer_service_console_switches_take_effect() -> None:
                 "handoff_enabled": False,
                 "operator_alert_enabled": False,
                 "style_adapter_enabled": False,
+                "customer_service_brain_mode": "brain_first",
             }
         )
         disabled_config = apply_local_customer_service_settings(load_smoke_config())
@@ -1406,6 +1515,8 @@ def check_customer_service_console_switches_take_effect() -> None:
         assert_true(disabled_config["operator_alert"]["enabled"] is False, "operator-alert switch should disable operator alerts")
         assert_true(disabled_config["reply_style_adapter"]["enabled"] is False, "style-adapter switch should disable reply style adaptation")
         assert_true(disabled_config["final_visible_llm_polish"]["enabled"] is False, "LLM switch should disable final visible polish")
+        assert_true(disabled_config["customer_service_brain"]["enabled"] is False, "LLM switch should disable customer-service brain")
+        assert_equal(disabled_config["customer_service_brain"]["mode"], "brain_first", "brain mode setting should still roundtrip")
 
         disabled_event = process_target(
             connector=FakeConnector([{"id": "off-1", "type": "text", "content": "商用冰箱多少钱", "sender": "self"}]),  # type: ignore[arg-type]
@@ -1432,16 +1543,20 @@ def check_customer_service_console_switches_take_effect() -> None:
                 "handoff_enabled": True,
                 "operator_alert_enabled": True,
                 "style_adapter_enabled": True,
+                "customer_service_brain_mode": "shadow",
             }
         )
         record_only_config = apply_local_customer_service_settings(load_smoke_config())
         assert_true(record_only_config["intent_assist"]["llm_advisory"]["enabled"] is True, "LLM switch should enable LLM advisory")
-        assert_equal(record_only_config["intent_assist"]["llm_advisory"]["provider"], "deepseek", "LLM advisory should call configured model provider")
+        assert_equal(record_only_config["intent_assist"]["llm_advisory"]["provider"], "openai", "LLM advisory should follow the active model provider")
         assert_true(record_only_config["llm_reply_synthesis"]["enabled"] is True, "LLM switch should enable guarded reply synthesis")
-        assert_equal(record_only_config["llm_reply_synthesis"]["provider"], "deepseek", "guarded reply synthesis should call configured model provider")
+        assert_equal(record_only_config["llm_reply_synthesis"]["provider"], "openai", "guarded reply synthesis should follow the active model provider")
         assert_true(record_only_config["reply_style_adapter"]["enabled"] is True, "style-adapter switch should enable reply adaptation")
         assert_true(record_only_config["final_visible_llm_polish"]["enabled"] is True, "LLM switch should enable final visible polish")
-        assert_equal(record_only_config["final_visible_llm_polish"]["provider"], "deepseek", "final visible polish should call configured model provider")
+        assert_equal(record_only_config["final_visible_llm_polish"]["provider"], "openai", "final visible polish should follow the active model provider")
+        assert_true(record_only_config["customer_service_brain"]["enabled"] is True, "shadow brain should be enabled when LLM is on")
+        assert_equal(record_only_config["customer_service_brain"]["mode"], "shadow", "customer-service brain should keep console-selected shadow mode")
+        assert_equal(record_only_config["customer_service_brain"]["provider"], "openai", "customer-service brain should follow active model provider")
         record_only_event = process_target(
             connector=FakeConnector([{"id": "record-1", "type": "text", "content": "商用冰箱多少钱", "sender": "self"}]),  # type: ignore[arg-type]
             target=parse_targets(record_only_config)[0],
@@ -1585,10 +1700,11 @@ def check_live_safety_guard_enforces_single_allowed_target() -> None:
         guarded = apply_local_customer_service_settings(base_config)
         assert_equal([item.get("name") for item in guarded.get("targets", [])], ["许聪"], "live guard should keep only the allowed target")
         assert_true(guarded.get("history_backfill", {}).get("enabled") is False, "live guard should disable wheel/OCR backfill")
-        assert_equal(guarded.get("multi_target", {}).get("max_scan_targets_per_iteration"), 1, "live guard should force one-target scans")
+        assert_equal(guarded.get("multi_target", {}).get("max_scan_targets_per_iteration"), 0, "live guard should disable idle target scans")
         assert_equal(guarded.get("multi_target", {}).get("idle_whitelist_sweep_count"), 0, "live guard should not actively sweep idle whitelist")
-        assert_true(guarded.get("multi_target", {}).get("change_warmup_enabled") is True, "live guard should debounce changed sessions before opening chats")
-        assert_true(3 <= int(guarded.get("poll", {}).get("interval_seconds") or 0) <= 8, "live guard should keep response polling fast")
+        assert_true(guarded.get("multi_target", {}).get("change_warmup_enabled") is False, "live guard should avoid extra change warmup waits")
+        assert_equal(int(guarded.get("poll", {}).get("interval_min_seconds") or 0), 3, "live guard should use 3s minimum randomized poll")
+        assert_equal(int(guarded.get("poll", {}).get("interval_max_seconds") or 0), 5, "live guard should use 5s maximum randomized poll")
         assert_true(
             int(guarded.get("rate_limits", {}).get("min_seconds_between_replies") or 0) <= 3,
             "live guard should not impose customer-visible reply spacing",
@@ -1677,25 +1793,23 @@ def check_live_safety_guard_multi_allowed_targets_do_not_starve_secondary_sessio
         )
         assert_equal(
             int(multi_target.get("max_scan_targets_per_iteration") or 0),
-            1,
-            "multi-session guard should avoid mechanical multi-scan sweeps",
+            0,
+            "multi-session guard should avoid mechanical whitelist scan sweeps",
         )
         assert_equal(
             int(multi_target.get("max_targets_per_iteration") or 0),
+            2,
+            "multi-session guard should dispatch up to two unread targets per capture turn",
+        )
+        assert_equal(
+            int(multi_target.get("min_switch_interval_seconds") or 0),
             1,
-            "multi-session guard should dispatch one target per capture turn",
+            "multi-session guard should keep only a minimal anti-bounce switch interval",
         )
-        assert_true(
-            int(multi_target.get("min_switch_interval_seconds") or 0) <= 2,
-            "multi-session guard should avoid long hard switch intervals",
-        )
-        assert_true(bool(multi_target.get("switch_human_delay_enabled")), "switch delay should be enabled for humanized chat transitions")
-        assert_true(
-            float(multi_target.get("switch_human_delay_min_seconds") or 0.0) >= 1.0
-            and float(multi_target.get("switch_human_delay_max_seconds") or 0.0) <= 3.0,
-            "switch delay should remain inside 1-3 seconds",
-        )
-        assert_true(bool(multi_target.get("capture_one_target_per_round")), "capture should be serialized per dispatch turn")
+        assert_true(not bool(multi_target.get("switch_human_delay_enabled")), "switch delay should be disabled so unread sessions are opened promptly")
+        assert_equal(float(multi_target.get("switch_human_delay_min_seconds") or 0.0), 0.0, "switch delay min should be 0")
+        assert_equal(float(multi_target.get("switch_human_delay_max_seconds") or 0.0), 0.0, "switch delay max should be 0")
+        assert_true(not bool(multi_target.get("capture_one_target_per_round")), "capture should allow two unread targets while keeping sends serialized")
     finally:
         remove_file(settings_store.settings_path)
         if old_tenant is None:
@@ -2621,6 +2735,26 @@ def check_final_visible_polish_transient_failure_can_degrade_when_enabled() -> N
         "reply_text": "原始草稿仍在长度限制内，可以安全降级发送。",
         "llm_status": {"status": 200, "error": ""},
     }
+    unsupported_model = {
+        "enabled": True,
+        "required": True,
+        "passed": False,
+        "reason": "{\"error\":{\"message\":\"The 'gpt-5.2' model is not supported when using Codex with a ChatGPT account.\",\"type\":\"invalid_request_error\"}}",
+        "reply_text": "当前草稿已经可直接发送，不应因为轻润色模型不兼容而整条失败。",
+        "llm_status": {
+            "ok": False,
+            "status": 400,
+            "error": "{\"error\":{\"message\":\"The 'gpt-5.2' model is not supported when using Codex with a ChatGPT account.\",\"type\":\"invalid_request_error\"}}",
+        },
+    }
+    api_key_missing = {
+        "enabled": True,
+        "required": True,
+        "passed": False,
+        "reason": "LLM API key is not set",
+        "reply_text": "草稿已具备发送条件，不应因为润色密钥缺失而直接报废。",
+        "llm_status": {"ok": False, "status": 0, "error": "LLM API key is not set"},
+    }
     degrade_cfg = {"final_visible_llm_polish": {"allow_send_when_unavailable": True}}
     strict_cfg = {"final_visible_llm_polish": {"allow_send_when_unavailable": False}}
     assert_true(
@@ -2643,9 +2777,106 @@ def check_final_visible_polish_transient_failure_can_degrade_when_enabled() -> N
         final_visible_polish_blocks_send(polished_guard_reject, config=degrade_cfg) is False,
         "guard rejection of only the polished candidate should degrade to the original safe draft",
     )
+    assert_true(
+        final_visible_polish_blocks_send(unsupported_model, config=degrade_cfg) is False,
+        "unsupported final-polish model should degrade to the safe draft when fallback sending is enabled",
+    )
+    assert_true(
+        final_visible_polish_blocks_send(unsupported_model, config=strict_cfg) is True,
+        "strict mode should still block unsupported-model final polish failures",
+    )
+    assert_true(
+        final_visible_polish_blocks_send(api_key_missing, config=degrade_cfg) is False,
+        "missing final-polish API key should degrade to the safe draft when fallback sending is enabled",
+    )
 
 
-def check_final_visible_polish_fast_path_skips_short_reply() -> None:
+def check_final_visible_polish_lightweight_budget_covers_realtime_and_llm() -> None:
+    settings = {
+        "provider": "openai",
+        "model_tier": "flash",
+        "timeout_seconds": 8,
+        "max_tokens": 260,
+        "temperature": 0.45,
+        "short_reply_char_threshold": 88,
+    }
+    short_draft = "这台车目前报价8.68万，通勤省油方向挺合适。"
+    realtime_budget = resolve_polish_runtime_budget(
+        settings=settings,
+        provider="openai",
+        draft_reply=short_draft,
+        source_channel="realtime",
+        needs_handoff=False,
+    )
+    llm_budget = resolve_polish_runtime_budget(
+        settings=settings,
+        provider="openai",
+        draft_reply=short_draft,
+        source_channel="llm",
+        needs_handoff=False,
+    )
+    handoff_budget = resolve_polish_runtime_budget(
+        settings=settings,
+        provider="openai",
+        draft_reply=short_draft,
+        source_channel="handoff",
+        needs_handoff=True,
+    )
+    assert_equal(realtime_budget.get("profile"), "short", "realtime short drafts should use the lightweight polish budget")
+    assert_equal(llm_budget.get("profile"), "short", "LLM short drafts should use the lightweight polish budget")
+    assert_equal(handoff_budget.get("profile"), "default", "handoff drafts should keep the conservative polish budget")
+    assert_true(int(realtime_budget.get("max_tokens") or 0) <= 120, "realtime short polish should cap completion tokens")
+    assert_true(int(llm_budget.get("max_tokens") or 0) <= 120, "LLM short polish should cap completion tokens")
+    assert_true(int(handoff_budget.get("max_tokens") or 0) == 260, "handoff polish should not inherit short-token cap")
+
+
+def check_final_visible_polish_brain_source_is_lightweight_but_stricter() -> None:
+    settings = {
+        "provider": "openai",
+        "model_tier": "flash",
+        "timeout_seconds": 8,
+        "max_tokens": 260,
+        "temperature": 0.45,
+    }
+    brain_budget = resolve_polish_runtime_budget(
+        settings=settings,
+        provider="openai",
+        draft_reply="这台秦PLUS目前报价8.68万，通勤省油方向挺合适。",
+        source_channel="brain",
+        needs_handoff=False,
+    )
+    brain_handoff_budget = resolve_polish_runtime_budget(
+        settings=settings,
+        provider="openai",
+        draft_reply="这个我不能直接承诺，需要让同事核实后再给您准话。",
+        source_channel="brain",
+        needs_handoff=True,
+    )
+    assert_equal(brain_budget.get("profile"), "short", "Brain replies should still use lightweight final polish when concise")
+    assert_equal(
+        brain_handoff_budget.get("profile"),
+        "default",
+        "Brain handoff/boundary replies should keep conservative final polish budget",
+    )
+    assert_true(
+        min_similarity_for_source("brain") > min_similarity_for_source("normal"),
+        "Brain-source final polish should be stricter than normal drafts",
+    )
+    guard = guard_polished_reply(
+        base_reply="这台秦PLUS目前报价8.68万，通勤省油方向挺合适。",
+        polished_reply="我建议您先看凯美瑞，通勤省油方向也挺合适。",
+        recent_reply_texts=[],
+        settings={"identity_guard_enabled": True, "max_reply_chars": 620},
+        source_channel="brain",
+    )
+    assert_equal(
+        guard.get("reason"),
+        "polish_removed_protected_token",
+        "Brain-source polish must not remove protected price facts while changing the recommendation",
+    )
+
+
+def check_final_visible_polish_does_not_fast_skip_short_reply_by_default() -> None:
     config = load_smoke_config()
     config["reply"]["prefix"] = ""
     config["final_visible_llm_polish"] = {
@@ -2653,31 +2884,71 @@ def check_final_visible_polish_fast_path_skips_short_reply() -> None:
         "required_for_send": True,
         "provider": "manual_json",
         "candidate": {},
-        "skip_short_reply_fast_path_enabled": True,
         "skip_short_reply_max_chars": 46,
         "skip_short_reply_max_sentences": 2,
     }
     config["rpa_reply_safety"] = {"enabled": True, "max_auto_reply_chars": 150}
-    result = finalize_customer_visible_reply_with_llm(
-        "好的，我先给您看两台更贴预算的车。",
+    should_skip = should_fast_skip_final_visible_polish(
+        reply_body="好的，我先给您看两台更贴预算的车。",
         config=config,
-        combined="能不能先给我推荐两台预算内的车？",
-        recent_reply_texts=[],
         source_channel="normal",
         needs_handoff=False,
     )
-    assert_true(result.get("passed") is True, "fast path should still pass final polish gate")
-    assert_equal(
-        result.get("reason"),
-        "final_visible_llm_polish_fast_local_skip",
-        "short conversational reply should use fast skip path",
+    assert_true(should_skip is False, "short replies should not bypass final visible polish by default")
+
+    config["final_visible_llm_polish"]["skip_short_reply_fast_path_enabled"] = True
+    explicit_skip = should_fast_skip_final_visible_polish(
+        reply_body="好的，我先给您看两台更贴预算的车。",
+        config=config,
+        source_channel="normal",
+        needs_handoff=False,
     )
-    reply_text = str(result.get("reply_text") or "")
-    assert_true(bool(reply_text.strip()), "fast path should still produce non-empty customer-visible text")
+    assert_true(explicit_skip is False, "Brain First baseline forbids fast skip even when a stale diagnostic flag is present")
+
+
+def check_safe_brain_reply_clears_soft_no_evidence_handoff() -> None:
+    intent_assist = {
+        "evidence": {
+            "safety": {
+                "must_handoff": True,
+                "allowed_auto_reply": False,
+                "reasons": ["no_relevant_business_evidence"],
+            }
+        }
+    }
+    brain_result = {
+        "applied": True,
+        "needs_handoff": False,
+        "guard": {"action": "send_reply", "reason": "guard_passed"},
+        "brain_plan": {
+            "evidence_used": {
+                "product_ids": [],
+                "formal_knowledge_ids": [],
+                "common_sense_topics": ["new_driver_vehicle_selection"],
+            },
+            "facts_claimed": [],
+        },
+        "audit_summary": {"structured_evidence_count": 0},
+    }
+    clear_no_relevant_handoff_after_safe_brain_reply(intent_assist, brain_result)
+    safety = intent_assist["evidence"]["safety"]
+    assert_true(safety.get("must_handoff") is False, "safe Brain common-sense reply should clear soft no-evidence handoff")
     assert_true(
-        rpa_reply_content_char_count(reply_text) <= 46,
-        "fast path output should stay concise for short conversational replies",
+        safety.get("customer_service_brain_soft_evidence_override") is True,
+        "Brain soft override should be auditable",
     )
+
+    hard = {
+        "evidence": {
+            "safety": {
+                "must_handoff": True,
+                "allowed_auto_reply": False,
+                "reasons": ["discount_requires_approval"],
+            }
+        }
+    }
+    clear_no_relevant_handoff_after_safe_brain_reply(hard, brain_result)
+    assert_true(hard["evidence"]["safety"].get("must_handoff") is True, "hard risk handoff must stay blocked")
 
 
 def check_customer_data_write_allows_soft_handoff_only() -> None:
@@ -2760,6 +3031,139 @@ def check_provider_switch_ignores_stale_provider_scoped_overrides() -> None:
         "https://45.113.1.228/v1",
         "custom OpenAI-compatible gateways should remain allowed for OpenAI",
     )
+
+
+def check_local_customer_service_settings_follow_active_provider_for_llm_modules() -> None:
+    tenant_id = "workflow_provider_normalization_probe"
+    settings_store = CustomerServiceSettings(tenant_id=tenant_id)
+    old_tenant = os.environ.get("WECHAT_KNOWLEDGE_TENANT")
+    old_provider = os.environ.get("LLM_PROVIDER")
+    old_active_provider = os.environ.get("ACTIVE_LLM_PROVIDER")
+    old_base_url = os.environ.get("OPENAI_BASE_URL")
+    old_flash_model = os.environ.get("OPENAI_FLASH_MODEL")
+    old_pro_model = os.environ.get("OPENAI_PRO_MODEL")
+    os.environ["WECHAT_KNOWLEDGE_TENANT"] = tenant_id
+    os.environ["LLM_PROVIDER"] = "openai"
+    os.environ.pop("ACTIVE_LLM_PROVIDER", None)
+    os.environ["OPENAI_BASE_URL"] = "https://openai.test.gateway/v1"
+    os.environ["OPENAI_FLASH_MODEL"] = "gpt-test-flash"
+    os.environ["OPENAI_PRO_MODEL"] = "gpt-test-pro"
+    remove_file(settings_store.settings_path)
+    try:
+        settings_store.save({"use_llm": True})
+        expected_base_url = resolve_llm_base_url(provider="openai")
+        expected_flash_model = resolve_llm_tier_model(provider="openai", tier="flash")
+        expected_pro_model = resolve_llm_tier_model(provider="openai", tier="pro")
+        config = load_smoke_config()
+        config["intent_assist"] = {
+            "enabled": True,
+            "llm_advisory": {
+                "enabled": True,
+                "provider": "manual_json",
+                "candidate_json_path": "",
+            },
+        }
+        config["llm_reply_synthesis"] = {
+            "enabled": True,
+            "provider": "deepseek",
+            "model": "deepseek-v4-flash",
+            "base_url": "https://api.deepseek.com",
+            "model_routing": {
+                "flash_model": "deepseek-v4-flash",
+                "pro_model": "deepseek-v4-pro",
+            },
+        }
+        config["product_entity_resolution"] = {
+            "enabled": True,
+            "provider": "manual_json",
+        }
+        config["final_visible_llm_polish"] = {
+            "enabled": True,
+            "provider": "manual_json",
+        }
+        normalized = apply_local_customer_service_settings(config)
+
+        advisory = (((normalized.get("intent_assist") or {}).get("llm_advisory")) or {})
+        assert_equal(advisory.get("provider"), "openai", "intent assist should follow active OpenAI provider")
+        assert_equal(advisory.get("model"), expected_flash_model, "intent assist should resolve the active flash model")
+        assert_equal(advisory.get("base_url"), expected_base_url, "intent assist should resolve the active base URL")
+
+        synthesis = normalized.get("llm_reply_synthesis", {}) or {}
+        assert_equal(synthesis.get("provider"), "openai", "reply synthesis should overwrite stale provider labels")
+        assert_equal(synthesis.get("model"), expected_flash_model, "reply synthesis should overwrite stale flash models")
+        assert_equal(synthesis.get("base_url"), expected_base_url, "reply synthesis should overwrite stale base URLs")
+        routing = synthesis.get("model_routing", {}) or {}
+        assert_equal(routing.get("flash_model"), expected_flash_model, "reply synthesis flash routing should follow active provider")
+        assert_equal(routing.get("pro_model"), expected_pro_model, "reply synthesis pro routing should follow active provider")
+
+        entity = normalized.get("product_entity_resolution", {}) or {}
+        assert_equal(entity.get("provider"), "openai", "product entity resolution should follow active provider")
+        assert_equal(entity.get("model"), expected_flash_model, "product entity resolution should resolve the active flash model")
+        assert_equal(entity.get("base_url"), expected_base_url, "product entity resolution should resolve the active base URL")
+
+        polish = normalized.get("final_visible_llm_polish", {}) or {}
+        assert_equal(polish.get("provider"), "openai", "final visible polish should follow active provider")
+        assert_equal(polish.get("model"), expected_flash_model, "final visible polish should resolve the active flash model")
+        assert_equal(polish.get("base_url"), expected_base_url, "final visible polish should resolve the active base URL")
+    finally:
+        remove_file(settings_store.settings_path)
+        if old_tenant is None:
+            os.environ.pop("WECHAT_KNOWLEDGE_TENANT", None)
+        else:
+            os.environ["WECHAT_KNOWLEDGE_TENANT"] = old_tenant
+        if old_provider is None:
+            os.environ.pop("LLM_PROVIDER", None)
+        else:
+            os.environ["LLM_PROVIDER"] = old_provider
+        if old_active_provider is None:
+            os.environ.pop("ACTIVE_LLM_PROVIDER", None)
+        else:
+            os.environ["ACTIVE_LLM_PROVIDER"] = old_active_provider
+        if old_base_url is None:
+            os.environ.pop("OPENAI_BASE_URL", None)
+        else:
+            os.environ["OPENAI_BASE_URL"] = old_base_url
+        if old_flash_model is None:
+            os.environ.pop("OPENAI_FLASH_MODEL", None)
+        else:
+            os.environ["OPENAI_FLASH_MODEL"] = old_flash_model
+        if old_pro_model is None:
+            os.environ.pop("OPENAI_PRO_MODEL", None)
+        else:
+            os.environ["OPENAI_PRO_MODEL"] = old_pro_model
+
+
+def check_local_customer_service_settings_follow_active_tenant_for_brain_mode() -> None:
+    tenant_id = "workflow_brain_tenant_probe"
+    settings_store = CustomerServiceSettings(tenant_id=tenant_id)
+    old_tenant = os.environ.get("WECHAT_KNOWLEDGE_TENANT")
+    os.environ["WECHAT_KNOWLEDGE_TENANT"] = tenant_id
+    remove_file(settings_store.settings_path)
+    try:
+        settings_store.save(
+            {
+                "use_llm": True,
+                "customer_service_brain_mode": "brain_first",
+                "final_visible_llm_polish_enabled": True,
+            }
+        )
+        config = load_smoke_config()
+        config["customer_service_brain"] = {
+            "enabled": False,
+            "mode": "off",
+            "provider": "manual_json",
+        }
+        normalized = apply_local_customer_service_settings(config)
+        brain = normalized.get("customer_service_brain", {}) or {}
+        assert_true(brain.get("enabled") is True, "active tenant brain_first setting should enable Brain")
+        assert_equal(brain.get("mode"), "brain_first", "Brain mode should come from the active tenant settings")
+        assert_equal(int(brain.get("max_tokens") or 0), 2600, "Brain default token budget should avoid truncated plans")
+    finally:
+        remove_file(settings_store.settings_path)
+        if old_tenant is None:
+            os.environ.pop("WECHAT_KNOWLEDGE_TENANT", None)
+        else:
+            os.environ["WECHAT_KNOWLEDGE_TENANT"] = old_tenant
 
 
 def check_llm_reply_application_guards() -> None:

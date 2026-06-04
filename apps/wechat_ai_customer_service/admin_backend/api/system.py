@@ -13,15 +13,18 @@ from apps.wechat_ai_customer_service.auth.models import Role
 from apps.wechat_ai_customer_service.llm_config import (
     LLM_REASONING_EFFORT_OPTIONS,
     active_llm_provider,
-    apply_llm_reasoning_effort,
+    call_llm_request_once,
     llm_provider_options,
     llm_provider_preset,
+    llm_provider_request_style,
     llm_urlopen,
     load_llm_config,
+    llm_fallback_enabled,
     normalize_llm_base_url,
     normalize_llm_provider,
     normalize_llm_reasoning_effort,
     parse_bool,
+    resolve_llm_fallback_settings,
     resolve_llm_api_key,
     resolve_llm_allow_insecure_tls,
     resolve_llm_base_url,
@@ -214,6 +217,41 @@ def update_llm_config(request: Request, payload: dict[str, Any]) -> dict[str, An
         config.pop(str(preset.get("api_key_env") or ""), None)
         if provider == "openai_compatible":
             config.pop("LLM_API_KEY", None)
+
+    fallback_enabled = parse_bool(payload.get("fallback_enabled"), default=llm_fallback_enabled(config=config))
+    fallback_provider_value = payload.get("fallback_provider")
+    fallback_provider = normalize_llm_provider(
+        fallback_provider_value or config.get("LLM_FALLBACK_PROVIDER") or "anthropic"
+    ) if (fallback_enabled or "fallback_provider" in payload) else resolve_llm_fallback_settings(config=config).get("provider", "")
+    fallback_base_url = normalize_llm_base_url(str(payload.get("fallback_base_url") or ""))
+    fallback_flash_model = str(payload.get("fallback_flash_model") or payload.get("fallback_model") or "").strip()
+    fallback_pro_model = str(payload.get("fallback_pro_model") or payload.get("fallback_model") or "").strip()
+    fallback_flash_reasoning_effort = normalize_llm_reasoning_effort(payload.get("fallback_flash_reasoning_effort"))
+    fallback_pro_reasoning_effort = normalize_llm_reasoning_effort(payload.get("fallback_pro_reasoning_effort"))
+    fallback_api_key = str(payload.get("fallback_api_key") or "").strip()
+    fallback_clear_api_key = bool(payload.get("fallback_clear_api_key"))
+    fallback_allow_insecure_tls = parse_bool(payload.get("fallback_allow_insecure_tls"), default=False)
+
+    if "fallback_enabled" in payload:
+        _set_bool(config, "LLM_FALLBACK_ENABLED", fallback_enabled)
+    if "fallback_provider" in payload:
+        _set_or_clear(config, "LLM_FALLBACK_PROVIDER", fallback_provider)
+    if "fallback_base_url" in payload:
+        _set_or_clear(config, "LLM_FALLBACK_BASE_URL", fallback_base_url)
+    if "fallback_flash_model" in payload or "fallback_model" in payload:
+        _set_or_clear(config, "LLM_FALLBACK_FLASH_MODEL", fallback_flash_model)
+    if "fallback_pro_model" in payload or "fallback_model" in payload:
+        _set_or_clear(config, "LLM_FALLBACK_PRO_MODEL", fallback_pro_model)
+    if "fallback_flash_reasoning_effort" in payload:
+        _set_or_clear(config, "LLM_FALLBACK_FLASH_REASONING_EFFORT", fallback_flash_reasoning_effort)
+    if "fallback_pro_reasoning_effort" in payload:
+        _set_or_clear(config, "LLM_FALLBACK_PRO_REASONING_EFFORT", fallback_pro_reasoning_effort)
+    if "fallback_allow_insecure_tls" in payload:
+        _set_bool(config, "LLM_FALLBACK_ALLOW_INSECURE_TLS", fallback_allow_insecure_tls)
+    if fallback_api_key:
+        config["LLM_FALLBACK_API_KEY"] = fallback_api_key
+    elif fallback_clear_api_key:
+        config.pop("LLM_FALLBACK_API_KEY", None)
     save_llm_config(config)
     return _llm_config_payload(context=context, config=config, provider=provider)
 
@@ -223,70 +261,96 @@ def test_llm_config(request: Request, payload: dict[str, Any] | None = None) -> 
     context = current_auth_context(request)
     payload = payload or {}
     config = load_llm_config()
-    provider = normalize_llm_provider(payload.get("provider") or active_llm_provider(config=config))
-    api_key = str(payload.get("api_key") or "").strip() or resolve_llm_api_key(provider=provider, config=config)
-    if not api_key:
-        return {"ok": False, "message": f"{llm_provider_preset(provider).get('label', provider)} API Key 未配置", "provider": provider}
-    base_url = normalize_llm_base_url(str(payload.get("base_url") or "")) or resolve_llm_base_url(provider=provider, config=config)
-    if not base_url:
-        return {"ok": False, "message": "Base URL 未配置", "provider": provider}
+    target = "fallback" if str(payload.get("target") or "").strip().lower() == "fallback" else "primary"
     tier = "pro" if str(payload.get("route") or payload.get("tier") or "").strip().lower() == "pro" else "flash"
-    requested_model = payload.get("model")
-    if requested_model is None:
-        requested_model = payload.get("pro_model") if tier == "pro" else payload.get("flash_model")
-    model = str(requested_model or "").strip() or resolve_llm_tier_model(provider=provider, tier=tier, config=config)
-    if not model:
-        return {"ok": False, "message": "模型名未配置", "provider": provider, "base_url": base_url}
-    request_payload: dict[str, Any] = {
-        "model": model,
-        "messages": [{"role": "user", "content": "Reply with OK only."}],
-        "temperature": 0,
-        "max_tokens": 8,
-        "stream": False,
-    }
-    explicit_reasoning_effort = payload.get("reasoning_effort") if "reasoning_effort" in payload else None
-    reasoning_effort = apply_llm_reasoning_effort(
-        request_payload,
-        provider=provider,
-        tier=tier,
-        explicit_value=explicit_reasoning_effort,
-        config=config,
-    )
-    try:
-        req = urllib.request.Request(
-            base_url.rstrip("/") + "/chat/completions",
-            data=json.dumps(request_payload, ensure_ascii=False).encode("utf-8"),
-            headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json", "Accept": "application/json"},
-            method="POST",
+    if target == "fallback":
+        fallback = resolve_llm_fallback_settings(config=config, tier=tier)
+        provider = normalize_llm_provider(payload.get("provider") or fallback.get("provider") or "")
+        api_key = str(payload.get("api_key") or "").strip() or str(fallback.get("api_key") or "")
+        base_url = normalize_llm_base_url(str(payload.get("base_url") or "")) or str(fallback.get("base_url") or "")
+        requested_model = payload.get("model")
+        if requested_model is None:
+            requested_model = payload.get("pro_model") if tier == "pro" else payload.get("flash_model")
+        model = str(requested_model or "").strip() or str(fallback.get("model") or "")
+        reasoning_effort = normalize_llm_reasoning_effort(
+            payload.get("reasoning_effort")
+            if "reasoning_effort" in payload
+            else (fallback.get("pro_reasoning_effort") if tier == "pro" else fallback.get("flash_reasoning_effort"))
         )
-        with llm_urlopen(req, timeout=30, provider=provider, allow_insecure_tls=payload.get("allow_insecure_tls")) as response:
-            status = int(getattr(response, "status", 200))
-            if 200 <= status < 300:
-                raw = response.read().decode("utf-8", errors="replace")
-                sample = _chat_completion_sample(raw)
-                return {
-                    "ok": True,
-                    "message": "连接成功",
-                    "provider": provider,
-                    "provider_label": str(llm_provider_preset(provider).get("label") or provider),
-                    "base_url": base_url,
-                    "model": model,
-                    "route": tier,
-                    "reasoning_effort": reasoning_effort,
-                    "sample": sample,
-                }
-            return {"ok": False, "message": f"HTTP {status}", "provider": provider, "base_url": base_url, "model": model}
-    except urllib.error.HTTPError as exc:
-        detail = exc.read().decode("utf-8", errors="replace")[:200]
-        model_hint = _llm_model_unavailable_hint(provider=provider, base_url=base_url, api_key=api_key, model=model, allow_insecure_tls=payload.get("allow_insecure_tls"))
-        message = f"HTTP {exc.code}: {detail}"
-        if model_hint:
-            message = f"{message}\n{model_hint}"
-        return {"ok": False, "message": message, "provider": provider, "base_url": base_url, "model": model}
-    except urllib.error.URLError as exc:
-        return {"ok": False, "message": f"连接失败: {exc.reason}", "provider": provider, "base_url": base_url, "model": model}
-    except Exception as exc:
-        return {"ok": False, "message": f"测试异常: {exc}", "provider": provider, "base_url": base_url, "model": model}
+        allow_insecure_tls = (
+            parse_bool(payload.get("allow_insecure_tls"), default=bool(fallback.get("allow_insecure_tls")))
+            if "allow_insecure_tls" in payload
+            else bool(fallback.get("allow_insecure_tls"))
+        )
+    else:
+        provider = normalize_llm_provider(payload.get("provider") or active_llm_provider(config=config))
+        api_key = str(payload.get("api_key") or "").strip() or resolve_llm_api_key(provider=provider, config=config)
+        base_url = normalize_llm_base_url(str(payload.get("base_url") or "")) or resolve_llm_base_url(provider=provider, config=config)
+        requested_model = payload.get("model")
+        if requested_model is None:
+            requested_model = payload.get("pro_model") if tier == "pro" else payload.get("flash_model")
+        model = str(requested_model or "").strip() or resolve_llm_tier_model(provider=provider, tier=tier, config=config)
+        reasoning_effort = normalize_llm_reasoning_effort(payload.get("reasoning_effort")) or resolve_llm_reasoning_effort(
+            provider=provider,
+            tier=tier,
+            config=config,
+        )
+        allow_insecure_tls = payload.get("allow_insecure_tls")
+    if not provider:
+        return {"ok": False, "message": "供应商未配置", "target": target}
+    if not api_key:
+        return {"ok": False, "message": f"{llm_provider_preset(provider).get('label', provider)} API Key 未配置", "provider": provider, "target": target}
+    if not base_url:
+        return {"ok": False, "message": "Base URL 未配置", "provider": provider, "target": target}
+    if not model:
+        return {"ok": False, "message": "模型名未配置", "provider": provider, "base_url": base_url, "target": target}
+    response = call_llm_request_once(
+        provider=provider,
+        api_key=api_key,
+        base_url=base_url,
+        model=model,
+        messages=[{"role": "user", "content": "Reply with OK only."}],
+        timeout=30,
+        max_tokens=8,
+        temperature=0,
+        tier=tier,
+        json_mode=False,
+        explicit_reasoning_effort=reasoning_effort,
+        allow_insecure_tls=allow_insecure_tls,
+    )
+    if response.get("ok"):
+        return {
+            "ok": True,
+            "message": "连接成功",
+            "target": target,
+            "provider": provider,
+            "provider_label": str(llm_provider_preset(provider).get("label") or provider),
+            "base_url": base_url,
+            "model": model,
+            "route": tier,
+            "reasoning_effort": reasoning_effort,
+            "sample": str(response.get("response_text") or "")[:80],
+            "request_style": response.get("request_style", llm_provider_request_style(provider)),
+        }
+    model_hint = _llm_model_unavailable_hint(
+        provider=provider,
+        base_url=base_url,
+        api_key=api_key,
+        model=model,
+        allow_insecure_tls=allow_insecure_tls,
+    )
+    message = str(response.get("error") or f"HTTP {response.get('status') or 0}")
+    if model_hint:
+        message = f"{message}\n{model_hint}"
+    return {
+        "ok": False,
+        "message": message,
+        "target": target,
+        "provider": provider,
+        "base_url": base_url,
+        "model": model,
+        "request_style": response.get("request_style", llm_provider_request_style(provider)),
+    }
 
 
 @router.get("/feishu-config")
@@ -359,6 +423,45 @@ def test_feishu_handoff(request: Request, payload: dict[str, Any] | None = None)
     return dispatch_handoff_case_to_feishu(case, config=config, dry_run=bool(payload.get("dry_run")))
 
 
+def _route_probe_payload(
+    *,
+    provider: str,
+    provider_label: str,
+    base_url: str,
+    flash_model: str,
+    pro_model: str,
+    flash_reasoning_effort: str,
+    pro_reasoning_effort: str,
+    api_key: str,
+    allow_insecure_tls: bool,
+    enabled: bool | None = None,
+) -> dict[str, Any]:
+    model_probe = _fetch_provider_model_ids(
+        provider=provider,
+        base_url=base_url,
+        api_key=api_key,
+        allow_insecure_tls=allow_insecure_tls,
+        timeout=4,
+    )
+    available_models = model_probe.get("models") if isinstance(model_probe.get("models"), list) else []
+    return {
+        "enabled": enabled if enabled is not None else True,
+        "provider": provider,
+        "provider_label": provider_label,
+        "base_url": base_url,
+        "flash_model": flash_model,
+        "pro_model": pro_model,
+        "flash_reasoning_effort": flash_reasoning_effort,
+        "pro_reasoning_effort": pro_reasoning_effort,
+        "available_models": available_models,
+        "available_models_error": str(model_probe.get("error") or ""),
+        "allow_insecure_tls": allow_insecure_tls,
+        "api_key_configured": bool(api_key),
+        "api_key_masked": _mask_key(api_key),
+        "request_style": llm_provider_request_style(provider),
+    }
+
+
 def _llm_config_payload(*, context: Any, config: dict[str, str], provider: str) -> dict[str, Any]:
     provider = normalize_llm_provider(provider)
     key = resolve_llm_api_key(provider=provider, config=config)
@@ -368,30 +471,65 @@ def _llm_config_payload(*, context: Any, config: dict[str, str], provider: str) 
         providers.append({**option, "api_key_masked": _mask_key(provider_key)})
     preset = llm_provider_preset(provider)
     base_url = resolve_llm_base_url(provider=provider, config=config)
-    model_probe = _fetch_provider_model_ids(
+    primary_route = _route_probe_payload(
         provider=provider,
+        provider_label=str(preset.get("label") or provider),
         base_url=base_url,
+        flash_model=resolve_llm_tier_model(provider=provider, tier="flash", config=config),
+        pro_model=resolve_llm_tier_model(provider=provider, tier="pro", config=config),
+        flash_reasoning_effort=resolve_llm_reasoning_effort(provider=provider, tier="flash", config=config),
+        pro_reasoning_effort=resolve_llm_reasoning_effort(provider=provider, tier="pro", config=config),
         api_key=key,
         allow_insecure_tls=resolve_llm_allow_insecure_tls(provider=provider, config=config),
-        timeout=4,
     )
-    available_models = model_probe.get("models") if isinstance(model_probe.get("models"), list) else []
+    fallback_settings = resolve_llm_fallback_settings(config=config, tier="flash")
+    fallback_provider = normalize_llm_provider(fallback_settings.get("provider") or "")
+    fallback_label = str(llm_provider_preset(fallback_provider).get("label") or fallback_provider or "")
+    fallback_route = _route_probe_payload(
+        provider=fallback_provider,
+        provider_label=fallback_label,
+        base_url=str(fallback_settings.get("base_url") or ""),
+        flash_model=str(fallback_settings.get("flash_model") or ""),
+        pro_model=str(fallback_settings.get("pro_model") or ""),
+        flash_reasoning_effort=str(fallback_settings.get("flash_reasoning_effort") or ""),
+        pro_reasoning_effort=str(fallback_settings.get("pro_reasoning_effort") or ""),
+        api_key=str(fallback_settings.get("api_key") or ""),
+        allow_insecure_tls=bool(fallback_settings.get("allow_insecure_tls")),
+        enabled=bool(fallback_settings.get("enabled")),
+    ) if fallback_provider else {
+        "enabled": bool(fallback_settings.get("enabled")),
+        "provider": "",
+        "provider_label": "",
+        "base_url": "",
+        "flash_model": "",
+        "pro_model": "",
+        "flash_reasoning_effort": "",
+        "pro_reasoning_effort": "",
+        "available_models": [],
+        "available_models_error": "",
+        "allow_insecure_tls": False,
+        "api_key_configured": False,
+        "api_key_masked": "",
+        "request_style": "",
+    }
     return {
         "ok": True,
         "provider": provider,
         "provider_label": str(preset.get("label") or provider),
         "providers": providers,
-        "base_url": base_url,
-        "flash_model": resolve_llm_tier_model(provider=provider, tier="flash", config=config),
-        "pro_model": resolve_llm_tier_model(provider=provider, tier="pro", config=config),
-        "flash_reasoning_effort": resolve_llm_reasoning_effort(provider=provider, tier="flash", config=config),
-        "pro_reasoning_effort": resolve_llm_reasoning_effort(provider=provider, tier="pro", config=config),
+        "base_url": primary_route["base_url"],
+        "flash_model": primary_route["flash_model"],
+        "pro_model": primary_route["pro_model"],
+        "flash_reasoning_effort": primary_route["flash_reasoning_effort"],
+        "pro_reasoning_effort": primary_route["pro_reasoning_effort"],
         "reasoning_effort_options": list(LLM_REASONING_EFFORT_OPTIONS),
-        "available_models": available_models,
-        "available_models_error": str(model_probe.get("error") or ""),
-        "allow_insecure_tls": resolve_llm_allow_insecure_tls(provider=provider, config=config),
-        "api_key_configured": bool(key),
-        "api_key_masked": _mask_key(key),
+        "available_models": primary_route["available_models"],
+        "available_models_error": primary_route["available_models_error"],
+        "allow_insecure_tls": primary_route["allow_insecure_tls"],
+        "api_key_configured": primary_route["api_key_configured"],
+        "api_key_masked": primary_route["api_key_masked"],
+        "request_style": primary_route["request_style"],
+        "fallback": fallback_route,
         "editable": True,
     }
 
@@ -457,9 +595,16 @@ def _fetch_provider_model_ids(
     if not base_url or not api_key:
         return {"ok": False, "models": [], "error": ""}
     try:
+        request_style = llm_provider_request_style(provider)
+        headers = {"Accept": "application/json"}
+        if request_style == "anthropic_messages":
+            headers["x-api-key"] = api_key
+            headers["anthropic-version"] = "2023-06-01"
+        else:
+            headers["Authorization"] = f"Bearer {api_key}"
         req = urllib.request.Request(
             base_url.rstrip("/") + "/models",
-            headers={"Authorization": f"Bearer {api_key}", "Accept": "application/json"},
+            headers=headers,
             method="GET",
         )
         with llm_urlopen(req, timeout=max(1, timeout), provider=provider, allow_insecure_tls=allow_insecure_tls) as response:

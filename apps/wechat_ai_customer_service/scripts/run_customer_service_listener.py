@@ -320,6 +320,40 @@ def load_concurrency_scheduler_enabled(config_path: Path) -> bool:
     return multi_target.get("rpa_low_risk_mode", True) is not False
 
 
+def load_managed_poll_interval_settings(config_path: Path, *, fallback_seconds: float = 3.0) -> dict[str, float]:
+    """Return the managed listener's idle polling window.
+
+    The live RPA loop should not tick at an exact fixed cadence. We keep a
+    short 3-5s default window, then sample a fresh value each idle loop.
+    """
+
+    try:
+        raw = json.loads(config_path.read_text(encoding="utf-8"))
+    except Exception:
+        raw = {}
+    poll = raw.get("poll") if isinstance(raw, dict) else {}
+    if not isinstance(poll, dict):
+        poll = {}
+
+    def read_float(*keys: str, default: float) -> float:
+        for key in keys:
+            if key in poll:
+                try:
+                    return float(poll.get(key))
+                except (TypeError, ValueError):
+                    continue
+        return float(default)
+
+    center = read_float("interval_seconds", default=fallback_seconds)
+    min_seconds = read_float("interval_min_seconds", "min_interval_seconds", default=center)
+    max_seconds = read_float("interval_max_seconds", "max_interval_seconds", default=max(center, min_seconds))
+    min_seconds = max(0.5, min(10.0, min_seconds))
+    max_seconds = max(0.5, min(10.0, max_seconds))
+    if max_seconds < min_seconds:
+        max_seconds = min_seconds
+    return {"min_seconds": min_seconds, "max_seconds": max_seconds}
+
+
 def _deduped_names(values: Any) -> list[str]:
     if not isinstance(values, list):
         return []
@@ -1950,6 +1984,41 @@ def _already_running(tenant_id: str) -> bool:
     return False
 
 
+def scheduler_bridge_has_active_work(scheduler_bridge: Any) -> bool:
+    if scheduler_bridge is None or not bool(getattr(scheduler_bridge, "enabled", False)):
+        return False
+    store = getattr(scheduler_bridge, "store", None)
+    if store is None or not hasattr(store, "load"):
+        return False
+    try:
+        state = store.load()
+    except Exception:
+        return False
+    if not isinstance(state, dict):
+        return False
+    sessions = [item for item in (state.get("sessions", {}) or {}).values() if isinstance(item, dict)]
+    if any(item.get("pending_capture") or str(item.get("status") or "") in {"pending", "capturing"} for item in sessions):
+        return True
+    planner_tasks = [item for item in (state.get("llm_tasks", {}) or {}).values() if isinstance(item, dict)]
+    polish_tasks = [item for item in (state.get("polish_tasks", {}) or {}).values() if isinstance(item, dict)]
+    if any(str(item.get("status") or "") in {"queued", "running"} for item in planner_tasks + polish_tasks):
+        return True
+    replies = [item for item in (state.get("ready_replies", {}) or {}).values() if isinstance(item, dict)]
+    if any(str(item.get("status") or "") in {"ready", "sending"} for item in replies):
+        return True
+    monitor = getattr(scheduler_bridge, "session_monitor", None)
+    connector = getattr(scheduler_bridge, "connector", None)
+    if monitor is not None and connector is not None:
+        try:
+            monitor.poll(connector)
+            pending = monitor.pending_targets(limit=1)
+            if pending:
+                return True
+        except Exception:
+            return False
+    return False
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--tenant-id", required=True)
@@ -1961,6 +2030,10 @@ def main() -> int:
 
     tenant_id = str(args.tenant_id).strip()
     config_path = args.config.resolve()
+    poll_interval_settings = load_managed_poll_interval_settings(
+        config_path,
+        fallback_seconds=max(0.5, float(args.interval_seconds)),
+    )
 
     if _already_running(tenant_id):
         print(f"Managed listener for {tenant_id} is already running; exiting.", file=sys.stderr)
@@ -2359,76 +2432,90 @@ def main() -> int:
         if passive_probe_enabled and (
             passive_probe_last_at <= 0.0 or (now_wall - passive_probe_last_at) >= passive_probe_interval_seconds
         ):
-            passive_probe = run_passive_logout_probe(
-                env=env,
-                timeout_seconds=passive_probe_timeout_seconds,
-            )
-            passive_probe_last_at = now_wall
-            passive_verdict = evaluate_passive_logout_probe(
-                passive_probe,
-                guard_state=risk_guard_state,
-                settings=risk_settings,
-                now_ts=now_wall,
-            )
-            last_passive_probe_verdict = passive_verdict
-            risk_guard_state = passive_verdict.get("state") if isinstance(passive_verdict.get("state"), dict) else risk_guard_state
-            write_transport_risk_guard_state(risk_state_file, risk_guard_state)
-            append_log(
-                log_path,
-                {
-                    "event": "managed_listener_passive_logout_probe",
-                    "tenant_id": tenant_id,
-                    "passive_probe": passive_probe,
-                    "verdict": {
-                        "stop": bool(passive_verdict.get("stop")),
-                        "reason": passive_verdict.get("reason"),
-                        "hits": passive_verdict.get("hits"),
-                        "failures": passive_verdict.get("failures"),
-                        "threshold": passive_verdict.get("threshold"),
-                    },
-                },
-            )
-            if passive_verdict.get("stop"):
-                message = str(passive_verdict.get("message") or "检测到微信掉线风险，已自动停机。")
-                runtime_handoff = create_runtime_transport_handoff_case(
-                    tenant_id=tenant_id,
-                    reason=str(passive_verdict.get("reason") or "wechat_logout_detected_by_passive_probe"),
-                    message=message,
-                    source="passive_logout_probe",
-                    verdict=passive_verdict,
-                )
+            if scheduler_bridge_has_active_work(scheduler_bridge):
+                passive_probe_last_at = now_wall
+                risk_guard_state["passive_logout_probe_last_at"] = now_wall
+                risk_guard_state["passive_logout_probe_deferred_reason"] = "scheduler_active_work"
+                write_transport_risk_guard_state(risk_state_file, risk_guard_state)
                 append_log(
                     log_path,
                     {
-                        "event": "managed_listener_passive_logout_stop",
+                        "event": "managed_listener_passive_logout_probe_deferred",
                         "tenant_id": tenant_id,
-                        "passive_probe": passive_probe,
-                        "transport_risk": passive_verdict,
-                        "runtime_handoff": runtime_handoff,
+                        "reason": "scheduler_active_work",
                     },
                 )
-                write_runtime_status(
-                    "stopped",
-                    message,
-                    tenant_id=tenant_id,
-                    transport_risk={"passive_probe": passive_verdict},
-                    runtime_handoff=runtime_handoff,
+            else:
+                passive_probe = run_passive_logout_probe(
+                    env=env,
+                    timeout_seconds=passive_probe_timeout_seconds,
                 )
-                _shutdown_operator_guard("passive_logout_stop")
-                print(message, file=sys.stderr)
-                return 4
-            calibration_due = passive_probe_recalibration_due(
-                passive_verdict,
-                settings=risk_settings,
-                now_ts=now_wall,
-            )
-            if calibration_due.get("due"):
-                calibration_stop = _interactive_calibration_or_stop(
-                    "passive_probe_failure",
-                    trigger={"passive_probe": passive_probe, "verdict": passive_verdict, "due": calibration_due},
+                passive_probe_last_at = now_wall
+                passive_verdict = evaluate_passive_logout_probe(
+                    passive_probe,
+                    guard_state=risk_guard_state,
+                    settings=risk_settings,
+                    now_ts=now_wall,
                 )
-                if calibration_stop is not None:
-                    return calibration_stop
+                last_passive_probe_verdict = passive_verdict
+                risk_guard_state = passive_verdict.get("state") if isinstance(passive_verdict.get("state"), dict) else risk_guard_state
+                write_transport_risk_guard_state(risk_state_file, risk_guard_state)
+                append_log(
+                    log_path,
+                    {
+                        "event": "managed_listener_passive_logout_probe",
+                        "tenant_id": tenant_id,
+                        "passive_probe": passive_probe,
+                        "verdict": {
+                            "stop": bool(passive_verdict.get("stop")),
+                            "reason": passive_verdict.get("reason"),
+                            "hits": passive_verdict.get("hits"),
+                            "failures": passive_verdict.get("failures"),
+                            "threshold": passive_verdict.get("threshold"),
+                        },
+                    },
+                )
+                if passive_verdict.get("stop"):
+                    message = str(passive_verdict.get("message") or "检测到微信掉线风险，已自动停机。")
+                    runtime_handoff = create_runtime_transport_handoff_case(
+                        tenant_id=tenant_id,
+                        reason=str(passive_verdict.get("reason") or "wechat_logout_detected_by_passive_probe"),
+                        message=message,
+                        source="passive_logout_probe",
+                        verdict=passive_verdict,
+                    )
+                    append_log(
+                        log_path,
+                        {
+                            "event": "managed_listener_passive_logout_stop",
+                            "tenant_id": tenant_id,
+                            "passive_probe": passive_probe,
+                            "transport_risk": passive_verdict,
+                            "runtime_handoff": runtime_handoff,
+                        },
+                    )
+                    write_runtime_status(
+                        "stopped",
+                        message,
+                        tenant_id=tenant_id,
+                        transport_risk={"passive_probe": passive_verdict},
+                        runtime_handoff=runtime_handoff,
+                    )
+                    _shutdown_operator_guard("passive_logout_stop")
+                    print(message, file=sys.stderr)
+                    return 4
+                calibration_due = passive_probe_recalibration_due(
+                    passive_verdict,
+                    settings=risk_settings,
+                    now_ts=now_wall,
+                )
+                if calibration_due.get("due"):
+                    calibration_stop = _interactive_calibration_or_stop(
+                        "passive_probe_failure",
+                        trigger={"passive_probe": passive_probe, "verdict": passive_verdict, "due": calibration_due},
+                    )
+                    if calibration_stop is not None:
+                        return calibration_stop
         if cloud_required_enabled():
             now_ts = time.monotonic()
             if now_ts - last_cloud_refresh_at >= cloud_refresh_interval:
@@ -2646,7 +2733,9 @@ def main() -> int:
             },
             **summary,
         )
-        base_sleep = max(0.5, float(args.interval_seconds))
+        idle_min_sleep = max(0.5, float(poll_interval_settings.get("min_seconds") or args.interval_seconds))
+        idle_max_sleep = max(idle_min_sleep, float(poll_interval_settings.get("max_seconds") or idle_min_sleep))
+        base_sleep = random.uniform(idle_min_sleep, idle_max_sleep)
         busy_sleep = min(base_sleep, 1.15)
         quick_followup_sleep = min(busy_sleep, 0.68)
         sleep_mode = "idle"
@@ -2662,7 +2751,7 @@ def main() -> int:
             fast_followup_ticks_remaining = 0
         cooldown_sleep = max(0.0, float(risk_verdict.get("cooldown_seconds") or 0.0))
         jitter_cap = max(0.0, float(risk_verdict.get("loop_jitter_seconds") or 0.0))
-        jitter_multiplier = 1.0
+        jitter_multiplier = 0.0
         if sleep_mode == "busy":
             jitter_multiplier = 0.7
         elif sleep_mode == "fast_followup":

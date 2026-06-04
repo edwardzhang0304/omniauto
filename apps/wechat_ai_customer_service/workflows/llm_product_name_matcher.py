@@ -5,13 +5,11 @@ from __future__ import annotations
 import hashlib
 import json
 import re
-import urllib.error
-import urllib.request
 from typing import Any
 
 from apps.wechat_ai_customer_service.llm_config import (
     apply_llm_reasoning_effort,
-    llm_urlopen,
+    call_llm_request_with_failover,
     resolve_effective_llm_provider,
     resolve_llm_api_key,
     resolve_llm_base_url,
@@ -74,35 +72,29 @@ def llm_match_product_name(
         return result
 
     payload = build_llm_payload(query_text, candidates, model=model, provider=provider, settings=settings)
-    url = base_url.rstrip("/") + "/chat/completions"
-    request = urllib.request.Request(
-        url,
-        data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
-        headers={
-            "Authorization": f"Bearer {api_key}",
-            "Content-Type": "application/json",
-        },
-        method="POST",
+    result_payload = call_llm_request_with_failover(
+        provider=provider,
+        api_key=api_key,
+        base_url=base_url,
+        model=model,
+        messages=list(payload.get("messages") or []),
+        timeout=max(1, timeout),
+        max_tokens=int(payload.get("max_tokens") or 180),
+        temperature=float(payload.get("temperature") or 0),
+        tier="flash",
+        json_mode=True,
     )
-    try:
-        with llm_urlopen(request, timeout=max(1, timeout), provider=provider) as response:
-            raw = response.read().decode("utf-8", errors="replace")
-            parsed = parse_llm_response(raw)
-    except urllib.error.HTTPError as exc:
-        body = exc.read().decode("utf-8", errors="replace")
+    if not result_payload.get("ok"):
         result = {
             "applied": False,
             "matched": False,
-            "reason": "llm_http_error",
-            "status": int(getattr(exc, "code", 0) or 0),
-            "error": summarize_error_body(body),
+            "reason": "llm_http_error" if int(result_payload.get("status") or 0) > 0 else "llm_request_failed",
+            "status": int(result_payload.get("status") or 0),
+            "error": summarize_error_body(str(result_payload.get("error") or "")),
         }
         cache_result(cache_key, result)
         return result
-    except Exception as exc:
-        result = {"applied": False, "matched": False, "reason": "llm_request_failed", "error": repr(exc)}
-        cache_result(cache_key, result)
-        return result
+    parsed = parse_llm_response(str(result_payload.get("response_text") or ""))
 
     resolved = reconcile_llm_candidate(parsed, candidates, min_confidence=min_confidence)
     cache_result(cache_key, resolved)

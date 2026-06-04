@@ -231,10 +231,11 @@ class WeChatConnector:
         args = ["sessions"]
         if fresh:
             args.append("--fresh")
+        env_overrides = interactive_rpa_probe_env() if fresh else None
         lock_timeout = rpa_lock_timeout_seconds("sessions", default=14.0)
         try:
             with wechat_rpa_lock("sessions", timeout_seconds=lock_timeout) as lock_meta:
-                primary = self.call_compat_sidecar(args, allow_failure=True)
+                primary = self.call_compat_sidecar(args, allow_failure=True, env_overrides=env_overrides)
                 if primary.get("ok"):
                     primary.setdefault("adapter", "win32_ocr")
                     primary.setdefault("transport_priority", "rpa_first")
@@ -1561,6 +1562,13 @@ def guarded_send_confirmation_fallback(send_result: dict[str, Any], messages: di
         return False
     send_meta_ok = send_meta.get("ok")
     if send_meta_ok is False:
+        return False
+    pre_guard = send_meta.get("pre_send_guard")
+    if not isinstance(pre_guard, dict):
+        return False
+    if pre_guard.get("ok") is not True or str(pre_guard.get("reason") or "") != "target_confirmed":
+        return False
+    if pre_guard.get("blind_send"):
         return False
     post_guard = send_meta.get("post_send_guard")
     if not isinstance(post_guard, dict) or post_guard.get("ok") is not True:

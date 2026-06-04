@@ -830,7 +830,16 @@ def policy_key_matches_intent(policy_key: str, tag_set: set[str]) -> bool:
 
 
 def sanitize_context(context: dict[str, Any]) -> dict[str, Any]:
-    allowed = {"last_product_id", "last_product_name", "last_quantity", "last_shipping_city", "last_unit_price", "last_total"}
+    allowed = {
+        "last_product_id",
+        "last_product_name",
+        "last_quantity",
+        "last_shipping_city",
+        "last_unit_price",
+        "last_total",
+        "last_product_price",
+        "last_product_source",
+    }
     return {key: context.get(key) for key in allowed if context.get(key) not in (None, "")}
 
 

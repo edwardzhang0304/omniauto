@@ -26,11 +26,15 @@ for path in (PROJECT_ROOT, WORKFLOWS_ROOT, APP_ROOT, ADAPTERS_ROOT):
         sys.path.insert(0, str(path))
 
 from apps.wechat_ai_customer_service.knowledge_paths import tenant_context  # noqa: E402
+from apps.wechat_ai_customer_service.admin_backend.services.formal_review_state import acknowledge_item  # noqa: E402
+from apps.wechat_ai_customer_service.product_master import ProductMasterStore  # noqa: E402
+from reply_evidence_builder import build_reply_evidence_pack  # noqa: E402
 from listen_and_reply import TargetConfig, process_target  # noqa: E402
 from run_jiangsu_chejin_used_car_checks import (  # noqa: E402
     TENANT_ID,
     FakeConnector,
     ensure_customer_account,
+    seed_formal_used_car_knowledge,
     used_car_rules,
     used_car_service_config,
 )
@@ -92,6 +96,10 @@ def main() -> int:
             results.extend(
                 [
                     check_offline_realistic_matrix(token),
+                    check_context_product_focus_for_relative_quote(token),
+                    check_catalog_candidate_semantic_product_matching(),
+                    check_catalog_price_fact_realtime_route(token),
+                    check_inventory_category_availability_route(token),
                     check_offline_context_followup(token),
                 ]
             )
@@ -196,6 +204,298 @@ def check_offline_realistic_matrix(token: str) -> dict[str, Any]:
         outputs.append(summarize_event(case["id"], event))
     quality = summarize_quality(outputs)
     return {"name": "offline_realistic_llm_matrix", "ok": True, "case_count": len(outputs), "quality": quality, "outputs": outputs}
+
+
+def check_context_product_focus_for_relative_quote(token: str) -> dict[str, Any]:
+    seed_result = seed_formal_used_car_knowledge(token)
+    acknowledge_seeded_product_master(seed_result)
+    config = synthesis_config(token)
+    decision = type(
+        "Decision",
+        (),
+        {
+            "reply_text": "",
+            "rule_name": "",
+            "matched": False,
+            "need_handoff": False,
+            "reason": "",
+        },
+    )()
+    pack = build_reply_evidence_pack(
+        config=config,
+        target_name="新数据测试",
+        target_state={
+            "conversation_context": {
+                "last_product_id": "chejin_qinplus_2022_dmi55",
+                "last_product_name": "2022款比亚迪秦PLUS DM-i 55KM",
+            }
+        },
+        batch=[{"id": "ctx-price-1", "type": "text", "sender": "customer", "content": "这辆什么价格"}],
+        combined="这辆什么价格",
+        decision=decision,
+        reply_text="",
+        intent_assist={},
+        rag_reply={},
+        llm_reply={},
+        product_knowledge={},
+        data_capture={},
+        raw_capture={},
+        customer_profile=None,
+    )
+    evidence = ((pack.get("knowledge") or {}).get("evidence") or {})
+    products = evidence.get("products", []) or []
+    catalog = evidence.get("catalog_candidates", []) or []
+    assert_true(products, "relative quote should include context product in formal product evidence")
+    assert_true(products[0].get("id") == "chejin_qinplus_2022_dmi55", "relative quote should bind to QinPLUS context product")
+    assert_true(products[0].get("price") == 8.68, "relative quote should carry product-master price")
+    assert_true(catalog, "relative quote should keep product master candidate evidence")
+    assert_true(catalog[0].get("id") == "chejin_qinplus_2022_dmi55", "context product should be the focused catalog candidate")
+    assert_true(
+        all(str(item.get("id") or "") == "chejin_qinplus_2022_dmi55" for item in catalog),
+        "focused relative quote should not mix unrelated catalog vehicles",
+    )
+    return {
+        "name": "context_product_focus_for_relative_quote",
+        "ok": True,
+        "product_id": products[0].get("id"),
+        "price": products[0].get("price"),
+    }
+
+
+def check_catalog_candidate_semantic_product_matching() -> dict[str, Any]:
+    from knowledge_loader import build_evidence_pack
+    from reply_evidence_builder import catalog_product_candidates, compact_knowledge_pack
+
+    with tenant_context("chejin"):
+        sienna_homophone = catalog_product_candidates("塞纳多少钱？", limit=5, context={})
+        sienna_canonical = catalog_product_candidates("赛那多少钱？", limit=5, context={})
+        qinplus = catalog_product_candidates("秦PLUS多少钱？", limit=5, context={})
+        most_expensive = catalog_product_candidates("你们这儿最贵的车是哪款，介绍一下情况", limit=5, context={})
+        quoted_list = catalog_product_candidates("给我发一下你的标价就行，最终价格我们可以谈", limit=5, context={})
+        explicit_sienna_after_qinplus_context = catalog_product_candidates(
+            "塞纳价格多少？22万预算有替代吗？",
+            limit=5,
+            context={"last_product_id": "chejin_qinplus_2022_dmi55"},
+        )
+        explicit_sienna_pack = build_evidence_pack(
+            "塞纳价格多少？22万预算有替代吗？",
+            context={"last_product_id": "chejin_qinplus_2022_dmi55"},
+        )
+        explicit_sienna_compact = compact_knowledge_pack(
+            "塞纳价格多少？22万预算有替代吗？",
+            explicit_sienna_pack,
+            max_rag_hits=5,
+            max_rag_text_chars=800,
+            max_catalog_candidates=8,
+        )
+    assert_true(sienna_homophone, "homophone product query should recall catalog candidates")
+    assert_true(
+        str(sienna_homophone[0].get("id") or "") == "chejin_sienna_2021_hybrid",
+        f"塞纳 should bind to 赛那 product master first: {sienna_homophone[:3]}",
+    )
+    assert_true(
+        str(sienna_canonical[0].get("id") or "") == "chejin_sienna_2021_hybrid",
+        f"赛那 should bind to 赛那 product master first: {sienna_canonical[:3]}",
+    )
+    assert_true(qinplus, "QinPLUS price query should recall catalog candidates")
+    assert_true(
+        str(qinplus[0].get("id") or "") == "chejin_qinplus_2022_dmi55",
+        f"秦PLUS should outrank generic PLUS matches such as Tesla SRPLUS: {qinplus[:3]}",
+    )
+    assert_true(most_expensive, "price superlative query should recall product-master candidates")
+    assert_true(
+        most_expensive[0].get("match_reason") == "catalog_price_superlative",
+        "price superlative query should be explicitly backed by product-master price ordering",
+    )
+    assert_true(
+        float(most_expensive[0].get("price") or 0) >= float(most_expensive[min(1, len(most_expensive) - 1)].get("price") or 0),
+        f"price superlative candidates should be sorted by public product-master price: {most_expensive[:3]}",
+    )
+    assert_true(quoted_list, "generic quote/list request should recall product-master candidates instead of handoff-only fallback")
+    assert_true(
+        quoted_list[0].get("match_reason") == "catalog_price_list_request",
+        "quote/list request should be explicitly backed by product-master list evidence",
+    )
+    assert_true(
+        all(float(item.get("price") or 0) > 0 for item in quoted_list[:3]),
+        f"quote/list candidates should carry public prices: {quoted_list[:3]}",
+    )
+    assert_true(
+        explicit_sienna_after_qinplus_context,
+        "explicit Sienna query with old QinPLUS context should still recall catalog candidates",
+    )
+    assert_true(
+        str(explicit_sienna_after_qinplus_context[0].get("id") or "") == "chejin_sienna_2021_hybrid",
+        "explicit current product mention should outrank stale conversation product context",
+    )
+    explicit_products = ((explicit_sienna_compact.get("evidence") or {}).get("products") or [])
+    assert_true(explicit_products, "compact product evidence should include explicit Sienna product")
+    assert_true(
+        str(explicit_products[0].get("id") or "") == "chejin_sienna_2021_hybrid",
+        f"compact product evidence should put explicit current product before stale context product: {explicit_products[:3]}",
+    )
+    return {
+        "name": "catalog_candidate_semantic_product_matching",
+        "ok": True,
+        "sienna_product_id": sienna_homophone[0].get("id"),
+        "qinplus_product_id": qinplus[0].get("id"),
+        "most_expensive_product_id": most_expensive[0].get("id"),
+        "explicit_sienna_after_qinplus_context": explicit_sienna_after_qinplus_context[0].get("id"),
+        "compact_first_product": explicit_products[0].get("id"),
+    }
+
+
+def acknowledge_seeded_product_master(seed_result: dict[str, Any]) -> list[str]:
+    """Make product-master fixtures runtime-visible, matching manually reviewed inventory."""
+    product_ids = [
+        str(item.get("id") or "")
+        for item in (seed_result.get("items") or [])
+        if isinstance(item, dict) and str(item.get("category") or "") == "products" and str(item.get("id") or "")
+    ]
+    store = ProductMasterStore(tenant_id=TENANT_ID)
+    acknowledged: list[str] = []
+    for product_id in product_ids:
+        item = store.get_item(product_id, include_archived=True)
+        assert_true(bool(item), f"seeded product master item should exist: {product_id}")
+        result = store.save_item(acknowledge_item(item or {}, actor="test"))
+        assert_true(result.get("ok"), f"seeded product acknowledge failed: {product_id} {result}")
+        acknowledged.append(product_id)
+    return acknowledged
+
+
+def check_catalog_price_fact_realtime_route(token: str) -> dict[str, Any]:
+    seed_result = seed_formal_used_car_knowledge(token)
+    acknowledge_seeded_product_master(seed_result)
+    config = synthesis_config(token)
+    rules = used_car_rules(token)
+    state: dict[str, Any] = {"version": 1, "targets": {}}
+    most_expensive = process_offline_message(
+        config,
+        rules,
+        state,
+        "catalog_price_superlative",
+        f"你们这儿最贵的车是哪款，介绍一下情况 {token}",
+    )
+    price_list = process_offline_message(
+        config,
+        rules,
+        state,
+        "catalog_price_list",
+        f"给我发一下你的标价就行，最终价格我们可以谈 {token}",
+    )
+    direct_price = process_offline_message(
+        config,
+        rules,
+        state,
+        "catalog_direct_price",
+        f"宝马320多少钱？ {token}",
+    )
+    typo_price = process_offline_message(
+        config,
+        rules,
+        state,
+        "catalog_typo_alias_price",
+        f"塞纳多少钱？ {token}",
+    )
+    typo_alt = process_offline_message(
+        config,
+        rules,
+        state,
+        "catalog_typo_alias_budget_alternative",
+        f"塞纳价格多少？22万预算有替代吗？ {token}",
+    )
+    top_reply = str((most_expensive.get("decision") or {}).get("reply_text") or "")
+    list_reply = str((price_list.get("decision") or {}).get("reply_text") or "")
+    direct_reply = str((direct_price.get("decision") or {}).get("reply_text") or "")
+    typo_reply = str((typo_price.get("decision") or {}).get("reply_text") or "")
+    typo_alt_decision = typo_alt.get("decision") or {}
+    typo_alt_reply = str(typo_alt_decision.get("reply_text") or "")
+    assert_true(
+        (most_expensive.get("decision") or {}).get("reason") == "product_master_price_superlative",
+        f"most-expensive query must use product-master price fact route: {most_expensive.get('decision')}",
+    )
+    assert_true(
+        "最高" in top_reply and "标价" in top_reply and "万" in top_reply,
+        f"most-expensive reply should mention the current tenant's highest public-price product: {top_reply}",
+    )
+    assert_true(
+        (price_list.get("decision") or {}).get("reason") == "product_master_price_list",
+        f"generic quote request must use product-master price list route: {price_list.get('decision')}",
+    )
+    assert_true("万" in list_reply and ("、" in list_reply or "，" in list_reply), f"price-list reply should include multiple public quotes: {list_reply}")
+    assert_true(
+        (direct_price.get("decision") or {}).get("reason") in {"product_master_direct_price_fact", "guard_passed"},
+        f"direct product price query should be answered by product-master route or guarded Brain/LLM synthesis: {direct_price.get('decision')}",
+    )
+    assert_true("宝马" in direct_reply and "12.8万" in direct_reply, f"direct price reply should cite product-master price: {direct_reply}")
+    assert_true(
+        (typo_price.get("decision") or {}).get("reason") in {"product_master_direct_price_fact", "guard_passed"},
+        f"typo/alias direct price query should use product-master route or guarded Brain/LLM synthesis: {typo_price.get('decision')}",
+    )
+    assert_true(any(term in typo_reply for term in ("赛那", "SIENNA", "塞纳")) and "28.5万" in typo_reply, f"typo/alias price reply should cite Sienna product-master price: {typo_reply}")
+    assert_true(
+        not bool(typo_alt_decision.get("need_handoff")),
+        f"safe product-master quote plus budget alternative should not be forced to handoff: {typo_alt_decision}",
+    )
+    assert_true(
+        "28.5万" in typo_alt_reply and any(term in typo_alt_reply for term in ("GL8", "奥德赛", "21.5万", "17.6万")),
+        f"budget alternative reply should quote target and product-master-backed alternatives: {typo_alt_reply}",
+    )
+    assert_true(
+        not any(term in typo_alt_reply for term in ("转人工", "人工客服", "真人客服", "销售人工", "人工确认", "人工核实")),
+        f"safe quote alternative should not expose mechanical handoff wording: {typo_alt_reply}",
+    )
+    outputs = [
+        summarize_event("catalog_price_superlative", most_expensive),
+        summarize_event("catalog_price_list", price_list),
+        summarize_event("catalog_direct_price", direct_price),
+        summarize_event("catalog_typo_alias_price", typo_price),
+        summarize_event("catalog_typo_alias_budget_alternative", typo_alt),
+    ]
+    return {"name": "catalog_price_fact_realtime_route", "ok": True, "outputs": outputs}
+
+
+def check_inventory_category_availability_route(token: str) -> dict[str, Any]:
+    seed_result = seed_formal_used_car_knowledge(token)
+    acknowledge_seeded_product_master(seed_result)
+    config = synthesis_config(token)
+    rules = used_car_rules(token)
+    state: dict[str, Any] = {"version": 1, "targets": {}}
+    event = process_offline_message(
+        config,
+        rules,
+        state,
+        "german_inventory_availability",
+        f"你在说啥？我要问汽车，有德系车吗？ {token}",
+    )
+    reply = reply_text(event)
+    route = event.get("runtime_route") if isinstance(event.get("runtime_route"), dict) else {}
+    realtime_reply = event.get("realtime_reply") if isinstance(event.get("realtime_reply"), dict) else {}
+    assert_normal_send(event, "german_inventory_availability", require_rag=False, require_structured=False)
+    assert_true(
+        any(marker in reply for marker in ("宝马", "320", "德系")),
+        f"brand-family availability should answer from product-master candidates instead of generic clarification: {reply}",
+    )
+    assert_true(
+        str(realtime_reply.get("rule_name") or "") == "realtime_local_recommendation",
+        f"brand-family availability should use local product candidate route: {realtime_reply}",
+    )
+    used_product_ids = [str(item) for item in realtime_reply.get("used_product_ids", []) or []]
+    assert_true(
+        used_product_ids and all(product_id == "chejin_bmw320_2019_m" for product_id in used_product_ids),
+        f"brand-family availability should not mix unrelated non-German catalog candidates: {used_product_ids} {reply}",
+    )
+    assert_true(
+        str(route.get("reason") or "") in {"explicit_vehicle_candidates_requested", "followup_ready_for_vehicle_candidates", "detailed_vehicle_need_ready_for_candidates"},
+        f"brand-family availability should not be intercepted as uncertain/challenge route: {route}",
+    )
+    return {
+        "name": "inventory_category_availability_route",
+        "ok": True,
+        "route_reason": route.get("reason"),
+        "reply_text": reply,
+        "used_product_ids": used_product_ids,
+    }
 
 
 def check_offline_context_followup(token: str) -> dict[str, Any]:
@@ -518,6 +818,11 @@ def assert_human_quality(text: str, case_id: str, *, expect_handoff: bool) -> No
     assert_true(not formula_hits, f"{case_id} reply is still formulaic {formula_hits}: {text}")
     assert_no_ai_identity_exposure(text, case_id)
     assert_true("RAG experience ->" not in text and "{" not in text and "}" not in text, f"{case_id} reply leaked raw/system data: {text}")
+    surface_noise_hits = [marker for marker in ("先看我在", "优先我在", "建议我在", "推荐我在", "我会先看我在") if marker in text]
+    assert_true(not surface_noise_hits, f"{case_id} reply leaked visible stitching noise {surface_noise_hits}: {text}")
+    if not expect_handoff:
+        handoff_exposure_hits = [marker for marker in ("转人工", "人工客服", "真人客服", "销售人工", "人工确认", "人工核实") if marker in text]
+        assert_true(not handoff_exposure_hits, f"{case_id} non-handoff reply exposed mechanical handoff wording {handoff_exposure_hits}: {text}")
     assert_true(len(text.strip()) >= 18, f"{case_id} reply is too short to be useful: {text}")
     if expect_handoff:
         assert_true(any(marker in text for marker in HANDOFF_MARKERS), f"{case_id} handoff should explain human verification naturally: {text}")

@@ -1053,143 +1053,170 @@ const LLM_REASONING_EFFORT_LABELS = {
   xhigh: "xhigh（极深，若中转支持）",
 };
 
+function llmRouteElements(target = "primary") {
+  const prefix = target === "fallback" ? "llm-fallback" : "llm";
+  return {
+    providerSelect: document.getElementById(`${prefix}-provider-select`),
+    baseUrlInput: document.getElementById(`${prefix}-base-url-input`),
+    flashModelSelect: document.getElementById(`${prefix}-flash-model-select`),
+    flashModelInput: document.getElementById(`${prefix}-flash-model-input`),
+    proModelSelect: document.getElementById(`${prefix}-pro-model-select`),
+    proModelInput: document.getElementById(`${prefix}-pro-model-input`),
+    flashReasoningInput: document.getElementById(`${prefix}-flash-reasoning-input`),
+    proReasoningInput: document.getElementById(`${prefix}-pro-reasoning-input`),
+    insecureTlsInput: document.getElementById(`${prefix}-insecure-tls-input`),
+    input: document.getElementById(`${prefix}-api-key-input`),
+    keyCurrent: document.getElementById(`${prefix}-api-key-current`),
+    modelAvailabilityNote: document.getElementById(`${prefix}-model-availability-note`),
+    enabledInput: target === "fallback" ? document.getElementById("llm-fallback-enabled-input") : null,
+    testButton: document.getElementById(target === "fallback" ? "llm-fallback-test" : "llm-config-test"),
+    proTestButton: document.getElementById(target === "fallback" ? "llm-fallback-test-pro" : "llm-config-test-pro"),
+  };
+}
+
+function llmRoutePayload(config, target = "primary") {
+  if (target === "fallback") return config?.fallback || {};
+  return config || {};
+}
+
+function llmBaseUrlPlaceholder(provider) {
+  if (provider === "openai_compatible") return "填写第三方中转 Base URL，例如 https://.../v1";
+  if (provider === "anthropic") return "Anthropic 风格 Base URL，例如 https://.../v1";
+  return "https://.../v1";
+}
+
+function renderLlmRouteForm(config, target = "primary") {
+  const routePayload = llmRoutePayload(config, target);
+  const editable = !!config?.editable;
+  const providers = Array.isArray(config?.providers) ? config.providers : [];
+  const elements = llmRouteElements(target);
+  const provider = routePayload.provider || (target === "primary" ? config?.provider : "") || providers[0]?.id || "openai_compatible";
+  const option = providers.find((item) => item.id === provider) || {};
+  const modelOptions = llmVisibleModelOptions(routePayload, option);
+
+  if (elements.enabledInput) {
+    elements.enabledInput.checked = !!routePayload.enabled;
+    elements.enabledInput.disabled = !editable;
+  }
+  if (elements.providerSelect) {
+    elements.providerSelect.innerHTML = providers.map((item) => `<option value="${escapeHtml(item.id)}">${escapeHtml(item.label || item.id)}</option>`).join("");
+    elements.providerSelect.value = provider;
+    elements.providerSelect.disabled = !editable;
+  }
+  if (elements.baseUrlInput) {
+    elements.baseUrlInput.value = routePayload.base_url || option.base_url || "";
+    elements.baseUrlInput.disabled = !editable;
+    elements.baseUrlInput.placeholder = llmBaseUrlPlaceholder(provider);
+  }
+  if (elements.flashModelInput) {
+    elements.flashModelInput.value = routePayload.flash_model || option.flash_model || "";
+    elements.flashModelInput.disabled = !editable;
+  }
+  renderLlmModelSelect(elements.flashModelSelect, elements.flashModelInput?.value || routePayload.flash_model || "", modelOptions, editable);
+  if (elements.proModelInput) {
+    elements.proModelInput.value = routePayload.pro_model || option.pro_model || "";
+    elements.proModelInput.disabled = !editable;
+  }
+  renderLlmModelSelect(elements.proModelSelect, elements.proModelInput?.value || routePayload.pro_model || "", modelOptions, editable);
+  renderLlmReasoningSelect(
+    elements.flashReasoningInput,
+    routePayload.flash_reasoning_effort || option.flash_reasoning_effort || "",
+    config?.reasoning_effort_options,
+    editable,
+  );
+  renderLlmReasoningSelect(
+    elements.proReasoningInput,
+    routePayload.pro_reasoning_effort || option.pro_reasoning_effort || "",
+    config?.reasoning_effort_options,
+    editable,
+  );
+  if (elements.insecureTlsInput) {
+    elements.insecureTlsInput.checked = !!routePayload.allow_insecure_tls;
+    elements.insecureTlsInput.disabled = !editable;
+  }
+  if (elements.modelAvailabilityNote) {
+    const availableModels = Array.isArray(routePayload.available_models) ? routePayload.available_models : [];
+    if (availableModels.length) {
+      elements.modelAvailabilityNote.innerHTML = availableModels.map((model) => `<span class="llm-model-chip">${escapeHtml(model)}</span>`).join("");
+    } else if (routePayload.available_models_error) {
+      elements.modelAvailabilityNote.textContent = `未读取到可用模型：${routePayload.available_models_error}`;
+    } else {
+      elements.modelAvailabilityNote.textContent = target === "fallback" ? "未读取到备选可用模型。" : "未读取到可用模型。";
+    }
+  }
+  if (elements.input) {
+    elements.input.value = "";
+    elements.input.placeholder = routePayload.api_key_configured ? "已配置（输入新 Key 可覆盖；留空保留）" : "请输入 API Key";
+    elements.input.disabled = !editable;
+  }
+  if (elements.keyCurrent) {
+    elements.keyCurrent.textContent = routePayload.api_key_configured
+      ? `当前已保存 Key：${routePayload.api_key_masked || "已配置"}。输入新 Key 会覆盖；留空保存会保留原 Key。`
+      : "当前未保存 Key。";
+  }
+  if (elements.testButton) {
+    elements.testButton.textContent = target === "fallback" ? "测试备选浅任务" : "测试浅任务";
+    elements.testButton.title = editable ? `${target === "fallback" ? "测试备选链路的浅任务模型" : "测试浅任务入口使用的模型"}` : "当前会话不可测试";
+  }
+  if (elements.proTestButton) {
+    elements.proTestButton.textContent = target === "fallback" ? "测试备选深度思考" : "测试深度思考";
+    elements.proTestButton.title = editable ? `${target === "fallback" ? "测试备选链路的深度思考模型" : "测试深度思考入口使用的模型"}` : "当前会话不可测试";
+  }
+}
+
 function renderLlmConfig() {
   const payload = state.llmConfig || {};
   const summary = document.getElementById("llm-config-summary");
-  const providerSelect = document.getElementById("llm-provider-select");
-  const baseUrlInput = document.getElementById("llm-base-url-input");
-  const flashModelSelect = document.getElementById("llm-flash-model-select");
-  const flashModelInput = document.getElementById("llm-flash-model-input");
-  const proModelSelect = document.getElementById("llm-pro-model-select");
-  const proModelInput = document.getElementById("llm-pro-model-input");
-  const flashReasoningInput = document.getElementById("llm-flash-reasoning-input");
-  const proReasoningInput = document.getElementById("llm-pro-reasoning-input");
-  const insecureTlsInput = document.getElementById("llm-insecure-tls-input");
-  const input = document.getElementById("llm-api-key-input");
-  const keyCurrent = document.getElementById("llm-api-key-current");
-  const dataList = document.getElementById("llm-model-options");
-  const modelAvailabilityNote = document.getElementById("llm-model-availability-note");
-  const saveButton = document.getElementById("llm-config-save");
-  const testButton = document.getElementById("llm-config-test");
-  const proTestButton = document.getElementById("llm-config-test-pro");
   const providers = Array.isArray(payload.providers) ? payload.providers : [];
-  const activeProvider = payload.provider || providers[0]?.id || "openai_compatible";
-  const activeOption = providers.find((item) => item.id === activeProvider) || {};
-  const modelOptions = llmVisibleModelOptions(payload, activeOption);
+  const primaryProvider = payload.provider || providers[0]?.id || "openai_compatible";
+  const primaryOption = providers.find((item) => item.id === primaryProvider) || {};
+  const fallback = payload.fallback || {};
   if (summary) {
     summary.innerHTML = `
-      <div><span>供应商</span><strong>${escapeHtml(payload.provider_label || activeOption.label || activeProvider)}</strong></div>
-      <div><span>Key 状态</span><strong>${payload.api_key_configured ? "已配置" : "未配置"}</strong></div>
-      <div><span>当前 Key</span><strong>${escapeHtml(payload.api_key_masked || "—")}</strong></div>
+      <div><span>主供应商</span><strong>${escapeHtml(payload.provider_label || primaryOption.label || primaryProvider)}</strong></div>
+      <div><span>主 Key</span><strong>${payload.api_key_configured ? "已配置" : "未配置"}</strong></div>
+      <div><span>备选开关</span><strong>${fallback.enabled ? "已启用" : "未启用"}</strong></div>
+      <div><span>备选供应商</span><strong>${escapeHtml(fallback.provider_label || fallback.provider || "—")}</strong></div>
+      <div><span>备选 Key</span><strong>${fallback.api_key_configured ? "已配置" : "未配置"}</strong></div>
       <div><span>编辑权限</span><strong>${payload.editable ? "所有用户可编辑" : "当前会话只读"}</strong></div>
     `;
   }
-  if (providerSelect) {
-    providerSelect.innerHTML = providers.map((item) => `<option value="${escapeHtml(item.id)}">${escapeHtml(item.label || item.id)}</option>`).join("");
-    providerSelect.value = activeProvider;
-    providerSelect.disabled = !payload.editable;
-  }
-  if (baseUrlInput) {
-    baseUrlInput.value = payload.base_url || activeOption.base_url || "";
-    baseUrlInput.disabled = !payload.editable;
-    baseUrlInput.placeholder = activeProvider === "openai_compatible" ? "填写第三方中转 Base URL，例如 https://.../v1" : "https://.../v1";
-  }
-  if (flashModelInput) {
-    flashModelInput.value = payload.flash_model || activeOption.flash_model || "";
-    flashModelInput.disabled = !payload.editable;
-  }
-  renderLlmModelSelect(flashModelSelect, flashModelInput?.value || payload.flash_model || "", modelOptions, payload.editable);
-  if (proModelInput) {
-    proModelInput.value = payload.pro_model || activeOption.pro_model || "";
-    proModelInput.disabled = !payload.editable;
-  }
-  renderLlmModelSelect(proModelSelect, proModelInput?.value || payload.pro_model || "", modelOptions, payload.editable);
-  renderLlmReasoningSelect(
-    flashReasoningInput,
-    payload.flash_reasoning_effort || activeOption.flash_reasoning_effort || "",
-    payload.reasoning_effort_options,
-    payload.editable,
-  );
-  renderLlmReasoningSelect(
-    proReasoningInput,
-    payload.pro_reasoning_effort || activeOption.pro_reasoning_effort || "",
-    payload.reasoning_effort_options,
-    payload.editable,
-  );
-  if (insecureTlsInput) {
-    insecureTlsInput.checked = !!payload.allow_insecure_tls;
-    insecureTlsInput.disabled = !payload.editable;
-  }
-  if (dataList) {
-    const dataListOptions = new Set(modelOptions);
-    [payload.flash_model, payload.pro_model].forEach((model) => {
-      if (model) dataListOptions.add(model);
-    });
-    dataList.innerHTML = Array.from(dataListOptions).map((model) => `<option value="${escapeHtml(model)}"></option>`).join("");
-  }
-  if (modelAvailabilityNote) {
-    const availableModels = Array.isArray(payload.available_models) ? payload.available_models : [];
-    if (availableModels.length) {
-      modelAvailabilityNote.innerHTML = availableModels
-        .map((model) => `<span class="llm-model-chip">${escapeHtml(model)}</span>`)
-        .join("");
-    } else if (payload.available_models_error) {
-      modelAvailabilityNote.textContent = `未读取到可用模型：${payload.available_models_error}`;
-    } else {
-      modelAvailabilityNote.textContent = "未读取到可用模型。";
-    }
-  }
-  if (input) {
-    input.value = "";
-    input.placeholder = payload.api_key_configured ? "已配置（输入新 Key 可覆盖；留空保留）" : "请输入 API Key";
-    input.disabled = !payload.editable;
-  }
-  if (keyCurrent) {
-    keyCurrent.textContent = payload.api_key_configured
-      ? `当前已保存 Key：${payload.api_key_masked || "已配置"}。输入新 Key 会覆盖；留空保存会保留原 Key。`
-      : "当前未保存 Key。";
-  }
+  renderLlmRouteForm(payload, "primary");
+  renderLlmRouteForm(payload, "fallback");
   updateLlmInfoPanel();
   updateLlmTestButtonState();
+  const saveButton = document.getElementById("llm-config-save");
   if (saveButton) {
     saveButton.disabled = !payload.editable;
-    saveButton.title = payload.editable ? "保存大模型配置" : "当前会话不可编辑";
-  }
-  if (testButton) {
-    testButton.textContent = "测试浅任务";
-    testButton.title = payload.editable ? "测试浅任务入口使用的模型" : "当前会话不可测试";
-  }
-  if (proTestButton) {
-    proTestButton.textContent = "测试深度思考";
-    proTestButton.title = payload.editable ? "测试深度思考入口使用的模型" : "当前会话不可测试";
+    saveButton.title = payload.editable ? "保存主用与备选大模型配置" : "当前会话不可编辑";
   }
 }
 
 async function saveLlmConfig(event) {
   if (event) event.preventDefault();
-  const providerSelect = document.getElementById("llm-provider-select");
-  const baseUrlInput = document.getElementById("llm-base-url-input");
-  const flashModelSelect = document.getElementById("llm-flash-model-select");
-  const flashModelInput = document.getElementById("llm-flash-model-input");
-  const proModelSelect = document.getElementById("llm-pro-model-select");
-  const proModelInput = document.getElementById("llm-pro-model-input");
-  const flashReasoningInput = document.getElementById("llm-flash-reasoning-input");
-  const proReasoningInput = document.getElementById("llm-pro-reasoning-input");
-  const insecureTlsInput = document.getElementById("llm-insecure-tls-input");
-  const input = document.getElementById("llm-api-key-input");
-  if (!input || !providerSelect) return;
-  const apiKey = input.value.trim();
+  const primary = llmRouteElements("primary");
+  const fallback = llmRouteElements("fallback");
+  if (!primary.input || !primary.providerSelect) return;
   const payload = await apiJson("/api/system/llm-config", {
     method: "PUT",
     body: JSON.stringify({
-      provider: providerSelect.value,
-      base_url: baseUrlInput?.value.trim() || "",
-      flash_model: flashModelSelect?.value || flashModelInput?.value.trim() || "",
-      pro_model: proModelSelect?.value || proModelInput?.value.trim() || "",
-      flash_reasoning_effort: flashReasoningInput?.value || "",
-      pro_reasoning_effort: proReasoningInput?.value || "",
-      allow_insecure_tls: !!insecureTlsInput?.checked,
-      api_key: apiKey,
+      provider: primary.providerSelect.value,
+      base_url: primary.baseUrlInput?.value.trim() || "",
+      flash_model: primary.flashModelSelect?.value || primary.flashModelInput?.value.trim() || "",
+      pro_model: primary.proModelSelect?.value || primary.proModelInput?.value.trim() || "",
+      flash_reasoning_effort: primary.flashReasoningInput?.value || "",
+      pro_reasoning_effort: primary.proReasoningInput?.value || "",
+      allow_insecure_tls: !!primary.insecureTlsInput?.checked,
+      api_key: primary.input.value.trim(),
+      fallback_enabled: !!fallback.enabledInput?.checked,
+      fallback_provider: fallback.providerSelect?.value || "",
+      fallback_base_url: fallback.baseUrlInput?.value.trim() || "",
+      fallback_flash_model: fallback.flashModelSelect?.value || fallback.flashModelInput?.value.trim() || "",
+      fallback_pro_model: fallback.proModelSelect?.value || fallback.proModelInput?.value.trim() || "",
+      fallback_flash_reasoning_effort: fallback.flashReasoningInput?.value || "",
+      fallback_pro_reasoning_effort: fallback.proReasoningInput?.value || "",
+      fallback_allow_insecure_tls: !!fallback.insecureTlsInput?.checked,
+      fallback_api_key: fallback.input?.value.trim() || "",
     }),
   });
   if (payload.ok === false) {
@@ -1198,25 +1225,20 @@ async function saveLlmConfig(event) {
   }
   state.llmConfig = payload;
   renderLlmConfig();
-  alert("大模型配置已保存。");
+  alert("主备大模型配置已保存。");
 }
 
-async function testLlmConfig(route = "flash") {
+async function testLlmConfig(route = "flash", target = "primary") {
   const isPro = route === "pro";
-  const testButton = document.getElementById(isPro ? "llm-config-test-pro" : "llm-config-test");
-  const providerSelect = document.getElementById("llm-provider-select");
-  const baseUrlInput = document.getElementById("llm-base-url-input");
-  const flashModelSelect = document.getElementById("llm-flash-model-select");
-  const flashModelInput = document.getElementById("llm-flash-model-input");
-  const proModelSelect = document.getElementById("llm-pro-model-select");
-  const proModelInput = document.getElementById("llm-pro-model-input");
-  const flashReasoningInput = document.getElementById("llm-flash-reasoning-input");
-  const proReasoningInput = document.getElementById("llm-pro-reasoning-input");
-  const insecureTlsInput = document.getElementById("llm-insecure-tls-input");
-  const input = document.getElementById("llm-api-key-input");
-  const model = isPro ? proModelSelect?.value || proModelInput?.value.trim() : flashModelSelect?.value || flashModelInput?.value.trim();
-  const reasoningEffort = isPro ? proReasoningInput?.value || "" : flashReasoningInput?.value || "";
+  const elements = llmRouteElements(target);
+  const routePayload = llmRoutePayload(state.llmConfig || {}, target);
+  const model = isPro
+    ? elements.proModelSelect?.value || elements.proModelInput?.value.trim()
+    : elements.flashModelSelect?.value || elements.flashModelInput?.value.trim();
+  const reasoningEffort = isPro ? elements.proReasoningInput?.value || "" : elements.flashReasoningInput?.value || "";
   const routeLabel = isPro ? "深度思考入口" : "浅任务入口";
+  const targetLabel = target === "fallback" ? "备选链路" : "主用链路";
+  const testButton = isPro ? elements.proTestButton : elements.testButton;
   if (testButton) {
     testButton.disabled = true;
     testButton.textContent = "测试中...";
@@ -1225,17 +1247,20 @@ async function testLlmConfig(route = "flash") {
     const payload = await apiJson("/api/system/llm-config/test", {
       method: "POST",
       body: JSON.stringify({
-        provider: providerSelect?.value || state.llmConfig?.provider || "",
+        target,
+        provider: elements.providerSelect?.value || routePayload.provider || "",
         route,
-        base_url: baseUrlInput?.value.trim() || "",
+        base_url: elements.baseUrlInput?.value.trim() || "",
         model: model || "",
         reasoning_effort: reasoningEffort,
-        allow_insecure_tls: !!insecureTlsInput?.checked,
-        api_key: input?.value.trim() || "",
+        allow_insecure_tls: !!elements.insecureTlsInput?.checked,
+        api_key: elements.input?.value.trim() || "",
       }),
     });
     if (payload.ok) {
-      alert(`连接成功\n入口: ${routeLabel}\n供应商: ${escapeHtml(payload.provider_label || payload.provider || "—")}\n模型: ${escapeHtml(payload.model || "—")}\n思考强度: ${llmReasoningLabel(payload.reasoning_effort || "")}\nBase URL: ${escapeHtml(payload.base_url || "—")}`);
+      alert(
+        `连接成功\n链路: ${targetLabel}\n入口: ${routeLabel}\n供应商: ${escapeHtml(payload.provider_label || payload.provider || "—")}\n模型: ${escapeHtml(payload.model || "—")}\n思考强度: ${llmReasoningLabel(payload.reasoning_effort || "")}\n协议: ${escapeHtml(payload.request_style || "—")}\nBase URL: ${escapeHtml(payload.base_url || "—")}`,
+      );
     } else {
       alert(`连接失败: ${payload.message || "未知错误"}`);
     }
@@ -1244,7 +1269,9 @@ async function testLlmConfig(route = "flash") {
   } finally {
     if (testButton) {
       testButton.disabled = false;
-      testButton.textContent = isPro ? "测试深度思考" : "测试浅任务";
+      testButton.textContent = target === "fallback"
+        ? (isPro ? "测试备选深度思考" : "测试备选浅任务")
+        : (isPro ? "测试深度思考" : "测试浅任务");
       updateLlmTestButtonState();
     }
   }
@@ -1253,39 +1280,49 @@ async function testLlmConfig(route = "flash") {
 function updateLlmInfoPanel() {
   const config = state.llmConfig || {};
   const providers = Array.isArray(config.providers) ? config.providers : [];
-  const providerSelect = document.getElementById("llm-provider-select");
-  const baseUrlInput = document.getElementById("llm-base-url-input");
-  const flashModelSelect = document.getElementById("llm-flash-model-select");
-  const flashModelInput = document.getElementById("llm-flash-model-input");
-  const proModelSelect = document.getElementById("llm-pro-model-select");
-  const proModelInput = document.getElementById("llm-pro-model-input");
-  const flashReasoningInput = document.getElementById("llm-flash-reasoning-input");
-  const proReasoningInput = document.getElementById("llm-pro-reasoning-input");
-  const provider = providerSelect?.value || config.provider || providers[0]?.id || "openai_compatible";
+  const primary = llmRouteElements("primary");
+  const fallback = llmRouteElements("fallback");
+  const primaryProvider = primary.providerSelect?.value || config.provider || providers[0]?.id || "openai_compatible";
+  const primaryOption = providers.find((item) => item.id === primaryProvider) || {};
+  const fallbackPayload = llmRoutePayload(config, "fallback");
+  const fallbackProvider = fallback.providerSelect?.value || fallbackPayload.provider || "";
+  const fallbackOption = providers.find((item) => item.id === fallbackProvider) || {};
+
+  setLlmInfoText("llm-info-provider", primaryOption.label || config.provider_label || primaryProvider || "—");
+  setLlmInfoText("llm-info-flash-model", primary.flashModelSelect?.value || primary.flashModelInput?.value || primaryOption.flash_model || "—");
+  setLlmInfoText("llm-info-flash-effort", llmReasoningLabel(primary.flashReasoningInput?.value || primaryOption.flash_reasoning_effort || ""));
+  setLlmInfoText("llm-info-pro-model", primary.proModelSelect?.value || primary.proModelInput?.value || primaryOption.pro_model || "—");
+  setLlmInfoText("llm-info-pro-effort", llmReasoningLabel(primary.proReasoningInput?.value || primaryOption.pro_reasoning_effort || ""));
+  setLlmInfoText("llm-info-base-url", primary.baseUrlInput?.value || primaryOption.base_url || "—");
+  setLlmInfoText("llm-info-tls", primary.insecureTlsInput?.checked ? "允许自签名证书" : "标准证书校验");
+
+  setLlmInfoText("llm-info-fallback-enabled", fallback.enabledInput?.checked ? "已启用自动切换" : "未启用");
+  setLlmInfoText("llm-info-fallback-provider", fallbackOption.label || fallbackPayload.provider_label || fallbackProvider || "—");
+  setLlmInfoText("llm-info-fallback-flash-model", fallback.flashModelSelect?.value || fallback.flashModelInput?.value || fallbackOption.flash_model || "—");
+  setLlmInfoText("llm-info-fallback-pro-model", fallback.proModelSelect?.value || fallback.proModelInput?.value || fallbackOption.pro_model || "—");
+  setLlmInfoText("llm-info-fallback-base-url", fallback.baseUrlInput?.value || fallbackOption.base_url || "—");
+  setLlmInfoText("llm-info-fallback-tls", fallback.insecureTlsInput?.checked ? "允许自签名证书" : "标准证书校验");
+}
+
+function updateLlmRouteTestButtons(target = "primary") {
+  const config = state.llmConfig || {};
+  const providers = Array.isArray(config.providers) ? config.providers : [];
+  const routePayload = llmRoutePayload(config, target);
+  const elements = llmRouteElements(target);
+  const provider = elements.providerSelect?.value || routePayload.provider || "";
   const option = providers.find((item) => item.id === provider) || {};
-  setLlmInfoText("llm-info-provider", option.label || config.provider_label || provider || "—");
-  setLlmInfoText("llm-info-flash-model", flashModelSelect?.value || flashModelInput?.value || option.flash_model || "—");
-  setLlmInfoText("llm-info-flash-effort", llmReasoningLabel(flashReasoningInput?.value || option.flash_reasoning_effort || ""));
-  setLlmInfoText("llm-info-pro-model", proModelSelect?.value || proModelInput?.value || option.pro_model || "—");
-  setLlmInfoText("llm-info-pro-effort", llmReasoningLabel(proReasoningInput?.value || option.pro_reasoning_effort || ""));
-  setLlmInfoText("llm-info-base-url", baseUrlInput?.value || option.base_url || "—");
-  setLlmInfoText("llm-info-tls", document.getElementById("llm-insecure-tls-input")?.checked ? "允许自签名证书" : "标准证书校验");
+  const hasSavedKey = target === "fallback"
+    ? !!routePayload.api_key_configured
+    : (provider === config.provider ? !!config.api_key_configured : !!option.api_key_configured);
+  const hasTypedKey = !!elements.input?.value.trim();
+  const disabled = !config.editable || (!hasSavedKey && !hasTypedKey);
+  if (elements.testButton) elements.testButton.disabled = disabled;
+  if (elements.proTestButton) elements.proTestButton.disabled = disabled;
 }
 
 function updateLlmTestButtonState() {
-  const config = state.llmConfig || {};
-  const providers = Array.isArray(config.providers) ? config.providers : [];
-  const providerSelect = document.getElementById("llm-provider-select");
-  const input = document.getElementById("llm-api-key-input");
-  const testButton = document.getElementById("llm-config-test");
-  const proTestButton = document.getElementById("llm-config-test-pro");
-  const provider = providerSelect?.value || config.provider || "";
-  const option = providers.find((item) => item.id === provider) || {};
-  const hasSavedKey = provider === config.provider ? !!config.api_key_configured : !!option.api_key_configured;
-  const hasTypedKey = !!input?.value.trim();
-  const disabled = !config.editable || (!hasSavedKey && !hasTypedKey);
-  if (testButton) testButton.disabled = disabled;
-  if (proTestButton) proTestButton.disabled = disabled;
+  updateLlmRouteTestButtons("primary");
+  updateLlmRouteTestButtons("fallback");
 }
 
 function setLlmInfoText(id, value) {
@@ -1329,19 +1366,21 @@ function renderLlmModelSelect(select, value, models, editable) {
   select.disabled = !editable;
 }
 
-function applyLlmModelSelect(route) {
+function applyLlmModelSelect(route, target = "primary") {
   const isPro = route === "pro";
-  const select = document.getElementById(isPro ? "llm-pro-model-select" : "llm-flash-model-select");
-  const input = document.getElementById(isPro ? "llm-pro-model-input" : "llm-flash-model-input");
+  const elements = llmRouteElements(target);
+  const select = isPro ? elements.proModelSelect : elements.flashModelSelect;
+  const input = isPro ? elements.proModelInput : elements.flashModelInput;
   if (!select || !input) return;
   input.value = select.value;
   updateLlmInfoPanel();
 }
 
-function syncLlmModelSelect(route) {
+function syncLlmModelSelect(route, target = "primary") {
   const isPro = route === "pro";
-  const select = document.getElementById(isPro ? "llm-pro-model-select" : "llm-flash-model-select");
-  const input = document.getElementById(isPro ? "llm-pro-model-input" : "llm-flash-model-input");
+  const elements = llmRouteElements(target);
+  const select = isPro ? elements.proModelSelect : elements.flashModelSelect;
+  const input = isPro ? elements.proModelInput : elements.flashModelInput;
   if (!select || !input) return;
   const typed = String(input.value || "").trim();
   const hasOption = Array.from(select.options || []).some((option) => option.value === typed);
@@ -1372,39 +1411,32 @@ function uniqueStrings(items) {
   return result;
 }
 
-function applyLlmProviderPreset() {
+function applyLlmProviderPreset(target = "primary") {
   const config = state.llmConfig || {};
   const providers = Array.isArray(config.providers) ? config.providers : [];
-  const providerSelect = document.getElementById("llm-provider-select");
-  const baseUrlInput = document.getElementById("llm-base-url-input");
-  const flashModelSelect = document.getElementById("llm-flash-model-select");
-  const flashModelInput = document.getElementById("llm-flash-model-input");
-  const proModelSelect = document.getElementById("llm-pro-model-select");
-  const proModelInput = document.getElementById("llm-pro-model-input");
-  const flashReasoningInput = document.getElementById("llm-flash-reasoning-input");
-  const proReasoningInput = document.getElementById("llm-pro-reasoning-input");
-  const insecureTlsInput = document.getElementById("llm-insecure-tls-input");
-  if (!providerSelect) return;
-  const option = providers.find((item) => item.id === providerSelect.value) || {};
-  if (baseUrlInput) {
-    baseUrlInput.value = option.base_url || "";
-    baseUrlInput.placeholder = providerSelect.value === "openai_compatible" ? "填写第三方中转 Base URL，例如 https://.../v1" : "https://.../v1";
+  const elements = llmRouteElements(target);
+  if (!elements.providerSelect) return;
+  const option = providers.find((item) => item.id === elements.providerSelect.value) || {};
+  const routePayload = llmRoutePayload(config, target);
+  if (elements.baseUrlInput) {
+    elements.baseUrlInput.value = option.base_url || "";
+    elements.baseUrlInput.placeholder = llmBaseUrlPlaceholder(elements.providerSelect.value);
   }
-  const modelOptions = llmVisibleModelOptions(config, option);
-  if (flashModelInput) flashModelInput.value = option.flash_model || "";
-  renderLlmModelSelect(flashModelSelect, flashModelInput?.value || option.flash_model || "", modelOptions, config.editable);
-  if (proModelInput) proModelInput.value = option.pro_model || "";
-  renderLlmModelSelect(proModelSelect, proModelInput?.value || option.pro_model || "", modelOptions, config.editable);
-  renderLlmReasoningSelect(flashReasoningInput, option.flash_reasoning_effort || "", config.reasoning_effort_options, config.editable);
-  renderLlmReasoningSelect(proReasoningInput, option.pro_reasoning_effort || "", config.reasoning_effort_options, config.editable);
-  if (insecureTlsInput) insecureTlsInput.checked = !!option.allow_insecure_tls;
+  const modelOptions = llmVisibleModelOptions(routePayload, option);
+  if (elements.flashModelInput) elements.flashModelInput.value = option.flash_model || "";
+  renderLlmModelSelect(elements.flashModelSelect, elements.flashModelInput?.value || option.flash_model || "", modelOptions, config.editable);
+  if (elements.proModelInput) elements.proModelInput.value = option.pro_model || "";
+  renderLlmModelSelect(elements.proModelSelect, elements.proModelInput?.value || option.pro_model || "", modelOptions, config.editable);
+  renderLlmReasoningSelect(elements.flashReasoningInput, option.flash_reasoning_effort || "", config.reasoning_effort_options, config.editable);
+  renderLlmReasoningSelect(elements.proReasoningInput, option.pro_reasoning_effort || "", config.reasoning_effort_options, config.editable);
+  if (elements.insecureTlsInput) elements.insecureTlsInput.checked = !!option.allow_insecure_tls;
   updateLlmInfoPanel();
   updateLlmTestButtonState();
 }
 
-function toggleLlmApiKeyVisibility() {
-  const input = document.getElementById("llm-api-key-input");
-  const button = document.getElementById("llm-config-toggle");
+function toggleLlmApiKeyVisibility(target = "primary") {
+  const input = document.getElementById(target === "fallback" ? "llm-fallback-api-key-input" : "llm-api-key-input");
+  const button = document.getElementById(target === "fallback" ? "llm-fallback-toggle" : "llm-config-toggle");
   if (!input || !button) return;
   const isPassword = input.type === "password";
   input.type = isPassword ? "text" : "password";
@@ -1594,6 +1626,13 @@ function renderCustomerService(counts = {}) {
       .map((mode) => `<option value="${escapeHtml(mode.id)}">${escapeHtml(mode.label)}</option>`)
       .join("");
     modeSelect.value = settings.reply_mode || "manual_assist";
+  }
+  const brainModeSelect = document.getElementById("customer-brain-mode");
+  if (brainModeSelect) {
+    brainModeSelect.innerHTML = (item.customer_service_brain_modes || [])
+      .map((mode) => `<option value="${escapeHtml(mode.id)}">${escapeHtml(mode.label)}</option>`)
+      .join("");
+    brainModeSelect.value = settings.customer_service_brain_mode || "off";
   }
   setChecked("customer-service-enabled", Boolean(settings.enabled));
   setChecked("customer-record-messages", settings.record_messages !== false);
@@ -2024,6 +2063,7 @@ async function saveCustomerServiceSettings() {
       identity_guard_enabled: document.getElementById("customer-identity-guard")?.checked,
       style_adapter_enabled: document.getElementById("customer-style-adapter")?.checked,
       final_visible_llm_polish_enabled: document.getElementById("customer-final-polish")?.checked,
+      customer_service_brain_mode: document.getElementById("customer-brain-mode")?.value || "off",
       respond_all_unread_sessions: document.getElementById("customer-respond-all-unread")?.checked,
     }),
   });
@@ -8309,18 +8349,31 @@ document.getElementById("full-diagnostics").addEventListener("click", () => runD
 document.getElementById("create-backup").addEventListener("click", () => createBackup().catch((error) => alert(error.message)));
 document.getElementById("refresh-versions").addEventListener("click", () => loadVersions().catch((error) => alert(error.message)));
 document.getElementById("llm-config-form")?.addEventListener("submit", (event) => saveLlmConfig(event).catch((error) => alert(error.message)));
-document.getElementById("llm-config-test")?.addEventListener("click", () => testLlmConfig("flash").catch((error) => alert(error.message)));
-document.getElementById("llm-config-test-pro")?.addEventListener("click", () => testLlmConfig("pro").catch((error) => alert(error.message)));
-document.getElementById("llm-config-toggle")?.addEventListener("click", toggleLlmApiKeyVisibility);
-document.getElementById("llm-provider-select")?.addEventListener("change", applyLlmProviderPreset);
+document.getElementById("llm-config-test")?.addEventListener("click", () => testLlmConfig("flash", "primary").catch((error) => alert(error.message)));
+document.getElementById("llm-config-test-pro")?.addEventListener("click", () => testLlmConfig("pro", "primary").catch((error) => alert(error.message)));
+document.getElementById("llm-fallback-test")?.addEventListener("click", () => testLlmConfig("flash", "fallback").catch((error) => alert(error.message)));
+document.getElementById("llm-fallback-test-pro")?.addEventListener("click", () => testLlmConfig("pro", "fallback").catch((error) => alert(error.message)));
+document.getElementById("llm-config-toggle")?.addEventListener("click", () => toggleLlmApiKeyVisibility("primary"));
+document.getElementById("llm-fallback-toggle")?.addEventListener("click", () => toggleLlmApiKeyVisibility("fallback"));
+document.getElementById("llm-provider-select")?.addEventListener("change", () => applyLlmProviderPreset("primary"));
+document.getElementById("llm-fallback-provider-select")?.addEventListener("change", () => applyLlmProviderPreset("fallback"));
 document.getElementById("llm-base-url-input")?.addEventListener("input", updateLlmInfoPanel);
-document.getElementById("llm-flash-model-select")?.addEventListener("change", () => applyLlmModelSelect("flash"));
-document.getElementById("llm-pro-model-select")?.addEventListener("change", () => applyLlmModelSelect("pro"));
-["llm-flash-reasoning-input", "llm-pro-reasoning-input"].forEach((id) => {
+document.getElementById("llm-fallback-base-url-input")?.addEventListener("input", updateLlmInfoPanel);
+document.getElementById("llm-flash-model-select")?.addEventListener("change", () => applyLlmModelSelect("flash", "primary"));
+document.getElementById("llm-pro-model-select")?.addEventListener("change", () => applyLlmModelSelect("pro", "primary"));
+document.getElementById("llm-fallback-flash-model-select")?.addEventListener("change", () => applyLlmModelSelect("flash", "fallback"));
+document.getElementById("llm-fallback-pro-model-select")?.addEventListener("change", () => applyLlmModelSelect("pro", "fallback"));
+["llm-flash-reasoning-input", "llm-pro-reasoning-input", "llm-fallback-flash-reasoning-input", "llm-fallback-pro-reasoning-input"].forEach((id) => {
   document.getElementById(id)?.addEventListener("change", updateLlmInfoPanel);
 });
 document.getElementById("llm-api-key-input")?.addEventListener("input", updateLlmTestButtonState);
+document.getElementById("llm-fallback-api-key-input")?.addEventListener("input", updateLlmTestButtonState);
 document.getElementById("llm-insecure-tls-input")?.addEventListener("change", updateLlmInfoPanel);
+document.getElementById("llm-fallback-insecure-tls-input")?.addEventListener("change", updateLlmInfoPanel);
+document.getElementById("llm-fallback-enabled-input")?.addEventListener("change", () => {
+  updateLlmInfoPanel();
+  updateLlmTestButtonState();
+});
 document.getElementById("feishu-config-form")?.addEventListener("submit", (event) => saveFeishuConfig(event).catch((error) => alert(error.message)));
 document.getElementById("feishu-config-test")?.addEventListener("click", () => testFeishuConfig(false).catch((error) => alert(error.message)));
 document.getElementById("feishu-config-test-dry")?.addEventListener("click", () => testFeishuConfig(true).catch((error) => alert(error.message)));

@@ -90,7 +90,7 @@ USED_CAR_TERMS = (
 )
 HANDOFF_HINTS = ("转人工", "人工", "负责人", "确认后回复", "请负责人")
 DIRECT_CHOICE_TERMS = ("哪个", "哪台", "哪款", "还是", "怎么选", "选一辆", "更推荐")
-DIRECT_ANSWER_HINTS = ("建议", "优先", "更推荐", "先看", "我会先", "可以先")
+DIRECT_ANSWER_HINTS = ("建议", "优先", "更推荐", "先看", "我会先", "可以先", "先排", "先缩到", "最高标价", "标价最高")
 VEHICLE_MODEL_TERMS = ("赛纳", "塞纳", "赛那", "凯美瑞", "雅阁", "奇骏", "途观", "gl8", "思域", "秦plus", "dm-i")
 VEHICLE_CHOICE_CONTEXT_TERMS = USED_CAR_TERMS + ("suv", "mpv", "轿车", "越野", "纯电", "混动", "油车")
 IDENTITY_OR_SYSTEM_TERMS = ("真人", "系统", "自动回", "机器人", "自动回复", "是不是ai", "是ai", "客服")
@@ -529,6 +529,9 @@ def detect_issues(question: str, result: dict[str, Any]) -> list[dict[str, Any]]
     if not reply:
         issues.append(issue("empty_reply", "回复为空", "listen_and_reply / realtime_reply_router"))
         return issues
+    llm_dependent_not_probed = bool(route.get("foreground_llm_allowed")) and not realtime.get("applied") and not llm_probe.get("attempted")
+    if llm_dependent_not_probed:
+        return issues
     if len(reply) > 180:
         issues.append(issue("reply_too_long", f"回复偏长({len(reply)}字)", owner_from_result(route, realtime, llm_probe)))
     if is_vehicle_choice_question(question) and not contains_any(reply, DIRECT_ANSWER_HINTS) and not expected_l0:
@@ -542,7 +545,11 @@ def detect_issues(question: str, result: dict[str, Any]) -> list[dict[str, Any]]
         issues.append(issue("possible_over_handoff", "非高风险问题出现转人工倾向", "realtime_reply_router / llm_reply_synthesis"))
     if contains_any(question, ("赛纳", "塞纳", "赛那")) and not contains_any(reply, ("赛那", "塞纳", "赛纳", "sienna")):
         issues.append(issue("entity_resolution_miss", "同义/同音车型识别后回复未显式对齐实体", "product_name_matcher / llm_product_name_matcher"))
-    if str(route.get("reason") or "") == "uncertain_message_light_synthesis_allowed" and not llm_probe.get("attempted"):
+    if (
+        str(route.get("reason") or "") == "uncertain_message_light_synthesis_allowed"
+        and not llm_probe.get("attempted")
+        and not (realtime.get("applied") and str(realtime.get("rule_name") or "") == "realtime_uncertain_business_clarify")
+    ):
         issues.append(issue("llm_not_triggered_when_uncertain", "不确定问题未触发LLM探针", "listen_and_reply / realtime_reply_router"))
     if str(realtime.get("reason") or "") == "route_not_l1":
         if expected_l0:

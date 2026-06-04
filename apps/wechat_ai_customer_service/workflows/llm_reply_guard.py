@@ -711,10 +711,47 @@ def has_direct_appointment_commitment(reply: str, platform_rules: dict[str, Any]
         start = clean.find(term)
         while start >= 0:
             window = clean[max(0, start - 18) : start + len(term) + 18]
-            if not any(marker in window for marker in local_caution):
+            if not any(marker in window for marker in local_caution) and not is_safe_appointment_advisory_window(window):
                 return True
             start = clean.find(term, start + len(term))
     return False
+
+
+def is_safe_appointment_advisory_window(window: str) -> bool:
+    clean = str(window or "")
+    if not clean:
+        return False
+    hard_commitment_markers = (
+        "约好了",
+        "预约好了",
+        "安排好了",
+        "排好了",
+        "定好了",
+        "预留好了",
+        "留好了",
+        "我给您约",
+        "我帮您约",
+        "直接过来",
+        "随时来",
+    )
+    if any(marker in clean for marker in hard_commitment_markers):
+        return False
+    advisory_markers = (
+        "建议",
+        "先看",
+        "先核",
+        "核车况",
+        "核实车",
+        "检测报告",
+        "实车",
+        "车况",
+        "对比",
+        "以报告为准",
+        "以实车为准",
+        "避免白跑",
+        "别白跑",
+    )
+    return any(marker in clean for marker in advisory_markers)
 
 
 def has_sales_followup_commitment(reply: str, platform_rules: dict[str, Any] | None = None) -> bool:

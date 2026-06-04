@@ -28,31 +28,209 @@ from typing import Any, Callable
 from apps.wechat_ai_customer_service.admin_backend.services.customer_service_scheduler_state import (
     SchedulerConfig,
     SchedulerStateStore,
+    append_event,
     complete_llm_task,
+    complete_polish_task,
     enqueue_llm_task,
     enqueue_pending_session,
+    enqueue_polish_task,
     fail_llm_task,
+    fail_polish_task,
     has_active_session_work,
     mark_capture_started,
     mark_llm_started,
+    mark_polish_started,
     mark_reply_failed,
     mark_reply_sending,
     mark_reply_sent,
     mark_reply_stale,
+    normalize_repeatable_probe_text,
     recover_orphaned_running_llm_tasks,
+    recover_orphaned_running_polish_tasks,
     record_capture_result,
     record_session_signal,
     select_capture_sessions,
     select_ready_replies,
     state_summary,
+    stable_id,
 )
+from apps.wechat_ai_customer_service.wechat_message_normalizer import split_wechat_ocr_speaker_prefix
 
 
 CaptureFn = Callable[[dict[str, Any]], dict[str, Any]]
 PlanReplyFn = Callable[[dict[str, Any], dict[str, Any]], dict[str, Any]]
+PolishReplyFn = Callable[[dict[str, Any], dict[str, Any]], dict[str, Any]]
 FreshnessFn = Callable[[dict[str, Any]], dict[str, Any]]
 SendFn = Callable[[dict[str, Any]], dict[str, Any]]
 CaptureDoneFn = Callable[[dict[str, Any], dict[str, Any], dict[str, Any]], None]
+
+
+_RPA_HUMANIZED_SEND_ENV_MAPPING = {
+    "WECHAT_WIN32_OCR_HUMANIZED_INPUT_ENABLED": "enabled",
+    "WECHAT_WIN32_OCR_HUMANIZED_INPUT_METHOD": "input_method",
+    "WECHAT_WIN32_OCR_HUMANIZED_TYPING_CHUNK_MIN_CHARS": "typing_chunk_min_chars",
+    "WECHAT_WIN32_OCR_HUMANIZED_TYPING_CHUNK_MAX_CHARS": "typing_chunk_max_chars",
+    "WECHAT_WIN32_OCR_HUMANIZED_TYPING_CHAR_DELAY_MIN_MS": "typing_char_delay_min_ms",
+    "WECHAT_WIN32_OCR_HUMANIZED_TYPING_CHAR_DELAY_MAX_MS": "typing_char_delay_max_ms",
+    "WECHAT_WIN32_OCR_HUMANIZED_TYPING_MICRO_PAUSE_EVERY_CHARS": "typing_micro_pause_every_chars",
+    "WECHAT_WIN32_OCR_HUMANIZED_TYPING_MICRO_PAUSE_MIN_MS": "typing_micro_pause_min_ms",
+    "WECHAT_WIN32_OCR_HUMANIZED_TYPING_MICRO_PAUSE_MAX_MS": "typing_micro_pause_max_ms",
+    "WECHAT_WIN32_OCR_HUMANIZED_TYPING_TYPO_PROBABILITY": "typing_typo_probability",
+    "WECHAT_WIN32_OCR_HUMANIZED_TYPING_TYPO_MAX": "typing_typo_max",
+    "WECHAT_WIN32_OCR_HUMANIZED_SEND_PRE_DELAY_MIN_MS": "send_pre_delay_min_ms",
+    "WECHAT_WIN32_OCR_HUMANIZED_SEND_PRE_DELAY_MAX_MS": "send_pre_delay_max_ms",
+    "WECHAT_WIN32_OCR_HUMANIZED_SEND_POST_INPUT_DELAY_MIN_MS": "send_post_input_delay_min_ms",
+    "WECHAT_WIN32_OCR_HUMANIZED_SEND_POST_INPUT_DELAY_MAX_MS": "send_post_input_delay_max_ms",
+    "WECHAT_WIN32_OCR_HUMANIZED_ADAPTIVE_SPEED_ENABLED": "adaptive_speed_enabled",
+    "WECHAT_WIN32_OCR_FAST_SEND_CONFIRMATION": "fast_send_confirmation_enabled",
+    "WECHAT_WIN32_OCR_SEND_TRIGGER_MODE": "send_trigger_mode",
+    "WECHAT_WIN32_OCR_SEND_INPUT_CONFIRM_ATTEMPTS": "send_input_confirm_attempts",
+    "WECHAT_WIN32_OCR_SEND_MIN_INTERVAL_SECONDS": "send_rate_min_interval_seconds",
+    "WECHAT_WIN32_OCR_SEND_BURST_WINDOW_SECONDS": "send_rate_burst_window_seconds",
+    "WECHAT_WIN32_OCR_SEND_BURST_LIMIT": "send_rate_burst_limit",
+}
+
+
+_SELF_MESSAGE_SENDERS = {"self", "assistant", "agent", "me", "outbound"}
+_SHORT_PENDING_SIGNAL_KIND = "high_sensitivity_short"
+
+
+def _short_pending_semantic_text(raw_text: str, *, target_name: str = "") -> tuple[str, dict[str, Any]]:
+    """Return body-only text for monitor-owned short unread previews."""
+    text = str(raw_text or "").strip()
+    split = split_wechat_ocr_speaker_prefix(
+        text,
+        conversation_type="group",
+        target_name=target_name,
+        known_speakers=[],
+        allow_unlisted_name_like_prefix=True,
+    )
+    if split.get("changed"):
+        cleaned = str(split.get("content") or "").strip()
+        if cleaned:
+            return cleaned, {
+                "speaker_name": str(split.get("speaker_name") or "").strip(),
+                "original_content": text,
+                "reason": str(split.get("reason") or "monitor_short_speaker_prefix"),
+            }
+    return text, {}
+
+
+def recover_high_sensitivity_short_pending_batch(
+    messages: list[dict[str, Any]],
+    pending_signal: dict[str, Any] | None,
+    *,
+    target_name: str = "",
+    allow_self_for_test: bool = False,
+    max_batch_messages: int = 1,
+) -> list[dict[str, Any]]:
+    """Recover a short unread probe when an anchor boundary misclassifies it as old history.
+
+    RPA/OCR can see a session-list preview like "在吗" while the chat-pane anchor
+    still reports "no messages after anchor", especially when the same short
+    phrase appeared before bootstrap.  Only the monitor-owned high-sensitivity
+    short signal may enter this narrow recovery path.
+    """
+
+    if not isinstance(pending_signal, dict):
+        return []
+    if str(pending_signal.get("pending_signal_kind") or "").strip() != _SHORT_PENDING_SIGNAL_KIND:
+        return []
+    pending_text = str(pending_signal.get("pending_signal_text") or pending_signal.get("preview_content") or "").strip()
+    semantic_pending_text, speaker_meta = _short_pending_semantic_text(pending_text, target_name=target_name)
+    pending_compact = normalize_repeatable_probe_text(semantic_pending_text)
+    if not pending_compact or len(pending_compact) > 7:
+        return []
+    detected_at = str(
+        pending_signal.get("pending_since")
+        or pending_signal.get("last_detected_at")
+        or pending_signal.get("last_message_time")
+        or ""
+    )
+    recovered: list[dict[str, Any]] = []
+    for item in reversed(messages or []):
+        if not isinstance(item, dict):
+            continue
+        if str(item.get("type") or "text").strip().lower() not in {"", "text"}:
+            continue
+        sender = str(item.get("sender") or "").strip().lower()
+        if sender in _SELF_MESSAGE_SENDERS and not allow_self_for_test:
+            continue
+        content = str(item.get("content") or "").strip()
+        compact = normalize_repeatable_probe_text(content)
+        if not compact:
+            continue
+        suffix_match = compact.endswith(pending_compact) and len(compact) - len(pending_compact) <= 4
+        if compact != pending_compact and not suffix_match:
+            continue
+        cloned = copy.deepcopy(item)
+        original_id = str(cloned.get("id") or "").strip()
+        synthetic_id = stable_id(
+            "short-pending-signal",
+            target_name,
+            original_id,
+            pending_compact,
+            detected_at,
+        )
+        cloned["id"] = f"short_pending:{synthetic_id}"
+        cloned["original_message_id"] = original_id
+        cloned["short_pending_recovered"] = True
+        cloned["pending_signal_text"] = pending_text
+        cloned["pending_signal_kind"] = _SHORT_PENDING_SIGNAL_KIND
+        if speaker_meta:
+            cloned["speaker_name"] = speaker_meta.get("speaker_name")
+            cloned["group_member_name"] = speaker_meta.get("speaker_name")
+            cloned["original_content"] = speaker_meta.get("original_content")
+            cloned["ocr_speaker_prefix"] = speaker_meta
+        if suffix_match and compact != pending_compact:
+            cloned["content"] = semantic_pending_text
+        recovered.append(cloned)
+        if len(recovered) >= max(1, int(max_batch_messages or 1)):
+            break
+    if recovered:
+        return list(reversed(recovered))
+
+    synthetic_id = stable_id(
+        "short-pending-signal",
+        target_name,
+        "monitor-only",
+        pending_compact,
+        detected_at,
+    )
+    synthetic: dict[str, Any] = {
+        "id": f"short_pending:{synthetic_id}",
+        "type": "text",
+        "sender": "unknown",
+        "sender_role": "unknown",
+        "content": semantic_pending_text,
+        "time": detected_at,
+        "short_pending_recovered": True,
+        "short_pending_synthesized_from_monitor": True,
+        "pending_signal_text": pending_text,
+        "pending_signal_kind": _SHORT_PENDING_SIGNAL_KIND,
+    }
+    if speaker_meta:
+        synthetic["speaker_name"] = speaker_meta.get("speaker_name")
+        synthetic["group_member_name"] = speaker_meta.get("speaker_name")
+        synthetic["original_content"] = speaker_meta.get("original_content")
+        synthetic["ocr_speaker_prefix"] = speaker_meta
+    return [synthetic]
+
+
+def _apply_rpa_humanized_send_runtime_env(config: dict[str, Any]) -> None:
+    settings = config.get("rpa_humanized_send") if isinstance(config.get("rpa_humanized_send"), dict) else {}
+    if not isinstance(settings, dict):
+        settings = {}
+    for env_name, key in _RPA_HUMANIZED_SEND_ENV_MAPPING.items():
+        if key not in settings and key != "fast_send_confirmation_enabled":
+            continue
+        value = settings.get(key)
+        if value is None and key == "fast_send_confirmation_enabled":
+            value = True
+        if isinstance(value, bool):
+            os.environ[env_name] = "1" if value else "0"
+        elif value is not None:
+            os.environ[env_name] = str(value)
 
 
 def default_freshness_ok(reply: dict[str, Any]) -> dict[str, Any]:
@@ -69,6 +247,7 @@ class CustomerServiceSchedulerRuntime:
         config: SchedulerConfig,
         capture_fn: CaptureFn,
         plan_reply_fn: PlanReplyFn,
+        polish_reply_fn: PolishReplyFn | None = None,
         freshness_fn: FreshnessFn | None = None,
         send_fn: SendFn | None = None,
         capture_done_fn: CaptureDoneFn | None = None,
@@ -77,14 +256,40 @@ class CustomerServiceSchedulerRuntime:
         self.config = config
         self.capture_fn = capture_fn
         self.plan_reply_fn = plan_reply_fn
+        self.polish_reply_fn = polish_reply_fn
         self.freshness_fn = freshness_fn or default_freshness_ok
         self.send_fn = send_fn
         self.capture_done_fn = capture_done_fn
-        self._executor = ThreadPoolExecutor(max_workers=max(1, int(config.llm_max_concurrency)))
-        self._futures: dict[str, Future[dict[str, Any]]] = {}
+        self._planner_executor = ThreadPoolExecutor(max_workers=max(1, int(config.planner_max_concurrency or config.llm_max_concurrency)))
+        self._planner_futures: dict[str, Future[dict[str, Any]]] = {}
+        self._planner_task_snapshots: dict[str, dict[str, Any]] = {}
+        self._polish_executor = ThreadPoolExecutor(max_workers=max(1, int(config.polish_max_concurrency or config.llm_max_concurrency)))
+        self._polish_futures: dict[str, Future[dict[str, Any]]] = {}
+        self._polish_task_snapshots: dict[str, dict[str, Any]] = {}
 
     def shutdown(self) -> None:
-        self._executor.shutdown(wait=False, cancel_futures=False)
+        self._planner_executor.shutdown(wait=False, cancel_futures=False)
+        self._polish_executor.shutdown(wait=False, cancel_futures=False)
+
+    def _restore_missing_polish_task_from_snapshot(self, state: dict[str, Any], task_id: str) -> bool:
+        task = (state.get("polish_tasks", {}) or {}).get(task_id)
+        if isinstance(task, dict):
+            return True
+        snapshot = self._polish_task_snapshots.get(task_id)
+        if not isinstance(snapshot, dict):
+            return False
+        state.setdefault("polish_tasks", {})[task_id] = copy.deepcopy(snapshot)
+        return True
+
+    def _restore_missing_llm_task_from_snapshot(self, state: dict[str, Any], task_id: str) -> bool:
+        task = (state.get("llm_tasks", {}) or {}).get(task_id)
+        if isinstance(task, dict):
+            return True
+        snapshot = self._planner_task_snapshots.get(task_id)
+        if not isinstance(snapshot, dict):
+            return False
+        state.setdefault("llm_tasks", {})[task_id] = copy.deepcopy(snapshot)
+        return True
 
     def tick(
         self,
@@ -105,9 +310,13 @@ class CustomerServiceSchedulerRuntime:
             if session and session.get("pending_capture"):
                 events.append({"event": "signal_pending", "target_name": session.get("target_name")})
 
-        recovered = recover_orphaned_running_llm_tasks(state, active_task_ids=set(self._futures), now=now)
+        recovered = recover_orphaned_running_llm_tasks(state, active_task_ids=set(self._planner_futures), now=now)
         for task in recovered:
             events.append({"event": "llm_task_orphan_requeued", "task_id": task.get("task_id"), "target_name": task.get("target_name")})
+        if self.polish_reply_fn is not None:
+            recovered_polish = recover_orphaned_running_polish_tasks(state, active_task_ids=set(self._polish_futures), now=now)
+            for task in recovered_polish:
+                events.append({"event": "polish_task_orphan_requeued", "task_id": task.get("task_id"), "target_name": task.get("target_name")})
 
         pre_sent = self._consume_send_queue(state, allow_send=allow_send, now=now)
         phase_durations["send_pre_seconds"] = round(max(0.0, time.perf_counter() - phase_started), 4)
@@ -120,14 +329,37 @@ class CustomerServiceSchedulerRuntime:
         events.extend(captured)
 
         submitted = self._submit_llm_tasks(state, now=now)
-        phase_durations["llm_submit_seconds"] = round(max(0.0, time.perf_counter() - phase_started), 4)
+        planner_submit_seconds = round(max(0.0, time.perf_counter() - phase_started), 4)
+        phase_durations["planner_submit_seconds"] = planner_submit_seconds
         phase_started = time.perf_counter()
         events.extend(submitted)
 
         completed = self._collect_llm_results(state, now=now)
-        phase_durations["llm_collect_seconds"] = round(max(0.0, time.perf_counter() - phase_started), 4)
+        planner_collect_seconds = round(max(0.0, time.perf_counter() - phase_started), 4)
+        phase_durations["planner_collect_seconds"] = planner_collect_seconds
         phase_started = time.perf_counter()
         events.extend(completed)
+
+        polish_submit_seconds = 0.0
+        polish_collect_seconds = 0.0
+        if self.polish_reply_fn is not None:
+            polish_submitted = self._submit_polish_tasks(state, now=now)
+            polish_submit_seconds = round(max(0.0, time.perf_counter() - phase_started), 4)
+            phase_durations["polish_submit_seconds"] = polish_submit_seconds
+            phase_started = time.perf_counter()
+            events.extend(polish_submitted)
+
+            polish_completed = self._collect_polish_results(state, now=now)
+            polish_collect_seconds = round(max(0.0, time.perf_counter() - phase_started), 4)
+            phase_durations["polish_collect_seconds"] = polish_collect_seconds
+            phase_started = time.perf_counter()
+            events.extend(polish_completed)
+        else:
+            phase_durations["polish_submit_seconds"] = 0.0
+            phase_durations["polish_collect_seconds"] = 0.0
+
+        phase_durations["llm_submit_seconds"] = round(planner_submit_seconds + polish_submit_seconds, 4)
+        phase_durations["llm_collect_seconds"] = round(planner_collect_seconds + polish_collect_seconds, 4)
 
         sent = self._consume_send_queue(state, allow_send=allow_send, now=now)
         phase_durations["send_post_seconds"] = round(max(0.0, time.perf_counter() - phase_started), 4)
@@ -191,8 +423,8 @@ class CustomerServiceSchedulerRuntime:
 
     def _submit_llm_tasks(self, state: dict[str, Any], *, now: str | None = None) -> list[dict[str, Any]]:
         events: list[dict[str, Any]] = []
-        running_count = sum(1 for future in self._futures.values() if not future.done())
-        capacity = max(0, int(self.config.llm_max_concurrency) - running_count)
+        running_count = sum(1 for future in self._planner_futures.values() if not future.done())
+        capacity = max(0, int(self.config.planner_max_concurrency or self.config.llm_max_concurrency) - running_count)
         if capacity <= 0:
             return events
         tasks = [
@@ -200,7 +432,7 @@ class CustomerServiceSchedulerRuntime:
             for task in (state.get("llm_tasks", {}) or {}).values()
             if isinstance(task, dict)
             and task.get("status") == "queued"
-            and str(task.get("task_id") or "") not in self._futures
+            and str(task.get("task_id") or "") not in self._planner_futures
         ]
         tasks.sort(key=lambda item: str(item.get("created_at") or ""))
         captures = state.get("captures", {}) or {}
@@ -213,42 +445,189 @@ class CustomerServiceSchedulerRuntime:
                 events.append({"event": "llm_task_failed", "task_id": task_id, "reason": "capture_missing"})
                 continue
             mark_llm_started(state, task_id, now=now)
-            self._futures[task_id] = self._executor.submit(self.plan_reply_fn, copy.deepcopy(capture), copy.deepcopy(task))
+            self._planner_task_snapshots[task_id] = copy.deepcopy(task)
+            self._planner_futures[task_id] = self._planner_executor.submit(self.plan_reply_fn, copy.deepcopy(capture), copy.deepcopy(task))
             events.append({"event": "llm_task_submitted", "task_id": task_id, "target_name": task.get("target_name")})
         return events
 
     def _collect_llm_results(self, state: dict[str, Any], *, now: str | None = None) -> list[dict[str, Any]]:
         events: list[dict[str, Any]] = []
-        for task_id, future in list(self._futures.items()):
+        for task_id, future in list(self._planner_futures.items()):
             if not future.done():
                 continue
-            self._futures.pop(task_id, None)
+            self._planner_futures.pop(task_id, None)
             try:
                 result = future.result()
             except Exception as exc:  # noqa: BLE001
                 error = repr(exc)
                 trace = "".join(traceback.format_exception(type(exc), exc, exc.__traceback__))[-4000:]
+                if not self._restore_missing_llm_task_from_snapshot(state, task_id):
+                    events.append(
+                        {
+                            "event": "llm_task_failed",
+                            "task_id": task_id,
+                            "error": error,
+                            "traceback": trace,
+                            "reason": "llm_task_missing_after_future",
+                        }
+                    )
+                    continue
                 task = fail_llm_task(state, task_id, reason=error, now=now)
                 task["traceback"] = trace
+                self._planner_task_snapshots.pop(task_id, None)
                 events.append({"event": "llm_task_failed", "task_id": task_id, "error": error, "traceback": trace})
                 continue
             if result.get("ok") is False:
+                if not self._restore_missing_llm_task_from_snapshot(state, task_id):
+                    events.append(
+                        {
+                            "event": "llm_task_failed",
+                            "task_id": task_id,
+                            "reason": "llm_task_missing_after_future",
+                            "error": str(result.get("reason") or result.get("error") or "planner_failed"),
+                        }
+                    )
+                    continue
                 fail_llm_task(state, task_id, reason=str(result.get("reason") or result.get("error") or "planner_failed"), now=now)
+                self._planner_task_snapshots.pop(task_id, None)
                 events.append({"event": "llm_task_failed", "task_id": task_id, "reason": result.get("reason")})
                 continue
             reply_text = str(result.get("reply_text") or "").strip()
             if not reply_text:
+                if not self._restore_missing_llm_task_from_snapshot(state, task_id):
+                    events.append({"event": "llm_task_failed", "task_id": task_id, "reason": "llm_task_missing_after_future"})
+                    continue
                 fail_llm_task(state, task_id, reason="empty_reply_text", now=now)
+                self._planner_task_snapshots.pop(task_id, None)
                 events.append({"event": "llm_task_failed", "task_id": task_id, "reason": "empty_reply_text"})
                 continue
+            if not self._restore_missing_llm_task_from_snapshot(state, task_id):
+                events.append({"event": "llm_task_failed", "task_id": task_id, "reason": "llm_task_missing_after_future"})
+                continue
+            context_update = result.get("conversation_context_update") if isinstance(result.get("conversation_context_update"), dict) else {}
+            if context_update:
+                target_name = str(result.get("target_name") or (state.get("llm_tasks", {}) or {}).get(task_id, {}).get("target_name") or "")
+                merge_scheduler_conversation_context(state, target_name, context_update, now=now)
+                events.append({"event": "conversation_context_updated", "task_id": task_id, "target_name": target_name, "product_id": context_update.get("last_product_id")})
             completion = complete_llm_task(
                 state,
                 task_id,
                 reply_text=reply_text,
                 decision=result.get("decision") if isinstance(result.get("decision"), dict) else {},
+                result_payload=result if isinstance(result, dict) else None,
+                create_ready_reply=self.polish_reply_fn is None,
                 now=now,
             )
+            if completion.get("status") == "completed" and self.polish_reply_fn is not None:
+                try:
+                    polish_task = enqueue_polish_task(state, task_id, now=now)
+                except Exception as exc:  # noqa: BLE001
+                    fail_llm_task(state, task_id, reason=f"polish_enqueue_failed:{exc!r}", now=now)
+                    self._planner_task_snapshots.pop(task_id, None)
+                    events.append({"event": "polish_task_enqueue_failed", "task_id": task_id, "error": repr(exc)})
+                    continue
+                self._planner_task_snapshots.pop(task_id, None)
+                events.append({"event": "llm_task_completed", "task_id": task_id, "status": completion.get("status"), "polish_task_id": polish_task.get("task_id")})
+                continue
+            self._planner_task_snapshots.pop(task_id, None)
             events.append({"event": "llm_task_completed", "task_id": task_id, "status": completion.get("status")})
+        return events
+
+    def _submit_polish_tasks(self, state: dict[str, Any], *, now: str | None = None) -> list[dict[str, Any]]:
+        events: list[dict[str, Any]] = []
+        if self.polish_reply_fn is None:
+            return events
+        running_count = sum(1 for future in self._polish_futures.values() if not future.done())
+        capacity = max(0, int(self.config.polish_max_concurrency or self.config.llm_max_concurrency) - running_count)
+        if capacity <= 0:
+            return events
+        tasks = [
+            task
+            for task in (state.get("polish_tasks", {}) or {}).values()
+            if isinstance(task, dict)
+            and task.get("status") == "queued"
+            and str(task.get("task_id") or "") not in self._polish_futures
+        ]
+        tasks.sort(key=lambda item: str(item.get("created_at") or ""))
+        planner_tasks = state.get("llm_tasks", {}) or {}
+        for task in tasks[:capacity]:
+            task_id = str(task.get("task_id") or "")
+            planner_task_id = str(task.get("planner_task_id") or "")
+            planner_task = planner_tasks.get(planner_task_id)
+            if not isinstance(planner_task, dict):
+                fail_polish_task(state, task_id, reason="planner_task_missing", now=now)
+                events.append({"event": "polish_task_failed", "task_id": task_id, "reason": "planner_task_missing"})
+                continue
+            mark_polish_started(state, task_id, now=now)
+            self._polish_task_snapshots[task_id] = copy.deepcopy(task)
+            self._polish_futures[task_id] = self._polish_executor.submit(self.polish_reply_fn, copy.deepcopy(planner_task), copy.deepcopy(task))
+            events.append({"event": "polish_task_submitted", "task_id": task_id, "target_name": task.get("target_name")})
+        return events
+
+    def _collect_polish_results(self, state: dict[str, Any], *, now: str | None = None) -> list[dict[str, Any]]:
+        events: list[dict[str, Any]] = []
+        for task_id, future in list(self._polish_futures.items()):
+            if not future.done():
+                continue
+            self._polish_futures.pop(task_id, None)
+            try:
+                result = future.result()
+            except Exception as exc:  # noqa: BLE001
+                error = repr(exc)
+                trace = "".join(traceback.format_exception(type(exc), exc, exc.__traceback__))[-4000:]
+                if not self._restore_missing_polish_task_from_snapshot(state, task_id):
+                    events.append(
+                        {
+                            "event": "polish_task_failed",
+                            "task_id": task_id,
+                            "error": error,
+                            "traceback": trace,
+                            "reason": "polish_task_missing_after_future",
+                        }
+                    )
+                    continue
+                task = fail_polish_task(state, task_id, reason=error, now=now)
+                task["traceback"] = trace
+                self._polish_task_snapshots.pop(task_id, None)
+                events.append({"event": "polish_task_failed", "task_id": task_id, "error": error, "traceback": trace})
+                continue
+            if result.get("ok") is False:
+                if not self._restore_missing_polish_task_from_snapshot(state, task_id):
+                    events.append(
+                        {
+                            "event": "polish_task_failed",
+                            "task_id": task_id,
+                            "reason": "polish_task_missing_after_future",
+                            "error": str(result.get("reason") or result.get("error") or "polish_failed"),
+                        }
+                    )
+                    continue
+                fail_polish_task(state, task_id, reason=str(result.get("reason") or result.get("error") or "polish_failed"), now=now)
+                self._polish_task_snapshots.pop(task_id, None)
+                events.append({"event": "polish_task_failed", "task_id": task_id, "reason": result.get("reason")})
+                continue
+            reply_text = str(result.get("reply_text") or "").strip()
+            if not reply_text:
+                if not self._restore_missing_polish_task_from_snapshot(state, task_id):
+                    events.append({"event": "polish_task_failed", "task_id": task_id, "reason": "polish_task_missing_after_future"})
+                    continue
+                fail_polish_task(state, task_id, reason="empty_reply_text", now=now)
+                self._polish_task_snapshots.pop(task_id, None)
+                events.append({"event": "polish_task_failed", "task_id": task_id, "reason": "empty_reply_text"})
+                continue
+            if not self._restore_missing_polish_task_from_snapshot(state, task_id):
+                events.append({"event": "polish_task_failed", "task_id": task_id, "reason": "polish_task_missing_after_future"})
+                continue
+            completion = complete_polish_task(
+                state,
+                task_id,
+                reply_text=reply_text,
+                decision=result.get("decision") if isinstance(result.get("decision"), dict) else {},
+                degraded=bool(result.get("degraded")),
+                now=now,
+            )
+            self._polish_task_snapshots.pop(task_id, None)
+            events.append({"event": "polish_task_completed", "task_id": task_id, "status": completion.get("status"), "degraded": bool(result.get("degraded"))})
         return events
 
     def _consume_send_queue(self, state: dict[str, Any], *, allow_send: bool, now: str | None = None) -> list[dict[str, Any]]:
@@ -380,6 +759,39 @@ def mark_session_capture_failed(state: dict[str, Any], target_name: str, reason:
     )
 
 
+def merge_scheduler_conversation_context(
+    state: dict[str, Any],
+    target_name: str,
+    context_update: dict[str, Any],
+    *,
+    now: str | None = None,
+) -> None:
+    from apps.wechat_ai_customer_service.admin_backend.services.customer_service_scheduler_state import ensure_session
+
+    if not isinstance(context_update, dict) or not context_update:
+        return
+    session = ensure_session(state, target_name, now=now)
+    existing = session.get("conversation_context") if isinstance(session.get("conversation_context"), dict) else {}
+    clean_update = {
+        key: value
+        for key, value in context_update.items()
+        if value not in (None, "", [], {})
+    }
+    if not clean_update:
+        return
+    session["conversation_context"] = {
+        **existing,
+        **clean_update,
+        "updated_at": str(now or datetime.now().isoformat(timespec="seconds")),
+    }
+    append_event(
+        state,
+        "scheduler_conversation_context_updated",
+        target_name=session["target_name"],
+        last_product_id=session["conversation_context"].get("last_product_id"),
+    )
+
+
 class CapturedMessagesConnector:
     """Connector facade for LLM planning from already-captured messages.
 
@@ -399,6 +811,13 @@ class CapturedMessagesConnector:
         **_kwargs: Any,
     ) -> dict[str, Any]:
         messages = self.capture.get("messages") or []
+        used_batch_fallback = False
+        if not messages and isinstance(self.capture.get("batch"), list):
+            # Short high-sensitivity unread probes can be recovered after OCR
+            # anchor matching, so the reply-eligible item may live only in the
+            # scheduler batch. Keep the planner read-only, but do not starve it.
+            messages = self.capture.get("batch") or []
+            used_batch_fallback = bool(messages)
         history_meta = self.capture.get("history_backfill") if isinstance(self.capture.get("history_backfill"), dict) else {}
         return {
             "ok": True,
@@ -408,6 +827,7 @@ class CapturedMessagesConnector:
             "_history_backfill": history_meta,
             "scheduler_capture_id": self.capture.get("capture_id"),
             "scheduler_context_version": self.capture.get("context_version"),
+            "scheduler_used_batch_fallback": used_batch_fallback,
         }
 
     def send_text_and_verify(self, target: str, text: str, exact: bool = True) -> dict[str, Any]:
@@ -429,6 +849,7 @@ def plan_reply_with_listen_workflow(
     rules: dict[str, Any],
     workflow_state: dict[str, Any],
     allow_fallback_send: bool = False,
+    apply_final_visible_polish: bool = True,
 ) -> dict[str, Any]:
     """Reuse the existing reply planner without opening or sending WeChat."""
 
@@ -444,12 +865,16 @@ def plan_reply_with_listen_workflow(
     from apps.wechat_ai_customer_service.workflows.listen_and_reply import (
         _apply_greeting,
         final_visible_polish_blocks_send,
-        final_visible_polish_degraded,
-        finalize_customer_visible_reply_with_llm,
         polish_customer_visible_reply_text,
         recent_customer_visible_reply_texts,
         sanitize_customer_visible_reply_text,
     )
+    if apply_final_visible_polish:
+        from apps.wechat_ai_customer_service.workflows.listen_and_reply import (
+            final_visible_polish_blocks_send,
+            final_visible_polish_degraded,
+            finalize_customer_visible_reply_with_llm,
+        )
 
     connector = CapturedMessagesConnector(capture)
     event = process_target(
@@ -513,29 +938,32 @@ def plan_reply_with_listen_workflow(
         event["outbound_naturalness"] = outbound_naturalness
         if outbound_naturalness.get("applied"):
             reply_text = str(outbound_naturalness.get("reply_text") or reply_text)
-        final_polish = finalize_customer_visible_reply_with_llm(
-            reply_text,
-            config=config,
-            combined=combined,
-            recent_reply_texts=recent_reply_texts,
-            source_channel=str(((event.get("reply_style_adapter") or {}) if isinstance(event.get("reply_style_adapter"), dict) else {}).get("source_channel") or "normal"),
-            needs_handoff=False,
-        )
-        event["final_visible_llm_polish"] = final_polish
-        if final_polish.get("passed"):
-            reply_text = str(final_polish.get("reply_text") or reply_text)
-        elif final_visible_polish_blocks_send(final_polish, config=config):
-            return {"ok": False, "reason": "final_visible_llm_polish_failed", "event": event}
-        elif final_visible_polish_degraded(final_polish, config=config):
-            event["final_visible_llm_polish_degraded"] = True
+        if apply_final_visible_polish:
+            final_polish = finalize_customer_visible_reply_with_llm(
+                reply_text,
+                config=config,
+                combined=combined,
+                recent_reply_texts=recent_reply_texts,
+                source_channel=str(((event.get("reply_style_adapter") or {}) if isinstance(event.get("reply_style_adapter"), dict) else {}).get("source_channel") or "normal"),
+                needs_handoff=False,
+            )
+            event["final_visible_llm_polish"] = final_polish
+            if final_polish.get("passed"):
+                reply_text = str(final_polish.get("reply_text") or reply_text)
+            elif final_visible_polish_blocks_send(final_polish, config=config):
+                return {"ok": False, "reason": "final_visible_llm_polish_failed", "event": event}
+            elif final_visible_polish_degraded(final_polish, config=config):
+                event["final_visible_llm_polish_degraded"] = True
         decision = {**decision, "reply_text": reply_text}
         event["decision"] = decision
     if event.get("action") in {"blocked", "error"}:
         return {"ok": False, "reason": str(event.get("reason") or event.get("action")), "event": event}
     if not reply_text:
         return {"ok": False, "reason": "empty_planned_reply", "event": event}
+    conversation_context_update = event.get("conversation_context_update") if isinstance(event.get("conversation_context_update"), dict) else {}
     return {
         "ok": True,
+        "target_name": str(target_config.name),
         "reply_text": reply_text,
         "decision": {
             **decision,
@@ -546,6 +974,73 @@ def plan_reply_with_listen_workflow(
         "event": event,
         "task_id": task.get("task_id"),
         "capture_id": capture.get("capture_id"),
+        "conversation_context_update": conversation_context_update,
+    }
+
+
+def polish_reply_with_listen_workflow(
+    planner_task: dict[str, Any],
+    _task: dict[str, Any],
+    *,
+    target_config: Any,
+    config: dict[str, Any],
+    workflow_state: dict[str, Any],
+) -> dict[str, Any]:
+    import sys
+    from pathlib import Path
+
+    workflow_root = Path(__file__).resolve().parents[2] / "workflows"
+    adapter_root = Path(__file__).resolve().parents[2] / "adapters"
+    for path in (workflow_root, adapter_root):
+        if str(path) not in sys.path:
+            sys.path.insert(0, str(path))
+    from apps.wechat_ai_customer_service.workflows.listen_and_reply import (
+        final_visible_polish_blocks_send,
+        final_visible_polish_degraded,
+        finalize_customer_visible_reply_with_llm,
+        recent_customer_visible_reply_texts,
+    )
+
+    planner_result = planner_task.get("result") if isinstance(planner_task.get("result"), dict) else {}
+    decision = copy.deepcopy(planner_result.get("decision") if isinstance(planner_result.get("decision"), dict) else {})
+    event = copy.deepcopy(planner_result.get("event") if isinstance(planner_result.get("event"), dict) else {})
+    reply_text = str(planner_result.get("reply_text") or decision.get("reply_text") or planner_task.get("reply_text") or "").strip()
+    if not reply_text:
+        return {"ok": False, "reason": "empty_planner_reply_for_polish"}
+    target_state = {}
+    try:
+        target_state = (workflow_state.get("targets", {}) or {}).get(str(target_config.name), {}) or {}
+    except Exception:
+        target_state = {}
+    recent_reply_texts = recent_customer_visible_reply_texts(target_state)
+    combined = str(event.get("combined_content") or "")
+    source_channel = str(((event.get("reply_style_adapter") or {}) if isinstance(event.get("reply_style_adapter"), dict) else {}).get("source_channel") or "normal")
+    final_polish = finalize_customer_visible_reply_with_llm(
+        reply_text,
+        config=config,
+        combined=combined,
+        recent_reply_texts=recent_reply_texts,
+        source_channel=source_channel,
+        needs_handoff=False,
+    )
+    event["final_visible_llm_polish"] = final_polish
+    degraded = False
+    if final_polish.get("passed"):
+        reply_text = str(final_polish.get("reply_text") or reply_text)
+    elif final_visible_polish_blocks_send(final_polish, config=config):
+        return {"ok": False, "reason": "final_visible_llm_polish_failed", "event": event}
+    elif final_visible_polish_degraded(final_polish, config=config):
+        degraded = True
+        event["final_visible_llm_polish_degraded"] = True
+    decision["reply_text"] = reply_text
+    decision["final_visible_llm_polish"] = final_polish
+    decision["final_visible_llm_polish_degraded"] = degraded
+    return {
+        "ok": True,
+        "reply_text": reply_text,
+        "decision": decision,
+        "event": event,
+        "degraded": degraded,
     }
 
 
@@ -592,6 +1087,7 @@ class ManagedListenerSchedulerBridge:
         self._switch_human_delay_max_seconds = 0.0
         self._capture_one_target_per_round = False
         self._last_capture_signal_target = ""
+        self._last_actual_capture_target = ""
         self._last_capture_switch_delay_seconds = 0.0
         self._load_workflow_symbols()
         self.reload()
@@ -611,6 +1107,7 @@ class ManagedListenerSchedulerBridge:
             config = wf["load_config"](self.config_path)
             config = wf["apply_local_customer_service_settings"](config)
         self.config = config
+        _apply_rpa_humanized_send_runtime_env(config)
         self.scheduler_config = SchedulerConfig.from_config(config)
         session_routing = config.get("_local_customer_service_session_routing", {}) or {}
         if not isinstance(session_routing, dict):
@@ -629,6 +1126,8 @@ class ManagedListenerSchedulerBridge:
         self.state_path = wf["resolve_path"](config.get("state_path"))
         self.audit_path = wf["resolve_path"](config.get("audit_log_path"))
         multi_target_cfg = config.get("multi_target") if isinstance(config.get("multi_target"), dict) else {}
+        multi_target_cfg = self._normalize_multi_target_switch_controls(multi_target_cfg or {})
+        config["multi_target"] = multi_target_cfg
         self.use_multi_target = bool((multi_target_cfg or {}).get("enabled"))
         self._switch_human_delay_enabled = bool((multi_target_cfg or {}).get("switch_human_delay_enabled", False))
         self._switch_human_delay_min_seconds = self._safe_non_negative_float(
@@ -642,9 +1141,14 @@ class ManagedListenerSchedulerBridge:
         if self._switch_human_delay_max_seconds < self._switch_human_delay_min_seconds:
             self._switch_human_delay_max_seconds = self._switch_human_delay_min_seconds
         self._capture_one_target_per_round = bool((multi_target_cfg or {}).get("capture_one_target_per_round", False))
+        try:
+            configured_target_batch = int((multi_target_cfg or {}).get("max_targets_per_iteration") or 1)
+        except (TypeError, ValueError):
+            configured_target_batch = 1
         if (
             self.use_multi_target
             and self._capture_one_target_per_round
+            and configured_target_batch <= 1
             and int(self.scheduler_config.capture_max_sessions_per_round) != 1
         ):
             self.scheduler_config = replace(self.scheduler_config, capture_max_sessions_per_round=1)
@@ -697,6 +1201,58 @@ class ManagedListenerSchedulerBridge:
             parsed = float(default)
         return max(0.0, parsed)
 
+    def _normalize_multi_target_switch_controls(self, multi_target_cfg: dict[str, Any]) -> dict[str, Any]:
+        normalized = dict(multi_target_cfg or {})
+        if not bool(normalized.get("enabled")):
+            return normalized
+        dispatch_strategy = str(normalized.get("dispatch_strategy") or "event_driven").strip().lower()
+        if dispatch_strategy != "event_driven":
+            return normalized
+        if normalized.get("rpa_low_risk_mode", True) is not False:
+            normalized["rpa_low_risk_mode"] = True
+            normalized.setdefault("initial_preview_can_raise_unread", False)
+            normalized.setdefault("preview_change_can_raise_unread", False)
+            normalized.setdefault("short_preview_can_raise_unread", True)
+            normalized["scan_all_whitelist_each_iteration"] = False
+            normalized["idle_whitelist_sweep_count"] = 0
+            try:
+                target_batch = int(normalized.get("max_targets_per_iteration") or 0)
+            except (TypeError, ValueError):
+                target_batch = 0
+            normalized["max_targets_per_iteration"] = max(2, min(2, target_batch or 2))
+            normalized["max_scan_targets_per_iteration"] = 0
+        delay_enabled = bool(normalized.get("switch_human_delay_enabled", False))
+        normalized["switch_human_delay_enabled"] = delay_enabled
+        if delay_enabled:
+            delay_min = self._safe_non_negative_float(
+                normalized.get("switch_human_delay_min_seconds"),
+                default=1.0,
+            )
+            if delay_min <= 0:
+                delay_min = 1.0
+            delay_max = self._safe_non_negative_float(
+                normalized.get("switch_human_delay_max_seconds"),
+                default=3.0,
+            )
+            if delay_max <= 0:
+                delay_max = 3.0
+            if delay_max < delay_min:
+                delay_max = delay_min
+            normalized["switch_human_delay_min_seconds"] = float(delay_min)
+            normalized["switch_human_delay_max_seconds"] = float(delay_max)
+            # Retain only a minimal anti-bounce guard here. The visible
+            # humanization should come from the randomized 1-3s switch pause,
+            # not from a stale hard interval carried over from older configs.
+            normalized["min_switch_interval_seconds"] = 1
+            normalized["capture_one_target_per_round"] = bool(
+                normalized.get("capture_one_target_per_round", False)
+            )
+        else:
+            normalized["min_switch_interval_seconds"] = 1
+            normalized["switch_human_delay_min_seconds"] = 0.0
+            normalized["switch_human_delay_max_seconds"] = 0.0
+        return normalized
+
     def _load_workflow_symbols(self) -> None:
         import sys
 
@@ -727,6 +1283,7 @@ class ManagedListenerSchedulerBridge:
             mark_coalesced_messages,
             mark_processed,
             maybe_enrich_messages_with_history,
+            normalize_capture_payload_for_semantic_processing,
             parse_targets,
             record_reply_timestamp,
             resolve_path,
@@ -755,6 +1312,7 @@ class ManagedListenerSchedulerBridge:
             "mark_coalesced_messages": mark_coalesced_messages,
             "mark_processed": mark_processed,
             "maybe_enrich_messages_with_history": maybe_enrich_messages_with_history,
+            "normalize_capture_payload_for_semantic_processing": normalize_capture_payload_for_semantic_processing,
             "parse_targets": parse_targets,
             "record_reply_timestamp": record_reply_timestamp,
             "resolve_path": resolve_path,
@@ -791,6 +1349,14 @@ class ManagedListenerSchedulerBridge:
         sticky_hold = int(multi_target_cfg.get("sticky_target_hold_seconds", 35) or 35)
         sticky_rounds = int(multi_target_cfg.get("sticky_max_dispatch_rounds", 3) or 3)
         preview_confirmations = int(multi_target_cfg.get("preview_change_confirmations", 2) or 2)
+        initial_preview_can_raise_unread = bool(multi_target_cfg.get("initial_preview_can_raise_unread", True))
+        preview_change_can_raise_unread = bool(multi_target_cfg.get("preview_change_can_raise_unread", True))
+        short_preview_can_raise_unread = bool(multi_target_cfg.get("short_preview_can_raise_unread", True))
+        short_signal_max_chars = int(multi_target_cfg.get("high_sensitivity_short_max_chars", 7) or 7)
+        short_signal_merge_window = float(multi_target_cfg.get("high_sensitivity_short_merge_window_seconds", 2.5) or 0.0)
+        empty_capture_retry_seconds = float(multi_target_cfg.get("high_sensitivity_short_empty_capture_retry_seconds", 3.0) or 0.0)
+        empty_capture_retry_backoff = float(multi_target_cfg.get("high_sensitivity_short_empty_capture_retry_backoff_multiplier", 1.8) or 1.0)
+        empty_capture_retry_max_seconds = float(multi_target_cfg.get("high_sensitivity_short_empty_capture_retry_max_seconds", 15.0) or 0.0)
         if self.session_monitor is None:
             self.session_monitor = self._workflow["SessionMonitor"](
                 tenant_id=self.tenant_id,
@@ -802,6 +1368,14 @@ class ManagedListenerSchedulerBridge:
                 sticky_target_hold_seconds=max(5, sticky_hold),
                 sticky_max_dispatch_rounds=max(1, sticky_rounds),
                 preview_change_confirmations=max(1, preview_confirmations),
+                initial_preview_can_raise_unread=initial_preview_can_raise_unread,
+                preview_change_can_raise_unread=preview_change_can_raise_unread,
+                short_preview_can_raise_unread=short_preview_can_raise_unread,
+                high_sensitivity_short_max_chars=max(1, short_signal_max_chars),
+                high_sensitivity_short_merge_window_seconds=max(0.0, short_signal_merge_window),
+                empty_capture_retry_seconds=max(0.0, empty_capture_retry_seconds),
+                empty_capture_retry_backoff_multiplier=max(1.0, empty_capture_retry_backoff),
+                empty_capture_retry_max_seconds=max(max(0.0, empty_capture_retry_seconds), empty_capture_retry_max_seconds),
             )
             return
         self.session_monitor.whitelist = whitelist
@@ -812,11 +1386,24 @@ class ManagedListenerSchedulerBridge:
         self.session_monitor.sticky_target_hold_seconds = max(5, sticky_hold)
         self.session_monitor.sticky_max_dispatch_rounds = max(1, sticky_rounds)
         self.session_monitor.preview_change_confirmations = max(1, preview_confirmations)
+        self.session_monitor.initial_preview_can_raise_unread = initial_preview_can_raise_unread
+        self.session_monitor.preview_change_can_raise_unread = preview_change_can_raise_unread
+        self.session_monitor.short_preview_can_raise_unread = short_preview_can_raise_unread
+        self.session_monitor.high_sensitivity_short_max_chars = max(1, short_signal_max_chars)
+        self.session_monitor.high_sensitivity_short_merge_window_seconds = max(0.0, short_signal_merge_window)
+        self.session_monitor.empty_capture_retry_seconds = max(0.0, empty_capture_retry_seconds)
+        self.session_monitor.empty_capture_retry_backoff_multiplier = max(1.0, empty_capture_retry_backoff)
+        self.session_monitor.empty_capture_retry_max_seconds = max(
+            self.session_monitor.empty_capture_retry_seconds,
+            empty_capture_retry_max_seconds,
+        )
 
     def _ensure_runtime(self) -> None:
         signature = (
             self.scheduler_config.capture_max_sessions_per_round,
             self.scheduler_config.llm_max_concurrency,
+            self.scheduler_config.planner_max_concurrency,
+            self.scheduler_config.polish_max_concurrency,
             self.scheduler_config.send_max_replies_per_round,
             self.scheduler_config.stale_reply_policy,
         )
@@ -829,6 +1416,7 @@ class ManagedListenerSchedulerBridge:
             config=self.scheduler_config,
             capture_fn=self._capture_session,
             plan_reply_fn=self._plan_reply,
+            polish_reply_fn=self._polish_reply,
             freshness_fn=self._freshness_check,
             send_fn=self._send_reply,
             capture_done_fn=self._capture_done,
@@ -851,35 +1439,30 @@ class ManagedListenerSchedulerBridge:
                     state = self.store.load()
                 except Exception:  # noqa: BLE001 - keep listener resilient
                     state = {}
-                first = pending[0]
-                first_name = str(getattr(first, "name", "") or "")
-                if first_name and has_active_session_work(state, first_name):
-                    fallback = None
-                    for item in self.session_monitor.pending_targets(limit=self.scheduler_config.max_pending_sessions):
-                        name = str(getattr(item, "name", "") or "")
-                        if not name or name in self.ignored_session_names or name == first_name:
-                            continue
-                        if not has_active_session_work(state, name):
-                            fallback = item
-                            break
-                    if fallback is not None:
-                        pending = [fallback]
+                expanded_pending = list(pending)
+                if all(
+                    has_active_session_work(state, str(getattr(item, "name", "") or ""))
+                    for item in pending
+                    if str(getattr(item, "name", "") or "")
+                ):
+                    expanded_pending = list(self.session_monitor.pending_targets(limit=self.scheduler_config.max_pending_sessions))
+                non_busy = []
+                busy = []
+                for item in expanded_pending:
+                    name = str(getattr(item, "name", "") or "")
+                    if not name or name in self.ignored_session_names:
+                        continue
+                    if name and has_active_session_work(state, name):
+                        busy.append(item)
+                    else:
+                        non_busy.append(item)
+                if non_busy:
+                    pending = non_busy
+                elif busy:
+                    pending = busy[:1]
             next_name = ""
             if pending:
                 next_name = str(getattr(pending[0], "name", "") or "")
-            if (
-                self._switch_human_delay_enabled
-                and next_name
-                and self._last_capture_signal_target
-                and next_name != self._last_capture_signal_target
-            ):
-                delay = random.uniform(
-                    float(self._switch_human_delay_min_seconds),
-                    float(self._switch_human_delay_max_seconds),
-                )
-                if delay > 0:
-                    time.sleep(delay)
-                    self._last_capture_switch_delay_seconds = round(delay, 3)
             if next_name:
                 self._last_capture_signal_target = next_name
             return [
@@ -919,11 +1502,29 @@ class ManagedListenerSchedulerBridge:
 
     def _workflow_state_snapshot(self) -> dict[str, Any]:
         if self.state_path is None:
-            return {"version": 1, "targets": {}}
+            base = {"version": 1, "targets": {}}
+            return self._merge_scheduler_context_into_workflow_state(base)
         try:
-            return self._workflow["load_state"](self.state_path)
+            return self._merge_scheduler_context_into_workflow_state(self._workflow["load_state"](self.state_path))
         except Exception:
-            return {"version": 1, "targets": {}}
+            return self._merge_scheduler_context_into_workflow_state({"version": 1, "targets": {}})
+
+    def _merge_scheduler_context_into_workflow_state(self, workflow_state: dict[str, Any]) -> dict[str, Any]:
+        try:
+            scheduler_state = self.store.load()
+        except Exception:
+            return workflow_state
+        targets = workflow_state.setdefault("targets", {})
+        for name, session in (scheduler_state.get("sessions", {}) or {}).items():
+            if not isinstance(session, dict):
+                continue
+            context = session.get("conversation_context") if isinstance(session.get("conversation_context"), dict) else {}
+            if not context:
+                continue
+            target_state = targets.setdefault(str(name), {})
+            existing = target_state.get("conversation_context") if isinstance(target_state.get("conversation_context"), dict) else {}
+            target_state["conversation_context"] = {**existing, **context}
+        return workflow_state
 
     def _target_state(self, state: dict[str, Any], target_name: str) -> dict[str, Any]:
         return state.setdefault("targets", {}).setdefault(
@@ -942,6 +1543,21 @@ class ManagedListenerSchedulerBridge:
             str(session.get("target_name") or session.get("name") or ""),
             exact=bool(session.get("exact", True)),
         )
+        if (
+            self._switch_human_delay_enabled
+            and target.name
+            and self._last_actual_capture_target
+            and target.name != self._last_actual_capture_target
+        ):
+            delay = random.uniform(
+                float(self._switch_human_delay_min_seconds),
+                float(self._switch_human_delay_max_seconds),
+            )
+            if delay > 0:
+                time.sleep(delay)
+                self._last_capture_switch_delay_seconds = round(delay, 3)
+        if target.name:
+            self._last_actual_capture_target = target.name
         payload = self.connector.get_messages(target.name, exact=target.exact)
         if not payload.get("ok"):
             payload_state = str(payload.get("state") or "").strip().lower()
@@ -971,7 +1587,13 @@ class ManagedListenerSchedulerBridge:
             payload=payload,
             target_state=target_state,
         )
+        payload = self._workflow["normalize_capture_payload_for_semantic_processing"](
+            payload,
+            target=target,
+            config=self.config,
+        )
         messages = list(payload.get("messages") or [])
+        history_meta = payload.get("_history_backfill", {}) if isinstance(payload.get("_history_backfill"), dict) else {}
         selection = self._workflow["select_batch_details"](
             messages,
             target_state=target_state,
@@ -979,7 +1601,24 @@ class ManagedListenerSchedulerBridge:
             max_batch_messages=target.max_batch_messages,
             config=self.config,
         )
-        history_meta = payload.get("_history_backfill", {}) if isinstance(payload.get("_history_backfill"), dict) else {}
+        if not selection.batch:
+            recovered_short_batch = recover_high_sensitivity_short_pending_batch(
+                messages,
+                self._session_monitor_snapshot_for_target(target.name),
+                target_name=target.name,
+                allow_self_for_test=target.allow_self_for_test,
+                max_batch_messages=min(2, max(1, int(target.max_batch_messages or 1))),
+            )
+            if recovered_short_batch:
+                selection = replace(
+                    selection,
+                    batch=recovered_short_batch,
+                    overflow_messages=[],
+                    eligible_count=len(recovered_short_batch),
+                )
+                history_meta = dict(history_meta)
+                history_meta["short_pending_recovered_from_anchor_empty"] = True
+                history_meta["short_pending_recovered_count"] = len(recovered_short_batch)
         if self._workflow["history_gap_risk_blocks_reply"](history_meta, self.config) and selection.eligible_count > 0:
             return {
                 "ok": False,
@@ -1008,7 +1647,14 @@ class ManagedListenerSchedulerBridge:
             return
         target_name = str(capture.get("target_name") or session.get("target_name") or "")
         if target_name:
-            self.session_monitor.reset_unread(target_name)
+            if (
+                capture.get("status") == "empty"
+                and hasattr(self.session_monitor, "should_preserve_pending_after_empty_capture")
+                and self.session_monitor.should_preserve_pending_after_empty_capture(target_name)
+            ):
+                self.session_monitor.reset_unread(target_name, preserve_pending=True)
+            else:
+                self.session_monitor.reset_unread(target_name)
 
     def _plan_reply(self, capture: dict[str, Any], task: dict[str, Any]) -> dict[str, Any]:
         target = self._target_for_name(str(capture.get("target_name") or ""), exact=bool(capture.get("exact", True)))
@@ -1021,6 +1667,7 @@ class ManagedListenerSchedulerBridge:
                 rules=copy.deepcopy(self.rules),
                 workflow_state=self._workflow_state_snapshot(),
                 allow_fallback_send=bool((self.config.get("reply", {}) or {}).get("allow_fallback_send")),
+                apply_final_visible_polish=False,
             )
         event = planned.get("event") if isinstance(planned.get("event"), dict) else {}
         if isinstance(planned.get("decision"), dict) and event:
@@ -1029,7 +1676,28 @@ class ManagedListenerSchedulerBridge:
                 "scheduler_planner_event_action": event.get("action"),
                 "scheduler_planner_event_reason": event.get("reason"),
             }
+        if event:
+            planned["event"] = event
         return planned
+
+    def _polish_reply(self, planner_task: dict[str, Any], task: dict[str, Any]) -> dict[str, Any]:
+        target = self._target_for_name(str(planner_task.get("target_name") or ""), exact=True)
+        with self._tenant_environment():
+            polished = polish_reply_with_listen_workflow(
+                planner_task,
+                task,
+                target_config=target,
+                config=copy.deepcopy(self.config),
+                workflow_state=self._workflow_state_snapshot(),
+            )
+        event = polished.get("event") if isinstance(polished.get("event"), dict) else {}
+        if isinstance(polished.get("decision"), dict) and event:
+            polished["decision"] = {
+                **polished["decision"],
+                "scheduler_polish_event_action": event.get("action"),
+                "scheduler_polish_event_reason": event.get("reason"),
+            }
+        return polished
 
     def _capture_for_reply(self, reply: dict[str, Any]) -> dict[str, Any] | None:
         inline_capture = reply.get("_capture")
@@ -1170,7 +1838,9 @@ class ManagedListenerSchedulerBridge:
         return None
 
     def _session_list_preview_matches_capture(self, reply: dict[str, Any], preview: dict[str, Any]) -> bool:
-        preview_content = self._compact_preview_text(preview.get("preview_content"))
+        preview_content = self._compact_preview_text(
+            preview.get("pending_signal_text") or preview.get("preview_content")
+        )
         if not preview_content:
             return False
         capture = self._capture_for_reply(reply)
@@ -1198,6 +1868,42 @@ class ManagedListenerSchedulerBridge:
                 return True
         return False
 
+    @staticmethod
+    def _latest_customer_message_content(batch: list[dict[str, Any]]) -> str:
+        for item in reversed(batch):
+            if not isinstance(item, dict):
+                continue
+            sender = str(item.get("sender") or "").strip().lower()
+            if sender in {"self", "assistant", "agent", "me", "outbound"}:
+                continue
+            content = str(item.get("content") or "").strip()
+            if content:
+                return content
+        for item in reversed(batch):
+            if not isinstance(item, dict):
+                continue
+            content = str(item.get("content") or "").strip()
+            if content:
+                return content
+        return ""
+
+    def _preview_unread_requires_strict_same_signal_scan(self, reply: dict[str, Any], preview: dict[str, Any]) -> bool:
+        if str(preview.get("pending_signal_kind") or "").strip() != "high_sensitivity_short":
+            return False
+        capture = self._capture_for_reply(reply)
+        if not isinstance(capture, dict):
+            return False
+        batch = [item for item in (capture.get("batch") or []) if isinstance(item, dict)]
+        if not batch:
+            return False
+        preview_text = str(preview.get("pending_signal_text") or preview.get("preview_content") or "").strip()
+        if not preview_text:
+            return False
+        latest_content = self._latest_customer_message_content(batch)
+        if not latest_content:
+            return False
+        return normalize_repeatable_probe_text(preview_text) == normalize_repeatable_probe_text(latest_content)
+
     def _reply_llm_elapsed_seconds(self, reply: dict[str, Any]) -> float:
         cached = reply.get("_llm_elapsed_seconds")
         if cached not in (None, ""):
@@ -1213,9 +1919,18 @@ class ManagedListenerSchedulerBridge:
         except Exception:
             return 0.0
         task = (state.get("llm_tasks", {}) or {}).get(task_id)
-        if not isinstance(task, dict):
+        if isinstance(task, dict):
+            return self._task_llm_elapsed_seconds(task)
+        polish_task = (state.get("polish_tasks", {}) or {}).get(task_id)
+        if not isinstance(polish_task, dict):
             return 0.0
-        return self._task_llm_elapsed_seconds(task)
+        elapsed = self._task_llm_elapsed_seconds(polish_task)
+        planner_task_id = str(polish_task.get("planner_task_id") or "").strip()
+        if planner_task_id:
+            planner_task = (state.get("llm_tasks", {}) or {}).get(planner_task_id)
+            if isinstance(planner_task, dict):
+                elapsed += self._task_llm_elapsed_seconds(planner_task)
+        return elapsed
 
     def _task_llm_elapsed_seconds(self, task: dict[str, Any]) -> float:
         started_ts = self._iso_to_timestamp(str(task.get("started_at") or ""))
@@ -1238,23 +1953,11 @@ class ManagedListenerSchedulerBridge:
         if str(settings.get("mode") or "preview_first") == "strict_only":
             return {"applied": False, "reason": "scheduler_freshness_strict_only"}
 
-        # Scheduler-level pending signal is authoritative: if we already know
-        # this session has unread work, never send the old reply.
         try:
             scheduler_state = self.store.load()
         except Exception:
             scheduler_state = {}
         session = (scheduler_state.get("sessions", {}) or {}).get(target_name, {})
-        if isinstance(session, dict) and bool(session.get("pending_capture")):
-            return {
-                "applied": True,
-                "ok": True,
-                "stale": True,
-                "has_newer_messages": True,
-                "reason": "scheduler_pending_capture_before_send",
-                "freshness_mode": "session_preview_fastpath",
-            }
-
         preview = self._session_monitor_snapshot_for_target(target_name)
         if (
             not isinstance(preview, dict)
@@ -1264,22 +1967,51 @@ class ManagedListenerSchedulerBridge:
                 target_name,
                 cache_seconds=float(settings.get("preview_from_session_list_cache_seconds") or 0.0),
             )
-        if not isinstance(preview, dict):
-            return {"applied": False, "reason": "session_preview_unavailable"}
-        if bool(preview.get("unread_detected")):
+        # Scheduler-level pending signal is authoritative only when it points to
+        # work newer than the captured batch.  RPA/OCR can leave the same unread
+        # preview pending while the reply is already ready; in that case sending
+        # is safe and avoids an infinite stale/requeue loop.
+        if isinstance(session, dict) and bool(session.get("pending_capture")):
+            if isinstance(preview, dict) and self._session_list_preview_matches_capture(reply, preview):
+                return {
+                    "applied": True,
+                    "ok": True,
+                    "stale": False,
+                    "has_newer_messages": False,
+                    "reason": "scheduler_pending_capture_matches_capture_fast_pass",
+                    "freshness_mode": "session_preview_fastpath",
+                    "preview_snapshot": {
+                        "last_detected_at": str(preview.get("last_detected_at") or ""),
+                        "pending_since": str(preview.get("pending_since") or ""),
+                        "last_message_time": str(preview.get("last_message_time") or ""),
+                    },
+                }
             return {
                 "applied": True,
                 "ok": True,
                 "stale": True,
                 "has_newer_messages": True,
-                "reason": "session_monitor_unread_pending_before_send",
+                "reason": "scheduler_pending_capture_before_send",
                 "freshness_mode": "session_preview_fastpath",
-                "preview_snapshot": {
-                    "last_detected_at": str(preview.get("last_detected_at") or ""),
-                    "pending_since": str(preview.get("pending_since") or ""),
-                    "last_message_time": str(preview.get("last_message_time") or ""),
-                },
             }
+        if not isinstance(preview, dict):
+            return {"applied": False, "reason": "session_preview_unavailable"}
+        if bool(preview.get("unread_detected")):
+            if self._session_list_preview_matches_capture(reply, preview):
+                return {
+                    "applied": True,
+                    "ok": True,
+                    "stale": False,
+                    "has_newer_messages": False,
+                    "reason": "session_monitor_unread_matches_capture_fast_pass",
+                    "freshness_mode": "session_preview_fastpath",
+                    "preview_snapshot": {
+                        "last_detected_at": str(preview.get("last_detected_at") or ""),
+                        "pending_since": str(preview.get("pending_since") or ""),
+                        "last_message_time": str(preview.get("last_message_time") or ""),
+                    },
+                }
+            return {"applied": False, "reason": "session_monitor_unread_requires_strict_scan"}
 
         if (
             str(preview.get("_source") or "") == "session_list"
@@ -1359,7 +2091,18 @@ class ManagedListenerSchedulerBridge:
         capture = self._capture_for_reply(reply)
         if not capture:
             return {"ok": False, "verified": False, "reason": "capture_missing_before_send"}
-        target = self._target_for_name(str(reply.get("target_name") or ""), exact=bool(capture.get("exact", True)))
+        reply_target_name = str(reply.get("target_name") or "").strip()
+        capture_target_name = str(capture.get("target_name") or "").strip()
+        if not reply_target_name or not capture_target_name or reply_target_name != capture_target_name:
+            return {
+                "ok": False,
+                "verified": False,
+                "reason": "reply_target_capture_mismatch",
+                "target_name": reply_target_name,
+                "capture_target_name": capture_target_name,
+                "capture_ids": reply.get("capture_ids"),
+            }
+        target = self._target_for_name(reply_target_name, exact=bool(capture.get("exact", True)))
         reply_text = str(reply.get("reply_text") or "").strip()
         if not reply_text:
             return {"ok": False, "verified": False, "reason": "empty_reply_text"}
@@ -1413,6 +2156,7 @@ class ManagedListenerSchedulerBridge:
                 "enabled": True,
                 "reply_id": reply.get("reply_id"),
                 "task_id": reply.get("task_id"),
+                "task_kind": reply.get("task_kind") or "planner",
                 "capture_ids": reply.get("capture_ids"),
                 "context_version": reply.get("input_context_version"),
             },

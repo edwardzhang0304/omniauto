@@ -298,6 +298,13 @@ def apply_customer_service_live_safety_guard(
             target["exact"] = bool(target.get("exact", True))
             if name != FILE_TRANSFER_ASSISTANT_NAME:
                 target["allow_self_for_test"] = False
+            else:
+                target["allow_self_for_test"] = True
+                try:
+                    self_test_batch = int(target.get("max_batch_messages") or 0)
+                except (TypeError, ValueError):
+                    self_test_batch = 0
+                target["max_batch_messages"] = max(self_test_batch, 8)
             by_name[name] = target
     merged["targets"] = [by_name[name] for name in allowed_targets if name in by_name]
 
@@ -324,21 +331,24 @@ def apply_customer_service_live_safety_guard(
                     "enabled": False,
                     "rpa_low_risk_mode": True,
                     "scan_all_whitelist_each_iteration": False,
-                    "max_scan_targets_per_iteration": 1,
+                    "max_scan_targets_per_iteration": 0,
                     "idle_whitelist_sweep_count": 0,
                     "max_targets_per_iteration": 1,
                     "dispatch_strategy": "event_driven",
                     "sticky_target_hold_seconds": max(int(multi_target.get("sticky_target_hold_seconds") or 0), 35),
                     "preview_change_confirmations": max(int(multi_target.get("preview_change_confirmations") or 0), 1),
-                    "change_warmup_enabled": True,
-                    "change_warmup_min_seconds": 0.8,
-                    "change_warmup_max_seconds": 2.0,
+                    "initial_preview_can_raise_unread": False,
+                    "preview_change_can_raise_unread": False,
+                    "short_preview_can_raise_unread": True,
+                    "change_warmup_enabled": False,
+                    "change_warmup_min_seconds": 0.0,
+                    "change_warmup_max_seconds": 0.0,
                 }
             )
-            multi_target["min_switch_interval_seconds"] = max(
-                25,
-                int(multi_target.get("min_switch_interval_seconds") or 0),
-            )
+            # Single-target mode does not need a long hard switch gate. Keep the
+            # baseline aligned with multi-session mode so old persisted configs
+            # cannot carry a stale 25s interval back into later runs.
+            multi_target["min_switch_interval_seconds"] = 1
         else:
             # In multi-session mode, prefer unread-driven dispatch only.
             # Avoid full-whitelist scans that create visible mechanical
@@ -348,19 +358,22 @@ def apply_customer_service_live_safety_guard(
                     "enabled": True,
                     "rpa_low_risk_mode": True,
                     "scan_all_whitelist_each_iteration": False,
-                    "max_scan_targets_per_iteration": 1,
+                    "max_scan_targets_per_iteration": 0,
                     "idle_whitelist_sweep_count": 0,
-                    "max_targets_per_iteration": 1,
+                    "max_targets_per_iteration": 2,
                     "dispatch_strategy": "event_driven",
                     "sticky_target_hold_seconds": max(int(multi_target.get("sticky_target_hold_seconds") or 0), 30),
                     "preview_change_confirmations": max(int(multi_target.get("preview_change_confirmations") or 0), 2),
-                    "change_warmup_enabled": True,
-                    "change_warmup_min_seconds": 0.8,
-                    "change_warmup_max_seconds": 2.0,
-                    "switch_human_delay_enabled": True,
-                    "switch_human_delay_min_seconds": 1.0,
-                    "switch_human_delay_max_seconds": 3.0,
-                    "capture_one_target_per_round": True,
+                    "initial_preview_can_raise_unread": False,
+                    "preview_change_can_raise_unread": False,
+                    "short_preview_can_raise_unread": True,
+                    "change_warmup_enabled": False,
+                    "change_warmup_min_seconds": 0.0,
+                    "change_warmup_max_seconds": 0.0,
+                    "switch_human_delay_enabled": False,
+                    "switch_human_delay_min_seconds": 0.0,
+                    "switch_human_delay_max_seconds": 0.0,
+                    "capture_one_target_per_round": False,
                 }
             )
             # No hard long switch interval: unread-driven dispatch plus a short
@@ -382,7 +395,19 @@ def apply_customer_service_live_safety_guard(
                 {
                     "enabled": True,
                     "capture_max_sessions_per_round": bounded_scheduler_int("capture_max_sessions_per_round", 3, 1, 5),
-                    "llm_max_concurrency": bounded_scheduler_int("llm_max_concurrency", 2, 1, 3),
+                    "llm_max_concurrency": bounded_scheduler_int("llm_max_concurrency", 4, 1, 8),
+                    "planner_max_concurrency": bounded_scheduler_int(
+                        "planner_max_concurrency",
+                        bounded_scheduler_int("llm_max_concurrency", 4, 1, 8),
+                        1,
+                        8,
+                    ),
+                    "polish_max_concurrency": bounded_scheduler_int(
+                        "polish_max_concurrency",
+                        bounded_scheduler_int("llm_max_concurrency", 4, 1, 8),
+                        1,
+                        8,
+                    ),
                     "send_max_replies_per_round": bounded_scheduler_int("send_max_replies_per_round", 1, 1, 2),
                     "same_session_single_inflight": scheduler.get("same_session_single_inflight", True) is not False,
                     "stale_reply_policy": str(scheduler.get("stale_reply_policy") or "discard_and_requeue"),
@@ -400,10 +425,12 @@ def apply_customer_service_live_safety_guard(
             merged["concurrency_scheduler"] = scheduler
 
     poll = dict(merged.get("poll", {}) or {})
-    # Keep live customer-service response snappy; jitter below absorbs
-    # clock-like loops without making customers wait.
-    poll_interval = int(poll.get("interval_seconds") or 5)
-    poll["interval_seconds"] = min(max(poll_interval, 3), 8)
+    # Keep live customer-service response snappy while avoiding clock-like loops.
+    # The managed listener samples a fresh value inside this 3-5s window.
+    poll_interval = int(poll.get("interval_seconds") or 3)
+    poll["interval_seconds"] = min(max(poll_interval, 3), 5)
+    poll["interval_min_seconds"] = 3
+    poll["interval_max_seconds"] = 5
     merged["poll"] = poll
 
     transport_risk = dict(merged.get("transport_risk_guard", {}) or {})
@@ -459,6 +486,10 @@ def apply_customer_service_live_safety_guard(
         realtime["max_completion_tokens"] = min(int(realtime.get("max_completion_tokens") or 180), 180)
         realtime["max_history_messages"] = min(int(realtime.get("max_history_messages") or 4), 4)
         realtime["history_char_budget"] = min(int(realtime.get("history_char_budget") or 800), 800)
+        realtime["business_local_style_foreground_llm_enabled"] = _truthy(
+            realtime.get("business_local_style_foreground_llm_enabled"),
+            default=True,
+        )
         merged["realtime_reply"] = realtime
 
     reply_safety = dict(merged.get("rpa_reply_safety", {}) or {})

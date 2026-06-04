@@ -109,7 +109,7 @@
   },
   "llm_reply_synthesis": {
     "enabled": false,
-    "provider": "manual_json",
+    "provider": "openai",
     "mode": "guarded_auto",
     "shadow_mode": false,
     "require_evidence": true,
@@ -124,8 +124,8 @@
     "model_routing": {
       "enabled": true,
       "default_tier": "flash",
-      "flash_model": "deepseek-v4-flash",
-      "pro_model": "deepseek-v4-pro",
+      "flash_model": "gpt-5.4",
+      "pro_model": "gpt-5.4",
       "force_model_tier": "",
       "pro_intent_tags": [
         "payment",
@@ -182,14 +182,48 @@
     "include_evidence_pack_in_audit": false,
     "candidate_json_path": "",
     "platform_safety_rules_path": "apps/wechat_ai_customer_service/configs/platform_safety_rules.example.json",
-    "platform_understanding_rules_path": "apps/wechat_ai_customer_service/configs/platform_understanding_rules.example.json"
+    "platform_understanding_rules_path": "apps/wechat_ai_customer_service/configs/platform_understanding_rules.example.json",
+    "base_url": "https://aiself.vip/v1",
+    "model": "gpt-5.4"
+  },
+  "customer_service_brain": {
+    "enabled": false,
+    "mode": "off",
+    "provider": "openai",
+    "model_tier": "flash",
+    "model": "gpt-5.4",
+    "base_url": "https://aiself.vip/v1",
+    "timeout_seconds": 18,
+    "max_tokens": 2600,
+    "temperature": 0.35,
+    "max_reply_segments": 3,
+    "require_fact_claims": true,
+    "require_final_visible_polish": true,
+    "quality_verifier_enabled": true,
+    "quality_repair_enabled": true,
+    "max_quality_repair_attempts": 1,
+    "quality_repair_timeout_seconds": 8,
+    "quality_segment_soft_max_chars": 120,
+    "social_reply_soft_max_chars": 80,
+    "fallback_to_legacy_on_error": false,
+    "history_char_budget": 1200,
+    "summary_char_budget": 280,
+    "current_batch_char_budget": 420,
+    "max_prompt_product_items": 5,
+    "max_prompt_formal_items": 3,
+    "max_prompt_style_examples": 1,
+    "max_prompt_rag_hits": 1,
+    "prompt_item_text_chars": 220,
+    "blocking_shadow_enabled": false,
+    "include_brain_input_in_audit": false,
+    "include_evidence_pack_in_audit": false
   },
   "product_entity_resolution": {
     "enabled": true,
-    "provider": "deepseek",
+    "provider": "openai",
     "model_tier": "flash",
-    "model": "",
-    "base_url": "",
+    "model": "gpt-5.4",
+    "base_url": "https://aiself.vip/v1",
     "timeout_seconds": 3,
     "max_candidates": 12,
     "min_confidence": 0.72,
@@ -199,9 +233,9 @@
   "final_visible_llm_polish": {
     "enabled": false,
     "required_for_send": true,
-    "provider": "manual_json",
+    "provider": "openai",
     "model_tier": "flash",
-    "model": "",
+    "model": "gpt-5.4",
     "timeout_seconds": 4,
     "retry_count": 0,
     "max_tokens": 120,
@@ -212,7 +246,8 @@
     "fast_prompt_enabled": true,
     "cache_enabled": true,
     "cache_ttl_seconds": 86400,
-    "cache_max_entries": 512
+    "cache_max_entries": 512,
+    "base_url": "https://aiself.vip/v1"
   },
   "reply_multi_bubble": {
     "enabled": true,
@@ -274,10 +309,12 @@
     "advisory_only": true,
     "llm_advisory": {
       "enabled": false,
-      "provider": "manual_json",
+      "provider": "openai",
       "advisory_only": true,
       "include_prompt_in_audit": false,
-      "candidate_json_path": ""
+      "candidate_json_path": "",
+      "base_url": "https://aiself.vip/v1",
+      "model": "gpt-5.4"
     }
   },
   "targets": [
@@ -299,7 +336,9 @@
   "concurrency_scheduler": {
     "enabled": false,
     "capture_max_sessions_per_round": 3,
-    "llm_max_concurrency": 2,
+    "llm_max_concurrency": 4,
+    "planner_max_concurrency": 4,
+    "polish_max_concurrency": 4,
     "send_max_replies_per_round": 1,
     "same_session_single_inflight": true,
     "stale_reply_policy": "discard_and_requeue",

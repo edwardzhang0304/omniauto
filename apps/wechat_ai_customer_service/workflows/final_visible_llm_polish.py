@@ -13,15 +13,12 @@ import os
 import re
 import threading
 import time
-import urllib.error
-import urllib.request
 from difflib import SequenceMatcher
 from pathlib import Path
 from typing import Any
 
 from apps.wechat_ai_customer_service.llm_config import (
-    apply_llm_reasoning_effort,
-    llm_urlopen,
+    call_llm_request_with_failover,
     normalize_deepseek_model_tier,
     read_secret,
     resolve_effective_llm_provider,
@@ -43,6 +40,8 @@ DEFAULT_TEMPERATURE = 0.45
 DEFAULT_CACHE_TTL_SECONDS = 24 * 60 * 60
 DEFAULT_CACHE_MAX_ENTRIES = 512
 _CACHE_LOCK = threading.RLock()
+DEFAULT_LIGHTWEIGHT_SOURCE_CHANNELS = {"normal", "realtime", "llm", "brain", "social", "friendly"}
+CONSERVATIVE_SOURCE_CHANNELS = {"handoff", "rate_limit"}
 
 PROTECTED_TOKEN_PATTERN = re.compile(r"\d+(?:\.\d+)?\s*(?:万|元|块|公里|km|KM|年|天|%|折)|1[3-9]\d{9}|\b\d{4,}\b")
 AI_EXPOSURE_MARKERS = ("我是AI", "我是ai", "我是机器人", "AI助手", "智能客服", "自动回复系统", "机器客服")
@@ -138,13 +137,15 @@ def maybe_polish_customer_visible_reply(
             source_channel=source_channel,
             needs_handoff=needs_handoff,
         )
-    payload["llm_status"] = {key: result.get(key) for key in ("ok", "provider", "model", "status", "error") if key in result}
+    payload["llm_status"] = {key: result.get(key) for key in ("ok", "provider", "model", "status", "error", "failover") if key in result}
     if result.get("cache"):
         payload["cache"] = result.get("cache")
     if result.get("usage"):
         payload["llm_usage"] = result.get("usage")
     if result.get("prompt_estimate"):
         payload["prompt_estimate"] = result.get("prompt_estimate")
+    if result.get("runtime_budget"):
+        payload["runtime_budget"] = result.get("runtime_budget")
     if not result.get("ok"):
         payload["reason"] = str(result.get("error") or "llm_polish_unavailable")
         payload["reply_text"] = draft
@@ -182,11 +183,13 @@ def maybe_polish_customer_visible_reply(
             cache_payload = dict(payload.get("cache") or cache_info)
             cache_payload.update({"hit": False, "fallback_from_hit": True, "fallback_reason": guard.get("reason")})
             payload["cache"] = cache_payload
-            payload["llm_status"] = {key: fallback.get(key) for key in ("ok", "provider", "model", "status", "error") if key in fallback}
+            payload["llm_status"] = {key: fallback.get(key) for key in ("ok", "provider", "model", "status", "error", "failover") if key in fallback}
             if fallback.get("usage"):
                 payload["llm_usage"] = fallback.get("usage")
             if fallback.get("prompt_estimate"):
                 payload["prompt_estimate"] = fallback.get("prompt_estimate")
+            if fallback.get("runtime_budget"):
+                payload["runtime_budget"] = fallback.get("runtime_budget")
             if fallback.get("ok"):
                 result = fallback
                 candidate = fallback.get("candidate") if isinstance(fallback.get("candidate"), dict) else {}
@@ -568,10 +571,21 @@ def build_prompt_pack(
     needs_handoff: bool,
 ) -> dict[str, Any]:
     identity_guard = settings.get("identity_guard_enabled", True) is not False
+    brain_source = str(source_channel or "").strip().lower() == "brain"
     if settings.get("fast_prompt_enabled", True) is not False:
+        rules = [
+            "只改表达，不改事实。",
+            "不新增承诺或结论。",
+            "不要扩写，尽量不超过草稿长度，优先1到2句。",
+            "价格/金融/合同/置换/到店/电池等边界必须保留。",
+            "避免和recent完全重复。",
+        ]
+        if brain_source:
+            rules.insert(1, "不能改变客服大脑已确定的推荐对象、结论、边界或信息顺序。")
         system = (
             "你是微信客服最终轻量润色器。只把安全草稿改得更像真人客服，语气自然、简短。"
             "禁止新增事实、数字、车型、价格、库存、承诺、联系方式或政策；必须保留草稿边界。"
+            + ("当前草稿来自客服大脑，已完成内容决策；你只能做轻微表达编辑，不能重新回答。" if brain_source else "")
             + ("不要承认AI/机器人/智能客服身份。" if identity_guard else "")
             + '只输出JSON对象，字段为{"reply":字符串,"confidence":0到1,"reason":字符串}。'
         )
@@ -580,19 +594,25 @@ def build_prompt_pack(
             "draft": clip_text(draft_reply, 520),
             "recent": [clip_text(item, 120) for item in (recent_reply_texts or [])[-2:]],
             "keep_topics": topic_preservation_requirements(draft_reply),
-            "rules": [
-                "只改表达，不改事实。",
-                "不新增承诺或结论。",
-                "不要扩写，尽量不超过草稿长度，优先1到2句。",
-                "价格/金融/合同/置换/到店/电池等边界必须保留。",
-                "避免和recent完全重复。",
-            ],
+            "rules": rules,
         }
         return {"system": system, "user": user, "response_schema": None}
+    output_rules = [
+        "保留草稿含义和所有数字事实。",
+        "不要新增承诺，不要新增车源、价格、库存、优惠、合同、贷款结论。",
+        "不要扩写，尽量不超过草稿长度，优先1到2句，像微信真人简短回复。",
+        "不要出现转人工/人工客服等暴露链路措辞。",
+        "若需要请示负责人或核实资料，语气可以更自然，但边界不能消失。",
+        "若草稿涉及价格/金融/合同/电池三电/置换/到店等主题，润色后必须保留对应主题，不要改成另一个话题。",
+        "如果草稿是在拒绝贷款包过、最低价、价格承诺等高风险边界，润色后不要用“可以的/没问题/能的”开头。",
+    ]
+    if brain_source:
+        output_rules.insert(1, "必须保留客服大脑的推荐对象、明确结论、风险边界和先后顺序。")
     system = (
         "你是微信客服最终话术润色器，只负责把安全草稿改得更像真人客服。"
         "禁止重新回答问题，禁止新增事实、车型、价格、库存、承诺、联系方式或政策。"
-        "必须保留草稿里的数字、金额、年份、公里数、手机号等关键信息。"
+        + ("当前草稿来自客服大脑，内容决策已经完成；你只能微调语气、标点、分句和微信口吻，不能重新组织答案。" if brain_source else "")
+        + "必须保留草稿里的数字、金额、年份、公里数、手机号等关键信息。"
         "如果草稿是在请示/核实/负责人确认，必须保留这个边界，不要改成已经确认。"
         "避免和最近回复完全相同，语气自然、简短、有礼貌。"
         + (
@@ -610,15 +630,7 @@ def build_prompt_pack(
         "draft_reply": clip_text(draft_reply, 900),
         "recent_customer_visible_replies": [clip_text(item, 260) for item in (recent_reply_texts or [])[-4:]],
         "must_keep_topic_groups": topic_preservation_requirements(draft_reply),
-        "output_rules": [
-            "保留草稿含义和所有数字事实。",
-            "不要新增承诺，不要新增车源、价格、库存、优惠、合同、贷款结论。",
-            "不要扩写，尽量不超过草稿长度，优先1到2句，像微信真人简短回复。",
-            "不要出现转人工/人工客服等暴露链路措辞。",
-            "若需要请示负责人或核实资料，语气可以更自然，但边界不能消失。",
-            "若草稿涉及价格/金融/合同/电池三电/置换/到店等主题，润色后必须保留对应主题，不要改成另一个话题。",
-            "如果草稿是在拒绝贷款包过、最低价、价格承诺等高风险边界，润色后不要用“可以的/没问题/能的”开头。",
-        ],
+        "output_rules": output_rules,
     }
     return {"system": system, "user": user, "response_schema": RESPONSE_SCHEMA}
 
@@ -635,45 +647,25 @@ def post_polish_request(
     max_tokens: int,
     temperature: float,
 ) -> dict[str, Any]:
-    url = base_url.rstrip("/") + "/chat/completions"
-    payload = {
-        "model": model,
-        "messages": [
-            {"role": "system", "content": prompt_pack["system"]},
-            {
-                "role": "user",
-                "content": build_user_prompt_content(prompt_pack),
-            },
-        ],
-        "temperature": temperature,
-        "max_tokens": max_tokens,
-        "stream": False,
-        "response_format": {"type": "json_object"},
-    }
-    apply_llm_reasoning_effort(payload, provider=provider, tier=tier, read_secret_fn=read_secret)
-    request = urllib.request.Request(
-        url,
-        data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
-        headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
-        method="POST",
+    messages = [
+        {"role": "system", "content": prompt_pack["system"]},
+        {
+            "role": "user",
+            "content": build_user_prompt_content(prompt_pack),
+        },
+    ]
+    return call_llm_request_with_failover(
+        provider=provider,
+        api_key=api_key,
+        base_url=base_url,
+        model=model,
+        messages=messages,
+        timeout=max(1, timeout),
+        max_tokens=max_tokens,
+        temperature=temperature,
+        tier=tier,
+        json_mode=True,
     )
-    try:
-        with llm_urlopen(request, timeout=max(1, timeout), provider=provider) as response:
-            raw = response.read().decode("utf-8", errors="replace")
-            data = json.loads(raw)
-            content = data.get("choices", [{}])[0].get("message", {}).get("content", "")
-            return {
-                "ok": True,
-                "provider": provider,
-                "status": response.status,
-                "response_text": content,
-                "usage": data.get("usage", {}),
-            }
-    except urllib.error.HTTPError as exc:
-        body = exc.read().decode("utf-8", errors="replace")
-        return {"ok": False, "provider": provider, "status": exc.code, "error": body[:1000]}
-    except Exception as exc:
-        return {"ok": False, "provider": provider, "error": repr(exc)}
 
 
 def build_user_prompt_content(prompt_pack: dict[str, Any]) -> str:
@@ -815,6 +807,8 @@ def reply_similarity(left: str, right: str) -> float:
 
 
 def min_similarity_for_source(source_channel: str) -> float:
+    if source_channel == "brain":
+        return 0.42
     if source_channel == "handoff":
         return 0.22
     if source_channel == "rate_limit":
@@ -851,8 +845,18 @@ def resolve_polish_runtime_budget(
     profile = "default"
     short_reply = False
     medium_reply = False
-    # Keep handoff and special channels conservative; optimize the common normal path.
-    if not needs_handoff and str(source_channel or "normal").strip().lower() == "normal":
+    channel = str(source_channel or "normal").strip().lower() or "normal"
+    lightweight_channels = source_channel_set_from_settings(
+        settings.get("lightweight_source_channels"),
+        DEFAULT_LIGHTWEIGHT_SOURCE_CHANNELS,
+    )
+    conservative_channels = source_channel_set_from_settings(
+        settings.get("conservative_source_channels"),
+        CONSERVATIVE_SOURCE_CHANNELS,
+    )
+    # Keep handoff/rate-limit conservative; optimize all ordinary customer-visible
+    # drafts regardless of whether they came from realtime, LLM, or local routing.
+    if not needs_handoff and channel in lightweight_channels and channel not in conservative_channels:
         if char_count <= short_threshold:
             profile = "short"
             short_reply = True
@@ -894,6 +898,16 @@ def resolve_final_polish_timeout(
         if configured < DEFAULT_OPENAI_TIMEOUT_SECONDS:
             return DEFAULT_OPENAI_TIMEOUT_SECONDS
     return configured
+
+
+def source_channel_set_from_settings(value: Any, default: set[str]) -> set[str]:
+    if isinstance(value, str):
+        items = [item.strip().lower() for item in value.split(",") if item.strip()]
+        return set(items) or set(default)
+    if isinstance(value, (list, tuple, set)):
+        items = {str(item).strip().lower() for item in value if str(item).strip()}
+        return items or set(default)
+    return set(default)
 
 
 def truncate_reply(reply: str, settings: dict[str, Any]) -> str:

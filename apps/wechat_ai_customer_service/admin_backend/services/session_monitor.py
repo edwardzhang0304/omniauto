@@ -12,7 +12,7 @@ import json
 import os
 import time
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -34,6 +34,11 @@ class SessionState:
     last_dispatched_at: str = ""
     conversation_type: str = "unknown"
     preview_change_hits: int = 0
+    pending_signal_text: str = ""
+    pending_signal_kind: str = ""
+    signal_ready_after: str = ""
+    retry_not_before: str = ""
+    empty_capture_retries: int = 0
 
 
 @dataclass
@@ -44,6 +49,7 @@ class ActiveTarget:
     unread_detected: bool = False
     session_age_seconds: int = 0
     conversation_type: str = "unknown"
+    pending_signal_kind: str = ""
 
 
 class SessionMonitor:
@@ -62,6 +68,14 @@ class SessionMonitor:
         sticky_target_hold_seconds: int = 35,
         sticky_max_dispatch_rounds: int = 3,
         preview_change_confirmations: int = 2,
+        initial_preview_can_raise_unread: bool = True,
+        preview_change_can_raise_unread: bool = True,
+        short_preview_can_raise_unread: bool = True,
+        high_sensitivity_short_max_chars: int = 7,
+        high_sensitivity_short_merge_window_seconds: float = 0.0,
+        empty_capture_retry_seconds: float = 3.0,
+        empty_capture_retry_backoff_multiplier: float = 1.8,
+        empty_capture_retry_max_seconds: float = 15.0,
     ) -> None:
         self.tenant_id = active_tenant_id(tenant_id)
         self.state_path = state_path or (
@@ -77,6 +91,17 @@ class SessionMonitor:
         self.sticky_target_hold_seconds = max(5, int(sticky_target_hold_seconds or 35))
         self.sticky_max_dispatch_rounds = max(1, int(sticky_max_dispatch_rounds or 3))
         self.preview_change_confirmations = max(1, int(preview_change_confirmations or 2))
+        self.initial_preview_can_raise_unread = bool(initial_preview_can_raise_unread)
+        self.preview_change_can_raise_unread = bool(preview_change_can_raise_unread)
+        self.short_preview_can_raise_unread = bool(short_preview_can_raise_unread)
+        self.high_sensitivity_short_max_chars = max(1, int(high_sensitivity_short_max_chars or 7))
+        self.high_sensitivity_short_merge_window_seconds = max(0.0, float(high_sensitivity_short_merge_window_seconds or 0.0))
+        self.empty_capture_retry_seconds = max(0.0, float(empty_capture_retry_seconds or 0.0))
+        self.empty_capture_retry_backoff_multiplier = max(1.0, float(empty_capture_retry_backoff_multiplier or 1.0))
+        self.empty_capture_retry_max_seconds = max(
+            self.empty_capture_retry_seconds,
+            float(empty_capture_retry_max_seconds or self.empty_capture_retry_seconds or 0.0),
+        )
         self._last_switch_at: float = 0.0
         self._last_dispatched_target: str = ""
         self._sticky_target: str = ""
@@ -113,6 +138,11 @@ class SessionMonitor:
                 last_dispatched_at=str(data.get("last_dispatched_at") or ""),
                 conversation_type=str(data.get("conversation_type") or "unknown"),
                 preview_change_hits=int(data.get("preview_change_hits", 0) or 0),
+                pending_signal_text=str(data.get("pending_signal_text") or ""),
+                pending_signal_kind=str(data.get("pending_signal_kind") or ""),
+                signal_ready_after=str(data.get("signal_ready_after") or ""),
+                retry_not_before=str(data.get("retry_not_before") or ""),
+                empty_capture_retries=int(data.get("empty_capture_retries", 0) or 0),
             )
             for name, data in raw.items()
             if isinstance(data, dict)
@@ -137,6 +167,11 @@ class SessionMonitor:
                     "last_dispatched_at": s.last_dispatched_at,
                     "conversation_type": s.conversation_type,
                     "preview_change_hits": int(s.preview_change_hits or 0),
+                    "pending_signal_text": s.pending_signal_text,
+                    "pending_signal_kind": s.pending_signal_kind,
+                    "signal_ready_after": s.signal_ready_after,
+                    "retry_not_before": s.retry_not_before,
+                    "empty_capture_retries": int(s.empty_capture_retries or 0),
                 }
                 for name, s in self._sessions.items()
             },
@@ -178,7 +213,8 @@ class SessionMonitor:
             existing = self._sessions.get(name)
             if existing is None:
                 # New session seen for the first time
-                initial_unread = bool(unread_badge or has_signal)
+                short_preview_signal = self.short_preview_can_raise_unread and self._signal_kind(content) == "high_sensitivity_short"
+                initial_unread = bool(unread_badge or (self.initial_preview_can_raise_unread and has_signal) or short_preview_signal)
                 self._sessions[name] = SessionState(
                     name=name,
                     last_content_digest=digest,
@@ -192,6 +228,9 @@ class SessionMonitor:
                     last_detected_at=now_iso if initial_unread else "",
                     conversation_type=conversation_type,
                     preview_change_hits=0,
+                    pending_signal_text=content if initial_unread else "",
+                    pending_signal_kind=self._signal_kind(content),
+                    signal_ready_after=self._signal_ready_after(now_iso, content) if initial_unread else "",
                 )
                 if initial_unread:
                     active.append(ActiveTarget(
@@ -201,6 +240,7 @@ class SessionMonitor:
                         unread_detected=True,
                         session_age_seconds=0,
                         conversation_type=conversation_type,
+                        pending_signal_kind=self._signal_kind(content),
                     ))
             else:
                 changed_by_digest = bool(digest and digest != existing.last_content_digest)
@@ -227,15 +267,27 @@ class SessionMonitor:
                         should_raise_unread = True
                         existing.preview_change_hits = 0
                     elif changed_by_digest or changed_by_time:
-                        existing.preview_change_hits = int(existing.preview_change_hits or 0) + 1
-                        if existing.preview_change_hits >= self.preview_change_confirmations:
+                        short_preview_signal = self.short_preview_can_raise_unread and self._signal_kind(content) == "high_sensitivity_short"
+                        if short_preview_signal:
                             should_raise_unread = True
+                            existing.preview_change_hits = 0
+                        elif self.preview_change_can_raise_unread:
+                            existing.preview_change_hits = int(existing.preview_change_hits or 0) + 1
+                            if existing.preview_change_hits >= self.preview_change_confirmations:
+                                should_raise_unread = True
+                        else:
+                            # Treat ordinary preview drift as a baseline update
+                            # only. This avoids foreground hopping when WeChat
+                            # refreshes list previews or timestamps without a
+                            # visible unread signal.
+                            existing.preview_change_hits = 0
                     if should_raise_unread:
-                        existing.unread_detected = True
-                        if not existing.pending_since:
-                            existing.pending_since = now_iso
-                        existing.last_detected_at = now_iso
-                        existing.priority_score = priority
+                        self._mark_pending_signal(
+                            existing,
+                            content=content,
+                            now_iso=now_iso,
+                            priority=priority,
+                        )
                         active.append(ActiveTarget(
                             name=name,
                             exact=True,
@@ -243,6 +295,7 @@ class SessionMonitor:
                             unread_detected=True,
                             session_age_seconds=age_seconds,
                             conversation_type=conversation_type,
+                            pending_signal_kind=existing.pending_signal_kind,
                         ))
                 else:
                     existing.last_seen_at = now_iso
@@ -260,6 +313,7 @@ class SessionMonitor:
                             unread_detected=True,
                             session_age_seconds=_age_seconds(existing.pending_since or existing.last_detected_at or existing.last_seen_at),
                             conversation_type=conversation_type,
+                            pending_signal_kind=existing.pending_signal_kind,
                         ))
                     else:
                         existing.preview_change_hits = 0
@@ -341,8 +395,26 @@ class SessionMonitor:
 
         if not selected:
             return []
-        # In low-disturbance mode we intentionally dispatch one foreground target per turn.
-        return selected[:1]
+        try:
+            cap = int(limit) if limit is not None else int(self.max_targets_per_iteration)
+        except (TypeError, ValueError):
+            cap = int(self.max_targets_per_iteration)
+        cap = max(1, min(cap, int(self.max_targets_per_iteration)))
+        if cap <= 1:
+            return selected[:1]
+
+        # Still avoid whitelist sweeps: only append sessions that already have
+        # unread/pending signals. The caller serializes foreground captures and
+        # applies humanized delays between real cross-chat switches.
+        seen = {item.name for item in selected}
+        for item in pending:
+            if item.name in seen:
+                continue
+            selected.append(item)
+            seen.add(item.name)
+            if len(selected) >= cap:
+                break
+        return selected[:cap]
 
     def pick_next_target(self, active: list[ActiveTarget]) -> ActiveTarget | None:
         """Respect min_switch_interval and return the highest-priority target."""
@@ -370,6 +442,11 @@ class SessionMonitor:
                 "last_detected_at": s.last_detected_at,
                 "last_dispatched_at": s.last_dispatched_at,
                 "conversation_type": s.conversation_type,
+                "pending_signal_text": s.pending_signal_text,
+                "pending_signal_kind": s.pending_signal_kind,
+                "signal_ready_after": s.signal_ready_after,
+                "retry_not_before": s.retry_not_before,
+                "empty_capture_retries": int(s.empty_capture_retries or 0),
             }
             for s in self._sessions.values()
         ]
@@ -384,27 +461,122 @@ class SessionMonitor:
                 unread_detected=True,
                 session_age_seconds=_age_seconds(s.pending_since or s.last_detected_at or s.last_seen_at),
                 conversation_type=s.conversation_type or "unknown",
+                pending_signal_kind=s.pending_signal_kind or "",
             )
             for s in self._sessions.values()
             if s.unread_detected
             and (not self.whitelist or s.name in self.whitelist)
             and (not self.blacklist or s.name not in self.blacklist)
+            and self._signal_ready_for_dispatch(s)
         ]
         active.sort(key=lambda t: (-t.priority_score, -t.session_age_seconds))
         if limit is None:
             return active
         return active[: max(0, int(limit))]
 
-    def reset_unread(self, name: str) -> None:
-        """Mark a session as read after processing."""
+    def reset_unread(
+        self,
+        name: str,
+        *,
+        preserve_pending: bool = False,
+        retry_after_seconds: float | None = None,
+    ) -> None:
+        """Mark a session handled, or preserve its pending signal for retry."""
         if name in self._sessions:
-            self._sessions[name].unread_detected = False
-            self._sessions[name].priority_score = 0
-            self._sessions[name].pending_since = ""
-            self._sessions[name].last_unread_badge = ""
-            self._sessions[name].preview_change_hits = 0
-            self._sessions[name].last_dispatched_at = datetime.now().isoformat(timespec="seconds")
+            session = self._sessions[name]
+            now = datetime.now()
+            now_iso = now.isoformat(timespec="seconds")
+            if preserve_pending:
+                session.unread_detected = True
+                session.priority_score = max(60, int(session.priority_score or 0))
+                if not session.pending_since:
+                    session.pending_since = now_iso
+                session.last_detected_at = now_iso
+                session.last_dispatched_at = now_iso
+                session.empty_capture_retries = int(session.empty_capture_retries or 0) + 1
+                delay = self._empty_capture_retry_delay(session, retry_after_seconds=retry_after_seconds)
+                if delay > 0:
+                    session.retry_not_before = (now + timedelta(seconds=delay)).isoformat(timespec="milliseconds")
+                session.signal_ready_after = ""
+            else:
+                session.unread_detected = False
+                session.priority_score = 0
+                session.pending_since = ""
+                session.last_unread_badge = ""
+                session.preview_change_hits = 0
+                session.pending_signal_text = ""
+                session.pending_signal_kind = ""
+                session.signal_ready_after = ""
+                session.retry_not_before = ""
+                session.empty_capture_retries = 0
+                session.last_dispatched_at = now_iso
             self._save_state()
+
+    def should_preserve_pending_after_empty_capture(self, name: str) -> bool:
+        session = self._sessions.get(str(name or "").strip())
+        if not isinstance(session, SessionState):
+            return False
+        return session.unread_detected and session.pending_signal_kind == "high_sensitivity_short"
+
+    def _mark_pending_signal(
+        self,
+        session: SessionState,
+        *,
+        content: str,
+        now_iso: str,
+        priority: int,
+    ) -> None:
+        session.unread_detected = True
+        if not session.pending_since:
+            session.pending_since = now_iso
+        session.last_detected_at = now_iso
+        session.priority_score = priority
+        session.pending_signal_text = str(content or "").strip()
+        session.pending_signal_kind = self._signal_kind(content)
+        session.signal_ready_after = self._signal_ready_after(now_iso, content)
+        session.retry_not_before = ""
+        session.empty_capture_retries = 0
+
+    def _signal_kind(self, content: str) -> str:
+        if _is_high_sensitivity_short_signal(content, max_chars=self.high_sensitivity_short_max_chars):
+            return "high_sensitivity_short"
+        return "normal"
+
+    def _signal_ready_after(self, now_iso: str, content: str) -> str:
+        if self._signal_kind(content) != "high_sensitivity_short":
+            return ""
+        if self.high_sensitivity_short_merge_window_seconds <= 0:
+            return ""
+        base = datetime.now()
+        try:
+            parsed = datetime.fromisoformat(now_iso)
+            if getattr(parsed, "tzinfo", None) is not None:
+                parsed = parsed.replace(tzinfo=None)
+            if parsed > base:
+                base = parsed
+        except ValueError:
+            pass
+        return (base + timedelta(seconds=self.high_sensitivity_short_merge_window_seconds)).isoformat(timespec="milliseconds")
+
+    def _signal_ready_for_dispatch(self, session: SessionState) -> bool:
+        now = datetime.now()
+        if session.retry_not_before:
+            retry_ts = _parse_iso_datetime(session.retry_not_before)
+            if retry_ts is not None and retry_ts > now:
+                return False
+        if session.signal_ready_after:
+            ready_ts = _parse_iso_datetime(session.signal_ready_after)
+            if ready_ts is not None and ready_ts > now:
+                return False
+        return True
+
+    def _empty_capture_retry_delay(self, session: SessionState, *, retry_after_seconds: float | None = None) -> float:
+        base = self.empty_capture_retry_seconds if retry_after_seconds is None else max(0.0, float(retry_after_seconds))
+        if base <= 0:
+            return 0.0
+        retries = max(0, int(session.empty_capture_retries or 0) - 1)
+        delay = base * (self.empty_capture_retry_backoff_multiplier ** retries)
+        return min(self.empty_capture_retry_max_seconds, delay)
 
 
 def _digest(value: str) -> str:
@@ -416,9 +588,35 @@ def _age_seconds(value: str) -> int:
         return 0
     try:
         base = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        if getattr(base, "tzinfo", None) is not None:
+            base = base.replace(tzinfo=None)
         return max(0, int((datetime.now() - base).total_seconds()))
     except Exception:
         return 0
+
+
+def _parse_iso_datetime(value: str) -> datetime | None:
+    text = str(value or "").strip()
+    if not text:
+        return None
+    try:
+        parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
+        if getattr(parsed, "tzinfo", None) is not None:
+            return parsed.replace(tzinfo=None)
+        return parsed
+    except Exception:
+        return None
+
+
+def _normalize_short_signal_text(text: str) -> str:
+    compact = "".join(str(text or "").split())
+    compact = "".join(ch for ch in compact if ch not in "，。,.！？!、~～：:；;“”\"'（）()[]【】")
+    return compact.strip().lower()
+
+
+def _is_high_sensitivity_short_signal(text: str, *, max_chars: int) -> bool:
+    compact = _normalize_short_signal_text(text)
+    return bool(compact) and len(compact) <= max(1, int(max_chars or 7))
 
 
 def _infer_conversation_type(name: str, session: dict[str, Any]) -> str:

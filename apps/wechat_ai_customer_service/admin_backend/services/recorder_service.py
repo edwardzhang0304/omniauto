@@ -15,6 +15,7 @@ from .raw_message_learning_service import RawMessageLearningService
 from .raw_message_store import RawMessageStore
 from apps.wechat_ai_customer_service.adapters.wechat_connector import WeChatConnector
 from apps.wechat_ai_customer_service.knowledge_paths import tenant_runtime_root
+from apps.wechat_ai_customer_service.wechat_message_normalizer import normalize_wechat_message_record
 
 
 DEFAULT_SETTINGS = {
@@ -252,6 +253,7 @@ class RecorderService:
         payload = self.connector.get_messages(target_name, exact=conversation.get("exact", True) is not False)
         if not payload.get("ok"):
             return {"ok": False, "conversation_id": conversation.get("conversation_id"), "messages": payload}
+        payload = normalize_recorder_capture_payload(payload, conversation)
         recovered_payload = self._recover_capture_window(conversation, payload, settings=active_settings)
         result = self.raw_store.upsert_messages(
             conversation,
@@ -356,6 +358,7 @@ class RecorderService:
                 },
             }
 
+        loaded_payload = normalize_recorder_capture_payload(loaded_payload, conversation)
         loaded_messages = [item for item in loaded_payload.get("messages", []) or [] if isinstance(item, dict)]
         merged_messages = merge_capture_message_windows(loaded_messages, visible_messages)
         recovered_anchor_index = find_latest_anchor_index(merged_messages, anchors)
@@ -453,6 +456,77 @@ def normalize_session(session: dict[str, Any]) -> dict[str, Any]:
         "source": {"type": RECORDER_DISCOVERY_SOURCE_TYPE},
         "raw_payload": session,
     }
+
+
+def normalize_recorder_capture_payload(payload: dict[str, Any], conversation: dict[str, Any]) -> dict[str, Any]:
+    if not isinstance(payload, dict):
+        return payload
+    conversation_type = str(conversation.get("conversation_type") or "unknown")
+    target_name = str(conversation.get("target_name") or conversation.get("display_name") or "")
+    known_speakers = recorder_known_speaker_names(conversation)
+    normalized_messages: list[dict[str, Any]] = []
+    changed: list[dict[str, Any]] = []
+    for item in payload.get("messages", []) or []:
+        if not isinstance(item, dict):
+            continue
+        next_item = normalize_wechat_message_record(
+            item,
+            conversation_type=conversation_type,
+            target_name=target_name,
+            known_speakers=known_speakers,
+            allow_unlisted_name_like_prefix=True,
+        )
+        if next_item.get("ocr_speaker_prefix"):
+            changed.append(
+                {
+                    "id": str(next_item.get("id") or next_item.get("message_id") or ""),
+                    "speaker_name": str(next_item.get("speaker_name") or ""),
+                    "content_preview": str(next_item.get("content") or "")[:120],
+                }
+            )
+        normalized_messages.append(next_item)
+    if not changed:
+        return {**payload, "messages": normalized_messages}
+    return {
+        **payload,
+        "messages": normalized_messages,
+        "_content_normalization": {
+            "changed_count": len(changed),
+            "changed_messages": changed[:20],
+            "conversation_type": conversation_type,
+            "target_name": target_name,
+        },
+    }
+
+
+def recorder_known_speaker_names(conversation: dict[str, Any]) -> list[str]:
+    names = [
+        str(conversation.get("target_name") or ""),
+        str(conversation.get("display_name") or ""),
+        str(conversation.get("group_name") or ""),
+    ]
+    raw_payload = conversation.get("raw_payload") if isinstance(conversation.get("raw_payload"), dict) else {}
+    for key in ("name", "title", "display_name", "target_name", "group_name"):
+        text = str((raw_payload or {}).get(key) or "").strip()
+        if text:
+            names.append(text)
+    for key in ("members", "participants", "member_names"):
+        for item in (raw_payload or {}).get(key, []) or []:
+            if isinstance(item, dict):
+                text = str(item.get("name") or item.get("display_name") or item.get("remark") or "").strip()
+            else:
+                text = str(item or "").strip()
+            if text:
+                names.append(text)
+    deduped: list[str] = []
+    seen: set[str] = set()
+    for name in names:
+        key = re.sub(r"[^0-9A-Za-z_\u4e00-\u9fff]+", "", name).lower()
+        if not key or key in seen:
+            continue
+        seen.add(key)
+        deduped.append(name)
+    return deduped
 
 
 def infer_conversation_type(name: str, session: dict[str, Any]) -> str:

@@ -212,6 +212,7 @@ def check_new_driver_parking_ranking_prefers_compact_cars() -> dict[str, Any]:
         budget=extract_budget_wan(query),
         strict_budget_cap=has_strict_budget_cap(query),
         used_car_query=True,
+        requested_semantic_tags=set(),
         scored=scored,
         allow_broad_fallback=True,
     )
@@ -256,6 +257,7 @@ def check_outdoor_suv_ranking_prefers_suvs() -> dict[str, Any]:
         budget=extract_budget_wan(query),
         strict_budget_cap=has_strict_budget_cap(query),
         used_car_query=True,
+        requested_semantic_tags=set(),
         scored=scored,
         allow_broad_fallback=True,
     )
@@ -300,6 +302,7 @@ def check_family_space_ranking_prefers_roomy_cars() -> dict[str, Any]:
         budget=extract_budget_wan(query),
         strict_budget_cap=has_strict_budget_cap(query),
         used_car_query=True,
+        requested_semantic_tags=set(),
         scored=scored,
         allow_broad_fallback=True,
     )

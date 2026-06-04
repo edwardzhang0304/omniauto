@@ -39,6 +39,7 @@ from apps.wechat_ai_customer_service.adapters.wechat_win32_ocr_sidecar import ( 
     adapt_humanized_input_settings,
     auxiliary_wechat_shell_like,
     blind_target_confirmation_guard,
+    blocking_screen_reason,
     capabilities_payload,
     chat_header_cutoff_y,
     calculate_send_points,
@@ -66,6 +67,7 @@ from apps.wechat_ai_customer_service.adapters.wechat_win32_ocr_sidecar import ( 
     humanized_input_settings,
     input_text_region_state,
     input_region_visual_delta_confirms,
+    input_region_soft_blank_noise,
     is_message_noise,
     jitter_input_click_point,
     jitter_send_click_point,
@@ -203,6 +205,17 @@ def test_parse_messages_keeps_low_visible_bubble_lines() -> None:
     assert_true("发送" not in content, f"send button noise should still be filtered: {messages}")
 
 
+def test_parse_messages_excludes_left_input_draft_residue() -> None:
+    items = [
+        {"text": "客户刚才问的车还能看吗", "confidence": 0.98, "left": 410, "right": 650, "top": 610, "bottom": 635, "center_x": 525, "center_y": 622},
+        {"text": "[二会话快测]金融这块不能先口头定死，", "confidence": 0.98, "left": 394, "right": 770, "top": 690, "bottom": 718, "center_x": 582, "center_y": 704},
+    ]
+    messages = parse_messages_from_ocr(items, (980, 860), target="新数据测试")
+    content = "\n".join(item["content"] for item in messages)
+    assert_true("客户刚才问的车还能看吗" in content, f"normal chat bubble should be retained: {messages}")
+    assert_true("二会话快测" not in content, f"input draft residue must not become chat content: {messages}")
+
+
 def test_parse_messages_classifies_wide_right_bubbles_as_self() -> None:
     items = [
         {"text": "从9万以内、自动挡、倒车影像配置优先、日常家", "confidence": 0.99, "left": 469, "right": 857, "top": 173, "bottom": 196, "center_x": 663, "center_y": 184.5},
@@ -235,6 +248,25 @@ def test_history_snapshot_merge_orders_and_dedupes() -> None:
     merged = merge_message_history_snapshots([latest, older])
     contents = [item["content"] for item in merged]
     assert_true(contents == ["[GAP-B01] 连续补充\n第1点", "[GAP-B02] 连续补充\n第2点", "[GAP-B03]连续补充\n第3点", "[GAP-B04] 连续补充\n第4点"], f"unexpected merged order: {merged}")
+
+
+def test_history_snapshot_merge_preserves_repeated_short_messages() -> None:
+    latest = {
+        "messages": [
+            {"id": "probe-old-visible", "sender": "unknown", "content": "在？"},
+            {"id": "probe-new-visible", "sender": "unknown", "content": "在？"},
+        ]
+    }
+    older = {
+        "messages": [
+            {"id": "probe-old-history", "sender": "unknown", "content": "在？"},
+        ]
+    }
+    merged = merge_message_history_snapshots([latest, older])
+    ids = [item["id"] for item in merged]
+    contents = [item["content"] for item in merged]
+    assert_true(ids == ["probe-old-history", "probe-new-visible"], f"short repeated probes should preserve the latest distinct occurrence: {merged}")
+    assert_true(contents == ["在？", "在？"], f"short repeated probes should keep both visible occurrences: {merged}")
 
 
 def test_anchor_match_supports_content_and_reply_keys() -> None:
@@ -326,6 +358,39 @@ def test_input_region_visual_delta_confirmation() -> None:
     stale_before = {"has_visible_text": True, "ocr_hits": 1, "dark_ratio": 0.02}
     stale = input_region_visual_delta_confirms(stale_before, after, {"ok": True, "method": "sendinput_unicode", "typed_chars": 32})
     assert_true(stale["ok"] is False, f"pre-existing input text must not be blindly sent: {stale}")
+
+
+def test_input_region_soft_blank_noise_allows_post_clear_progress() -> None:
+    noise_after_clear = {
+        "has_visible_text": True,
+        "ocr_hits": 0,
+        "dark_ratio": 0.027106,
+        "mean": 244.856,
+    }
+    assert_true(
+        input_region_soft_blank_noise(noise_after_clear) is True,
+        "low-dark high-mean zero-OCR residue after draft clearing should be treated as soft blank noise",
+    )
+    ocr_residue = {
+        "has_visible_text": True,
+        "ocr_hits": 1,
+        "dark_ratio": 0.027106,
+        "mean": 244.856,
+    }
+    assert_true(
+        input_region_soft_blank_noise(ocr_residue) is False,
+        "any OCR-visible residue must not be treated as blank because it can be an unsent draft fragment",
+    )
+    likely_draft = {
+        "has_visible_text": True,
+        "ocr_hits": 0,
+        "dark_ratio": 0.047955,
+        "mean": 241.007,
+    }
+    assert_true(
+        input_region_soft_blank_noise(likely_draft) is False,
+        "heavier pre-clear draft-like pixels must still trigger guarded clearing",
+    )
 
 
 def test_input_area_token_confirmation_excludes_recent_chat_bubble() -> None:
@@ -539,6 +604,50 @@ def test_connector_interactive_status_passes_probe_env() -> None:
     assert_true(payload.get("ok") is True, f"interactive status should pass: {payload}")
     assert_true(observed.get("args") == ["status"], f"status action should be used: {observed}")
     assert_true(env_overrides == interactive_rpa_probe_env(), f"interactive status env should be explicit: {observed}")
+
+
+def test_connector_fresh_session_discovery_passes_probe_env() -> None:
+    observed: dict[str, object] = {}
+
+    class StubConnector(WeChatConnector):
+        def call_compat_sidecar(self, args, *, allow_failure=False, primary_payload=None, env_overrides=None):  # type: ignore[override]
+            observed["args"] = list(args)
+            observed["env_overrides"] = dict(env_overrides or {})
+            return {
+                "ok": True,
+                "online": True,
+                "adapter": "win32_ocr",
+                "state": "sessions_ocr",
+                "sessions": [{"name": "文件传输助手"}],
+            }
+
+    payload = StubConnector().list_sessions(fresh=True)
+    env_overrides = observed.get("env_overrides") if isinstance(observed.get("env_overrides"), dict) else {}
+    assert_true(payload.get("ok") is True, f"fresh session discovery should pass: {payload}")
+    assert_true(observed.get("args") == ["sessions", "--fresh"], f"fresh discovery should preserve sessions args: {observed}")
+    assert_true(env_overrides == interactive_rpa_probe_env(), f"fresh discovery should request interactive probe env: {observed}")
+
+
+def test_connector_passive_session_poll_keeps_probe_env_empty() -> None:
+    observed: dict[str, object] = {}
+
+    class StubConnector(WeChatConnector):
+        def call_compat_sidecar(self, args, *, allow_failure=False, primary_payload=None, env_overrides=None):  # type: ignore[override]
+            observed["args"] = list(args)
+            observed["env_overrides"] = dict(env_overrides or {})
+            return {
+                "ok": True,
+                "online": True,
+                "adapter": "win32_ocr",
+                "state": "sessions_ocr",
+                "sessions": [{"name": "文件传输助手"}],
+            }
+
+    payload = StubConnector().list_sessions(fresh=False)
+    env_overrides = observed.get("env_overrides") if isinstance(observed.get("env_overrides"), dict) else {}
+    assert_true(payload.get("ok") is True, f"passive session poll should pass: {payload}")
+    assert_true(observed.get("args") == ["sessions"], f"passive poll should keep basic sessions args: {observed}")
+    assert_true(env_overrides == {}, f"passive session poll should remain non-invasive: {observed}")
 
 
 def test_connector_interactive_capabilities_recovers_minimized_window() -> None:
@@ -815,6 +924,27 @@ def test_quick_login_detection() -> None:
     assert_true(quick_login_like(items, geometry={"width": 980, "height": 860}) is False, "large window should not be treated as quick-login")
 
 
+def test_blocking_screen_ignores_normal_chat_login_words() -> None:
+    chat_items = [
+        {"text": "许聪", "confidence": 0.99, "left": 420, "right": 470, "top": 62, "bottom": 92, "center_x": 445, "center_y": 76},
+        {"text": "我刚才登录VPS服务端，为什么发了两次验证码？", "confidence": 0.99, "left": 430, "right": 810, "top": 220, "bottom": 250, "center_x": 620, "center_y": 235},
+        {"text": "后面扫码确认一下也可以", "confidence": 0.99, "left": 430, "right": 720, "top": 270, "bottom": 300, "center_x": 575, "center_y": 285},
+    ]
+    assert_true(
+        blocking_screen_reason(chat_items) == "",
+        "normal chat text containing login/scan words should not block RPA read",
+    )
+
+    login_items = [
+        {"text": "进入微信", "confidence": 0.99, "left": 90, "right": 220, "top": 280, "bottom": 322, "center_x": 155, "center_y": 301},
+        {"text": "切换账号", "confidence": 0.99, "left": 70, "right": 150, "top": 342, "bottom": 368, "center_x": 110, "center_y": 355},
+    ]
+    assert_true(
+        blocking_screen_reason(login_items) == "login_or_qr",
+        "real login-card text should still block RPA read",
+    )
+
+
 def test_service_subview_back_target_detection() -> None:
     items = [
         {"text": "<服务号", "confidence": 0.99, "left": 104, "right": 188, "top": 112, "bottom": 144, "center_x": 146, "center_y": 128},
@@ -902,6 +1032,7 @@ def test_guarded_send_confirmation_fallback() -> None:
         "ok": True,
         "send_result": {
             "ok": True,
+            "pre_send_guard": {"ok": True, "reason": "target_confirmed"},
             "post_send_guard": {"ok": True, "reason": "target_confirmed"},
             "click": {
                 "paste": {
@@ -920,6 +1051,7 @@ def test_guarded_send_confirmation_fallback() -> None:
         "ok": True,
         "send_result": {
             "ok": True,
+            "pre_send_guard": {"ok": True, "reason": "target_confirmed"},
             "post_send_guard": {"ok": True, "reason": "target_confirmed"},
             "click": {
                 "paste": {
@@ -932,6 +1064,18 @@ def test_guarded_send_confirmation_fallback() -> None:
     assert_true(
         guarded_send_confirmation_fallback(visual_send, messages),
         "visual-delta fast confirmation should be treated as guarded send confirmation",
+    )
+    missing_pre_guard = {
+        "ok": True,
+        "send_result": {
+            "ok": True,
+            "post_send_guard": {"ok": True, "reason": "target_confirmed"},
+            "click": {"paste": {"ok": True, "confirmed_by": "ocr_input_area"}},
+        },
+    }
+    assert_true(
+        guarded_send_confirmation_fallback(missing_pre_guard, messages) is False,
+        "fast confirmation must require pre-send target confirmation",
     )
     blocked = {"ok": True, "state": "login_window_detected", "messages": []}
     assert_true(
@@ -950,6 +1094,7 @@ def test_fast_send_confirmation_skips_slow_message_read_when_guard_is_strong() -
                 "ok": True,
                 "send_result": {
                     "ok": True,
+                    "pre_send_guard": {"ok": True, "reason": "target_confirmed"},
                     "post_send_guard": {"ok": True, "reason": "target_confirmed"},
                     "click": {"paste": {"ok": True, "confirmed_by": "ocr_input_area"}},
                 },
@@ -1118,6 +1263,7 @@ def test_fast_confirmation_still_enqueues_file_transfer_loopback() -> None:
                 "ok": True,
                 "send_result": {
                     "ok": True,
+                    "pre_send_guard": {"ok": True, "reason": "target_confirmed"},
                     "post_send_guard": {"ok": True, "reason": "target_confirmed"},
                     "click": {"paste": {"ok": True, "confirmed_by": "ocr_input_area"}},
                 },
@@ -1993,7 +2139,7 @@ def test_target_ready_short_circuits_when_active_target_already_confirmed() -> N
             setattr(sidecar_mod, name, value)
 
 
-def test_send_payload_reuses_prevalidated_guard_without_revalidating_active_target() -> None:
+def test_send_payload_rechecks_prevalidated_guard_before_typing() -> None:
     sidecar_mod = sys.modules["apps.wechat_ai_customer_service.adapters.wechat_win32_ocr_sidecar"]
     geometry = {"left": 0, "top": 0, "right": 980, "bottom": 860, "width": 980, "height": 860}
     originals = {
@@ -2009,11 +2155,17 @@ def test_send_payload_reuses_prevalidated_guard_without_revalidating_active_targ
     }
     calls = {"validate_active": 0}
     try:
-        def fail_validate(*_args, **_kwargs):
+        def pass_validate(*_args, **_kwargs):
             calls["validate_active"] += 1
-            return {"ok": False, "reason": "should_not_be_called"}
+            return {
+                "ok": True,
+                "online": True,
+                "reason": "target_confirmed",
+                "geometry": dict(geometry),
+                "screenshot_path": "send_guard.png",
+            }
 
-        sidecar_mod.validate_active_send_target = fail_validate
+        sidecar_mod.validate_active_send_target = pass_validate
         sidecar_mod.recover_send_window_guard = lambda _hwnd, max_attempts=1: {"ok": True, "reason": "window_valid"}
         sidecar_mod.get_window_geometry = lambda _hwnd: dict(geometry)
         sidecar_mod.validate_send_geometry = lambda _g: {"ok": True}
@@ -2053,10 +2205,69 @@ def test_send_payload_reuses_prevalidated_guard_without_revalidating_active_targ
         assert_true(payload.get("ok") is True, f"send payload should succeed with prevalidated guard: {payload}")
         send_result = payload.get("send_result") if isinstance(payload.get("send_result"), dict) else {}
         assert_true(
-            str(send_result.get("validation_source") or "") == "prevalidated_guard",
-            f"send payload should mark validation_source as prevalidated_guard: {send_result}",
+            str(send_result.get("validation_source") or "") == "prevalidated_guard_strict_recheck",
+            f"send payload should mark validation_source as strict recheck: {send_result}",
         )
-        assert_true(calls["validate_active"] == 0, f"active target validation should be skipped: {calls}")
+        assert_true(calls["validate_active"] == 1, f"active target validation must be re-run: {calls}")
+        pre_guard = send_result.get("pre_send_guard") if isinstance(send_result.get("pre_send_guard"), dict) else {}
+        assert_true(pre_guard.get("strict_recheck") is True, f"pre-send guard should record strict recheck: {pre_guard}")
+        assert_true(isinstance(pre_guard.get("cached_prevalidated_guard"), dict), f"cached guard should remain auditable: {pre_guard}")
+    finally:
+        for name, value in originals.items():
+            setattr(sidecar_mod, name, value)
+
+
+def test_send_payload_blocks_stale_prevalidated_guard_when_active_target_changed() -> None:
+    sidecar_mod = sys.modules["apps.wechat_ai_customer_service.adapters.wechat_win32_ocr_sidecar"]
+    geometry = {"left": 0, "top": 0, "right": 980, "bottom": 860, "width": 980, "height": 860}
+    originals = {
+        "validate_active_send_target": sidecar_mod.validate_active_send_target,
+        "recover_send_window_guard": sidecar_mod.recover_send_window_guard,
+        "get_window_geometry": sidecar_mod.get_window_geometry,
+        "validate_send_geometry": sidecar_mod.validate_send_geometry,
+        "calculate_send_points": sidecar_mod.calculate_send_points,
+        "reserve_send_rate": sidecar_mod.reserve_send_rate,
+        "send_with_guarded_clicks": sidecar_mod.send_with_guarded_clicks,
+        "humanized_action_sleep": sidecar_mod.humanized_action_sleep,
+    }
+    calls = {"validate_active": 0, "send": 0}
+    try:
+        def stale_validate(*_args, **_kwargs):
+            calls["validate_active"] += 1
+            return {
+                "ok": False,
+                "online": True,
+                "reason": "target_title_not_confirmed",
+                "geometry": dict(geometry),
+                "error": "active chat drifted",
+            }
+
+        sidecar_mod.validate_active_send_target = stale_validate
+        sidecar_mod.recover_send_window_guard = lambda _hwnd, max_attempts=1: {"ok": True, "reason": "window_valid"}
+        sidecar_mod.get_window_geometry = lambda _hwnd: dict(geometry)
+        sidecar_mod.validate_send_geometry = lambda _g: {"ok": True}
+        sidecar_mod.calculate_send_points = lambda _g: {"ok": True, "input_point": [640, 715], "send_point": [915, 816]}
+        sidecar_mod.reserve_send_rate = lambda **_kwargs: {"ok": True, "reason": "rate_ok"}
+        sidecar_mod.send_with_guarded_clicks = lambda *_args, **_kwargs: calls.__setitem__("send", calls["send"] + 1) or {"ok": True}
+        sidecar_mod.humanized_action_sleep = lambda *_args, **_kwargs: 0.0
+        payload = sidecar_mod.send_payload(
+            1001,
+            {"windows": [], "visible_main_windows": []},
+            target="新数据测试",
+            text="您好",
+            exact=True,
+            validated_guard={
+                "ok": True,
+                "online": True,
+                "reason": "target_confirmed",
+                "geometry": dict(geometry),
+            },
+        )
+        assert_true(payload.get("ok") is False, f"stale prevalidated guard should block send: {payload}")
+        assert_true(str(payload.get("state") or "") == "send_guard_blocked", f"unexpected state: {payload}")
+        assert_true(calls["validate_active"] == 1 and calls["send"] == 0, f"must revalidate before typing: {calls}")
+        guard = payload.get("guard") if isinstance(payload.get("guard"), dict) else {}
+        assert_true(guard.get("strict_recheck") is True, f"block reason should record strict recheck: {guard}")
     finally:
         for name, value in originals.items():
             setattr(sidecar_mod, name, value)
@@ -2267,6 +2478,7 @@ def main() -> int:
         test_message_probe_tokens_prefer_semantic_body_after_live_marker,
         test_parse_messages_from_ocr,
         test_parse_messages_keeps_low_visible_bubble_lines,
+        test_parse_messages_excludes_left_input_draft_residue,
         test_parse_messages_classifies_wide_right_bubbles_as_self,
         test_history_snapshot_merge_orders_and_dedupes,
         test_anchor_match_supports_content_and_reply_keys,
@@ -2281,6 +2493,8 @@ def main() -> int:
         test_startup_self_check_uses_interactive_probe_env,
         test_connector_interactive_capabilities_passes_probe_env,
         test_connector_interactive_status_passes_probe_env,
+        test_connector_fresh_session_discovery_passes_probe_env,
+        test_connector_passive_session_poll_keeps_probe_env_empty,
         test_connector_interactive_capabilities_recovers_minimized_window,
         test_connector_passive_status_does_not_recover_minimized_window,
         test_connector_interactive_status_recovers_blank_render_with_tray_redraw,
@@ -2305,6 +2519,7 @@ def main() -> int:
         test_blank_render_detection_for_empty_white_capture,
         test_send_guard_blocks_blank_render_before_file_transfer_blind_send,
         test_quick_login_detection,
+        test_blocking_screen_ignores_normal_chat_login_words,
         test_service_subview_back_target_detection,
         test_connector_rpa_priority_and_wxauto_reserve_toggle,
         test_send_verify_handles_split_multiline_messages,
@@ -2323,6 +2538,7 @@ def main() -> int:
         test_send_trigger_mode_defaults_to_enter_only,
         test_input_text_region_state_distinguishes_blank_and_text,
         test_input_region_visual_delta_confirmation,
+        test_input_region_soft_blank_noise_allows_post_clear_progress,
         test_input_area_token_confirmation_excludes_recent_chat_bubble,
         test_clear_existing_input_draft_noops_when_blank,
         test_send_rpa_env_enables_strict_focus_and_single_confirm,
@@ -2336,7 +2552,8 @@ def main() -> int:
         test_target_ready_defaults_to_single_attempt_and_hard_stops_blank_render,
         test_target_ready_requires_guard_confirmation_even_when_open_chat_returns_true,
         test_target_ready_short_circuits_when_active_target_already_confirmed,
-        test_send_payload_reuses_prevalidated_guard_without_revalidating_active_target,
+        test_send_payload_rechecks_prevalidated_guard_before_typing,
+        test_send_payload_blocks_stale_prevalidated_guard_when_active_target_changed,
         test_open_chat_search_fallback_clicks_visible_result_without_enter,
         test_open_chat_blocks_search_when_surface_is_blank,
         test_sidebar_search_clear_uses_window_image_click,

@@ -17,6 +17,7 @@ from apps.wechat_ai_customer_service.storage import get_postgres_store, load_sto
 from apps.wechat_ai_customer_service.admin_backend.services.knowledge_contamination_guard import (
     message_learning_exclusion_reason,
 )
+from apps.wechat_ai_customer_service.wechat_message_normalizer import normalize_wechat_message_record
 
 
 MAX_FILE_RECORDS = 10000
@@ -364,12 +365,20 @@ def normalize_message(
     source_module: str,
     learning_enabled: bool,
 ) -> dict[str, Any]:
+    original_record = record
+    record = normalize_wechat_message_record(
+        record,
+        conversation_type=str(conversation.get("conversation_type") or "unknown"),
+        target_name=str(conversation.get("target_name") or ""),
+    )
     content = str(record.get("content") or record.get("text") or "")
     message_id = str(record.get("id") or record.get("message_id") or "")
     sender = str(record.get("sender") or "")
     message_time = str(record.get("time") or record.get("message_time") or "")
     content_type = str(record.get("type") or record.get("content_type") or "text")
     sender_role = normalize_sender_role(record, sender=sender)
+    if conversation.get("conversation_type") == "group" and record.get("speaker_name") and sender_role == "unknown":
+        sender_role = "group_member"
     content_fingerprint = normalized_content_fingerprint(content)
     explicit_dedupe_key = str(record.get("dedupe_key") or "").strip()
     if explicit_dedupe_key:
@@ -398,7 +407,10 @@ def normalize_message(
         "message_id": message_id,
         "sender": sender,
         "sender_role": sender_role,
-        "group_member_name": str(record.get("group_member_name") or (sender if conversation.get("conversation_type") == "group" else "")),
+        "group_member_name": str(record.get("group_member_name") or record.get("speaker_name") or (sender if conversation.get("conversation_type") == "group" else "")),
+        "speaker_name": str(record.get("speaker_name") or ""),
+        "original_content": str(record.get("original_content") or ""),
+        "ocr_speaker_prefix": record.get("ocr_speaker_prefix") if isinstance(record.get("ocr_speaker_prefix"), dict) else {},
         "content_type": content_type,
         "content": content,
         "message_time": message_time,
@@ -410,7 +422,7 @@ def normalize_message(
         "learning_enabled": final_learning_enabled,
         "excluded_reason": str(record.get("excluded_reason") or exclusion_reason or ""),
         "dedupe_key": dedupe_key,
-        "raw_payload": record,
+        "raw_payload": {**record, "_original_raw_payload": original_record} if record is not original_record else record,
     }
 
 

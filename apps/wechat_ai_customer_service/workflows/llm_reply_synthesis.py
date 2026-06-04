@@ -5,13 +5,10 @@ from __future__ import annotations
 import json
 import re
 import time
-import urllib.error
-import urllib.request
 from typing import Any
 
 from apps.wechat_ai_customer_service.llm_config import (
-    apply_llm_reasoning_effort,
-    llm_urlopen,
+    call_llm_request_with_failover,
     normalize_deepseek_model_tier,
     read_secret,
     resolve_deepseek_max_tokens,
@@ -26,6 +23,11 @@ from apps.wechat_ai_customer_service.platform_safety_rules import enabled_prompt
 from customer_intent_assist import parse_json_object
 from llm_reply_guard import guard_synthesized_reply
 from reply_evidence_builder import build_reply_evidence_pack
+
+try:
+    from knowledge_runtime import KnowledgeRuntime
+except Exception:  # pragma: no cover - optional in isolated unit tests
+    KnowledgeRuntime = None  # type: ignore[assignment]
 
 
 DEFAULT_MAX_REPLY_CHARS = 520
@@ -56,6 +58,31 @@ DEFAULT_PRO_SAFETY_REASONS = {
     "price_approval_required",
 }
 RUN_LLM_CALL_COUNT = 0
+
+SAFE_QUOTE_REPAIR_TERMS = ("多少钱", "价格", "报价", "标价", "预算", "替代", "备选", "够不到", "超预算")
+SAFE_QUOTE_REPAIR_HARD_TERMS = (
+    "最低",
+    "底价",
+    "优惠",
+    "折扣",
+    "砍价",
+    "包过",
+    "保证",
+    "绝对",
+    "贷款",
+    "首付",
+    "分期",
+    "审批",
+    "合同",
+    "发票",
+    "定金",
+    "订金",
+    "事故",
+    "水泡",
+    "火烧",
+    "赔付",
+)
+GENERIC_PRODUCT_ALIASES = {"现车", "库存", "报价", "价格", "预算", "通勤", "试驾", "MPV", "SUV", "七座", "商务车", "保姆车"}
 
 
 RESPONSE_SCHEMA = {
@@ -148,6 +175,7 @@ def maybe_synthesize_reply(
         raw_capture=raw_capture,
         customer_profile=customer_profile,
     )
+    ensure_safe_product_master_quote_synthesis_override(evidence_pack)
     model_route = select_synthesis_model_route(settings=settings, evidence_pack=evidence_pack)
     effective_settings = synthesis_settings_for_tier(settings, str(model_route.get("tier") or "flash"))
     if str(model_route.get("tier") or "") != "flash":
@@ -167,8 +195,10 @@ def maybe_synthesize_reply(
             raw_capture=raw_capture,
             customer_profile=customer_profile,
         )
+        ensure_safe_product_master_quote_synthesis_override(evidence_pack)
         model_route = select_synthesis_model_route(settings=settings, evidence_pack=evidence_pack)
         effective_settings = synthesis_settings_for_tier(settings, str(model_route.get("tier") or "flash"))
+    ensure_product_master_quote_evidence_for_guard(evidence_pack)
     payload["evidence_summary"] = evidence_pack.get("audit_summary", {})
     payload["intent_tags"] = evidence_pack.get("intent_tags", [])
     payload["model_tier"] = model_route.get("tier")
@@ -251,6 +281,7 @@ def maybe_synthesize_reply(
         return payload
 
     candidate = result.get("candidate", {}) or {}
+    candidate = coerce_safe_product_master_quote_candidate(candidate=candidate, evidence_pack=evidence_pack)
     guard = guard_synthesized_reply(candidate=candidate, evidence_pack=evidence_pack, settings=settings)
     payload["candidate"] = compact_candidate(candidate)
     payload["guard"] = guard_for_audit(guard)
@@ -262,6 +293,33 @@ def maybe_synthesize_reply(
         return payload
 
     action = str(guard.get("action") or "")
+    fallback = fallback_to_existing_reply_after_guard_rejection(
+        guard=guard,
+        decision=decision,
+        reply_text=reply_text,
+        evidence_pack=evidence_pack,
+        settings=settings,
+    )
+    if fallback:
+        payload["candidate"] = compact_candidate(fallback["candidate"])
+        payload["guard"] = guard_for_audit(fallback["guard"])
+        raw_reply = normalize_advisor_synthesis_reply(
+            str(fallback["guard"].get("reply") or fallback["candidate"].get("reply") or ""),
+            evidence_pack=evidence_pack,
+            settings=settings,
+        )
+        raw_reply = truncate_reply(raw_reply, settings)
+        payload.update(
+            {
+                "applied": True,
+                "rule_name": "llm_synthesis_reply",
+                "reason": str(fallback.get("reason") or "guard_rejected_llm_used_existing_reply"),
+                "needs_handoff": False,
+                "raw_reply_text": raw_reply,
+                "reply_text": raw_reply,
+            }
+        )
+        return payload
     if action == "send_reply":
         raw_reply = normalize_advisor_synthesis_reply(
             str(guard.get("reply") or ""),
@@ -296,6 +354,416 @@ def maybe_synthesize_reply(
 
     payload["reason"] = str(guard.get("reason") or "guard_fallback")
     return payload
+
+
+def coerce_safe_product_master_quote_candidate(*, candidate: dict[str, Any], evidence_pack: dict[str, Any]) -> dict[str, Any]:
+    if not isinstance(candidate, dict):
+        return candidate
+    safety = evidence_pack.get("safety") if isinstance(evidence_pack.get("safety"), dict) else {}
+    safe_quote_message = is_safe_product_master_quote_message(evidence_pack)
+    if not safety.get("llm_synthesis_product_master_quote_override") and not safe_quote_message:
+        return candidate
+    current = str(evidence_pack.get("current_message") or "")
+    reply = str(candidate.get("reply") or "")
+    if not any(term in current for term in SAFE_QUOTE_REPAIR_TERMS):
+        return candidate
+    if any(term in current for term in SAFE_QUOTE_REPAIR_HARD_TERMS):
+        return candidate
+    handoff_requested = bool(candidate.get("needs_handoff")) or candidate.get("recommended_action") in {"handoff", "handoff_for_approval"}
+    if not handoff_requested and not safe_product_master_quote_candidate_needs_repair(candidate=candidate, evidence_pack=evidence_pack):
+        return candidate
+    repaired_reply, used_evidence = build_product_master_quote_reply(evidence_pack)
+    if not repaired_reply:
+        return candidate
+    repaired = dict(candidate)
+    repaired["can_answer"] = True
+    repaired["recommended_action"] = "send_reply"
+    repaired["needs_handoff"] = False
+    repaired["confidence"] = max(float_from_any(repaired.get("confidence"), 0.0), 0.82)
+    repaired["reply"] = repaired_reply
+    repaired["structured_used"] = True
+    repaired["rag_used"] = bool(repaired.get("rag_used", False))
+    repaired["used_evidence"] = merge_evidence_refs(repaired.get("used_evidence"), used_evidence)
+    repaired["risk_tags"] = [tag for tag in (repaired.get("risk_tags") or []) if str(tag).strip().lower() not in {"handoff", "needs_handoff"}]
+    repaired["reason"] = append_reason(str(repaired.get("reason") or ""), "product_master_quote_repaired_before_guard")
+    return repaired
+
+
+def ensure_safe_product_master_quote_synthesis_override(evidence_pack: dict[str, Any]) -> None:
+    safety = evidence_pack.get("safety") if isinstance(evidence_pack.get("safety"), dict) else {}
+    if not isinstance(safety, dict):
+        return
+    if safety.get("llm_synthesis_product_master_quote_override"):
+        return
+    reasons = {str(item) for item in safety.get("reasons", []) or [] if str(item)}
+    if not safety.get("must_handoff") or not reasons:
+        return
+    soft_reasons = {
+        "matched_faq_requires_handoff",
+        "shared_risk_control",
+        "missing_authoritative_evidence",
+        "no_relevant_business_evidence",
+    }
+    if not reasons <= soft_reasons:
+        return
+    current = str(evidence_pack.get("current_message") or "")
+    if not any(term in current for term in SAFE_QUOTE_REPAIR_TERMS):
+        return
+    if any(term in current for term in SAFE_QUOTE_REPAIR_HARD_TERMS):
+        return
+    quote_reply, _used_evidence = build_product_master_quote_reply(evidence_pack)
+    if not quote_reply:
+        return
+    safety["must_handoff"] = False
+    safety["allowed_auto_reply"] = True
+    safety["reasons"] = []
+    safety["llm_synthesis_product_master_quote_override"] = True
+    knowledge = evidence_pack.get("knowledge") if isinstance(evidence_pack.get("knowledge"), dict) else {}
+    knowledge_safety = knowledge.get("safety") if isinstance(knowledge.get("safety"), dict) else None
+    if isinstance(knowledge_safety, dict):
+        knowledge_safety["must_handoff"] = False
+        knowledge_safety["allowed_auto_reply"] = True
+        knowledge_safety["reasons"] = []
+        knowledge_safety["llm_synthesis_product_master_quote_override"] = True
+
+
+def ensure_product_master_quote_evidence_for_guard(evidence_pack: dict[str, Any]) -> None:
+    safety = evidence_pack.get("safety") if isinstance(evidence_pack.get("safety"), dict) else {}
+    if not safety.get("llm_synthesis_product_master_quote_override") and not is_safe_product_master_quote_message(evidence_pack):
+        return
+    current = str(evidence_pack.get("current_message") or "")
+    if not any(term in current for term in SAFE_QUOTE_REPAIR_TERMS):
+        return
+    _reply, used_evidence = build_product_master_quote_reply(evidence_pack)
+    if not used_evidence:
+        return
+    products_by_id = {
+        str(item.get("id") or "").strip(): item
+        for item in collect_product_evidence_items(evidence_pack)
+        if str(item.get("id") or "").strip()
+    }
+    used_ids = [ref.split(":", 1)[1] for ref in used_evidence if str(ref).startswith("product_master:")]
+    visible_items = [products_by_id[item_id] for item_id in used_ids if item_id in products_by_id]
+    if not visible_items:
+        return
+    knowledge = evidence_pack.setdefault("knowledge", {})
+    if not isinstance(knowledge, dict):
+        return
+    evidence = knowledge.setdefault("evidence", {})
+    if not isinstance(evidence, dict):
+        return
+    product_master = knowledge.setdefault("product_master", {})
+    if not isinstance(product_master, dict):
+        return
+    for bucket_name in ("products", "catalog_candidates"):
+        bucket = evidence.setdefault(bucket_name, [])
+        if isinstance(bucket, list):
+            append_product_items_for_guard(bucket, visible_items)
+    items = product_master.setdefault("items", [])
+    if isinstance(items, list):
+        append_product_items_for_guard(items, visible_items)
+
+
+def append_product_items_for_guard(bucket: list[Any], items: list[dict[str, Any]]) -> None:
+    seen = {str(item.get("id") or "").strip() for item in bucket if isinstance(item, dict) and str(item.get("id") or "").strip()}
+    for item in items:
+        item_id = str(item.get("id") or "").strip()
+        if not item_id or item_id in seen:
+            continue
+        bucket.append(
+            {
+                "id": item_id,
+                "category_id": "products",
+                "authority_level": "product_master",
+                "name": item.get("name"),
+                "category": item.get("category"),
+                "aliases": item.get("aliases", []),
+                "price": item.get("price"),
+                "stock": item.get("inventory"),
+                "match_reason": "product_master_quote_repair_guard_evidence",
+            }
+        )
+        seen.add(item_id)
+
+
+def is_safe_product_master_quote_message(evidence_pack: dict[str, Any]) -> bool:
+    current = str(evidence_pack.get("current_message") or "")
+    if not any(term in current for term in SAFE_QUOTE_REPAIR_TERMS):
+        return False
+    if any(term in current for term in SAFE_QUOTE_REPAIR_HARD_TERMS):
+        return False
+    quote_reply, _used_evidence = build_product_master_quote_reply(evidence_pack)
+    return bool(quote_reply)
+
+
+def safe_product_master_quote_candidate_needs_repair(*, candidate: dict[str, Any], evidence_pack: dict[str, Any]) -> bool:
+    reply = str(candidate.get("reply") or "")
+    if any(
+        term in reply
+        for term in (
+            "转人工",
+            "人工客服",
+            "真人客服",
+            "转销售",
+            "销售发现车",
+            "销售找",
+            "帮您找找",
+            "帮您找一批",
+            "帮您改找",
+            "再找",
+            "找车",
+            "具体车源我发",
+            "具体车源再发",
+        )
+    ):
+        return True
+    current = str(evidence_pack.get("current_message") or "")
+    if not any(term in current for term in ("预算", "替代", "备选", "够不到", "超预算")):
+        return False
+    markers = expected_budget_alternative_markers(evidence_pack)
+    if not markers:
+        return False
+    return not any(marker and marker in reply for marker in markers)
+
+
+def expected_budget_alternative_markers(evidence_pack: dict[str, Any]) -> list[str]:
+    products = collect_product_evidence_items(evidence_pack)
+    target = first_priced_product(products)
+    budget_upper = extract_budget_upper_value(str(evidence_pack.get("current_message") or ""))
+    if not target or budget_upper is None:
+        return []
+    alternatives = select_budget_alternatives(products, target=target, budget_upper=budget_upper)
+    markers: list[str] = []
+    for item in alternatives[:2]:
+        markers.append(product_short_label(item))
+        price = item.get("price")
+        if isinstance(price, (int, float)):
+            markers.append(format_wan_value(float(price)))
+    return [marker for marker in markers if marker]
+
+
+def build_product_master_quote_reply(evidence_pack: dict[str, Any]) -> tuple[str, list[str]]:
+    products = collect_product_evidence_items(evidence_pack)
+    target = first_priced_product(products)
+    if not target:
+        return "", []
+    price = target.get("price")
+    if not isinstance(price, (int, float)):
+        return "", []
+    current = str(evidence_pack.get("current_message") or "")
+    target_label = product_short_label(target)
+    target_price = format_wan_value(float(price))
+    budget_upper = extract_budget_upper_value(current)
+    used = [product_evidence_ref(target)]
+    if budget_upper is None:
+        return f"{target_label}这台标价{target_price}。", used
+
+    if float(price) <= budget_upper + 0.03:
+        budget_text = format_wan_value(budget_upper)
+        return f"{target_label}这台标价{target_price}，在{budget_text}预算内。", used
+
+    alternatives = select_budget_alternatives(products, target=target, budget_upper=budget_upper)
+    budget_text = format_wan_value(budget_upper)
+    if alternatives:
+        same_category = same_category_products(alternatives, target)
+        preferred = same_category or alternatives
+        alt_text = "、".join(f"{product_short_label(item)}（{format_wan_value(float(item['price']))}）" for item in preferred[:2])
+        used.extend(product_evidence_ref(item) for item in preferred[:2])
+        category_note = "" if same_category else f"，但不是同级{product_category_label(target)}"
+        return f"{target_label}这台标价{target_price}，{budget_text}预算够不到。预算内可先看{alt_text}{category_note}。", used
+    return f"{target_label}这台标价{target_price}，{budget_text}预算暂时够不到。", used
+
+
+def collect_product_evidence_items(evidence_pack: dict[str, Any]) -> list[dict[str, Any]]:
+    knowledge = evidence_pack.get("knowledge") if isinstance(evidence_pack.get("knowledge"), dict) else {}
+    evidence = knowledge.get("evidence") if isinstance(knowledge.get("evidence"), dict) else {}
+    product_master = knowledge.get("product_master") if isinstance(knowledge.get("product_master"), dict) else {}
+    buckets = [
+        evidence.get("products", []),
+        evidence.get("catalog_candidates", []),
+        product_master.get("items", []),
+    ]
+    runtime_products = runtime_product_master_items()
+    if runtime_products:
+        buckets.append(runtime_products)
+    items: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for bucket in buckets:
+        for raw in bucket or []:
+            normalized = normalize_product_evidence_item(raw)
+            item_id = str(normalized.get("id") or normalized.get("name") or "")
+            if not item_id or item_id in seen:
+                continue
+            seen.add(item_id)
+            items.append(normalized)
+    return items
+
+
+def runtime_product_master_items() -> list[dict[str, Any]]:
+    if KnowledgeRuntime is None:
+        return []
+    try:
+        return [item for item in KnowledgeRuntime().list_items("products") if isinstance(item, dict)]
+    except Exception:
+        return []
+
+
+def normalize_product_evidence_item(raw: Any) -> dict[str, Any]:
+    if not isinstance(raw, dict):
+        return {}
+    data = raw.get("data") if isinstance(raw.get("data"), dict) else {}
+    aliases = raw.get("aliases") if isinstance(raw.get("aliases"), list) else data.get("aliases", [])
+    if not isinstance(aliases, list):
+        aliases = []
+    return {
+        "id": str(raw.get("id") or data.get("id") or "").strip(),
+        "name": str(raw.get("name") or raw.get("title") or data.get("name") or data.get("title") or "").strip(),
+        "category": str(raw.get("category") or data.get("category") or "").strip(),
+        "aliases": [str(alias).strip() for alias in aliases if str(alias).strip()],
+        "price": product_price_value(raw, data),
+        "inventory": raw.get("inventory", data.get("inventory")),
+        "status": str(raw.get("status") or data.get("status") or "").strip(),
+    }
+
+
+def product_price_value(raw: dict[str, Any], data: dict[str, Any]) -> float | None:
+    for key in ("price", "unit_price", "sale_price", "listing_price", "guide_price", "quoted_price", "current_price"):
+        value = raw.get(key, data.get(key))
+        parsed = float_from_any(value, None)
+        if parsed is not None:
+            return parsed
+    return None
+
+
+def first_priced_product(products: list[dict[str, Any]]) -> dict[str, Any] | None:
+    for item in products:
+        if isinstance(item.get("price"), (int, float)) and float(item["price"]) > 0:
+            return item
+    return None
+
+
+def select_budget_alternatives(products: list[dict[str, Any]], *, target: dict[str, Any], budget_upper: float) -> list[dict[str, Any]]:
+    target_id = str(target.get("id") or "")
+    candidates: list[dict[str, Any]] = []
+    for item in products:
+        if str(item.get("id") or "") == target_id:
+            continue
+        price = item.get("price")
+        if not isinstance(price, (int, float)) or float(price) <= 0 or float(price) > budget_upper + 0.03:
+            continue
+        candidates.append(item)
+    same = same_category_products(candidates, target)
+    ordered_same = sorted(same, key=lambda item: (budget_upper - float(item["price"]), -float(item["price"])))
+    ordered_other = sorted([item for item in candidates if item not in same], key=lambda item: (budget_upper - float(item["price"]), -float(item["price"])))
+    return ordered_same + ordered_other
+
+
+def same_category_products(products: list[dict[str, Any]], target: dict[str, Any]) -> list[dict[str, Any]]:
+    target_label = product_category_label(target)
+    if not target_label:
+        return []
+    return [item for item in products if product_category_label(item) == target_label]
+
+
+def product_category_label(item: dict[str, Any]) -> str:
+    category = str(item.get("category") or "").strip()
+    if "/" in category:
+        category = category.rsplit("/", 1)[-1]
+    return category.strip()
+
+
+def product_short_label(item: dict[str, Any]) -> str:
+    aliases = item.get("aliases") if isinstance(item.get("aliases"), list) else []
+    for alias in aliases:
+        text = str(alias or "").strip()
+        if text and text not in GENERIC_PRODUCT_ALIASES and len(text) <= 12:
+            return text
+    name = str(item.get("name") or "").strip()
+    if not name:
+        return "这台车"
+    name = re.sub(r"^\d{4}款", "", name).strip()
+    return name[:18].rstrip()
+
+
+def product_evidence_ref(item: dict[str, Any]) -> str:
+    item_id = str(item.get("id") or "").strip()
+    if item_id:
+        return f"product_master:{item_id}"
+    return f"product_master:{product_short_label(item)}"
+
+
+def extract_budget_upper_value(text: str) -> float | None:
+    raw = str(text or "")
+    range_match = re.search(r"(\d+(?:\.\d+)?)\s*(?:到|-|~|至|—|－)\s*(\d+(?:\.\d+)?)\s*万", raw)
+    if range_match:
+        return max(float(range_match.group(1)), float(range_match.group(2)))
+    matches = [float(item) for item in re.findall(r"(\d+(?:\.\d+)?)\s*(?:万|w|W)", raw)]
+    if matches:
+        return max(matches)
+    return None
+
+
+def format_wan_value(value: float) -> str:
+    rounded = round(float(value), 2)
+    text = f"{rounded:.2f}".rstrip("0").rstrip(".")
+    return f"{text}万"
+
+
+def float_from_any(value: Any, default: float | None) -> float | None:
+    try:
+        return float(str(value).replace(",", "").strip())
+    except (TypeError, ValueError):
+        return default
+
+
+def merge_evidence_refs(existing: Any, extra: list[str]) -> list[str]:
+    merged: list[str] = []
+    for item in list(existing or []) + list(extra or []):
+        text = str(item or "").strip()
+        if text and text not in merged:
+            merged.append(text)
+    return merged
+
+
+def append_reason(existing: str, addition: str) -> str:
+    existing = str(existing or "").strip()
+    if not existing:
+        return addition
+    if addition in existing:
+        return existing
+    return f"{existing};{addition}"
+
+
+def fallback_to_existing_reply_after_guard_rejection(
+    *,
+    guard: dict[str, Any],
+    decision: Any,
+    reply_text: str,
+    evidence_pack: dict[str, Any],
+    settings: dict[str, Any],
+) -> dict[str, Any] | None:
+    if settings.get("fallback_to_existing_reply", True) is False:
+        return None
+    action = str(guard.get("action") or "")
+    reason = str(guard.get("reason") or "")
+    safe_fallback_reasons = {
+        "product_price_conflicts_with_product_master",
+    }
+    if action != "handoff" or reason not in safe_fallback_reasons:
+        return None
+    candidate = build_existing_reply_fallback_candidate(
+        decision=decision,
+        reply_text=reply_text,
+        evidence_pack=evidence_pack,
+    )
+    fallback_guard = guard_synthesized_reply(candidate=candidate, evidence_pack=evidence_pack, settings=settings)
+    if fallback_guard.get("allowed") and str(fallback_guard.get("action") or "") == "send_reply":
+        return {
+            "candidate": candidate,
+            "guard": fallback_guard,
+            "reason": f"guard_rejected_llm_used_existing_reply:{reason}",
+        }
+    return None
 
 
 def synthesize_reply(
@@ -715,6 +1183,10 @@ def build_synthesis_prompt_pack(evidence_pack: dict[str, Any], settings: dict[st
             "必须先直接回答客户当前问题，再补一条最短理由。"
             "不要重复前一轮已经说过的两台推荐，不要机械复读。"
             "如客户问“从你刚推荐的里到底选哪台”，必须明确给出一个首选（必要时加一个备选）。"
+            "如客户问某个具体商品多少钱、同时给了预算或问有没有替代，且商品库/候选商品里有价格证据，"
+            "应先报该商品标价，再说明是否超预算，再从商品库里给出预算内更贴近的备选；"
+            "如果没有同级完美替代，可以说明“不是同级，只作预算内备选”，不要因为缺少完美替代就转人工。"
+            "但不得承诺优惠、最低价、贷款审批、车况保证或另找未在商品库里的车源。"
             "避免套话（如“看情况”“都可以”）作为主答案。"
             "正文尽量控制在80个中文内容字以内。"
         )
@@ -834,50 +1306,30 @@ def post_deepseek_synthesis(
     max_tokens: int,
     temperature: float,
 ) -> dict[str, Any]:
-    url = base_url.rstrip("/") + "/chat/completions"
-    payload = {
-        "model": model,
-        "messages": [
-            {"role": "system", "content": prompt_pack["system"]},
-            {
-                "role": "user",
-                "content": (
-                    json.dumps(prompt_pack["user"], ensure_ascii=False)
-                    + "\n\nJSON schema:\n"
-                    + json.dumps(prompt_pack["response_schema"], ensure_ascii=False)
-                    + "\n\n只输出JSON对象，不要Markdown，不要解释。"
-                ),
-            },
-        ],
-        "temperature": temperature,
-        "max_tokens": max_tokens,
-        "stream": False,
-        "response_format": {"type": "json_object"},
-    }
-    apply_llm_reasoning_effort(payload, provider=provider, tier=tier, read_secret_fn=read_secret)
-    request = urllib.request.Request(
-        url,
-        data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
-        headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
-        method="POST",
+    messages = [
+        {"role": "system", "content": prompt_pack["system"]},
+        {
+            "role": "user",
+            "content": (
+                json.dumps(prompt_pack["user"], ensure_ascii=False)
+                + "\n\nJSON schema:\n"
+                + json.dumps(prompt_pack["response_schema"], ensure_ascii=False)
+                + "\n\n只输出JSON对象，不要Markdown，不要解释。"
+            ),
+        },
+    ]
+    return call_llm_request_with_failover(
+        provider=provider,
+        api_key=api_key,
+        base_url=base_url,
+        model=model,
+        messages=messages,
+        timeout=max(1, timeout),
+        max_tokens=max_tokens,
+        temperature=temperature,
+        tier=tier,
+        json_mode=True,
     )
-    try:
-        with llm_urlopen(request, timeout=max(1, timeout), provider=provider) as response:
-            raw = response.read().decode("utf-8", errors="replace")
-            data = json.loads(raw)
-            content = data.get("choices", [{}])[0].get("message", {}).get("content", "")
-            return {
-                "ok": True,
-                "provider": provider,
-                "status": response.status,
-                "response_text": content,
-                "usage": data.get("usage", {}),
-            }
-    except urllib.error.HTTPError as exc:
-        body = exc.read().decode("utf-8", errors="replace")
-        return {"ok": False, "provider": provider, "status": exc.code, "error": body[:1000]}
-    except Exception as exc:
-        return {"ok": False, "provider": provider, "error": repr(exc)}
 
 
 def truncate_reply(reply: str, settings: dict[str, Any]) -> str:
@@ -915,6 +1367,7 @@ def truncate_reply_naturally(text: str, max_chars: int) -> str:
 
 def normalize_advisor_synthesis_reply(reply: str, *, evidence_pack: dict[str, Any], settings: dict[str, Any]) -> str:
     clean = " ".join(str(reply or "").split()).strip()
+    clean = normalize_visible_reply_surface_noise(clean, evidence_pack=evidence_pack)
     advisor_mode = str(settings.get("advisor_mode") or "").strip()
     if not clean:
         return clean
@@ -976,6 +1429,63 @@ def normalize_advisor_synthesis_reply(reply: str, *, evidence_pack: dict[str, An
     result = ensure_listed_options_covered(result, evidence_pack=evidence_pack)
     result = adjust_budget_conflicted_priority(result, evidence_pack=evidence_pack)
     return normalize_reply_punctuation(result)
+
+
+def normalize_visible_reply_surface_noise(reply: str, *, evidence_pack: dict[str, Any]) -> str:
+    clean = str(reply or "").strip()
+    if not clean:
+        return clean
+    clean = clean.replace("我会先看我在", "我会先看")
+    clean = clean.replace("先看我在", "先看")
+    clean = re.sub(r"(优先|建议|推荐|先考虑|可以先看|可以看)我在", r"\1", clean)
+    clean = re.sub(r"(?<=[。！？；;])我在(?=[^。！？；;，,]{2,24}[、,，])", "", clean)
+    clean = re.sub(r"([。！？；;，,])我在[^。！？；;]{1,36}(?:先放后面|放后面|当备选|作为备选)[^。！？；;，,]{0,12}", r"\1", clean)
+    return dedupe_repeated_evidence_product_labels(clean, evidence_pack=evidence_pack)
+
+
+def dedupe_repeated_evidence_product_labels(reply: str, *, evidence_pack: dict[str, Any]) -> str:
+    clean = str(reply or "")
+    for label in collect_evidence_product_labels(evidence_pack):
+        if not label or clean.count(label) <= 1:
+            continue
+        clean = dedupe_repeated_label_in_text(clean, label)
+    return clean
+
+
+def dedupe_repeated_label_in_text(text: str, label: str) -> str:
+    clean = str(text or "")
+    label = str(label or "")
+    if not clean or not label:
+        return clean
+    escaped = re.escape(label)
+    clean = re.sub(rf"({escaped})(?:[、,，/／ ]+\1)+", r"\1", clean)
+    price_pattern = r"（\d+(?:\.\d+)?万）"
+    clean = re.sub(rf"({escaped}{price_pattern})(?:[、,，/／ ]+\1)+", r"\1", clean)
+    return clean
+
+
+def collect_evidence_product_labels(evidence_pack: dict[str, Any]) -> list[str]:
+    knowledge = evidence_pack.get("knowledge") if isinstance(evidence_pack.get("knowledge"), dict) else {}
+    evidence = knowledge.get("evidence") if isinstance(knowledge.get("evidence"), dict) else {}
+    labels: list[str] = []
+    seen_ids: set[str] = set()
+    seen_labels: set[str] = set()
+    for bucket in ("products", "catalog_candidates"):
+        for item in evidence.get(bucket, []) or []:
+            if not isinstance(item, dict):
+                continue
+            item_id = str(item.get("id") or "").strip()
+            if item_id and item_id in seen_ids:
+                continue
+            name = str(item.get("name") or item.get("title") or "").strip()
+            if not name and isinstance(item.get("data"), dict):
+                name = str(item["data"].get("name") or item["data"].get("title") or "").strip()
+            if item_id:
+                seen_ids.add(item_id)
+            if name and name not in seen_labels:
+                labels.append(name)
+                seen_labels.add(name)
+    return labels
 
 
 def ensure_listed_options_covered(reply: str, *, evidence_pack: dict[str, Any]) -> str:
@@ -1076,14 +1586,16 @@ def extract_listed_customer_options(text: str) -> list[str]:
 
 def clean_customer_option(value: str) -> str:
     option = str(value or "").strip(" \t\r\n：:，,。；;、/()（）[]【】")
-    option = re.sub(r"^(如果在|在|从|按|想买|考虑|对比|比较)", "", option).strip()
+    option = re.sub(r"^(如果在|我在|在|从|按|想买|考虑|对比|比较)", "", option).strip()
     option = re.sub(r"(这)$", "", option).strip()
     if not option or len(option) > 16:
         return ""
     if any(term in option for term in ("预算", "买台", "买辆", "老人", "客户", "需求")):
         return ""
-    noise_terms = {"预算", "纯电", "通勤", "接娃", "上下班", "方向", "优先级", "建议"}
+    noise_terms = {"预算", "纯电", "通勤", "接娃", "上下班", "方向", "优先级", "建议", "主要家用", "家用", "偶尔跑高速", "跑高速", "省心"}
     if option in noise_terms:
+        return ""
+    if any(term in option for term in ("偶尔", "主要", "跑高速")):
         return ""
     if not re.search(r"[\u4e00-\u9fffA-Za-z0-9]", option):
         return ""
@@ -1245,6 +1757,11 @@ def build_natural_timeout_fallback_reply(evidence_pack: dict[str, Any]) -> str:
         for term in ("预算", "推荐", "挑", "省油", "家用", "通勤", "接娃", "多少钱", "什么价", "报价", "哪台", "哪款")
     ):
         return ""
+    safety = evidence_pack.get("safety") if isinstance(evidence_pack.get("safety"), dict) else {}
+    if safety.get("llm_synthesis_product_master_quote_override") and any(term in message for term in ("多少钱", "什么价", "报价", "价格", "价位")):
+        quote_reply, _used_evidence = build_product_master_quote_reply(evidence_pack)
+        if quote_reply:
+            return quote_reply
     knowledge = evidence_pack.get("knowledge") if isinstance(evidence_pack.get("knowledge"), dict) else {}
     evidence = knowledge.get("evidence") if isinstance(knowledge.get("evidence"), dict) else {}
     candidates = []
@@ -1254,10 +1771,18 @@ def build_natural_timeout_fallback_reply(evidence_pack: dict[str, Any]) -> str:
                 candidates.append(item)
     budget = extract_budget_wan_from_text(message)
     names = []
+    seen_ids: set[str] = set()
+    seen_names: set[str] = set()
     for item in candidates:
+        item_id = str(item.get("id") or "").strip()
+        if item_id and item_id in seen_ids:
+            continue
         name = str(item.get("name") or item.get("title") or "")
         if not name and isinstance(item.get("data"), dict):
             name = str(item["data"].get("name") or item["data"].get("title") or "")
+        name = name.strip()
+        if name and name in seen_names:
+            continue
         price = item.get("price") or (item.get("data") or {}).get("price") if isinstance(item.get("data"), dict) else item.get("price")
         try:
             price_value = float(price)
@@ -1267,9 +1792,14 @@ def build_natural_timeout_fallback_reply(evidence_pack: dict[str, Any]) -> str:
             continue
         if name:
             names.append(f"{name}（{price_value:g}万）" if price_value else name)
+            if item_id:
+                seen_ids.add(item_id)
+            seen_names.add(name)
         if len(names) >= 2:
             break
     if names:
+        if len(names) == 1 and any(term in message for term in ("多少钱", "什么价", "报价", "价格", "价位")):
+            return f"{names[0]}，这是当前商品库公开标价。后面重点看检测报告和实车。"
         return "先给您短结论：可优先看" + "、".join(names) + "。您再告诉我更重视油耗还是车况，我立刻缩到1-2台。"
     return "先给您短结论：我按预算、用途、车况三项先筛。您补一个预算区间，我马上缩到1-2台给您。"
 
