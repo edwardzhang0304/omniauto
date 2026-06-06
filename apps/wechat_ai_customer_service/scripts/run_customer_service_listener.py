@@ -178,6 +178,10 @@ def normalize_send_trigger_mode(method: Any) -> str:
     raw = str(method or RPA_HUMANIZED_SEND_DEFAULTS["send_trigger_mode"]).strip().lower()
     if raw not in {"click_only", "enter_only", "enter_then_click"}:
         return str(RPA_HUMANIZED_SEND_DEFAULTS["send_trigger_mode"])
+    if raw == "enter_then_click":
+        return "enter_only"
+    if raw == "click_only" and not env_bool("WECHAT_WIN32_OCR_ALLOW_CLICK_SEND_TRIGGER", default=False):
+        return "enter_only"
     return raw
 
 
@@ -2225,12 +2229,26 @@ def main() -> int:
 
     scheduler_requested = load_concurrency_scheduler_enabled(config_path)
     if scheduler_requested:
-        scheduler_bridge = ManagedListenerSchedulerBridge(
-            tenant_id=tenant_id,
-            config_path=config_path,
-            allow_send=bool(args.send),
-            write_data=bool(args.write_data),
-        )
+        try:
+            scheduler_bridge = ManagedListenerSchedulerBridge(
+                tenant_id=tenant_id,
+                config_path=config_path,
+                allow_send=bool(args.send),
+                write_data=bool(args.write_data),
+            )
+        except Exception as exc:  # noqa: BLE001 - startup guards should surface in runtime status
+            message = f"微信自动客服启动前安全护栏未通过：{exc}"
+            write_runtime_status("stopped", message, tenant_id=tenant_id, last_error=repr(exc))
+            append_log(
+                log_path,
+                {
+                    "event": "managed_listener_scheduler_startup_guard_failed",
+                    "tenant_id": tenant_id,
+                    "error": repr(exc),
+                },
+            )
+            print(message, file=sys.stderr)
+            return 3
 
     append_log(
         log_path,
@@ -3008,11 +3026,29 @@ def summarize_scheduler_tick_activity(result: dict[str, Any] | None) -> dict[str
     running = int(summary.get("llm_running") or 0)
     ready = int(summary.get("reply_ready") or 0)
     sent = int(summary.get("reply_sent") or 0)
-    llm_completed = any(str(item.get("event") or "") == "llm_task_completed" for item in events)
-    send_completed = any(str(item.get("event") or "") == "send_completed" for item in events)
-    send_failed = any(str(item.get("event") or "") == "send_failed" for item in events)
+    event_names = {str(item.get("event") or "") for item in events}
+    llm_completed = "llm_task_completed" in event_names
+    send_completed = "send_completed" in event_names
+    send_failed = "send_failed" in event_names
     busy = bool(pending or running or ready or sent or events)
-    urgent_followup = bool(ready > 0 or llm_completed or send_completed or send_failed)
+    unread_or_capture_changed = bool(
+        event_names
+        & {
+            "signal_pending",
+            "capture_completed",
+            "capture_empty",
+            "reply_stale",
+            "state_cleanup",
+        }
+    )
+    urgent_followup = bool(
+        ready > 0
+        or pending > 0
+        or llm_completed
+        or send_completed
+        or send_failed
+        or unread_or_capture_changed
+    )
     return {
         "scheduler_enabled": True,
         "busy": busy,
@@ -3021,6 +3057,7 @@ def summarize_scheduler_tick_activity(result: dict[str, Any] | None) -> dict[str
         "llm_running": running,
         "reply_ready": ready,
         "reply_sent": sent,
+        "event_names": sorted(event_names),
     }
 
 

@@ -15,6 +15,7 @@ every operation when that reserve path is enabled.
 
 from __future__ import annotations
 
+import difflib
 import json
 import os
 import queue
@@ -433,13 +434,14 @@ class WeChatConnector:
         exact: bool = True,
         *,
         simulate_inbound_file_transfer: bool = False,
+        skip_send_rate_guard: bool = False,
     ) -> dict[str, Any]:
         loopback_inbound = bool(simulate_inbound_file_transfer and is_simulated_inbound_loopback_target(target))
         send_result = self.send_text(
             target,
             text,
             exact=exact,
-            skip_send_rate_guard=loopback_inbound,
+            skip_send_rate_guard=bool(loopback_inbound or skip_send_rate_guard),
         )
         if not send_result.get("ok"):
             return {"ok": False, "send": send_result, "verified": False}
@@ -1355,6 +1357,12 @@ def verify_send_from_messages(messages_payload: dict[str, Any], *, expected_text
     # all non-empty expected lines to be found in recent message contents.
     if any(compact == expected_compact for _sender, compact in normalized_messages):
         return True
+    if any(
+        sender in {"self", "unknown", ""}
+        and ocr_tolerant_text_match(expected_compact, compact)
+        for sender, compact in normalized_messages
+    ):
+        return True
     expected_lines = [compact_text(line) for line in expected.splitlines() if compact_text(line)]
     if len(expected_lines) <= 1:
         return False
@@ -1366,6 +1374,25 @@ def verify_send_from_messages(messages_payload: dict[str, Any], *, expected_text
 
 def compact_text(value: str) -> str:
     return re.sub(r"\s+", "", str(value or ""))
+
+
+def normalize_ocr_verification_text(value: str) -> str:
+    compact = compact_text(value)
+    compact = re.sub(r"(?<=[\u4e00-\u9fff])[Il1|](?=[\u4e00-\u9fff])", "", compact)
+    compact = re.sub(r"[^\u4e00-\u9fffA-Za-z0-9]", "", compact)
+    return compact.lower()
+
+
+def ocr_tolerant_text_match(expected_compact: str, observed_compact: str) -> bool:
+    expected = normalize_ocr_verification_text(expected_compact)
+    observed = normalize_ocr_verification_text(observed_compact)
+    if len(expected) < 24 or len(observed) < 12:
+        return False
+    if expected in observed or observed in expected:
+        return True
+    ratio = difflib.SequenceMatcher(None, expected, observed).ratio()
+    threshold = 0.78 if len(expected) >= 60 else 0.84
+    return ratio >= threshold
 
 
 def is_file_transfer_session_alias(target: str) -> bool:

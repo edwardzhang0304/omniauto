@@ -141,6 +141,7 @@ def build_category_evidence_pack(text: str, *, context: dict[str, Any] | None = 
         detected_tags.discard("unknown")
     intent_tags = normalize_pre_purchase_vehicle_tags(sorted(resolver_tags | detected_tags), text)
     evidence = legacy_evidence_from_category_pack(category_pack)
+    suppress_weak_product_evidence_without_need(evidence, text)
     safety = build_safety_summary(intent_tags, evidence, text)
     rag_evidence = build_rag_runtime_evidence(text, intent_tags=intent_tags, evidence=evidence, context=context)
     if rag_evidence.get("hits"):
@@ -345,8 +346,71 @@ def legacy_product_snippet(item: dict[str, Any], evidence_item: dict[str, Any]) 
         "discount_policy": (data.get("reply_templates") or {}).get("discount_policy"),
         "discount_tiers": data.get("price_tiers", []) or [],
         "matched_aliases": list(evidence_item.get("matched_fields", []) or []),
+        "match_reason": evidence_item.get("match_reason"),
+        "match_confidence": evidence_item.get("confidence"),
     }
     return {key: value for key, value in snippet.items() if value not in (None, "", [], {})}
+
+
+def suppress_weak_product_evidence_without_need(evidence: dict[str, Any], text: str) -> None:
+    """Drop weak product-category hits when the customer did not ask for a product.
+
+    The Brain should reason over authoritative product evidence, but broad
+    category words like "包装" can appear in non-purchase questions.  Without a
+    purchase/detail signal, those weak hits should not clear the
+    no-relevant-business-evidence safety boundary.
+    """
+
+    products = [item for item in evidence.get("products", []) or [] if isinstance(item, dict)]
+    if not products or text_has_product_need_signal(text):
+        return
+    strong_products = [item for item in products if not product_hit_is_weak_category_only(item)]
+    evidence["products"] = strong_products
+
+
+def product_hit_is_weak_category_only(item: dict[str, Any]) -> bool:
+    matched_fields = {str(value).lower() for value in item.get("matched_aliases", []) or [] if str(value)}
+    if not matched_fields:
+        return False
+    return matched_fields <= {"aliases", "category", "keywords", "tags", "title"}
+
+
+def text_has_product_need_signal(text: str) -> bool:
+    normalized = normalize_text(text)
+    if not normalized:
+        return False
+    need_terms = (
+        "买",
+        "采购",
+        "订",
+        "要",
+        "需要",
+        "想找",
+        "找个",
+        "看看",
+        "看下",
+        "推荐",
+        "报价",
+        "价格",
+        "多少钱",
+        "库存",
+        "现货",
+        "在售",
+        "有没有",
+        "有吗",
+        "合适",
+        "能放",
+        "预算",
+        "规格",
+        "尺寸",
+        "型号",
+        "参数",
+        "质保",
+        "保修",
+        "送货",
+        "安装",
+    )
+    return any(term in normalized for term in need_terms)
 
 
 def legacy_policy_faq(item: dict[str, Any], evidence_item: dict[str, Any]) -> dict[str, Any]:
@@ -680,7 +744,7 @@ def build_safety_summary(intent_tags: list[str], evidence: dict[str, Any], text:
     style_only = bool(tag_set & {"small_talk", "greeting"}) and not (tag_set - {"small_talk", "greeting"})
     customer_data_only = "customer_data" in tag_set and not (tag_set - {"customer_data"})
     if not has_business_evidence and not style_only and not customer_data_only:
-        if "unknown" in tag_set or not has_chat_evidence or (tag_set & intent_group("business")):
+        if "unknown" in tag_set or not has_chat_evidence or (tag_set & evidence_required_intents()):
             reasons.append("no_relevant_business_evidence")
             must_handoff = True
     elif "unknown" in tag_set and not has_business_evidence:
@@ -692,6 +756,10 @@ def build_safety_summary(intent_tags: list[str], evidence: dict[str, Any], text:
         "allowed_auto_reply": not must_handoff,
         "discount_check": discount_check,
     }
+
+
+def evidence_required_intents() -> set[str]:
+    return set(intent_group("business")) | {"product", "scene_product", "spec", "warranty"}
 
 
 def normalize_pre_purchase_vehicle_tags(intent_tags: list[str], text: str) -> list[str]:

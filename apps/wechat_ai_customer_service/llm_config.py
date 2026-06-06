@@ -47,6 +47,22 @@ TRANSIENT_LLM_ERROR_MARKERS = (
     "network is unreachable",
     "eof occurred in violation of protocol",
 )
+MODEL_UNAVAILABLE_LLM_ERROR_MARKERS = (
+    "model is not supported",
+    "model not supported",
+    "unsupported model",
+    "invalid model",
+    "model does not exist",
+    "model not found",
+    "model_not_found",
+    "does not have access to model",
+    "model is unavailable",
+    "model unavailable",
+)
+GATEWAY_FAILOVERABLE_LLM_ERROR_MARKERS = (
+    "upstream request failed",
+    "upstream_error",
+)
 
 
 LLM_PROVIDER_PRESETS: dict[str, dict[str, Any]] = {
@@ -686,6 +702,21 @@ def is_transient_llm_failure(result: dict[str, Any] | None) -> bool:
     return any(marker in text for marker in TRANSIENT_LLM_ERROR_MARKERS)
 
 
+def is_failoverable_llm_failure(result: dict[str, Any] | None) -> bool:
+    """Return True when a failed primary route is worth retrying on fallback."""
+
+    if is_transient_llm_failure(result):
+        return True
+    payload = result if isinstance(result, dict) else {}
+    text = " ".join(
+        str(payload.get(key) or "")
+        for key in ("error", "reason", "message", "detail")
+    ).lower()
+    if any(marker in text for marker in MODEL_UNAVAILABLE_LLM_ERROR_MARKERS):
+        return True
+    return any(marker in text for marker in GATEWAY_FAILOVERABLE_LLM_ERROR_MARKERS)
+
+
 def extract_llm_response_text(*, provider: Any, data: Any) -> str:
     provider_id = normalize_llm_provider(provider)
     if llm_provider_request_style(provider_id) == "anthropic_messages":
@@ -829,6 +860,7 @@ def call_llm_request_with_failover(
     messages: list[dict[str, Any]],
     timeout: int | float,
     max_tokens: int,
+    fallback_timeout: int | float | None = None,
     temperature: float | None = None,
     tier: str = "flash",
     json_mode: bool = False,
@@ -857,7 +889,7 @@ def call_llm_request_with_failover(
     if not fallback.get("enabled"):
         primary["failover"] = {"attempted": False, "activated": False, "reason": "fallback_disabled"}
         return primary
-    if not is_transient_llm_failure(primary):
+    if not is_failoverable_llm_failure(primary):
         primary["failover"] = {"attempted": False, "activated": False, "reason": "primary_error_not_transient"}
         return primary
     fallback_provider = str(fallback.get("provider") or "").strip()
@@ -881,7 +913,7 @@ def call_llm_request_with_failover(
         base_url=fallback_base_url,
         model=fallback_model,
         messages=messages,
-        timeout=timeout,
+        timeout=max(1, fallback_timeout if fallback_timeout is not None else timeout),
         max_tokens=max_tokens,
         temperature=temperature,
         tier=tier,
@@ -902,6 +934,7 @@ def call_llm_request_with_failover(
             "primary_status": primary.get("status", 0),
             "primary_error": str(primary.get("error") or ""),
             "fallback_provider": fallback_provider,
+            "fallback_timeout_seconds": max(1, fallback_timeout if fallback_timeout is not None else timeout),
         }
         return fallback_result
     primary["failover"] = {
@@ -912,6 +945,7 @@ def call_llm_request_with_failover(
         "primary_status": primary.get("status", 0),
         "primary_error": str(primary.get("error") or ""),
         "fallback_provider": fallback_provider,
+        "fallback_timeout_seconds": max(1, fallback_timeout if fallback_timeout is not None else timeout),
         "fallback_status": fallback_result.get("status", 0),
         "fallback_error": str(fallback_result.get("error") or ""),
     }

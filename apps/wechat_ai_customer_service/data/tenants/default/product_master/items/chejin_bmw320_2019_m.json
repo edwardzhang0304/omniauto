@@ -5,7 +5,7 @@
   "status": "active",
   "source": {
     "type": "test_fixture",
-    "batch_token": "DEBUG_SAFE_ALT"
+    "batch_token": "DBG_ALT"
   },
   "data": {
     "name": "2019款宝马320Li M运动套装",
@@ -36,8 +36,8 @@
   "review_state": {
     "is_new": true,
     "new_reason": "newly_added_formal_knowledge",
-    "marked_at": "2026-06-03T22:44:56",
-    "updated_at": "2026-06-03T22:44:56",
+    "marked_at": "2026-06-05T23:09:08",
+    "updated_at": "2026-06-05T23:09:08",
     "read_at": "",
     "read_by": "",
     "source": {
@@ -47,8 +47,8 @@
     }
   },
   "metadata": {
-    "created_at": "2026-06-03T22:44:56",
-    "updated_at": "2026-06-03T22:44:56",
+    "created_at": "2026-06-05T23:09:08",
+    "updated_at": "2026-06-05T23:09:08",
     "created_by": "admin",
     "updated_by": "admin"
   }

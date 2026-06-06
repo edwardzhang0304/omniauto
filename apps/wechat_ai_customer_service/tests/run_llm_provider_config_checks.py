@@ -85,11 +85,12 @@ def run_checks() -> dict[str, Any]:
             check_legacy_deepseek_defaults()
             check_openai_compatible_roundtrip_and_probe(calls)
             check_fallback_roundtrip_and_anthropic_probe(calls)
+            check_model_unavailable_primary_is_failoverable()
             check_llm_config_permissions_allow_all_authenticated_users()
         finally:
             llm_config_module.urllib.request.urlopen = old_urlopen
             llm_config_module._LLM_CONFIG_PATH = old_path
-    return {"ok": True, "checks": 4}
+    return {"ok": True, "checks": 5}
 
 
 def check_legacy_deepseek_defaults() -> None:
@@ -195,6 +196,27 @@ def check_fallback_roundtrip_and_anthropic_probe(calls: list[dict[str, Any]]) ->
     assert_equal(calls[-1]["body"]["model"], "kimi-for-coding", "fallback probe should use fallback flash model")
     assert_equal(calls[-1]["headers"].get("x-api-key"), "sk-fallback-kimi", "fallback probe should send anthropic API key header")
     assert_equal(calls[-1]["headers"].get("anthropic-version"), "2023-06-01", "fallback probe should send anthropic version header")
+
+
+def check_model_unavailable_primary_is_failoverable() -> None:
+    unsupported_model = {
+        "ok": False,
+        "status": 400,
+        "error": "{\"error\":{\"message\":\"The 'gpt-5.4' model is not supported when using Codex with a ChatGPT account.\"}}",
+    }
+    bad_request = {
+        "ok": False,
+        "status": 400,
+        "error": "bad request: missing required messages",
+    }
+    assert_true(
+        llm_config_module.is_failoverable_llm_failure(unsupported_model),
+        "unsupported model primary failures should be allowed to use fallback",
+    )
+    assert_true(
+        not llm_config_module.is_failoverable_llm_failure(bad_request),
+        "ordinary malformed 400 requests should not be treated as failoverable",
+    )
 
 
 def check_llm_config_permissions_allow_all_authenticated_users() -> None:

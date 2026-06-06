@@ -25,7 +25,9 @@ for path in (PROJECT_ROOT, APP_ROOT, WORKFLOWS_ROOT, ADAPTERS_ROOT):
 from apps.wechat_ai_customer_service.admin_backend.services.customer_service_scheduler_state import (  # noqa: E402
     SchedulerConfig,
     SchedulerStateStore,
+    cleanup_scheduler_state,
     complete_llm_task,
+    complete_polish_task,
     enqueue_llm_task,
     enqueue_polish_task,
     enqueue_pending_session,
@@ -40,6 +42,7 @@ from apps.wechat_ai_customer_service.admin_backend.services.customer_service_sch
     select_ready_replies,
     state_summary,
 )
+from apps.wechat_ai_customer_service.admin_backend.services.customer_service_settings import CustomerServiceSettings  # noqa: E402
 from apps.wechat_ai_customer_service.admin_backend.services.customer_service_scheduler import (  # noqa: E402
     CapturedMessagesConnector,
     CustomerServiceSchedulerRuntime,
@@ -60,6 +63,7 @@ from apps.wechat_ai_customer_service.scripts.run_customer_service_listener impor
     load_managed_poll_interval_settings,
     load_rpa_humanized_send_settings,
     scheduler_bridge_has_active_work,
+    summarize_scheduler_tick_activity,
 )
 from listen_and_reply import (  # noqa: E402
     TargetConfig,
@@ -95,6 +99,18 @@ def empty_state() -> dict[str, Any]:
     }
 
 
+def enable_brain_first_test_settings(tenant_id: str) -> Path:
+    settings_store = CustomerServiceSettings(tenant_id=tenant_id)
+    settings_store.save(
+        {
+            "use_llm": True,
+            "final_visible_llm_polish_enabled": True,
+            "customer_service_brain_mode": "brain_first",
+        }
+    )
+    return settings_store.settings_path
+
+
 class FakeSessionConnector:
     def __init__(self, sessions: list[dict[str, Any]]) -> None:
         self.sessions = sessions
@@ -127,7 +143,7 @@ class FakeBridgeConnector:
     def get_messages(self, target: str, exact: bool = True, history_load_times: int = 0) -> dict[str, Any]:
         return {"ok": True, "target": target, "exact": exact, "messages": list(self.messages.get(target, []))}
 
-    def send_text_and_verify(self, target: str, text: str, exact: bool = True) -> dict[str, Any]:
+    def send_text_and_verify(self, target: str, text: str, exact: bool = True, *, skip_send_rate_guard: bool = False) -> dict[str, Any]:
         self.sent.append({"target": target, "text": text, "exact": exact})
         return {"ok": True, "verified": True, "adapter": "win32_ocr", "state": "sent"}
 
@@ -670,6 +686,142 @@ def check_runtime_tick_does_not_wait_for_slow_llm() -> None:
             assert_equal(third["summary"]["reply_ready"], 2, "both LLM tasks should eventually be ready")
         finally:
             runtime.shutdown()
+
+
+def check_scheduler_cleanup_clears_session_ready_refs_without_losing_recent_audit() -> None:
+    state = empty_state()
+    enqueue_pending_session(state, "客户A", now="2026-06-06T10:00:00")
+    capture = record_capture_result(
+        state,
+        "客户A",
+        messages=[message("A", 1)],
+        batch=[message("A", 1)],
+        now="2026-06-06T10:00:01",
+    )
+    task = enqueue_llm_task(state, capture["capture_id"], now="2026-06-06T10:00:02")
+    complete_llm_task(state, task["task_id"], reply_text="收到，我帮您看。", decision={"rule_name": "unit"}, now="2026-06-06T10:00:03")
+    reply_id = next(iter(state["ready_replies"]))
+    mark_reply_sent(state, reply_id, send_result={"ok": True, "verified": True}, now="2026-06-06T10:00:04")
+    assert_true(reply_id in state["sessions"]["客户A"].get("ready_reply_ids", []), "precondition should keep old session ref")
+    cleanup_scheduler_state(state, config=SchedulerConfig(enabled=True), now="2026-06-06T10:00:05")
+    assert_true(reply_id in state["ready_replies"], "recent sent reply should remain for audit and summary")
+    assert_true(reply_id not in state["sessions"]["客户A"].get("ready_reply_ids", []), "session ready refs should keep only live ready/sending ids")
+
+
+def check_runtime_latency_trace_flows_through_reply_lifecycle() -> None:
+    with tempfile.TemporaryDirectory() as temp:
+        path = Path(temp) / "scheduler_state.json"
+        store = SchedulerStateStore(tenant_id="unit", path=path)
+
+        def capture_fn(session: dict[str, Any]) -> dict[str, Any]:
+            return {"messages": [message("A", 1)], "batch": [message("A", 1)]}
+
+        def planner(capture: dict[str, Any], task: dict[str, Any]) -> dict[str, Any]:
+            return {
+                "ok": True,
+                "reply_text": "收到，我帮您看。",
+                "decision": {"rule_name": "unit"},
+                "latency_trace": {
+                    "brain_llm_duration_seconds": 0.25,
+                    "semantic_review_duration_seconds": 0.01,
+                },
+            }
+
+        def sender(reply: dict[str, Any]) -> dict[str, Any]:
+            return {"ok": True, "verified": True, "send_result": {"send": {"state": "sent"}}}
+
+        runtime = CustomerServiceSchedulerRuntime(
+            store=store,
+            config=SchedulerConfig(enabled=True, capture_max_sessions_per_round=1, llm_max_concurrency=1, send_max_replies_per_round=1),
+            capture_fn=capture_fn,
+            plan_reply_fn=planner,
+            send_fn=sender,
+        )
+        try:
+            runtime.tick(session_signals=[{"name": "客户A", "content": "A新消息", "time": "10:00"}], allow_send=False, now="2026-06-06T10:00:00")
+            time.sleep(0.03)
+            runtime.tick(allow_send=False, now="2026-06-06T10:00:01")
+            runtime.tick(allow_send=True, now="2026-06-06T10:00:02")
+            state = store.load()
+            reply = next(iter((state.get("ready_replies") or {}).values()))
+            trace = reply.get("latency_trace") if isinstance(reply.get("latency_trace"), dict) else {}
+            for key in (
+                "unread_detected_at",
+                "capture_started_at",
+                "capture_finished_at",
+                "brain_queued_at",
+                "brain_started_at",
+                "brain_finished_at",
+                "ready_at",
+                "send_started_at",
+                "freshness_check_started_at",
+                "freshness_check_finished_at",
+                "send_rpa_started_at",
+                "send_rpa_finished_at",
+                "send_finished_at",
+                "brain_llm_duration_seconds",
+                "semantic_review_duration_seconds",
+            ):
+                assert_true(bool(trace.get(key)), f"latency trace missing {key}: {trace}")
+            summary = state_summary(state)
+            assert_true("pending_age_seconds_max" in summary, "summary should expose pending age")
+            assert_true("oldest_ready_age_seconds" in summary, "summary should expose ready age")
+        finally:
+            runtime.shutdown()
+
+
+def check_polish_latency_trace_is_inherited_by_ready_reply() -> None:
+    state = empty_state()
+    enqueue_pending_session(state, "客户A", now="2026-06-06T10:00:00")
+    capture = record_capture_result(
+        state,
+        "客户A",
+        messages=[message("A", 1)],
+        batch=[message("A", 1)],
+        now="2026-06-06T10:00:01",
+    )
+    task = enqueue_llm_task(state, capture["capture_id"], now="2026-06-06T10:00:02")
+    complete_llm_task(
+        state,
+        task["task_id"],
+        reply_text="收到，我帮您看。",
+        decision={"rule_name": "unit"},
+        result_payload={"latency_trace": {"brain_llm_duration_seconds": 1.2}},
+        create_ready_reply=False,
+        now="2026-06-06T10:00:03",
+    )
+    polish_task = enqueue_polish_task(state, task["task_id"], now="2026-06-06T10:00:04")
+    mark_polish_started(state, polish_task["task_id"], now="2026-06-06T10:00:05")
+    completion = complete_polish_task(
+        state,
+        polish_task["task_id"],
+        reply_text="收到，我帮您看。",
+        decision={"rule_name": "unit"},
+        result_payload={
+            "duration_seconds": 1.7,
+            "latency_trace": {"final_polish_llm_duration_seconds": 1.4},
+        },
+        now="2026-06-06T10:00:06",
+    )
+    trace = (completion.get("reply") or {}).get("latency_trace") or {}
+    assert_true(trace.get("brain_llm_duration_seconds") == 1.2, f"Brain trace should flow through polish: {trace}")
+    assert_true(trace.get("final_polish_duration_seconds") == 1.7, f"polish duration should be recorded: {trace}")
+    assert_true(trace.get("final_polish_llm_duration_seconds") == 1.4, f"polish LLM trace should be recorded: {trace}")
+
+
+def check_scheduler_fast_followup_treats_unread_and_capture_as_urgent() -> None:
+    signal_result = {
+        "scheduler_enabled": True,
+        "summary": {"pending_sessions": 1, "llm_running": 0, "reply_ready": 0, "reply_sent": 0},
+        "events": [{"event": "signal_pending", "target_name": "客户A"}],
+    }
+    capture_result = {
+        "scheduler_enabled": True,
+        "summary": {"pending_sessions": 0, "llm_running": 1, "reply_ready": 0, "reply_sent": 0},
+        "events": [{"event": "capture_completed", "target_name": "客户A"}],
+    }
+    assert_true(summarize_scheduler_tick_activity(signal_result)["urgent_followup"], "unread signal should trigger fast follow-up")
+    assert_true(summarize_scheduler_tick_activity(capture_result)["urgent_followup"], "capture completion should trigger fast follow-up")
 
 
 def check_runtime_repeated_unread_signal_does_not_stale_same_batch() -> None:
@@ -1847,6 +1999,8 @@ def check_managed_bridge_applies_rpa_fast_send_confirmation_env() -> None:
 def check_managed_bridge_capture_send_marks_workflow_state() -> None:
     with tempfile.TemporaryDirectory() as temp:
         root = Path(temp)
+        tenant_id = "unit_bridge"
+        settings_path = enable_brain_first_test_settings(tenant_id)
         config_path = root / "listener_config.json"
         state_path = root / "workflow_state.json"
         audit_path = root / "audit.jsonl"
@@ -1874,14 +2028,14 @@ def check_managed_bridge_capture_send_marks_workflow_state() -> None:
         }
         config_path.write_text(json.dumps(config, ensure_ascii=False, indent=2), encoding="utf-8")
         bridge = ManagedListenerSchedulerBridge(
-            tenant_id="unit_bridge",
+            tenant_id=tenant_id,
             config_path=config_path,
             allow_send=True,
             write_data=False,
         )
         fake = FakeBridgeConnector()
         bridge.connector = fake
-        bridge.store = SchedulerStateStore(tenant_id="unit_bridge", path=root / "scheduler_state.json")
+        bridge.store = SchedulerStateStore(tenant_id=tenant_id, path=root / "scheduler_state.json")
         if bridge.runtime is not None:
             bridge.runtime.shutdown()
         bridge.runtime = CustomerServiceSchedulerRuntime(
@@ -1899,6 +2053,7 @@ def check_managed_bridge_capture_send_marks_workflow_state() -> None:
             bridge.runtime.tick(allow_send=True, now="2026-05-25T10:00:01")
         finally:
             bridge.shutdown()
+            settings_path.unlink(missing_ok=True)
         assert_equal(len(fake.sent), 1, "bridge sender should send exactly one verified reply")
         workflow_state = json.loads(state_path.read_text(encoding="utf-8"))
         target_state = workflow_state.get("targets", {}).get("customer_a", {})
@@ -2884,6 +3039,21 @@ def check_short_pending_signal_synthesizes_monitor_only_group_preview() -> None:
     assert_equal(capture.get("message_ids"), [recovered[0]["id"]], "capture should retain the synthetic short id")
 
 
+def check_short_pending_signal_does_not_synthesize_media_preview() -> None:
+    recovered = scheduler_module.recover_high_sensitivity_short_pending_batch(
+        [],
+        {
+            "pending_signal_kind": "high_sensitivity_short",
+            "pending_signal_text": "[图片]",
+            "pending_since": "2026-06-04T22:02:50",
+        },
+        target_name="许聪",
+        allow_self_for_test=False,
+        max_batch_messages=2,
+    )
+    assert_true(not recovered, "media-only monitor preview should not synthesize a reply-eligible short message")
+
+
 def check_mixed_greeting_budget_intent_prefers_product() -> None:
     config = {"intent_router": {"heuristic_first": True, "cache_seconds": 0}}
     mixed = route_intent(
@@ -2960,6 +3130,10 @@ def run_checks() -> dict[str, Any]:
         check_session_monitor_event_driven_dispatch_rotates_under_hot_target,
         check_capture_failed_backoff_blocks_immediate_requeue,
         check_runtime_tick_does_not_wait_for_slow_llm,
+        check_scheduler_cleanup_clears_session_ready_refs_without_losing_recent_audit,
+        check_runtime_latency_trace_flows_through_reply_lifecycle,
+        check_polish_latency_trace_is_inherited_by_ready_reply,
+        check_scheduler_fast_followup_treats_unread_and_capture_as_urgent,
         check_runtime_repeated_unread_signal_does_not_stale_same_batch,
         check_runtime_send_runner_stales_before_send,
         check_reply_sent_preserves_followup_pending_signal,
@@ -3006,6 +3180,7 @@ def run_checks() -> dict[str, Any]:
         check_scheduler_capture_allows_repeated_short_greeting_after_previous_reply,
         check_short_pending_signal_recovers_anchor_empty_batch,
         check_short_pending_signal_synthesizes_monitor_only_group_preview,
+        check_short_pending_signal_does_not_synthesize_media_preview,
         check_mixed_greeting_budget_intent_prefers_product,
         check_handoff_keyword_requires_explicit_customer_request,
         check_scheduler_conversation_context_update_does_not_advance_context_version,

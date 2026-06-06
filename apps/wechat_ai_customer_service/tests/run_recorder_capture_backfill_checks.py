@@ -47,7 +47,7 @@ class FakeConnector:
             }
         return {"ok": True, "target": target, "exact": exact, "messages": self.visible}
 
-    def send_text(self, target: str, text: str, exact: bool = True) -> dict[str, Any]:
+    def send_text(self, target: str, text: str, exact: bool = True, *, skip_send_rate_guard: bool = False) -> dict[str, Any]:
         return {"ok": True, "target": target, "text": text, "exact": exact}
 
 

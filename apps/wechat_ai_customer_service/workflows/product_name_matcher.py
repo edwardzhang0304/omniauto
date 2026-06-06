@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 import unicodedata
 from typing import Any
 
@@ -185,9 +186,50 @@ def collect_matched_aliases(aliases: list[str], query_text: str) -> list[str]:
         clean = str(alias or "").strip()
         if not clean:
             continue
-        if alias_matches_query(clean, query_text):
+        if (
+            alias_matches_query(clean, query_text)
+            or likely_single_typo_match(clean, query_text)
+            or likely_entity_prefix_match(clean, query_text)
+        ):
             matched.append(clean)
     return matched
+
+
+def likely_entity_prefix_match(alias_token: str, query_token: str) -> bool:
+    """Match brand/model shorthand such as "奥迪" -> "奥迪A4L".
+
+    This is intentionally narrower than free-form fuzzy matching: it only
+    fires for concrete aliases that start with a Chinese brand-like prefix and
+    continue with a model suffix, and only when the customer is asking about
+    availability/details.  That gives the Brain the right product evidence
+    without turning generic words into product facts.
+    """
+
+    alias = compact_match_text(alias_token)
+    query = compact_match_text(query_token)
+    if len(alias) < 4 or len(alias) > 16 or not query or len(query) > 64:
+        return False
+    match = re.match(r"^([\u4e00-\u9fff]{2,4})(?=[a-z0-9])", alias)
+    if not match:
+        return False
+    prefix = match.group(1)
+    if prefix not in query:
+        return False
+    availability_terms = (
+        "有",
+        "有没有",
+        "还有",
+        "库存",
+        "现车",
+        "在售",
+        "报价",
+        "价格",
+        "多少钱",
+        "情况",
+        "推荐",
+        "看看",
+    )
+    return any(compact_match_text(term) in query for term in availability_terms)
 
 
 def likely_single_typo_match(alias_token: str, query_token: str) -> bool:

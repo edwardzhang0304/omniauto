@@ -11,6 +11,7 @@ from __future__ import annotations
 import json
 import re
 import time
+from datetime import datetime, timedelta
 from functools import lru_cache
 from pathlib import Path
 from typing import Any
@@ -27,19 +28,31 @@ from customer_intent_assist import parse_json_object
 from customer_service_brain_contract import (
     POLICY_FACT_TYPES,
     PRODUCT_FACT_TYPES,
+    PRODUCT_MASTER_ONLY_FACT_TYPES,
     brain_plan_to_guard_candidate,
     compact_brain_plan,
+    collect_quality_product_terms,
     join_reply_segments,
     normalize_brain_plan,
     validate_brain_plan,
     verify_brain_reply_quality,
 )
+from customer_service_quality_reviewer import (
+    review_brain_reply_semantics,
+    semantic_review_to_quality,
+)
 from llm_reply_guard import guard_synthesized_reply
-from reply_evidence_builder import build_reply_evidence_pack
+from evidence_authority import PRODUCT_MASTER_CATEGORY_ID, annotate_authority
+from reply_evidence_builder import build_reply_evidence_pack, catalog_product_payload
 
 
-DEFAULT_TIMEOUT_SECONDS = 18
-DEFAULT_MAX_TOKENS = 2600
+DEFAULT_TIMEOUT_SECONDS = 35
+DEFAULT_LARGE_PROMPT_TIMEOUT_SECONDS = 60
+DEFAULT_VERY_LARGE_PROMPT_TIMEOUT_SECONDS = 90
+DEFAULT_FALLBACK_TIMEOUT_SECONDS = 45
+DEFAULT_LARGE_PROMPT_THRESHOLD_CHARS = 5000
+DEFAULT_VERY_LARGE_PROMPT_THRESHOLD_CHARS = 12000
+DEFAULT_MAX_TOKENS = 900
 DEFAULT_TEMPERATURE = 0.35
 DEFAULT_HISTORY_CHAR_BUDGET = 1200
 DEFAULT_PERSONA_PROMPT = (
@@ -95,6 +108,20 @@ BRAIN_RESPONSE_SCHEMA = {
     },
 }
 
+BRAIN_RESPONSE_SCHEMA_PROMPT = (
+    "JSON对象字段：can_answer(bool), understanding(obj), answer_mode(enum:direct_answer/"
+    "ask_clarifying_question/soft_social_reply/soft_redirect_to_business/"
+    "recommend_from_catalog/compare_options/quote_product_fact/collect_customer_info/"
+    "handoff/fallback_existing), reply_strategy(obj), evidence_used(obj keys:"
+    "product_ids/formal_knowledge_ids/conversation_fact_ids/common_sense_topics/style_ids/rag_ids), "
+    "facts_claimed(list of {fact_type,value,source_level,source_id}), reply_segments(list[str]), "
+    "risk({risk_level,risk_tags,needs_handoff,handoff_reason}), self_check(obj), "
+    "recommended_action(enum:send_reply/handoff/handoff_for_approval/fallback_existing), "
+    "confidence(number), reason(str)。所有字段尽量短；understanding/reply_strategy/self_check只保留关键点；"
+    "reply_segments最多3条且每条不超过96个中文字符；每条都必须是可单独发送的完整句，"
+    "不能以如果/要是/比如等悬空条件半句收尾；reason不超过60个中文字符。只输出JSON。"
+)
+
 
 def maybe_run_customer_service_brain(
     *,
@@ -114,6 +141,8 @@ def maybe_run_customer_service_brain(
     customer_profile: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     started_at = time.time()
+    stage_timings: dict[str, float] = {}
+    stage_timeline: dict[str, dict[str, Any]] = {}
     settings = effective_brain_settings(config)
     payload: dict[str, Any] = {
         "enabled": bool(settings.get("enabled", False)),
@@ -121,9 +150,29 @@ def maybe_run_customer_service_brain(
         "applied": False,
         "adoptable": False,
     }
+    visible_reply_owner = "brain"
+
+    def record_stage(name: str, stage_started_at: float) -> None:
+        duration = round(time.time() - stage_started_at, 4)
+        stage_timings[name] = duration
+        finished_at = datetime.now()
+        started_at_dt = finished_at - timedelta(seconds=duration)
+        stage_timeline[name] = {
+            "started_at": started_at_dt.isoformat(timespec="seconds"),
+            "finished_at": finished_at.isoformat(timespec="seconds"),
+            "duration_seconds": duration,
+        }
 
     def finish(data: dict[str, Any]) -> dict[str, Any]:
-        data["duration_seconds"] = round(time.time() - started_at, 4)
+        total = round(time.time() - started_at, 4)
+        stage_timings["total"] = total
+        stage_timeline["total"] = {
+            "duration_seconds": total,
+        }
+        data["stage_timings"] = dict(stage_timings)
+        data["stage_timeline"] = copy_stage_timeline(stage_timeline)
+        data["latency_trace"] = brain_stage_latency_trace(stage_timeline)
+        data["duration_seconds"] = total
         return data
 
     if not payload["enabled"] or payload["mode"] == "off":
@@ -141,6 +190,7 @@ def maybe_run_customer_service_brain(
         )
         return finish(payload)
 
+    stage_started = time.time()
     evidence_pack = build_reply_evidence_pack(
         config=config_with_brain_synthesis_settings(config, settings),
         target_name=target_name,
@@ -157,6 +207,8 @@ def maybe_run_customer_service_brain(
         raw_capture=raw_capture,
         customer_profile=customer_profile,
     )
+    record_stage("evidence_pack", stage_started)
+    stage_started = time.time()
     brain_input = build_brain_input(
         settings=settings,
         target_name=target_name,
@@ -166,6 +218,7 @@ def maybe_run_customer_service_brain(
         raw_capture=raw_capture,
         evidence_pack=evidence_pack,
     )
+    record_stage("brain_input", stage_started)
     payload["audit_summary"] = evidence_pack.get("audit_summary", {})
     payload["brain_input_summary"] = compact_brain_input(brain_input)
     if settings.get("include_evidence_pack_in_audit", False):
@@ -173,10 +226,12 @@ def maybe_run_customer_service_brain(
     if settings.get("include_brain_input_in_audit", False):
         payload["brain_input"] = brain_input
 
+    stage_started = time.time()
     result = run_brain_llm(settings=settings, brain_input=brain_input)
+    record_stage("brain_llm", stage_started)
     payload["llm_status"] = {
         key: result.get(key)
-        for key in ("ok", "provider", "model", "status", "error", "fallback", "raw_response_text")
+        for key in ("ok", "provider", "model", "status", "error", "fallback", "failover", "raw_response_text")
         if key in result
     }
     if result.get("usage"):
@@ -186,38 +241,62 @@ def maybe_run_customer_service_brain(
     if not result.get("ok"):
         payload["reason"] = str(result.get("error") or "customer_service_brain_llm_unavailable")
         if strict_brain_no_legacy_fallback(settings, payload):
-            return finish(build_brain_safe_fallback_payload(payload, combined=combined, reason="customer_service_brain_llm_unavailable"))
+            return finish(build_brain_safe_fallback_payload(payload, combined=combined, reason="customer_service_brain_llm_unavailable", evidence_pack=evidence_pack))
         return finish(payload)
 
+    stage_started = time.time()
     raw_plan = result.get("brain_plan") if isinstance(result.get("brain_plan"), dict) else {}
     plan = normalize_brain_plan(raw_plan, max_segments=int(settings.get("max_reply_segments") or 3))
+    coerced_fallback = coerce_usable_fallback_existing_plan(plan)
+    if coerced_fallback:
+        payload["brain_fallback_existing_coerced"] = coerced_fallback
+    rehydrated_product_ids = augment_evidence_pack_with_plan_product_ids(evidence_pack, plan)
+    if rehydrated_product_ids:
+        payload["brain_product_evidence_rehydrated"] = rehydrated_product_ids
+    canonicalized_fact_sources = canonicalize_conversation_product_fact_sources(plan, evidence_pack)
+    if canonicalized_fact_sources:
+        payload["brain_canonicalized_fact_sources"] = canonicalized_fact_sources
+    added_fact_claims = ensure_minimal_product_fact_claims(plan, evidence_pack)
+    if added_fact_claims:
+        payload["brain_minimal_fact_claims_added"] = added_fact_claims
     validation = validate_brain_plan(plan, require_fact_claims=bool(settings.get("require_fact_claims", True)))
+    quality: dict[str, Any] | None = None
     evidence_validation = validate_plan_against_evidence(plan, evidence_pack)
     if not evidence_validation.get("ok"):
         validation = {
             "ok": False,
             "errors": list(validation.get("errors", []) or []) + list(evidence_validation.get("errors", []) or []),
         }
+    record_stage("plan_normalization_validation", stage_started)
     payload["brain_plan"] = compact_brain_plan(plan)
+    payload["authority_sources"] = brain_plan_authority_sources(plan)
     payload["plan_validation"] = validation
     if not validation.get("ok"):
-        payload["reason"] = "brain_plan_validation_failed"
-        if strict_brain_no_legacy_fallback(settings, payload):
-            return finish(build_brain_safe_fallback_payload(payload, combined=combined, reason="brain_plan_validation_failed"))
-        return finish(payload)
-
-    quality = verify_brain_reply_quality(plan, current_message=combined, evidence_pack=evidence_pack, settings=settings)
-    payload["quality_verification"] = compact_quality_verification(quality)
-    if not quality.get("ok"):
+        validation_feedback = plan_validation_repair_feedback(validation, combined=combined)
+        stage_started = time.time()
         repair_result = maybe_repair_brain_plan(
             settings=settings,
             brain_input=brain_input,
             plan=plan,
-            quality=quality,
+            quality=validation_feedback,
         )
-        payload["quality_repair"] = compact_repair_result(repair_result)
+        record_stage("plan_validation_repair", stage_started)
+        payload["plan_validation_repair"] = compact_repair_result(repair_result)
         if repair_result.get("ok") and isinstance(repair_result.get("brain_plan"), dict):
+            stage_started = time.time()
             repaired_plan = normalize_brain_plan(repair_result["brain_plan"], max_segments=int(settings.get("max_reply_segments") or 3))
+            repaired_coerced_fallback = coerce_usable_fallback_existing_plan(repaired_plan)
+            if repaired_coerced_fallback:
+                payload["repaired_brain_fallback_existing_coerced"] = repaired_coerced_fallback
+            repaired_rehydrated_product_ids = augment_evidence_pack_with_plan_product_ids(evidence_pack, repaired_plan)
+            if repaired_rehydrated_product_ids:
+                payload["repaired_brain_product_evidence_rehydrated"] = repaired_rehydrated_product_ids
+            repaired_canonicalized_fact_sources = canonicalize_conversation_product_fact_sources(repaired_plan, evidence_pack)
+            if repaired_canonicalized_fact_sources:
+                payload["repaired_brain_canonicalized_fact_sources"] = repaired_canonicalized_fact_sources
+            repaired_added_fact_claims = ensure_minimal_product_fact_claims(repaired_plan, evidence_pack)
+            if repaired_added_fact_claims:
+                payload["repaired_brain_minimal_fact_claims_added"] = repaired_added_fact_claims
             repaired_validation = validate_brain_plan(repaired_plan, require_fact_claims=bool(settings.get("require_fact_claims", True)))
             repaired_evidence_validation = validate_plan_against_evidence(repaired_plan, evidence_pack)
             if not repaired_evidence_validation.get("ok"):
@@ -226,41 +305,367 @@ def maybe_run_customer_service_brain(
                     "errors": list(repaired_validation.get("errors", []) or []) + list(repaired_evidence_validation.get("errors", []) or []),
                 }
             repaired_quality = verify_brain_reply_quality(repaired_plan, current_message=combined, evidence_pack=evidence_pack, settings=settings)
+            repaired_soft_pass = repaired_deterministic_quality_soft_pass_decision(
+                settings=settings,
+                plan=repaired_plan,
+                quality=repaired_quality,
+                evidence_pack=evidence_pack,
+            )
+            if repaired_soft_pass.get("ok"):
+                payload["repaired_quality_soft_pass"] = repaired_soft_pass
+                repaired_quality = {
+                    "ok": True,
+                    "source": "deterministic_quality_soft_pass_after_repair",
+                    "errors": [],
+                    "warnings": repaired_soft_pass.get("warnings", []),
+                    "repair_instruction": "",
+                }
+            if repaired_validation.get("ok") and repaired_quality.get("ok"):
+                repaired_semantic_review = review_brain_reply_semantics(
+                    settings=settings,
+                    brain_input=brain_input,
+                    evidence_pack=evidence_pack,
+                    plan=repaired_plan,
+                    deterministic_quality=repaired_quality,
+                    force=should_force_semantic_review_after_repair(settings, validation_feedback),
+                )
+                payload["repaired_quality_gate_v2"] = compact_semantic_review(repaired_semantic_review)
+                if not repaired_semantic_review.get("ok"):
+                    repaired_quality = semantic_review_to_quality(repaired_semantic_review)
             payload["repaired_brain_plan"] = compact_brain_plan(repaired_plan)
             payload["repaired_plan_validation"] = repaired_validation
             payload["repaired_quality_verification"] = compact_quality_verification(repaired_quality)
+            record_stage("plan_validation_repair_verification", stage_started)
+            if repaired_validation.get("ok") and repaired_quality.get("ok"):
+                plan = repaired_plan
+                visible_reply_owner = "brain_repair"
+                validation = repaired_validation
+                quality = repaired_quality
+                payload["brain_plan"] = compact_brain_plan(plan)
+                payload["authority_sources"] = brain_plan_authority_sources(plan)
+                payload["plan_validation"] = validation
+                payload["quality_verification"] = compact_quality_verification(quality)
+            else:
+                payload["reason"] = "brain_plan_validation_failed"
+                if strict_brain_no_legacy_fallback(settings, payload):
+                    return finish(build_brain_safe_fallback_payload(payload, combined=combined, reason="brain_plan_validation_failed", evidence_pack=evidence_pack))
+                return finish(payload)
+        else:
+            payload["reason"] = "brain_plan_validation_failed"
+            if strict_brain_no_legacy_fallback(settings, payload):
+                return finish(build_brain_safe_fallback_payload(payload, combined=combined, reason="brain_plan_validation_failed", evidence_pack=evidence_pack))
+            return finish(payload)
+
+    if quality is None:
+        stage_started = time.time()
+        quality = verify_brain_reply_quality(plan, current_message=combined, evidence_pack=evidence_pack, settings=settings)
+        record_stage("deterministic_quality", stage_started)
+    payload["quality_verification"] = compact_quality_verification(quality)
+    if quality.get("ok"):
+        stage_started = time.time()
+        semantic_review = review_brain_reply_semantics(
+            settings=settings,
+            brain_input=brain_input,
+            evidence_pack=evidence_pack,
+            plan=plan,
+            deterministic_quality=quality,
+        )
+        record_stage("semantic_reviewer", stage_started)
+        payload["quality_gate_v2"] = compact_semantic_review(semantic_review)
+        if not semantic_review.get("ok"):
+            semantic_quality = semantic_review_to_quality(semantic_review)
+            handoff_soft_pass = semantic_handoff_quality_soft_pass_decision(
+                settings=settings,
+                plan=plan,
+                deterministic_quality=quality,
+                semantic_quality=semantic_quality,
+                evidence_pack=evidence_pack,
+            )
+            if handoff_soft_pass.get("ok"):
+                payload["quality_handoff_soft_pass"] = handoff_soft_pass
+                quality = {
+                    "ok": True,
+                    "source": "semantic_reviewer_brain_handoff_soft_pass",
+                    "errors": [],
+                    "warnings": handoff_soft_pass.get("warnings", []),
+                    "repair_instruction": "",
+                    "semantic_review": semantic_quality.get("semantic_review", {}),
+                }
+            else:
+                quality = semantic_quality
+            payload["quality_verification"] = compact_quality_verification(quality)
+    if not quality.get("ok"):
+        stage_started = time.time()
+        repair_result = maybe_repair_brain_plan(
+            settings=settings,
+            brain_input=brain_input,
+            plan=plan,
+            quality=quality,
+        )
+        record_stage("quality_repair", stage_started)
+        payload["quality_repair"] = compact_repair_result(repair_result)
+        if repair_result.get("ok") and isinstance(repair_result.get("brain_plan"), dict):
+            stage_started = time.time()
+            repaired_plan = normalize_brain_plan(repair_result["brain_plan"], max_segments=int(settings.get("max_reply_segments") or 3))
+            repaired_coerced_fallback = coerce_usable_fallback_existing_plan(repaired_plan)
+            if repaired_coerced_fallback:
+                payload["repaired_brain_fallback_existing_coerced"] = repaired_coerced_fallback
+            repaired_rehydrated_product_ids = augment_evidence_pack_with_plan_product_ids(evidence_pack, repaired_plan)
+            if repaired_rehydrated_product_ids:
+                payload["repaired_brain_product_evidence_rehydrated"] = repaired_rehydrated_product_ids
+            repaired_canonicalized_fact_sources = canonicalize_conversation_product_fact_sources(repaired_plan, evidence_pack)
+            if repaired_canonicalized_fact_sources:
+                payload["repaired_brain_canonicalized_fact_sources"] = repaired_canonicalized_fact_sources
+            repaired_added_fact_claims = ensure_minimal_product_fact_claims(repaired_plan, evidence_pack)
+            if repaired_added_fact_claims:
+                payload["repaired_brain_minimal_fact_claims_added"] = repaired_added_fact_claims
+            repaired_validation = validate_brain_plan(repaired_plan, require_fact_claims=bool(settings.get("require_fact_claims", True)))
+            repaired_evidence_validation = validate_plan_against_evidence(repaired_plan, evidence_pack)
+            if not repaired_evidence_validation.get("ok"):
+                repaired_validation = {
+                    "ok": False,
+                    "errors": list(repaired_validation.get("errors", []) or []) + list(repaired_evidence_validation.get("errors", []) or []),
+                }
+            repaired_quality = verify_brain_reply_quality(repaired_plan, current_message=combined, evidence_pack=evidence_pack, settings=settings)
+            repaired_soft_pass = repaired_deterministic_quality_soft_pass_decision(
+                settings=settings,
+                plan=repaired_plan,
+                quality=repaired_quality,
+                evidence_pack=evidence_pack,
+            )
+            if repaired_soft_pass.get("ok"):
+                payload["repaired_quality_soft_pass"] = repaired_soft_pass
+                repaired_quality = {
+                    "ok": True,
+                    "source": "deterministic_quality_soft_pass_after_repair",
+                    "errors": [],
+                    "warnings": repaired_soft_pass.get("warnings", []),
+                    "repair_instruction": "",
+                }
+            if repaired_validation.get("ok") and repaired_quality.get("ok") and quality.get("source") == "semantic_reviewer":
+                repaired_deterministic_quality = dict(repaired_quality)
+                repaired_semantic_review = review_brain_reply_semantics(
+                    settings=settings,
+                    brain_input=brain_input,
+                    evidence_pack=evidence_pack,
+                    plan=repaired_plan,
+                    deterministic_quality=repaired_quality,
+                    force=should_force_semantic_review_after_repair(settings, quality),
+                )
+                payload["repaired_quality_gate_v2"] = compact_semantic_review(repaired_semantic_review)
+                if not repaired_semantic_review.get("ok"):
+                    semantic_repaired_quality = semantic_review_to_quality(repaired_semantic_review)
+                    handoff_soft_pass = semantic_handoff_quality_soft_pass_decision(
+                        settings=settings,
+                        plan=repaired_plan,
+                        deterministic_quality=repaired_deterministic_quality,
+                        semantic_quality=semantic_repaired_quality,
+                        evidence_pack=evidence_pack,
+                    )
+                    if handoff_soft_pass.get("ok"):
+                        payload["repaired_quality_handoff_soft_pass"] = handoff_soft_pass
+                        repaired_quality = {
+                            "ok": True,
+                            "source": "semantic_reviewer_brain_handoff_soft_pass_after_repair",
+                            "errors": [],
+                            "warnings": handoff_soft_pass.get("warnings", []),
+                            "repair_instruction": "",
+                            "semantic_review": semantic_repaired_quality.get("semantic_review", {}),
+                        }
+                    else:
+                        repaired_quality = semantic_repaired_quality
+                    soft_pass = repaired_semantic_quality_soft_pass_decision(
+                        settings=settings,
+                        plan=repaired_plan,
+                        deterministic_quality=repaired_deterministic_quality,
+                        semantic_quality=repaired_quality,
+                        evidence_pack=evidence_pack,
+                    )
+                    if soft_pass.get("ok"):
+                        payload["repaired_quality_soft_pass"] = soft_pass
+                        repaired_quality = {
+                            "ok": True,
+                            "source": "semantic_reviewer_soft_pass_after_repair",
+                            "errors": [],
+                            "warnings": soft_pass.get("warnings", []),
+                            "repair_instruction": "",
+                            "semantic_review": repaired_quality.get("semantic_review", {}),
+                        }
+            payload["repaired_brain_plan"] = compact_brain_plan(repaired_plan)
+            payload["repaired_plan_validation"] = repaired_validation
+            payload["repaired_quality_verification"] = compact_quality_verification(repaired_quality)
+            record_stage("quality_repair_verification", stage_started)
             if repaired_validation.get("ok") and repaired_quality.get("ok"):
                 plan = repaired_plan
                 validation = repaired_validation
                 quality = repaired_quality
                 payload["brain_plan"] = compact_brain_plan(plan)
+                payload["authority_sources"] = brain_plan_authority_sources(plan)
                 payload["plan_validation"] = validation
                 payload["quality_verification"] = compact_quality_verification(quality)
             else:
                 payload["reason"] = "brain_quality_verification_failed"
                 if strict_brain_no_legacy_fallback(settings, payload):
-                    return finish(build_brain_safe_fallback_payload(payload, combined=combined, reason="brain_quality_verification_failed"))
+                    return finish(build_brain_safe_fallback_payload(payload, combined=combined, reason="brain_quality_verification_failed", evidence_pack=evidence_pack))
                 return finish(payload)
         else:
             payload["reason"] = "brain_quality_verification_failed"
             if strict_brain_no_legacy_fallback(settings, payload):
-                return finish(build_brain_safe_fallback_payload(payload, combined=combined, reason="brain_quality_verification_failed"))
+                return finish(build_brain_safe_fallback_payload(payload, combined=combined, reason="brain_quality_verification_failed", evidence_pack=evidence_pack))
             return finish(payload)
 
+    stage_started = time.time()
     candidate = brain_plan_to_guard_candidate(plan)
     guard_settings = dict(settings)
     guard_settings.setdefault("require_evidence", True)
+    guard_settings["brain_first_guard"] = True
     if brain_plan_allows_soft_evidence_override(plan):
         guard_settings["advisor_mode"] = "clear_common_sense_recommendation"
     guard = guard_synthesized_reply(candidate=candidate, evidence_pack=evidence_pack, settings=guard_settings)
+    record_stage("guard", stage_started)
     payload["guard"] = compact_guard(guard)
-    if not guard.get("allowed"):
-        payload["reason"] = str(guard.get("reason") or "brain_guard_rejected")
-        if strict_brain_no_legacy_fallback(settings, payload):
-            return finish(build_brain_safe_fallback_payload(payload, combined=combined, reason="brain_guard_rejected"))
-        return finish(payload)
+    if guard_requires_brain_repair(guard):
+        if guard.get("allowed"):
+            payload["guard_non_repair_action_forced_to_repair"] = compact_guard(guard)
+            guard = {
+                "allowed": False,
+                "action": "repair",
+                "severity": "repair",
+                "guard_role": "reviewer",
+                "reason": str(guard.get("reason") or "non_hard_guard_action_requires_brain_repair"),
+                "hard_boundary": bool(guard.get("hard_boundary", False)),
+                "warnings": list(guard.get("warnings", []) or []) + ["non_repair_guard_action_forced_to_brain_repair"],
+                "repair_instruction": (
+                    "Guard/质量门不得直接接管客户可见回复。请 Brain 根据 Guard 发现的问题重新生成 BrainPlan；"
+                    "非硬边界不能直接转人工或输出通用核实话术。"
+                ),
+            }
+            payload["guard"] = compact_guard(guard)
+        guard_feedback = guard_rejection_repair_feedback(guard, combined=combined)
+        stage_started = time.time()
+        repair_result = maybe_repair_brain_plan(
+            settings=settings,
+            brain_input=brain_input,
+            plan=plan,
+            quality=guard_feedback,
+        )
+        record_stage("guard_repair", stage_started)
+        payload["guard_repair"] = compact_repair_result(repair_result)
+        if repair_result.get("ok") and isinstance(repair_result.get("brain_plan"), dict):
+            stage_started = time.time()
+            repaired_plan = normalize_brain_plan(repair_result["brain_plan"], max_segments=int(settings.get("max_reply_segments") or 3))
+            repaired_coerced_fallback = coerce_usable_fallback_existing_plan(repaired_plan)
+            if repaired_coerced_fallback:
+                payload["guard_repaired_brain_fallback_existing_coerced"] = repaired_coerced_fallback
+            repaired_rehydrated_product_ids = augment_evidence_pack_with_plan_product_ids(evidence_pack, repaired_plan)
+            if repaired_rehydrated_product_ids:
+                payload["guard_repaired_brain_product_evidence_rehydrated"] = repaired_rehydrated_product_ids
+            repaired_canonicalized_fact_sources = canonicalize_conversation_product_fact_sources(repaired_plan, evidence_pack)
+            if repaired_canonicalized_fact_sources:
+                payload["guard_repaired_brain_canonicalized_fact_sources"] = repaired_canonicalized_fact_sources
+            repaired_added_fact_claims = ensure_minimal_product_fact_claims(repaired_plan, evidence_pack)
+            if repaired_added_fact_claims:
+                payload["guard_repaired_brain_minimal_fact_claims_added"] = repaired_added_fact_claims
+            repaired_validation = validate_brain_plan(repaired_plan, require_fact_claims=bool(settings.get("require_fact_claims", True)))
+            repaired_evidence_validation = validate_plan_against_evidence(repaired_plan, evidence_pack)
+            if not repaired_evidence_validation.get("ok"):
+                repaired_validation = {
+                    "ok": False,
+                    "errors": list(repaired_validation.get("errors", []) or []) + list(repaired_evidence_validation.get("errors", []) or []),
+                }
+            repaired_quality = verify_brain_reply_quality(repaired_plan, current_message=combined, evidence_pack=evidence_pack, settings=settings)
+            repaired_soft_pass = repaired_deterministic_quality_soft_pass_decision(
+                settings=settings,
+                plan=repaired_plan,
+                quality=repaired_quality,
+                evidence_pack=evidence_pack,
+            )
+            if repaired_soft_pass.get("ok"):
+                payload["guard_repaired_quality_soft_pass"] = repaired_soft_pass
+                repaired_quality = {
+                    "ok": True,
+                    "source": "deterministic_quality_soft_pass_after_repair",
+                    "errors": [],
+                    "warnings": repaired_soft_pass.get("warnings", []),
+                    "repair_instruction": "",
+                }
+            if repaired_validation.get("ok") and repaired_quality.get("ok"):
+                repaired_semantic_review = review_brain_reply_semantics(
+                    settings=settings,
+                    brain_input=brain_input,
+                    evidence_pack=evidence_pack,
+                    plan=repaired_plan,
+                    deterministic_quality=repaired_quality,
+                    force=should_force_semantic_review_after_repair(settings, guard_feedback),
+                )
+                payload["guard_repaired_quality_gate_v2"] = compact_semantic_review(repaired_semantic_review)
+                if not repaired_semantic_review.get("ok"):
+                    semantic_repaired_quality = semantic_review_to_quality(repaired_semantic_review)
+                    handoff_soft_pass = semantic_handoff_quality_soft_pass_decision(
+                        settings=settings,
+                        plan=repaired_plan,
+                        deterministic_quality=repaired_quality,
+                        semantic_quality=semantic_repaired_quality,
+                        evidence_pack=evidence_pack,
+                    )
+                    if handoff_soft_pass.get("ok"):
+                        payload["guard_repaired_quality_handoff_soft_pass"] = handoff_soft_pass
+                        repaired_quality = {
+                            "ok": True,
+                            "source": "semantic_reviewer_brain_handoff_soft_pass_after_guard_repair",
+                            "errors": [],
+                            "warnings": handoff_soft_pass.get("warnings", []),
+                            "repair_instruction": "",
+                            "semantic_review": semantic_repaired_quality.get("semantic_review", {}),
+                        }
+                    else:
+                        repaired_quality = semantic_repaired_quality
+            if repaired_validation.get("ok") and repaired_quality.get("ok"):
+                repaired_candidate = brain_plan_to_guard_candidate(repaired_plan)
+                repaired_guard_settings = dict(settings)
+                repaired_guard_settings.setdefault("require_evidence", True)
+                repaired_guard_settings["brain_first_guard"] = True
+                if brain_plan_allows_soft_evidence_override(repaired_plan):
+                    repaired_guard_settings["advisor_mode"] = "clear_common_sense_recommendation"
+                repaired_guard = guard_synthesized_reply(
+                    candidate=repaired_candidate,
+                    evidence_pack=evidence_pack,
+                    settings=repaired_guard_settings,
+                )
+            else:
+                repaired_guard = {"allowed": False, "reason": "guard_repair_validation_or_quality_failed"}
+            payload["guard_repaired_brain_plan"] = compact_brain_plan(repaired_plan)
+            payload["guard_repaired_plan_validation"] = repaired_validation
+            payload["guard_repaired_quality_verification"] = compact_quality_verification(repaired_quality)
+            payload["guard_repaired_guard"] = compact_guard(repaired_guard)
+            record_stage("guard_repair_verification", stage_started)
+            if repaired_guard.get("allowed") and not guard_requires_brain_repair(repaired_guard):
+                plan = repaired_plan
+                visible_reply_owner = "brain_repair"
+                validation = repaired_validation
+                quality = repaired_quality
+                guard = repaired_guard
+                payload["brain_plan"] = compact_brain_plan(plan)
+                payload["authority_sources"] = brain_plan_authority_sources(plan)
+                payload["plan_validation"] = validation
+                payload["quality_verification"] = compact_quality_verification(quality)
+                payload["guard"] = compact_guard(guard)
+            else:
+                payload["reason"] = str(guard.get("reason") or "brain_guard_rejected")
+                if strict_brain_no_legacy_fallback(settings, payload):
+                    return finish(build_brain_safe_fallback_payload(payload, combined=combined, reason="brain_guard_rejected", evidence_pack=evidence_pack))
+                return finish(payload)
+        else:
+            payload["reason"] = str(guard.get("reason") or "brain_guard_rejected")
+            if strict_brain_no_legacy_fallback(settings, payload):
+                return finish(build_brain_safe_fallback_payload(payload, combined=combined, reason="brain_guard_rejected", evidence_pack=evidence_pack))
+            return finish(payload)
 
     action = str(guard.get("action") or "")
+    plan_reply_text = join_reply_segments(plan.get("reply_segments", []) or [])
+    guard_audit_copy = dict(guard)
+    guard_reply_for_audit = str(guard_audit_copy.pop("reply", "") or "").strip()
+    guard_reply_ignored = bool(guard_reply_for_audit and guard_reply_for_audit != plan_reply_text.strip())
     if action == "send_reply":
         payload.update(
             {
@@ -269,8 +674,13 @@ def maybe_run_customer_service_brain(
                 "rule_name": "customer_service_brain_reply",
                 "reason": str(guard.get("reason") or "brain_guard_passed"),
                 "needs_handoff": False,
-                "raw_reply_text": str(guard.get("reply") or join_reply_segments(plan.get("reply_segments", []) or [])),
-                "reply_text": str(guard.get("reply") or join_reply_segments(plan.get("reply_segments", []) or [])),
+                "raw_reply_text": plan_reply_text,
+                "reply_text": plan_reply_text,
+                "visible_reply_owner": visible_reply_owner,
+                "visible_reply_source": "brain_plan.reply_segments",
+                "guard_verdict": str(guard.get("guard_verdict") or guard.get("severity") or "pass"),
+                "guard_hard_boundary": bool(guard.get("hard_boundary", False)),
+                "guard_reply_ignored": guard_reply_ignored,
             }
         )
     elif action == "handoff":
@@ -281,8 +691,13 @@ def maybe_run_customer_service_brain(
                 "rule_name": "customer_service_brain_handoff",
                 "reason": str(guard.get("reason") or "brain_handoff"),
                 "needs_handoff": True,
-                "raw_reply_text": str(guard.get("reply") or join_reply_segments(plan.get("reply_segments", []) or [])),
-                "reply_text": str(guard.get("reply") or join_reply_segments(plan.get("reply_segments", []) or [])),
+                "raw_reply_text": plan_reply_text,
+                "reply_text": plan_reply_text,
+                "visible_reply_owner": "brain_hard_boundary_refusal" if bool(guard.get("hard_boundary", False)) else visible_reply_owner,
+                "visible_reply_source": "brain_plan.reply_segments",
+                "guard_verdict": str(guard.get("guard_verdict") or guard.get("severity") or "handoff"),
+                "guard_hard_boundary": bool(guard.get("hard_boundary", False)),
+                "guard_reply_ignored": guard_reply_ignored,
             }
         )
     else:
@@ -302,6 +717,11 @@ def effective_brain_settings(config: dict[str, Any]) -> dict[str, Any]:
     settings.setdefault("provider", llm_synthesis.get("provider", "manual_json"))
     settings.setdefault("model_tier", llm_synthesis.get("model_tier", "flash"))
     settings.setdefault("timeout_seconds", DEFAULT_TIMEOUT_SECONDS)
+    settings.setdefault("large_prompt_timeout_seconds", DEFAULT_LARGE_PROMPT_TIMEOUT_SECONDS)
+    settings.setdefault("very_large_prompt_timeout_seconds", DEFAULT_VERY_LARGE_PROMPT_TIMEOUT_SECONDS)
+    settings.setdefault("fallback_timeout_seconds", DEFAULT_FALLBACK_TIMEOUT_SECONDS)
+    settings.setdefault("large_prompt_timeout_threshold_chars", DEFAULT_LARGE_PROMPT_THRESHOLD_CHARS)
+    settings.setdefault("very_large_prompt_timeout_threshold_chars", DEFAULT_VERY_LARGE_PROMPT_THRESHOLD_CHARS)
     settings.setdefault("max_tokens", DEFAULT_MAX_TOKENS)
     settings.setdefault("temperature", DEFAULT_TEMPERATURE)
     settings.setdefault("max_reply_segments", 3)
@@ -312,16 +732,32 @@ def effective_brain_settings(config: dict[str, Any]) -> dict[str, Any]:
     settings.setdefault("quality_repair_enabled", True)
     settings.setdefault("max_quality_repair_attempts", 1)
     settings.setdefault("quality_repair_timeout_seconds", 8)
-    settings.setdefault("quality_segment_soft_max_chars", 120)
+    settings.setdefault("quality_repair_max_tokens", 520)
+    settings.setdefault("quality_reply_max_chars", 120)
+    settings.setdefault("quality_mixed_topic_reply_max_chars", 180)
+    settings.setdefault("quality_split_reply_max_chars", 150)
+    settings.setdefault("quality_segment_soft_max_chars", 96)
     settings.setdefault("social_reply_soft_max_chars", 80)
-    settings.setdefault("history_char_budget", DEFAULT_HISTORY_CHAR_BUDGET)
-    settings.setdefault("summary_char_budget", 280)
-    settings.setdefault("current_batch_char_budget", 420)
+    settings.setdefault("quality_gate_v2_enabled", True)
+    settings.setdefault("semantic_reviewer_enabled", True)
+    settings.setdefault("semantic_reviewer_mode", "suspicious_only")
+    settings.setdefault("semantic_reviewer_timeout_seconds", 8)
+    settings.setdefault("semantic_reviewer_fallback_timeout_seconds", 8)
+    settings.setdefault("semantic_reviewer_max_tokens", 350)
+    settings.setdefault("semantic_reviewer_temperature", 0.1)
+    settings.setdefault("semantic_reviewer_cache_enabled", True)
+    settings.setdefault("semantic_reviewer_soft_pass_low_risk", True)
+    settings.setdefault("semantic_reviewer_brain_handoff_soft_pass_enabled", True)
+    settings.setdefault("semantic_reviewer_post_repair_soft_pass_enabled", True)
+    settings.setdefault("history_char_budget", 600)
+    settings.setdefault("summary_char_budget", 220)
+    settings.setdefault("current_batch_char_budget", 300)
     settings.setdefault("max_prompt_product_items", 5)
     settings.setdefault("max_prompt_formal_items", 3)
     settings.setdefault("max_prompt_style_examples", 1)
     settings.setdefault("max_prompt_rag_hits", 1)
     settings.setdefault("prompt_item_text_chars", 220)
+    settings.setdefault("lean_prompt_threshold_chars", 5500)
     settings.setdefault("fallback_to_legacy_on_error", False)
     if "identity_guard_enabled" not in settings:
         if "identity_guard_enabled" in llm_synthesis:
@@ -355,6 +791,82 @@ def config_with_brain_synthesis_settings(config: dict[str, Any], settings: dict[
     synthesis["enabled"] = True
     merged["llm_reply_synthesis"] = synthesis
     return merged
+
+
+def positive_int_setting(settings: dict[str, Any], key: str, default: int, *, minimum: int = 1) -> int:
+    raw_value = settings.get(key)
+    try:
+        value = int(default if raw_value is None or raw_value == "" else raw_value)
+    except (TypeError, ValueError):
+        value = default
+    return max(minimum, value)
+
+
+def copy_stage_timeline(stage_timeline: dict[str, dict[str, Any]]) -> dict[str, dict[str, Any]]:
+    copied: dict[str, dict[str, Any]] = {}
+    for name, item in stage_timeline.items():
+        if not isinstance(item, dict):
+            continue
+        copied[name] = dict(item)
+    return copied
+
+
+def brain_stage_latency_trace(stage_timeline: dict[str, dict[str, Any]]) -> dict[str, Any]:
+    trace: dict[str, Any] = {}
+    for name, item in stage_timeline.items():
+        if not isinstance(item, dict):
+            continue
+        if item.get("started_at"):
+            trace[f"{name}_started_at"] = item.get("started_at")
+        if item.get("finished_at"):
+            trace[f"{name}_finished_at"] = item.get("finished_at")
+        if item.get("duration_seconds") is not None:
+            trace[f"{name}_duration_seconds"] = item.get("duration_seconds")
+    semantic = stage_timeline.get("semantic_reviewer") if isinstance(stage_timeline.get("semantic_reviewer"), dict) else {}
+    if semantic.get("started_at"):
+        trace["semantic_review_started_at"] = semantic.get("started_at")
+    if semantic.get("finished_at"):
+        trace["semantic_review_finished_at"] = semantic.get("finished_at")
+    if semantic.get("duration_seconds") is not None:
+        trace["semantic_review_duration_seconds"] = semantic.get("duration_seconds")
+    return trace
+
+
+def brain_prompt_pressure_chars(prompt_estimate: dict[str, Any]) -> int:
+    return max(
+        0,
+        int(prompt_estimate.get("prompt_chars") or 0),
+        int(prompt_estimate.get("initial_prompt_chars") or 0),
+    )
+
+
+def resolve_brain_llm_timeout(settings: dict[str, Any], prompt_estimate: dict[str, Any], *, base_key: str = "timeout_seconds") -> int:
+    base = positive_int_setting(settings, base_key, DEFAULT_TIMEOUT_SECONDS)
+    large_timeout = positive_int_setting(settings, "large_prompt_timeout_seconds", DEFAULT_LARGE_PROMPT_TIMEOUT_SECONDS)
+    very_large_timeout = positive_int_setting(settings, "very_large_prompt_timeout_seconds", DEFAULT_VERY_LARGE_PROMPT_TIMEOUT_SECONDS)
+    large_threshold = positive_int_setting(
+        settings,
+        "large_prompt_timeout_threshold_chars",
+        DEFAULT_LARGE_PROMPT_THRESHOLD_CHARS,
+        minimum=0,
+    )
+    very_large_threshold = positive_int_setting(
+        settings,
+        "very_large_prompt_timeout_threshold_chars",
+        DEFAULT_VERY_LARGE_PROMPT_THRESHOLD_CHARS,
+        minimum=0,
+    )
+    pressure_chars = brain_prompt_pressure_chars(prompt_estimate)
+    if very_large_threshold and pressure_chars >= very_large_threshold:
+        return max(base, very_large_timeout)
+    if large_threshold and pressure_chars >= large_threshold:
+        return max(base, large_timeout)
+    return base
+
+
+def resolve_brain_fallback_timeout(settings: dict[str, Any], primary_timeout_seconds: int) -> int:
+    fallback_timeout = positive_int_setting(settings, "fallback_timeout_seconds", DEFAULT_FALLBACK_TIMEOUT_SECONDS)
+    return max(1, min(max(1, primary_timeout_seconds), fallback_timeout))
 
 
 def build_brain_input(
@@ -469,8 +981,12 @@ def run_brain_llm(*, settings: dict[str, Any], brain_input: dict[str, Any]) -> d
     api_key = resolve_llm_api_key(provider=provider, read_secret_fn=read_secret)
     model = resolve_llm_tier_model(provider=provider, tier=str(settings.get("model_tier") or "flash"), explicit_model=str(settings.get("model") or ""), read_secret_fn=read_secret)
     base_url = resolve_llm_base_url(provider=provider, explicit_base_url=str(settings.get("base_url") or ""), read_secret_fn=read_secret)
-    prompt_pack = build_brain_prompt_pack(settings=settings, brain_input=brain_input)
-    prompt_estimate = estimate_prompt_pack(prompt_pack)
+    prompt_pack, user_content, prompt_estimate = build_sized_brain_prompt(settings=settings, brain_input=brain_input)
+    timeout_seconds = resolve_brain_llm_timeout(settings, prompt_estimate)
+    fallback_timeout_seconds = resolve_brain_fallback_timeout(settings, timeout_seconds)
+    prompt_estimate["prompt_pressure_chars"] = brain_prompt_pressure_chars(prompt_estimate)
+    prompt_estimate["timeout_seconds"] = timeout_seconds
+    prompt_estimate["fallback_timeout_seconds"] = fallback_timeout_seconds
     if not api_key:
         return {
             "ok": False,
@@ -487,9 +1003,10 @@ def run_brain_llm(*, settings: dict[str, Any], brain_input: dict[str, Any]) -> d
         model=model,
         messages=[
             {"role": "system", "content": prompt_pack["system"]},
-            {"role": "user", "content": json.dumps(prompt_pack["user"], ensure_ascii=False) + "\n\nJSON schema:\n" + json.dumps(BRAIN_RESPONSE_SCHEMA, ensure_ascii=False)},
+            {"role": "user", "content": user_content},
         ],
-        timeout=max(1, int(settings.get("timeout_seconds") or DEFAULT_TIMEOUT_SECONDS)),
+        timeout=timeout_seconds,
+        fallback_timeout=fallback_timeout_seconds,
         max_tokens=max(256, int(settings.get("max_tokens") or DEFAULT_MAX_TOKENS)),
         temperature=float(settings.get("temperature") or DEFAULT_TEMPERATURE),
         tier=str(settings.get("model_tier") or "flash"),
@@ -530,33 +1047,83 @@ def brain_from_manual_json(settings: dict[str, Any]) -> dict[str, Any]:
     return {"ok": True, "provider": "manual_json", "brain_plan": plan}
 
 
+def build_sized_brain_prompt(
+    *,
+    settings: dict[str, Any],
+    brain_input: dict[str, Any],
+    repair_plan: dict[str, Any] | None = None,
+    repair_quality: dict[str, Any] | None = None,
+) -> tuple[dict[str, Any], str, dict[str, Any]]:
+    if repair_plan is not None and repair_quality is not None:
+        prompt_pack = build_brain_repair_prompt_pack(
+            settings=settings,
+            brain_input=brain_input,
+            plan=repair_plan,
+            quality=repair_quality,
+        )
+    else:
+        prompt_pack = build_brain_prompt_pack(settings=settings, brain_input=brain_input)
+    user_content = build_brain_user_content(prompt_pack)
+    prompt_estimate: dict[str, Any] = estimate_prompt_pack(prompt_pack, user_content=user_content)
+    threshold = max(0, int(settings.get("lean_prompt_threshold_chars") or 0))
+    if not threshold or int(prompt_estimate.get("prompt_chars") or 0) <= threshold:
+        prompt_estimate["profile"] = "default"
+        return prompt_pack, user_content, prompt_estimate
+
+    lean_settings = dict(settings)
+    lean_settings["history_char_budget"] = min(int(settings.get("history_char_budget") or 600), 120)
+    lean_settings["summary_char_budget"] = min(int(settings.get("summary_char_budget") or 220), 80)
+    lean_settings["current_batch_char_budget"] = min(int(settings.get("current_batch_char_budget") or 300), 140)
+    lean_settings["max_prompt_product_items"] = min(int(settings.get("max_prompt_product_items") or 5), 5)
+    lean_settings["max_prompt_formal_items"] = min(int(settings.get("max_prompt_formal_items") or 3), 2)
+    lean_settings["max_prompt_style_examples"] = 0
+    lean_settings["max_prompt_rag_hits"] = 0
+    lean_settings["prompt_item_text_chars"] = min(int(settings.get("prompt_item_text_chars") or 220), 100)
+    lean_settings["prompt_profile"] = "lean"
+    if repair_plan is not None and repair_quality is not None:
+        prompt_pack = build_brain_repair_prompt_pack(
+            settings=lean_settings,
+            brain_input=brain_input,
+            plan=repair_plan,
+            quality=repair_quality,
+        )
+    else:
+        prompt_pack = build_brain_prompt_pack(settings=lean_settings, brain_input=brain_input)
+    user_content = build_brain_user_content(prompt_pack)
+    lean_estimate: dict[str, Any] = estimate_prompt_pack(prompt_pack, user_content=user_content)
+    lean_estimate["profile"] = "lean"
+    lean_estimate["initial_prompt_chars"] = int(prompt_estimate.get("prompt_chars") or 0)
+    return prompt_pack, user_content, lean_estimate
+
+
 def build_brain_prompt_pack(*, settings: dict[str, Any], brain_input: dict[str, Any]) -> dict[str, Any]:
     evidence = brain_input.get("evidence") if isinstance(brain_input.get("evidence"), dict) else {}
     system = (
-        "你是微信客服的大脑，不是模板填空器。"
-        "你的任务是先理解客户真实意图，再基于允许的证据规划自然、简短、像真人客服的回复。"
-        "商品事实只能来自 product_master；政策、流程和边界只能来自 formal_knowledge；"
-        "当前会话事实只在当前会话内有效；AI经验池、历史聊天和style_context只能影响表达方式，不能作为事实依据；"
-        "OCR引用/回复预览只能作为客户指代的辅助上下文，不能当作当前新消息、事实来源或学习依据；"
-        "LLM常识只能做通用取舍分析，不能编造价格、库存、车况、贷款、售后或业务承诺。"
-        "客户问泛化选车、用车取舍、避坑方向、油耗舒适性、维修便利性等问题时，"
-        "只要不需要编造具体车源/价格/库存/政策承诺，就应当用常识给出明确、实用的判断，"
-        "不要因为formal_knowledge为空就转人工或fallback。"
-        "要处理口语、错别字、音译、简称和上下文指代。"
-        "若客户问候或闲聊，先自然回应，不要机械硬转业务。"
-        "若客户明确问价、推荐、比较或质疑，必须直接回应当前问题。"
-        "输出1到3条reply_segments，每条都是完整微信短句，不要省略号截断。"
-        "必须严格使用response_schema字段名。evidence_used只能包含"
-        "product_ids、formal_knowledge_ids、conversation_fact_ids、common_sense_topics、style_ids、rag_ids；"
-        "不要写product_master、formal_knowledge、common_sense等替代字段。"
-        "facts_claimed只能记录需要权威证据支持的事实，字段名只能是fact_type、value、source_level、source_id；"
-        "常识性分析不要放进facts_claimed，应放在evidence_used.common_sense_topics。"
-        "risk字段只能包含risk_level、risk_tags、needs_handoff、handoff_reason。"
-        "当只是常识性建议时，answer_mode优先用direct_answer或compare_options，"
-        "facts_claimed=[]，can_answer=true，recommended_action=send_reply。"
-        "输出前必须自检：是否回答了当前问题、是否引用了允许证据、是否没有把辅助层当事实、是否像真人短句。"
-        "必须遵守用户消息中的runtime_principles；这些原则只约束表达、安全和思考方式，不授权任何商品事实或业务承诺。"
-        "只输出JSON对象，不要Markdown。"
+        "你是微信客服Brain，先理解真实意图，再规划自然短回复。"
+        "权威边界：商品事实只用content_basis.product_master；政策/流程/边界只用formal_knowledge；"
+        "当前会话事实只在本会话有效。AI经验池/历史/style/RAG只辅助表达，不能授权事实。"
+        "LLM常识可做泛化取舍/避坑/保险等常识分析，但不得编造价格、库存、车况、贷款、售后或承诺。"
+        "legacy/existing_reply只作风险参考，不能作为上级答案或主导最终话术。"
+        "safety里no_relevant_business_evidence只是软提示：若客户是问候/闲聊/常识问题，且不声明商品/政策事实、无硬风险，应直接自然回复。"
+        "必须直答当前问题：问候/闲聊先自然接住；问价/推荐/比较/质疑要给结论。"
+        "客户说“刚才/前面/这两台/直接挑/别再问预算”时，必须沿用conversation.context与history_text中的上一轮需求，结合product_master候选给出实际建议，不能只说确认、稍等或重新追问同一信息。"
+        "客户给出预算上限时，若product_master里有预算内候选，主推荐必须优先预算内；超预算车只能作为明确标注的备选，不可替代预算内推荐。"
+        "客户明确要两台/多台推荐时，若product_master/catalog_candidates里有两个以上预算内或近预算候选，必须给出至少两个具体候选；"
+        "第二候选不完美也要如实说明取舍，不能用“继续筛/再找找”代替客户要的具体推荐。"
+        "品牌/车型/错字/简称/指代先查product_master，命中则答该商品；无完全匹配时说明差距并给近似方向，不要仅因此handoff。"
+        "客户问实物适配、装载、尺寸、座椅放倒、空间是否够等问题时，若缺少权威参数，不要编造结论；"
+        "但可直接给出谨慎答复：需要按实车尺寸、现场试装或核实资料确认。此类不确定答复不等于必须转人工。"
+        "置换/贷款/看车流程按formal_knowledge答并保留审批/核价边界；"
+        "除非formal_knowledge明确授权，不承诺上门验车、当天打款、最终收购价或固定服务时效。"
+        "可说先初估、再按门店验车/手续核实后确认，包过、具体利率月供、最低价等才handoff。"
+        "保险、贷款、赔付等边界表达不要复述“一定赔/肯定赔/保证赔/包过”等高风险短语，即使是否定句也改说“不能直接下结论/需要以审核为准”。"
+        "客户留电话、姓名、到店时间或问能否安排看车时，先自然确认已记下，再说明需要核实车源状态和门店排期、确认后回复；不能直接承诺“过来就可以/直接来”。"
+        "输出1到3条完整微信短句，默认越短越好，总内容尽量不超过120个有效中文内容字符；每条都要能独立发送，不要让某条以“如果/要是/比如”这类半句收尾。"
+        "客户确实需要较多信息时，拆成2到3条完整短句，而不是写成长段；不要省略号；别说“资料写的是”，可说“我这边看到”。"
+        "facts_claimed只写权威事实{fact_type,value,source_level,source_id}；常识分析放evidence_used.common_sense_topics。"
+        "risk只含risk_level/risk_tags/needs_handoff/handoff_reason。"
+        "常识性建议：facts_claimed=[]，recommended_action=send_reply，answer_mode用direct_answer或compare_options。"
+        "遵守runtime_principles；它不授权事实。只输出JSON对象。"
     )
     return {
         "schema_version": 1,
@@ -564,8 +1131,7 @@ def build_brain_prompt_pack(*, settings: dict[str, Any], brain_input: dict[str, 
         "user": {
             "task": "生成 BrainPlan，不要直接绕过guard发送。",
             "brain_input": slim_brain_input_for_prompt(brain_input, settings=settings),
-            "authority_order": evidence.get("authority_order", []),
-            "response_schema": BRAIN_RESPONSE_SCHEMA,
+            "authority_order": compact_authority_order_for_prompt(evidence.get("authority_order", [])),
         },
     }
 
@@ -598,12 +1164,30 @@ def slim_brain_input_for_prompt(brain_input: dict[str, Any], *, settings: dict[s
         max_text_chars=item_text_chars,
     )
     rag = compact_rag_for_prompt(evidence.get("rag", {}) if isinstance(evidence.get("rag"), dict) else {}, max_hits=max_rag_hits, max_text_chars=item_text_chars)
+    current_message = compact_current_message_for_prompt(
+        brain_input.get("current_message", {}) if isinstance(brain_input.get("current_message"), dict) else {}
+    )
+    current_message["referenced_context_policy"] = "引用只辅助理解指代，不授权新事实、订单抽取或自动学习。"
+    auxiliary: dict[str, Any] = {}
+    common_sense = compact_common_sense_for_prompt(evidence.get("common_sense", {}))
+    if common_sense:
+        auxiliary["common_sense"] = common_sense
+    ai_experience_pool = compact_ai_experience_pool_for_prompt(evidence.get("ai_experience_pool", {}))
+    if ai_experience_pool:
+        auxiliary["ai_experience_pool"] = ai_experience_pool
+    style_items = [
+        compact_prompt_value(item, max_text_chars=item_text_chars, max_list_items=3)
+        for item in (style_context or [])[:max_style_examples]
+        if isinstance(item, dict)
+    ]
+    if style_items:
+        auxiliary["style_context"] = style_items
+    if rag.get("hits"):
+        auxiliary["rag"] = rag
+    audit_summary = evidence.get("audit_summary", {}) if isinstance(evidence.get("audit_summary"), dict) else {}
     return {
         "target": brain_input.get("target", {}),
-        "current_message": {
-            **(brain_input.get("current_message", {}) if isinstance(brain_input.get("current_message"), dict) else {}),
-            "referenced_context_policy": "引用只辅助理解指代，不授权新事实、订单抽取或自动学习。",
-        },
+        "current_message": current_message,
         "conversation": {
             "context": conversation.get("context", {}),
             "summary": clip(str(conversation.get("summary") or ""), int(settings.get("summary_char_budget") or 360)),
@@ -615,20 +1199,23 @@ def slim_brain_input_for_prompt(brain_input: dict[str, Any], *, settings: dict[s
             "formal_knowledge": formal_knowledge,
             "evidence": content_evidence,
         },
-        "auxiliary": {
-            "common_sense": evidence.get("common_sense", {}),
-            "ai_experience_pool": evidence.get("ai_experience_pool", {}),
-            "style_context": [
-                compact_prompt_value(item, max_text_chars=item_text_chars, max_list_items=4)
-                for item in (style_context or [])[:max_style_examples]
-                if isinstance(item, dict)
-            ],
-            "rag": rag,
-        },
-        "safety": evidence.get("safety", {}),
+        "auxiliary": auxiliary,
+        "safety": compact_safety_for_prompt(evidence.get("safety", {})),
         "intent_tags": evidence.get("intent_tags", []),
-        "audit_summary": evidence.get("audit_summary", {}),
-        "runtime_principles": runtime.get("runtime_principles") or build_brain_runtime_principles(settings=settings),
+        "audit_summary": {
+            key: audit_summary.get(key)
+            for key in (
+                "structured_evidence_count",
+                "runtime_rag_hit_count",
+                "rag_hit_count",
+                "excluded_ai_experience_pool_hit_count",
+            )
+            if key in audit_summary
+        },
+        "legacy_candidate_policy": "legacy/existing_reply仅审计参考，不能授权事实或最终话术。",
+        "runtime_principles": compact_runtime_principles_for_prompt(
+            runtime.get("runtime_principles") or build_brain_runtime_principles(settings=settings)
+        ),
     }
 
 
@@ -649,6 +1236,67 @@ def maybe_repair_brain_plan(
     return run_brain_repair_llm(settings=settings, brain_input=brain_input, plan=plan, quality=quality)
 
 
+def plan_validation_repair_feedback(validation: dict[str, Any], *, combined: str) -> dict[str, Any]:
+    errors = [str(item) for item in validation.get("errors", []) or [] if str(item)]
+    instruction_parts = [
+        "BrainPlan未通过权威证据校验。请重新理解客户当前问题并重新生成BrainPlan。",
+        "结构化校验只提供审稿意见，最终回复仍由Brain决定。",
+        "商品名称、价格、车况、库存等商品事实必须回到product_master授权；政策流程必须回到formal_knowledge授权。",
+        "当前会话事实只能帮助理解指代，不能单独授权价格、库存、车况或承诺。",
+        "如果草稿引用了未在本轮证据中的商品，请改用brain_input里的product_master/catalog_candidates，或明确说明需要核实。",
+        "不要退回机械兜底，不要只说稍后确认；能在权威证据内回答的，要直接回答。",
+    ]
+    if errors:
+        instruction_parts.append("本次校验错误：" + "；".join(errors[:6]))
+    customer_text = str(combined or "").strip()
+    if customer_text:
+        instruction_parts.append("当前客户消息：" + customer_text[:180])
+    return {
+        "ok": False,
+        "source": "plan_authority_validation",
+        "errors": errors,
+        "warnings": [],
+        "repair_instruction": " ".join(instruction_parts),
+    }
+
+
+def guard_rejection_repair_feedback(guard: dict[str, Any], *, combined: str) -> dict[str, Any]:
+    reason = str(guard.get("reason") or "brain_guard_rejected").strip()
+    severity = str(guard.get("severity") or "").strip()
+    guard_instruction = str(guard.get("repair_instruction") or "").strip()
+    guard_warnings = [str(item) for item in (guard.get("warnings") or []) if str(item).strip()]
+    guard_errors = [str(item) for item in (guard.get("errors") or []) if str(item).strip()]
+    instruction_parts = [
+        "BrainPlan被最终安全守护拒绝。请把guard原因当成审稿意见，重新生成一个证据安全、可发送的BrainPlan。",
+        "最终回复仍由Brain决定，但必须修正guard指出的事实、承诺、证据或安全边界问题。",
+        "如果guard等级是repair，说明这是可修复质量/证据问题，应尽量在硬边界内修好，不要直接转人工。",
+        "只有触碰硬边界、越权承诺、高风险请求或会话错位时，才应推荐handoff。",
+        "能在商品库/正式知识/当前会话已授权事实内回答的，要直接回答；不能编造，也不要退回机械稍后确认。",
+        "如果是商品事实不被支持，请改用本轮product_master/catalog_candidates里明确存在的商品，或清楚说明该点需要核实。",
+        "如果是政策/流程/承诺风险，请用formal_knowledge边界内的说法，避免承诺结果、时效、审批或最终价格。",
+    ]
+    if severity:
+        instruction_parts.append("guard等级：" + severity)
+    if reason:
+        instruction_parts.append("guard拒绝原因：" + reason)
+    if guard_instruction:
+        instruction_parts.append("guard返修意见：" + guard_instruction[:260])
+    if guard_warnings:
+        instruction_parts.append("guard警告：" + "；".join(guard_warnings[:4]))
+    if guard_errors:
+        instruction_parts.append("guard错误：" + "；".join(guard_errors[:4]))
+    customer_text = str(combined or "").strip()
+    if customer_text:
+        instruction_parts.append("当前客户消息：" + customer_text[:180])
+    return {
+        "ok": False,
+        "source": "guard_rejection",
+        "errors": guard_errors or ([reason] if reason else ["brain_guard_rejected"]),
+        "warnings": [],
+        "repair_instruction": " ".join(instruction_parts),
+    }
+
+
 def run_brain_repair_llm(
     *,
     settings: dict[str, Any],
@@ -660,8 +1308,17 @@ def run_brain_repair_llm(
     api_key = resolve_llm_api_key(provider=provider, read_secret_fn=read_secret)
     model = resolve_llm_tier_model(provider=provider, tier=str(settings.get("model_tier") or "flash"), explicit_model=str(settings.get("model") or ""), read_secret_fn=read_secret)
     base_url = resolve_llm_base_url(provider=provider, explicit_base_url=str(settings.get("base_url") or ""), read_secret_fn=read_secret)
-    prompt_pack = build_brain_repair_prompt_pack(settings=settings, brain_input=brain_input, plan=plan, quality=quality)
-    prompt_estimate = estimate_prompt_pack(prompt_pack)
+    prompt_pack, user_content, prompt_estimate = build_sized_brain_prompt(
+        settings=settings,
+        brain_input=brain_input,
+        repair_plan=plan,
+        repair_quality=quality,
+    )
+    timeout_seconds = resolve_brain_llm_timeout(settings, prompt_estimate, base_key="quality_repair_timeout_seconds")
+    fallback_timeout_seconds = resolve_brain_fallback_timeout(settings, timeout_seconds)
+    prompt_estimate["prompt_pressure_chars"] = brain_prompt_pressure_chars(prompt_estimate)
+    prompt_estimate["timeout_seconds"] = timeout_seconds
+    prompt_estimate["fallback_timeout_seconds"] = fallback_timeout_seconds
     if not api_key:
         return {
             "ok": False,
@@ -678,10 +1335,11 @@ def run_brain_repair_llm(
         model=model,
         messages=[
             {"role": "system", "content": prompt_pack["system"]},
-            {"role": "user", "content": json.dumps(prompt_pack["user"], ensure_ascii=False) + "\n\nJSON schema:\n" + json.dumps(BRAIN_RESPONSE_SCHEMA, ensure_ascii=False)},
+            {"role": "user", "content": user_content},
         ],
-        timeout=max(1, int(settings.get("quality_repair_timeout_seconds") or settings.get("timeout_seconds") or 8)),
-        max_tokens=max(256, int(settings.get("max_tokens") or DEFAULT_MAX_TOKENS)),
+        timeout=timeout_seconds,
+        fallback_timeout=fallback_timeout_seconds,
+        max_tokens=positive_int_setting(settings, "quality_repair_max_tokens", 520, minimum=256),
         temperature=float(settings.get("temperature") or DEFAULT_TEMPERATURE),
         tier=str(settings.get("model_tier") or "flash"),
         json_mode=True,
@@ -714,8 +1372,12 @@ def build_brain_repair_prompt_pack(
         "你是微信客服大脑的质量修复器。你的任务不是新增事实，而是在同一证据包和同一权威边界内，"
         "修复原 BrainPlan 的答非所问、绕圈、缺少明确结论、机械套话或表达不自然问题。"
         "商品事实只能来自product_master；政策、流程和边界只能来自formal_knowledge；"
+        "如果需要重选或替换推荐商品，只能从brain_input里本轮提供的product_master、products、catalog_candidates中选择，"
+        "不能凭历史聊天、AI经验池、style_context或模型记忆临时引入未在本轮证据中出现的商品；"
+        "置换/收购类流程不可承诺上门验车、当天打款、最终收购价或固定服务时效，除非formal_knowledge明确授权；"
         "AI经验池、历史聊天、style_context和LLM常识只可辅助理解与表达，不能授权事实或承诺。"
-        "修复后仍输出完整 BrainPlan JSON，reply_segments必须是1到3条完整微信短句，不要省略号。"
+        "修复后仍输出完整 BrainPlan JSON，reply_segments必须是1到3条可独立发送的完整微信短句，不要省略号，不要半句收尾。"
+        "facts_claimed只写商品库/正式知识/当前会话已授权事实；常识建议、风险边界、话术理由放reply_strategy或evidence_used.common_sense_topics，不写入facts_claimed。"
         "如果证据不足，直接说明需要按资料核实，不要编造。只输出JSON对象，不要Markdown。"
     )
     return {
@@ -727,8 +1389,108 @@ def build_brain_repair_prompt_pack(
             "repair_instruction": str(quality.get("repair_instruction") or ""),
             "original_brain_plan": compact_brain_plan(plan),
             "brain_input": slim_brain_input_for_prompt(brain_input, settings=settings),
-            "response_schema": BRAIN_RESPONSE_SCHEMA,
         },
+    }
+
+
+def compact_current_message_for_prompt(current: dict[str, Any]) -> dict[str, Any]:
+    clean_text = str(current.get("clean_text") or "").strip()
+    raw_text = str(current.get("raw_text") or "").strip()
+    payload: dict[str, Any] = {
+        "clean_text": clean_text,
+        "message_ids": current.get("message_ids", []),
+    }
+    if raw_text and raw_text != clean_text:
+        payload["raw_text"] = clip(raw_text, 220)
+    referenced_context = current.get("referenced_context") or []
+    if referenced_context:
+        payload["referenced_context"] = [
+            compact_prompt_value(item, max_text_chars=180, max_list_items=3)
+            for item in referenced_context[:3]
+            if isinstance(item, dict)
+        ]
+    quality_flags = current.get("quality_flags") or []
+    if quality_flags:
+        payload["quality_flags"] = quality_flags[:5]
+    return payload
+
+
+def compact_authority_order_for_prompt(value: Any) -> list[str]:
+    result: list[str] = []
+    for item in value or []:
+        if not isinstance(item, dict):
+            continue
+        level = str(item.get("level") or "").strip()
+        if level:
+            result.append(level)
+    return result
+
+
+def compact_common_sense_for_prompt(value: Any) -> dict[str, Any]:
+    if not isinstance(value, dict):
+        return {}
+    payload: dict[str, Any] = {}
+    for key in ("layer", "allowed_use", "conflict_rule"):
+        item = value.get(key)
+        if item not in (None, "", [], {}):
+            payload[key] = compact_prompt_value(item, max_text_chars=90, max_list_items=2)
+    for key in ("guidance_points", "must_defer_to", "forbidden_fact_types", "response_style"):
+        items = value.get(key)
+        if items not in (None, "", [], {}):
+            payload[key] = compact_prompt_value(items, max_text_chars=70, max_list_items=2)
+    return payload
+
+
+def compact_ai_experience_pool_for_prompt(value: Any) -> dict[str, Any]:
+    if not isinstance(value, dict):
+        return {}
+    excluded = int(value.get("excluded_hit_count") or 0)
+    source = value.get("source") if isinstance(value.get("source"), dict) else {}
+    hits = source.get("hits") if isinstance(source.get("hits"), list) else []
+    if excluded <= 0 and not hits:
+        return {}
+    return {
+        "authority_level": "ai_experience_pool",
+        "can_authorize_reply_content": False,
+        "excluded_hit_count": excluded,
+    }
+
+
+def compact_safety_for_prompt(value: Any) -> dict[str, Any]:
+    if not isinstance(value, dict):
+        return {}
+    payload: dict[str, Any] = {}
+    reasons = {str(item) for item in value.get("reasons", []) or [] if str(item)}
+    soft_no_evidence_reasons = {"no_relevant_business_evidence", "auto_reply_disabled"}
+    if value.get("must_handoff") and reasons and reasons <= soft_no_evidence_reasons:
+        return {
+            "soft_no_evidence_guard": True,
+            "reasons": sorted(reasons),
+            "brain_instruction": "这不是硬转人工；若无事实声明、无违法/金融承诺/内部探针等硬风险，可用常识或闲聊能力直接回复。",
+        }
+    for key in ("must_handoff", "allowed_auto_reply", "reasons"):
+        item = value.get(key)
+        if item not in (None, "", [], {}):
+            payload[key] = compact_prompt_value(item, max_text_chars=100, max_list_items=4)
+    discount_check = value.get("discount_check") if isinstance(value.get("discount_check"), dict) else {}
+    if discount_check.get("detected"):
+        payload["discount_check"] = compact_prompt_value(discount_check, max_text_chars=100, max_list_items=4)
+    return payload
+
+
+def compact_runtime_principles_for_prompt(value: Any) -> dict[str, Any]:
+    if not isinstance(value, dict):
+        return {}
+    identity_guard = value.get("identity_guard") if isinstance(value.get("identity_guard"), dict) else {}
+    return {
+        "authority": value.get("authority") or "non_authoritative_runtime_principles",
+        "role_persona": clip(str(value.get("role_persona") or ""), 120),
+        "identity_guard": {
+            "enabled": identity_guard.get("enabled") is not False,
+            "customer_visible_rule": clip(str(identity_guard.get("customer_visible_rule") or ""), 90),
+        },
+        "reply_style": compact_prompt_value(value.get("reply_style", []) or [], max_text_chars=70, max_list_items=2),
+        "authority_boundary": compact_prompt_value(value.get("authority_boundary", []) or [], max_text_chars=80, max_list_items=2),
     }
 
 
@@ -773,8 +1535,14 @@ def load_customer_service_persona_prompt() -> str:
     return clean[:1200] if clean else DEFAULT_PERSONA_PROMPT
 
 
-def estimate_prompt_pack(prompt_pack: dict[str, Any]) -> dict[str, int]:
-    text = json.dumps(prompt_pack, ensure_ascii=False)
+def build_brain_user_content(prompt_pack: dict[str, Any]) -> str:
+    return json.dumps(prompt_pack.get("user", {}), ensure_ascii=False) + "\n\n" + BRAIN_RESPONSE_SCHEMA_PROMPT
+
+
+def estimate_prompt_pack(prompt_pack: dict[str, Any], *, user_content: str | None = None) -> dict[str, int]:
+    system = str(prompt_pack.get("system") or "")
+    user = user_content if user_content is not None else build_brain_user_content(prompt_pack)
+    text = system + "\n" + str(user or "")
     return {"prompt_chars": len(text), "rough_prompt_tokens": max(1, len(text) // 2)}
 
 
@@ -788,9 +1556,64 @@ def clip(text: str, limit: int) -> str:
 def compact_guard(guard: dict[str, Any]) -> dict[str, Any]:
     return {
         key: guard.get(key)
-        for key in ("allowed", "action", "reason", "authority_tags", "confidence", "min_confidence")
+        for key in (
+            "allowed",
+            "action",
+            "severity",
+            "guard_role",
+            "guard_verdict",
+            "reason",
+            "repair_instruction",
+            "warnings",
+            "errors",
+            "hard_boundary",
+            "authority_tags",
+            "confidence",
+            "min_confidence",
+            "customer_visible_reply_source",
+        )
         if key in guard
     }
+
+
+def guard_requires_brain_repair(guard: dict[str, Any]) -> bool:
+    """Keep reviewer layers from becoming customer-visible answer engines."""
+
+    action = str(guard.get("action") or "").strip()
+    if not guard.get("allowed") or action == "repair":
+        return True
+    if action == "handoff" and not bool(guard.get("hard_boundary", False)):
+        return True
+    if str(guard.get("customer_visible_reply_source") or "") == "guard_handoff_ack":
+        return True
+    return False
+
+
+def should_force_semantic_review_after_repair(settings: dict[str, Any], feedback: dict[str, Any]) -> bool:
+    """Avoid making every Brain repair pay for another full reviewer call.
+
+    Repair feedback has already been folded into the Brain prompt.  A second
+    LLM reviewer is still valuable for high-risk or hard-boundary findings, but
+    forcing it after every ordinary quality repair creates long-tail latency and
+    makes reviewer layers feel like competing answer engines.
+    """
+
+    if settings.get("semantic_reviewer_force_after_repair"):
+        return True
+    source = str(feedback.get("source") or "").strip()
+    review = feedback.get("semantic_review") if isinstance(feedback.get("semantic_review"), dict) else {}
+    if source == "semantic_reviewer":
+        risk = str(review.get("customer_visible_risk") or "").strip().lower()
+        if risk == "high":
+            return True
+        if review.get("hard_boundary_concerns"):
+            return True
+        if review.get("verdict") in {"block", "handoff_suggest"}:
+            return True
+        return bool(settings.get("semantic_reviewer_force_after_semantic_repair", False))
+    errors = [str(item).lower() for item in (feedback.get("errors") or []) if str(item)]
+    hard_tokens = ("hard_boundary", "illegal", "prompt", "secret", "越权", "违法", "硬边界")
+    return any(any(token in error for token in hard_tokens) for error in errors)
 
 
 def compact_quality_verification(quality: dict[str, Any]) -> dict[str, Any]:
@@ -800,6 +1623,410 @@ def compact_quality_verification(quality: dict[str, Any]) -> dict[str, Any]:
         "warnings": list(quality.get("warnings", []) or []),
         "repair_instruction": str(quality.get("repair_instruction") or "")[:500],
     }
+
+
+def compact_semantic_review(review: dict[str, Any]) -> dict[str, Any]:
+    return {
+        key: review.get(key)
+        for key in (
+            "ok",
+            "status",
+            "invoked",
+            "mode",
+            "enforced",
+            "verdict",
+            "shadow_verdict",
+            "confidence",
+            "semantic_errors",
+            "hard_boundary_concerns",
+            "errors",
+            "repair_instruction",
+            "customer_visible_risk",
+            "reason",
+            "unavailable",
+            "soft_pass",
+            "cache_hit",
+            "provider",
+            "model",
+            "elapsed_ms",
+            "failover",
+        )
+        if key in review
+    }
+
+
+def brain_plan_authority_sources(plan: dict[str, Any]) -> dict[str, Any]:
+    """Summarize which authority buckets the Brain says it used."""
+
+    evidence = plan.get("evidence_used") if isinstance(plan.get("evidence_used"), dict) else {}
+    product_ids = [str(item).strip() for item in evidence.get("product_ids", []) or [] if str(item).strip()]
+    formal_ids = [str(item).strip() for item in evidence.get("formal_knowledge_ids", []) or [] if str(item).strip()]
+    conversation_ids = [str(item).strip() for item in evidence.get("conversation_fact_ids", []) or [] if str(item).strip()]
+    common_sense_topics = [str(item).strip() for item in evidence.get("common_sense_topics", []) or [] if str(item).strip()]
+    style_ids = [str(item).strip() for item in evidence.get("style_ids", []) or [] if str(item).strip()]
+    rag_ids = [str(item).strip() for item in evidence.get("rag_ids", []) or [] if str(item).strip()]
+    content_authority_present = bool(product_ids or formal_ids or conversation_ids)
+    return {
+        "product_master": product_ids,
+        "formal_knowledge": formal_ids,
+        "conversation_facts": conversation_ids,
+        "llm_common_sense": common_sense_topics,
+        "style_only": style_ids,
+        "ai_experience_pool": rag_ids,
+        "content_authority_present": content_authority_present,
+        "auxiliary_only": bool(common_sense_topics or style_ids or rag_ids) and not content_authority_present,
+    }
+
+
+POST_REPAIR_SEMANTIC_BLOCK_TERMS = (
+    "答非所问",
+    "没有回答",
+    "未回答当前",
+    "当前问题未",
+    "完全无关",
+    "跑题",
+    "跨会话",
+    "错位",
+    "暴露AI",
+    "AI身份",
+    "事实越权",
+    "商品事实越权",
+    "编造",
+    "伪造",
+    "无依据价格",
+    "价格错误",
+    "不符合预算",
+    "预算外冒充",
+    "承诺",
+    "保证",
+)
+POST_REPAIR_LOW_INFO_STALL_TERMS = (
+    "确认一下",
+    "稍后",
+    "马上回复",
+    "帮您看看",
+    "核实清楚",
+    "先帮您看",
+    "回您",
+)
+POST_REPAIR_PRICE_RE = re.compile(r"\d+(?:\.\d+)?\s*(?:万|万元|w|W)")
+POST_REPAIR_SOFT_DETERMINISTIC_QUALITY_ERRORS = {
+    "relative_context_product_drift",
+    "missing_relative_context_product_reference",
+}
+SEMANTIC_HANDOFF_CONFIRMATION_MARKERS = (
+    "handoff",
+    "musthandoff",
+    "allowedautoreplyfalse",
+    "人工",
+    "转人工",
+    "专员",
+    "承接",
+    "审核",
+    "审批",
+    "评估",
+    "核实",
+)
+SEMANTIC_HANDOFF_BLOCK_MARKERS = (
+    "事实冲突",
+    "价格冲突",
+    "商品库冲突",
+    "正式知识冲突",
+    "编造",
+    "虚构",
+    "伪造",
+    "无依据",
+    "prompt",
+    "提示词",
+    "密钥",
+    "泄露",
+    "违法",
+    "错会话",
+    "跨会话",
+)
+
+
+def repaired_deterministic_quality_soft_pass_decision(
+    *,
+    settings: dict[str, Any],
+    plan: dict[str, Any],
+    quality: dict[str, Any],
+    evidence_pack: dict[str, Any],
+) -> dict[str, Any]:
+    """Defer post-repair context-only doubts to guard instead of hard-stalling.
+
+    This only applies after Brain has already repaired a draft.  The deterministic
+    quality gate may still be unsure about relative context in dry-run/OCR cases,
+    but it should not become a second reply engine.  Hard risks and unsupported
+    facts remain guarded downstream.
+    """
+
+    if not bool(settings.get("deterministic_quality_post_repair_soft_pass_enabled", True)):
+        return {"ok": False, "reason": "post_repair_deterministic_soft_pass_disabled"}
+    if not isinstance(quality, dict) or quality.get("ok"):
+        return {"ok": False, "reason": "quality_already_ok_or_missing"}
+    errors = [str(item).strip() for item in quality.get("errors", []) or [] if str(item).strip()]
+    if not errors:
+        return {"ok": False, "reason": "no_quality_errors"}
+    non_soft_errors = [item for item in errors if item not in POST_REPAIR_SOFT_DETERMINISTIC_QUALITY_ERRORS]
+    if non_soft_errors:
+        return {"ok": False, "reason": "non_soft_quality_errors", "errors": errors}
+    context_anchor_ids = collect_repaired_quality_context_anchor_ids(evidence_pack)
+    if context_anchor_ids:
+        return {
+            "ok": False,
+            "reason": "known_context_anchor_must_be_repaired_by_brain",
+            "errors": errors,
+            "context_anchor_ids": context_anchor_ids[:6],
+        }
+
+    action = str(plan.get("recommended_action") or "").strip().lower()
+    if action and action != "send_reply":
+        return {"ok": False, "reason": "plan_not_send_reply", "errors": errors}
+    if not bool(plan.get("can_answer", True)):
+        return {"ok": False, "reason": "plan_cannot_answer", "errors": errors}
+
+    risk = plan.get("risk") if isinstance(plan.get("risk"), dict) else {}
+    risk_level = str(risk.get("risk_level") or "medium").strip().lower()
+    risk_tags = {str(item).strip().lower() for item in risk.get("risk_tags", []) or [] if str(item).strip()}
+    hard_tags = {
+        "illegal_request",
+        "prompt_injection",
+        "policy_violation",
+        "finance_commitment",
+        "price_commitment",
+        "contract_commitment",
+        "invoice_commitment",
+    }
+    if bool(risk.get("needs_handoff")) or risk_level in {"high", "高"} or risk_tags & hard_tags:
+        return {"ok": False, "reason": "hard_risk_not_soft_passed", "errors": errors}
+
+    evidence = plan.get("evidence_used") if isinstance(plan.get("evidence_used"), dict) else {}
+    has_context_or_product_anchor = bool(evidence.get("product_ids") or evidence.get("conversation_fact_ids"))
+    if not has_context_or_product_anchor and not repaired_reply_has_actionable_anchor(
+        plan=plan,
+        evidence_pack=evidence_pack,
+        reply=join_reply_segments(plan.get("reply_segments", []) or []),
+    ):
+        return {"ok": False, "reason": "missing_context_or_product_anchor", "errors": errors}
+
+    return {
+        "ok": True,
+        "reason": "post_repair_context_quality_deferred_to_guard",
+        "warnings": [f"deterministic_quality_post_repair_soft_pass:{item}" for item in errors],
+        "errors": errors,
+    }
+
+
+def semantic_handoff_quality_soft_pass_decision(
+    *,
+    settings: dict[str, Any],
+    plan: dict[str, Any],
+    deterministic_quality: dict[str, Any],
+    semantic_quality: dict[str, Any],
+    evidence_pack: dict[str, Any],
+) -> dict[str, Any]:
+    """Keep a Brain-authored handoff reply when reviewer only confirms handoff.
+
+    Reviewer/guard layers may decide that a turn needs human follow-up, but they
+    should not replace Brain's specific customer-visible boundary explanation
+    with a generic stall.  This soft-pass is intentionally narrow: Brain itself
+    must have chosen handoff, deterministic validation must already be clean, and
+    the reviewer must not report factual conflicts, cross-session issues, prompt
+    leakage, illegal content, or other hard answer defects.
+    """
+
+    if not bool(settings.get("semantic_reviewer_brain_handoff_soft_pass_enabled", True)):
+        return {"ok": False, "reason": "brain_handoff_soft_pass_disabled"}
+    if not deterministic_quality.get("ok"):
+        return {"ok": False, "reason": "deterministic_quality_failed"}
+    if str(semantic_quality.get("source") or "") != "semantic_reviewer":
+        return {"ok": False, "reason": "not_semantic_quality"}
+    review = semantic_quality.get("semantic_review") if isinstance(semantic_quality.get("semantic_review"), dict) else {}
+    verdict = str(review.get("verdict") or "").strip().lower()
+    if verdict == "block":
+        return {"ok": False, "reason": "semantic_verdict_block"}
+    risk = str(review.get("customer_visible_risk") or "medium").strip().lower()
+
+    action = str(plan.get("recommended_action") or "").strip().lower()
+    plan_risk = plan.get("risk") if isinstance(plan.get("risk"), dict) else {}
+    brain_chose_handoff = action in {"handoff", "handoff_for_approval"} or bool(plan_risk.get("needs_handoff"))
+    if not brain_chose_handoff:
+        return {"ok": False, "reason": "brain_did_not_choose_handoff"}
+
+    reply = join_reply_segments(plan.get("reply_segments", []) or [])
+    if not reply.strip():
+        return {"ok": False, "reason": "empty_reply"}
+    if repaired_reply_is_low_information_stall(reply, plan=plan, evidence_pack=evidence_pack):
+        return {"ok": False, "reason": "low_information_stall_reply"}
+    if not repaired_reply_has_actionable_anchor(plan=plan, evidence_pack=evidence_pack, reply=reply):
+        return {"ok": False, "reason": "missing_actionable_anchor"}
+
+    semantic_errors = [str(item).strip() for item in review.get("semantic_errors", []) or [] if str(item).strip()]
+    if semantic_errors:
+        return {"ok": False, "reason": "semantic_errors_present", "semantic_errors": semantic_errors[:6]}
+
+    hard_concerns = [str(item).strip() for item in review.get("hard_boundary_concerns", []) or [] if str(item).strip()]
+    if not semantic_hard_concerns_are_handoff_only(hard_concerns, evidence_pack=evidence_pack):
+        return {"ok": False, "reason": "semantic_hard_boundary_concerns", "hard_boundary_concerns": hard_concerns[:6]}
+    if risk == "high" and not hard_concerns:
+        return {"ok": False, "reason": "semantic_high_risk_without_handoff_confirmation"}
+
+    if verdict == "repair" and not hard_concerns:
+        return {"ok": False, "reason": "repair_without_handoff_concern"}
+    if verdict not in {"handoff_suggest", "repair"} and hard_concerns:
+        return {"ok": False, "reason": "unexpected_hard_concern_verdict", "verdict": verdict}
+    if verdict not in {"handoff_suggest", "repair"} and not hard_concerns:
+        return {"ok": False, "reason": "semantic_verdict_not_handoff_confirmation", "verdict": verdict}
+
+    return {
+        "ok": True,
+        "reason": "semantic_reviewer_confirmed_brain_handoff",
+        "warnings": ["semantic_reviewer_brain_handoff_soft_pass"] + [f"semantic_handoff_confirmed:{item}" for item in hard_concerns[:4]],
+        "semantic_verdict": verdict,
+        "customer_visible_risk": risk,
+        "hard_boundary_concerns": hard_concerns[:6],
+    }
+
+
+def semantic_hard_concerns_are_handoff_only(hard_concerns: list[str], *, evidence_pack: dict[str, Any]) -> bool:
+    if not hard_concerns:
+        return True
+    safety = evidence_pack.get("safety") if isinstance(evidence_pack.get("safety"), dict) else {}
+    nested_safety = {}
+    knowledge = evidence_pack.get("knowledge") if isinstance(evidence_pack.get("knowledge"), dict) else {}
+    if isinstance(knowledge.get("safety"), dict):
+        nested_safety = knowledge.get("safety") or {}
+    safety_requires_handoff = bool(safety.get("must_handoff") or nested_safety.get("must_handoff"))
+    if not safety_requires_handoff:
+        return False
+    for concern in hard_concerns:
+        text = compact_match_text(concern)
+        if any(compact_match_text(marker) in text for marker in SEMANTIC_HANDOFF_BLOCK_MARKERS):
+            return False
+        if not any(compact_match_text(marker) in text for marker in SEMANTIC_HANDOFF_CONFIRMATION_MARKERS):
+            return False
+    return True
+
+
+def collect_repaired_quality_context_anchor_ids(evidence_pack: dict[str, Any]) -> list[str]:
+    conversation = evidence_pack.get("conversation") if isinstance(evidence_pack.get("conversation"), dict) else {}
+    context = conversation.get("context") if isinstance(conversation.get("context"), dict) else {}
+    ids: list[str] = []
+
+    def add(value: Any) -> None:
+        text = str(value or "").strip()
+        if text and text not in ids:
+            ids.append(text)
+
+    for key in ("last_product_id", "primary_context_product_id", "last_replied_product_id"):
+        add(context.get(key))
+    for key in ("recent_product_ids", "visible_reply_product_ids", "last_reply_product_ids"):
+        values = context.get(key)
+        if isinstance(values, (list, tuple, set)):
+            for item in values:
+                add(item)
+    return ids
+
+
+def repaired_semantic_quality_soft_pass_decision(
+    *,
+    settings: dict[str, Any],
+    plan: dict[str, Any],
+    deterministic_quality: dict[str, Any],
+    semantic_quality: dict[str, Any],
+    evidence_pack: dict[str, Any],
+) -> dict[str, Any]:
+    """Let a repaired, evidence-safe Brain reply survive minor semantic-review nits.
+
+    The semantic reviewer is useful for asking Brain to repair a weak draft, but
+    after one repair attempt it must not turn a concrete, low-risk and
+    authority-grounded reply into a generic stall. Hard authority concerns and
+    obvious non-answers still block.
+    """
+
+    if not bool(settings.get("semantic_reviewer_post_repair_soft_pass_enabled", True)):
+        return {"ok": False, "reason": "post_repair_soft_pass_disabled"}
+    if not deterministic_quality.get("ok"):
+        return {"ok": False, "reason": "deterministic_quality_failed"}
+    if str(semantic_quality.get("source") or "") != "semantic_reviewer":
+        return {"ok": False, "reason": "not_semantic_quality"}
+    review = semantic_quality.get("semantic_review") if isinstance(semantic_quality.get("semantic_review"), dict) else {}
+    if str(review.get("verdict") or "").strip().lower() in {"block", "handoff_suggest"}:
+        return {"ok": False, "reason": "semantic_verdict_not_soft_passable"}
+    if str(review.get("customer_visible_risk") or "medium").strip().lower() == "high":
+        return {"ok": False, "reason": "semantic_risk_high"}
+    hard_concerns = [str(item).strip() for item in review.get("hard_boundary_concerns", []) or [] if str(item).strip()]
+    if hard_concerns:
+        return {"ok": False, "reason": "semantic_hard_boundary_concerns", "hard_boundary_concerns": hard_concerns[:6]}
+    action = str(plan.get("recommended_action") or "").strip().lower()
+    if action and action != "send_reply":
+        return {"ok": False, "reason": "plan_not_send_reply"}
+    if not bool(plan.get("can_answer", True)):
+        return {"ok": False, "reason": "plan_cannot_answer"}
+    risk = plan.get("risk") if isinstance(plan.get("risk"), dict) else {}
+    if bool(risk.get("needs_handoff")):
+        return {"ok": False, "reason": "plan_needs_handoff"}
+    risk_level = str(risk.get("risk_level") or "medium").strip().lower()
+    if risk_level in {"high", "高"}:
+        return {"ok": False, "reason": "plan_risk_high"}
+
+    reply = join_reply_segments(plan.get("reply_segments", []) or [])
+    compact_reply = compact_match_text(reply)
+    if not compact_reply:
+        return {"ok": False, "reason": "empty_reply"}
+    if repaired_reply_is_low_information_stall(reply, plan=plan, evidence_pack=evidence_pack):
+        return {"ok": False, "reason": "low_information_stall_reply"}
+
+    semantic_errors = [str(item).strip() for item in review.get("semantic_errors", []) or [] if str(item).strip()]
+    joined_errors = compact_match_text(" ".join(semantic_errors))
+    if any(compact_match_text(term) in joined_errors for term in POST_REPAIR_SEMANTIC_BLOCK_TERMS):
+        return {"ok": False, "reason": "semantic_error_not_soft_passable", "semantic_errors": semantic_errors[:6]}
+    if not repaired_reply_has_actionable_anchor(plan=plan, evidence_pack=evidence_pack, reply=reply):
+        return {"ok": False, "reason": "missing_actionable_anchor"}
+    return {
+        "ok": True,
+        "reason": "post_repair_semantic_minor_nits_soft_passed",
+        "warnings": ["semantic_reviewer_post_repair_soft_pass"] + semantic_errors[:4],
+        "semantic_errors": semantic_errors[:6],
+    }
+
+
+def repaired_reply_is_low_information_stall(reply: str, *, plan: dict[str, Any], evidence_pack: dict[str, Any]) -> bool:
+    text = compact_match_text(reply)
+    if len(text) > 48:
+        return False
+    if not any(compact_match_text(term) in text for term in POST_REPAIR_LOW_INFO_STALL_TERMS):
+        return False
+    return not repaired_reply_has_actionable_anchor(plan=plan, evidence_pack=evidence_pack, reply=reply)
+
+
+def repaired_reply_has_actionable_anchor(*, plan: dict[str, Any], evidence_pack: dict[str, Any], reply: str) -> bool:
+    text = compact_match_text(reply)
+    if not text:
+        return False
+    fact_values = [
+        compact_match_text(fact.get("value"))
+        for fact in plan.get("facts_claimed", []) or []
+        if isinstance(fact, dict) and compact_match_text(fact.get("value"))
+    ]
+    if any(value and value in text for value in fact_values):
+        return True
+    if POST_REPAIR_PRICE_RE.search(str(reply or "")):
+        return True
+    product_terms = [compact_match_text(item) for item in collect_quality_product_terms(plan, evidence_pack) if compact_match_text(item)]
+    if product_terms and any(term in text for term in product_terms if len(term) >= 2):
+        return True
+    evidence = plan.get("evidence_used") if isinstance(plan.get("evidence_used"), dict) else {}
+    if evidence.get("formal_knowledge_ids") and len(text) >= 12:
+        return True
+    if evidence.get("common_sense_topics") and len(text) >= 10:
+        return True
+    return not (evidence.get("product_ids") or plan.get("facts_claimed"))
+
+
+def compact_match_text(value: Any) -> str:
+    return re.sub(r"\s+", "", str(value or "").strip()).lower()
 
 
 def compact_repair_result(result: dict[str, Any]) -> dict[str, Any]:
@@ -815,6 +2042,8 @@ def validate_plan_against_evidence(plan: dict[str, Any], evidence_pack: dict[str
 
     product_ids = collect_product_ids(evidence_pack)
     formal_ids = collect_formal_ids(evidence_pack)
+    normalized_product_ids = normalize_source_id_set(product_ids)
+    normalized_formal_ids = normalize_source_id_set(formal_ids)
     errors: list[str] = []
     for fact in plan.get("facts_claimed", []) or []:
         fact_type = str(fact.get("fact_type") or "")
@@ -824,11 +2053,12 @@ def validate_plan_against_evidence(plan: dict[str, Any], evidence_pack: dict[str
             if not source_ids:
                 errors.append(f"product_fact_missing_source_id:{fact_type}")
             for source_id in source_ids:
-                if source_id not in product_ids:
+                if normalize_source_id(source_id) not in normalized_product_ids:
                     errors.append(f"product_fact_source_not_in_evidence:{source_id}")
         if fact_type in POLICY_FACT_TYPES and source_level in {"formal_knowledge", "product_scoped_formal"}:
             for source_id in source_ids:
-                if source_id not in formal_ids and source_id not in product_ids:
+                normalized_source_id = normalize_source_id(source_id)
+                if normalized_source_id not in normalized_formal_ids and normalized_source_id not in normalized_product_ids:
                     errors.append(f"policy_fact_source_not_in_evidence:{source_id}")
     return {"ok": not errors, "errors": errors}
 
@@ -841,12 +2071,29 @@ def split_fact_source_ids(value: Any) -> list[str]:
     ids: list[str] = []
     for part in parts:
         item = str(part or "").strip()
-        for prefix in ("product:", "catalog_product:", "product_master:", "policy:", "formal:"):
-            if item.startswith(prefix):
-                item = item.split(":", 1)[1].strip()
+        item = normalize_source_id(item)
         if item and item not in ids:
             ids.append(item)
     return ids
+
+
+def normalize_source_id(value: Any) -> str:
+    """Normalize LLM-cited evidence ids without weakening authority checks."""
+
+    text = str(value or "").strip()
+    if not text:
+        return ""
+    text = re.sub(r"^(?:product|catalog_product|product_master|policy|formal|faq|policies|formal_knowledge)[:.]", "", text)
+    return text.strip()
+
+
+def normalize_source_id_set(values: set[str] | list[str] | tuple[str, ...]) -> set[str]:
+    normalized: set[str] = set()
+    for value in values or []:
+        text = normalize_source_id(value)
+        if text:
+            normalized.add(text)
+    return normalized
 
 
 def brain_plan_is_common_sense_advisory(plan: dict[str, Any]) -> bool:
@@ -868,6 +2115,8 @@ def brain_plan_allows_soft_evidence_override(plan: dict[str, Any]) -> bool:
     condition claims, policies, or commitments to bypass authority validation.
     """
 
+    if brain_plan_allows_safe_uncertain_reply(plan):
+        return True
     if str(plan.get("recommended_action") or "") != "send_reply":
         return False
     if plan.get("facts_claimed"):
@@ -892,6 +2141,163 @@ def brain_plan_allows_soft_evidence_override(plan: dict[str, Any]) -> bool:
     }
 
 
+def coerce_usable_fallback_existing_plan(plan: dict[str, Any]) -> dict[str, Any]:
+    """Normalize usable Brain replies away from legacy fallback action.
+
+    In Brain First mode, `fallback_existing` is not supposed to be the normal
+    carrier for customer-visible replies. If the Brain produced a concrete,
+    answerable, non-handoff reply but mislabeled the action as fallback, keep
+    the Brain content and let guard/quality continue validating it.
+    """
+
+    action = str(plan.get("recommended_action") or "").strip()
+    answer_mode = str(plan.get("answer_mode") or "").strip()
+    if action != "fallback_existing" and answer_mode != "fallback_existing":
+        return {}
+    if not bool(plan.get("can_answer", True)):
+        return {}
+    if not join_reply_segments(plan.get("reply_segments", []) or []):
+        return {}
+    risk = plan.get("risk") if isinstance(plan.get("risk"), dict) else {}
+    if bool(risk.get("needs_handoff")):
+        return {}
+    hard_risk_tags = {
+        "illegal_request",
+        "prompt_injection",
+        "policy_violation",
+        "out_of_scope",
+        "finance_commitment",
+        "price_commitment",
+        "contract_commitment",
+        "invoice_commitment",
+    }
+    risk_tags = {str(item).strip().lower() for item in (risk.get("risk_tags") or []) if str(item).strip()}
+    if risk_tags & hard_risk_tags:
+        return {}
+    previous = {"answer_mode": answer_mode, "recommended_action": action}
+    plan["answer_mode"] = "direct_answer"
+    plan["recommended_action"] = "send_reply"
+    plan["reason"] = append_reason_note(plan.get("reason"), "usable_fallback_existing_coerced_to_send_reply")
+    return previous
+
+
+def append_reason_note(value: Any, note: str) -> str:
+    text = str(value or "").strip()
+    if not text:
+        return note
+    if note in text:
+        return text
+    return f"{text}; {note}"
+
+
+def brain_plan_allows_safe_uncertain_reply(plan: dict[str, Any]) -> bool:
+    """Allow cautious, non-factual uncertainty replies through soft evidence guard.
+
+    This covers turns such as "can this fit my gear?" when the product master
+    has no verified dimensions. Brain may safely say to measure the real car or
+    verify onsite, but must not claim a concrete capacity, price, stock, policy,
+    or commitment without authority.
+    """
+
+    reply = join_reply_segments(plan.get("reply_segments", []) or [])
+    if not reply:
+        return False
+    action = str(plan.get("recommended_action") or "").strip()
+    if action not in {"send_reply", "handoff", "handoff_for_approval"}:
+        return False
+    answer_mode = str(plan.get("answer_mode") or "").strip()
+    if answer_mode not in {"direct_answer", "ask_clarifying_question", "compare_options", "handoff"}:
+        return False
+    if not reply_is_cautious_uncertain_guidance(reply):
+        return False
+    risk = plan.get("risk") if isinstance(plan.get("risk"), dict) else {}
+    risk_tags = {str(item).strip().lower() for item in (risk.get("risk_tags") or []) if str(item).strip()}
+    hard_risk_tags = {
+        "illegal_request",
+        "prompt_injection",
+        "policy_violation",
+        "out_of_scope",
+        "finance_commitment",
+        "price_commitment",
+        "contract_commitment",
+        "invoice_commitment",
+    }
+    if risk_tags & hard_risk_tags:
+        return False
+    for fact in plan.get("facts_claimed", []) or []:
+        if not isinstance(fact, dict):
+            return False
+        fact_type = str(fact.get("fact_type") or "").strip()
+        source_level = str(fact.get("source_level") or "").strip()
+        if source_level == "current_conversation_fact":
+            continue
+        if source_level in {"product_master", "product_scoped_formal"} and fact_type in {
+            "product",
+            "product_name",
+            "product_alias",
+        }:
+            continue
+        if fact_type in PRODUCT_FACT_TYPES or fact_type in POLICY_FACT_TYPES:
+            return False
+    return True
+
+
+def reply_is_cautious_uncertain_guidance(text: str) -> bool:
+    clean = str(text or "").strip()
+    if not clean:
+        return False
+    uncertainty_terms = (
+        "实车",
+        "现场",
+        "尺寸",
+        "量一下",
+        "量下",
+        "试装",
+        "核实",
+        "确认",
+        "看车",
+        "检测报告",
+        "以实际",
+        "不能直接下结论",
+        "不能随口定",
+    )
+    practical_terms = (
+        "装",
+        "放",
+        "空间",
+        "后备厢",
+        "后备箱",
+        "第二排",
+        "后排",
+        "座椅",
+        "放倒",
+        "尺寸",
+        "器材",
+        "箱子",
+        "展架",
+        "工具",
+        "梯子",
+    )
+    if not any(term in clean for term in uncertainty_terms):
+        return False
+    if not any(term in clean for term in practical_terms):
+        return False
+    forbidden_claims = (
+        "肯定能装",
+        "一定能装",
+        "绝对能装",
+        "肯定放得下",
+        "一定放得下",
+        "绝对放得下",
+        "保证能装",
+        "保证放得下",
+        "肯定够",
+        "一定够",
+        "绝对够",
+    )
+    return not any(term in clean for term in forbidden_claims)
+
+
 def strict_brain_no_legacy_fallback(settings: dict[str, Any], payload: dict[str, Any]) -> bool:
     return (
         str(payload.get("mode") or settings.get("mode") or "") == "brain_first"
@@ -900,8 +2306,14 @@ def strict_brain_no_legacy_fallback(settings: dict[str, Any], payload: dict[str,
     )
 
 
-def build_brain_safe_fallback_payload(payload: dict[str, Any], *, combined: str, reason: str) -> dict[str, Any]:
-    reply = brain_safe_fallback_reply(combined)
+def build_brain_safe_fallback_payload(
+    payload: dict[str, Any],
+    *,
+    combined: str,
+    reason: str,
+    evidence_pack: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    reply = brain_safe_fallback_reply(combined, evidence_pack=evidence_pack)
     next_payload = dict(payload)
     next_payload.update(
         {
@@ -913,12 +2325,14 @@ def build_brain_safe_fallback_payload(payload: dict[str, Any], *, combined: str,
             "raw_reply_text": reply,
             "reply_text": reply,
             "strict_no_legacy_fallback": True,
+            "visible_reply_owner": "brain_safe_fallback",
+            "visible_reply_source": "brain_safe_fallback",
         }
     )
     return next_payload
 
 
-def brain_safe_fallback_reply(text: str) -> str:
+def brain_safe_fallback_reply(text: str, *, evidence_pack: dict[str, Any] | None = None) -> str:
     clean = str(text or "").strip()
     normalized = re.sub(r"[\s。！？!?，,、~～\.\-_:：；;]+", "", clean).lower()
     if normalized in {"你好", "您好", "在吗", "在不", "在", "hello", "hi"}:
@@ -927,17 +2341,156 @@ def brain_safe_fallback_reply(text: str) -> str:
         return "好的，我这边尽快给您回。"
     if any(term in clean for term in ("好的", "好", "行", "可以", "谢谢", "再见")) and len(normalized) <= 10:
         return "好的。"
+    evidence_reply = brain_safe_fallback_reply_from_evidence(clean, evidence_pack=evidence_pack)
+    if evidence_reply:
+        return evidence_reply
     return "我这边先确认一下，马上回复您。"
+
+
+def brain_safe_fallback_reply_from_evidence(text: str, *, evidence_pack: dict[str, Any] | None) -> str:
+    """Use authoritative evidence for exceptional Brain failure fallback.
+
+    This is deliberately small: it does not replace the Brain's normal planning
+    role, but avoids a low-information stall when product-master evidence is
+    already present and the customer asked for concrete candidates.
+    """
+
+    if not isinstance(evidence_pack, dict):
+        return ""
+    if not is_candidate_recommendation_question(text):
+        return ""
+    products = collect_safe_fallback_product_candidates(evidence_pack, limit=2)
+    if len(products) >= 2:
+        first, second = products[0], products[1]
+        return f"可以，我先按当前信息给您两台：{format_safe_fallback_product(first)}、{format_safe_fallback_product(second)}。"
+    if len(products) == 1:
+        return f"可以，我先看到比较贴近的是{format_safe_fallback_product(products[0])}。"
+    return ""
+
+
+def is_candidate_recommendation_question(text: str) -> bool:
+    clean = re.sub(r"\s+", "", str(text or "")).lower()
+    if not clean:
+        return False
+    context_terms = ("刚才", "前面", "按刚才", "按前面", "直接挑", "别再问预算", "给我挑", "推荐", "两台", "哪台", "哪款")
+    vehicle_terms = ("车", "车型", "车源", "suv", "mpv", "轿车", "预算", "通勤", "家用", "省油")
+    detailed_need_terms = (
+        "想买",
+        "买台",
+        "帮我看",
+        "预算",
+        "以内",
+        "左右",
+        "能拉",
+        "装",
+        "接客户",
+        "工作室",
+        "通勤",
+        "接娃",
+        "家用",
+    )
+    return (
+        any(term in clean for term in vehicle_terms)
+        and any(term in clean for term in context_terms + detailed_need_terms)
+    )
+
+
+def collect_safe_fallback_product_candidates(evidence_pack: dict[str, Any], *, limit: int) -> list[dict[str, Any]]:
+    seen: set[str] = set()
+    products: list[dict[str, Any]] = []
+
+    def add(item: Any) -> None:
+        if not isinstance(item, dict):
+            return
+        product_id = str(item.get("id") or item.get("product_id") or item.get("sku") or "").strip()
+        name = str(item.get("name") or item.get("title") or "").strip()
+        if not product_id and not name:
+            return
+        key = product_id or name
+        if key in seen:
+            return
+        if not item_has_product_master_authority(item):
+            return
+        seen.add(key)
+        products.append(item)
+
+    knowledge = evidence_pack.get("knowledge") if isinstance(evidence_pack.get("knowledge"), dict) else {}
+    evidence = knowledge.get("evidence") if isinstance(knowledge.get("evidence"), dict) else {}
+    product_master = knowledge.get("product_master") if isinstance(knowledge.get("product_master"), dict) else {}
+    for bucket in (evidence.get("products"), evidence.get("catalog_candidates"), product_master.get("items")):
+        if not isinstance(bucket, list):
+            continue
+        for item in bucket:
+            add(item)
+            if len(products) >= limit:
+                return products
+    return products
+
+
+def item_has_product_master_authority(item: dict[str, Any]) -> bool:
+    authority = str(item.get("authority_level") or item.get("source_level") or "").strip().lower()
+    if authority in {"product_master", PRODUCT_MASTER_CATEGORY_ID.lower()}:
+        return True
+    return bool(item.get("id") or item.get("product_id")) and "price" in item
+
+
+def format_safe_fallback_product(item: dict[str, Any]) -> str:
+    name = str(item.get("name") or item.get("title") or "这台车").strip()
+    price = item.get("price")
+    unit = str(item.get("unit") or "万").strip()
+    if isinstance(price, (int, float)):
+        price_text = f"{price:g}{unit}"
+    else:
+        price_text = str(price or "").strip()
+    return f"{name}（{price_text}）" if price_text else name
 
 
 def compact_product_master_for_prompt(payload: dict[str, Any], *, max_items: int, max_text_chars: int) -> dict[str, Any]:
     data = {key: value for key, value in payload.items() if key != "items"}
     data["items"] = [
-        compact_prompt_value(item, max_text_chars=max_text_chars, max_list_items=6)
+        compact_product_item_for_brain_prompt(item, max_text_chars=max_text_chars)
         for item in (payload.get("items", []) or [])[:max_items]
         if isinstance(item, dict)
     ]
     return data
+
+
+def compact_product_item_for_brain_prompt(item: dict[str, Any], *, max_text_chars: int) -> dict[str, Any]:
+    """Keep authoritative product facts without dragging template-sized payloads."""
+    compact: dict[str, Any] = {}
+    for key in (
+        "id",
+        "product_id",
+        "sku",
+        "name",
+        "category",
+        "price",
+        "unit",
+        "stock",
+        "authority_level",
+        "match_reason",
+        "context_used",
+    ):
+        value = item.get(key)
+        if value not in (None, "", [], {}):
+            compact[key] = compact_prompt_value(value, max_text_chars=max_text_chars, max_list_items=4)
+    aliases = item.get("aliases") or item.get("matched_aliases") or []
+    if isinstance(aliases, list) and aliases:
+        compact["aliases"] = [str(alias) for alias in aliases[:6] if str(alias).strip()]
+    matched_aliases = item.get("matched_aliases") or []
+    if isinstance(matched_aliases, list) and matched_aliases:
+        compact["matched_aliases"] = [str(alias) for alias in matched_aliases[:6] if str(alias).strip()]
+    specs = str(item.get("specs") or "").strip()
+    if specs:
+        compact["specs"] = clip(specs, max(120, min(max_text_chars, 180)))
+    risk_rules = item.get("risk_rules") or []
+    if isinstance(risk_rules, list) and risk_rules:
+        compact["risk_rules"] = [
+            clip(str(rule), max(80, min(max_text_chars, 140)))
+            for rule in risk_rules[:4]
+            if str(rule).strip()
+        ]
+    return compact
 
 
 def compact_formal_knowledge_for_prompt(payload: dict[str, Any], *, max_items: int, max_text_chars: int) -> dict[str, Any]:
@@ -995,6 +2548,368 @@ def collect_product_ids(evidence_pack: dict[str, Any]) -> set[str]:
     return ids
 
 
+def augment_evidence_pack_with_plan_product_ids(evidence_pack: dict[str, Any], plan: dict[str, Any]) -> list[str]:
+    """Hydrate Brain-cited product ids from product master before authority checks.
+
+    Brain is allowed to reason over current conversation context. When the
+    customer says "按刚才那两台挑", the plan may cite product ids remembered in
+    conversation context even if the fresh lexical retrieval did not include
+    every item. We only rehydrate ids that product master can actually load, so
+    this cannot authorize hallucinated product facts.
+    """
+
+    requested_ids = collect_plan_product_ids(plan)
+    for product_id in collect_context_product_ids_for_current_conversation_product_facts(plan, evidence_pack):
+        if product_id not in requested_ids:
+            requested_ids.append(product_id)
+    if not requested_ids:
+        return []
+    existing_ids = normalize_source_id_set(collect_product_ids(evidence_pack))
+    missing_ids = [item for item in requested_ids if normalize_source_id(item) not in existing_ids]
+    if not missing_ids:
+        return []
+    try:
+        from knowledge_runtime import KnowledgeRuntime
+    except Exception:
+        return []
+    try:
+        runtime = KnowledgeRuntime()
+    except Exception:
+        return []
+
+    hydrated: list[dict[str, Any]] = []
+    hydrated_ids: list[str] = []
+    for product_id in missing_ids[:5]:
+        normalized_id = normalize_source_id(product_id)
+        if not normalized_id:
+            continue
+        try:
+            item = runtime.get_item("products", normalized_id)
+        except Exception:
+            item = None
+        if not isinstance(item, dict):
+            continue
+        payload = annotate_authority(catalog_product_payload(item), category_id=PRODUCT_MASTER_CATEGORY_ID)
+        item_id = normalize_source_id(payload.get("id") or payload.get("product_id") or payload.get("sku"))
+        if not item_id or item_id in existing_ids:
+            continue
+        hydrated.append(payload)
+        hydrated_ids.append(item_id)
+        existing_ids.add(item_id)
+    if not hydrated:
+        return []
+
+    knowledge = evidence_pack.setdefault("knowledge", {})
+    if not isinstance(knowledge, dict):
+        return []
+    evidence = knowledge.setdefault("evidence", {})
+    if not isinstance(evidence, dict):
+        return []
+    product_master = knowledge.setdefault(
+        "product_master",
+        {
+            "authority_level": "product_master",
+            "can_authorize_product_facts": True,
+            "items": [],
+        },
+    )
+    if not isinstance(product_master, dict):
+        product_master = {
+            "authority_level": "product_master",
+            "can_authorize_product_facts": True,
+            "items": [],
+        }
+        knowledge["product_master"] = product_master
+
+    evidence["products"] = merge_product_buckets(evidence.get("products", []), hydrated)
+    evidence["catalog_candidates"] = merge_product_buckets(evidence.get("catalog_candidates", []), hydrated)
+    product_master["items"] = merge_product_buckets(product_master.get("items", []), hydrated)
+    evidence_ids = evidence_pack.get("evidence_ids")
+    if isinstance(evidence_ids, list):
+        for item_id in hydrated_ids:
+            marker = f"catalog_product:{item_id}"
+            if marker not in evidence_ids:
+                evidence_ids.append(marker)
+    audit_summary = evidence_pack.get("audit_summary") if isinstance(evidence_pack.get("audit_summary"), dict) else {}
+    audit_evidence_ids = audit_summary.get("evidence_ids") if isinstance(audit_summary.get("evidence_ids"), list) else None
+    if audit_evidence_ids is not None:
+        for item_id in hydrated_ids:
+            marker = f"catalog_product:{item_id}"
+            if marker not in audit_evidence_ids:
+                audit_evidence_ids.append(marker)
+    return hydrated_ids
+
+
+def collect_context_product_ids_for_current_conversation_product_facts(
+    plan: dict[str, Any],
+    evidence_pack: dict[str, Any],
+) -> list[str]:
+    facts = plan.get("facts_claimed") if isinstance(plan.get("facts_claimed"), list) else []
+    needs_context_authority = False
+    for fact in facts:
+        if not isinstance(fact, dict):
+            continue
+        if str(fact.get("source_level") or "") != "current_conversation_fact":
+            continue
+        if str(fact.get("fact_type") or "") in PRODUCT_FACT_TYPES:
+            needs_context_authority = True
+            break
+    if not needs_context_authority:
+        return []
+    ids: list[str] = []
+    for context in iter_evidence_pack_conversation_contexts(evidence_pack):
+        append_unique_source_id(ids, context.get("last_product_id"))
+        for item in context.get("recent_product_ids", []) or []:
+            append_unique_source_id(ids, item)
+    return ids[:5]
+
+
+def ensure_minimal_product_fact_claims(plan: dict[str, Any], evidence_pack: dict[str, Any]) -> list[str]:
+    if plan.get("facts_claimed"):
+        return []
+    evidence = plan.get("evidence_used") if isinstance(plan.get("evidence_used"), dict) else {}
+    product_ids = [normalize_source_id(item) for item in evidence.get("product_ids", []) or [] if normalize_source_id(item)]
+    if not product_ids:
+        return []
+    added: list[str] = []
+    facts: list[dict[str, str]] = []
+    for product_id in product_ids[:3]:
+        item = find_product_evidence_item(evidence_pack, product_id)
+        if not item:
+            continue
+        value = str(item.get("name") or item.get("title") or item.get("sku") or product_id).strip()
+        facts.append(
+            {
+                "fact_type": "product_name",
+                "value": value or product_id,
+                "source_level": "product_master",
+                "source_id": product_id,
+            }
+        )
+        added.append(product_id)
+    if facts:
+        plan["facts_claimed"] = facts
+    return added
+
+
+def canonicalize_conversation_product_fact_sources(plan: dict[str, Any], evidence_pack: dict[str, Any]) -> list[dict[str, str]]:
+    facts = plan.get("facts_claimed") if isinstance(plan.get("facts_claimed"), list) else []
+    if not facts:
+        return []
+    product_ids = collect_fact_candidate_product_ids(plan, evidence_pack)
+    if not product_ids:
+        return []
+    changed: list[dict[str, str]] = []
+    for fact in facts:
+        if not isinstance(fact, dict):
+            continue
+        fact_type = str(fact.get("fact_type") or "").strip()
+        source_level = str(fact.get("source_level") or "").strip()
+        if source_level != "current_conversation_fact" or fact_type not in PRODUCT_FACT_TYPES:
+            continue
+        for product_id in product_ids:
+            item = find_product_evidence_item(evidence_pack, product_id)
+            if not item:
+                continue
+            if not conversation_fact_matches_product_master(fact, item):
+                continue
+            original_source_id = str(fact.get("source_id") or "")
+            fact["source_level"] = "product_master"
+            fact["source_id"] = product_id
+            changed.append(
+                {
+                    "fact_type": fact_type,
+                    "source_id": product_id,
+                    "original_source_id": original_source_id,
+                }
+            )
+            break
+    return changed
+
+
+def collect_fact_candidate_product_ids(plan: dict[str, Any], evidence_pack: dict[str, Any]) -> list[str]:
+    ids: list[str] = []
+    evidence = plan.get("evidence_used") if isinstance(plan.get("evidence_used"), dict) else {}
+    for item in evidence.get("product_ids", []) or []:
+        append_unique_source_id(ids, item)
+    for context in iter_evidence_pack_conversation_contexts(evidence_pack):
+        for item in context.get("recent_product_ids", []) or []:
+            append_unique_source_id(ids, item)
+        append_unique_source_id(ids, context.get("last_product_id"))
+    return ids[:5]
+
+
+def conversation_fact_matches_product_master(fact: dict[str, Any], item: dict[str, Any]) -> bool:
+    fact_type = str(fact.get("fact_type") or "").strip()
+    value = str(fact.get("value") or "").strip()
+    if not value:
+        return False
+    if fact_type in {"product", "product_name", "product_alias"}:
+        terms = product_evidence_text_terms(item)
+        normalized_value = compact_fact_text(value)
+        return any(normalized_value and normalized_value in compact_fact_text(term) for term in terms)
+    if fact_type in PRODUCT_MASTER_ONLY_FACT_TYPES:
+        if fact_type == "price":
+            return price_fact_matches_product(value, item)
+        return False
+    return False
+
+
+def product_evidence_text_terms(item: dict[str, Any]) -> list[str]:
+    terms: list[str] = []
+    data = item.get("data") if isinstance(item.get("data"), dict) else {}
+    for container in (item, data):
+        for key in ("name", "title", "model", "sku", "id", "product_id"):
+            value = str(container.get(key) or "").strip()
+            if value and value not in terms:
+                terms.append(value)
+        aliases = container.get("aliases") or container.get("alias") or container.get("matched_aliases")
+        if isinstance(aliases, list):
+            for alias in aliases:
+                text = str(alias or "").strip()
+                if text and text not in terms:
+                    terms.append(text)
+        else:
+            text = str(aliases or "").strip()
+            if text and text not in terms:
+                terms.append(text)
+    return terms
+
+
+def compact_fact_text(value: Any) -> str:
+    return re.sub(r"[^0-9a-zA-Z\u4e00-\u9fff]+", "", str(value or "")).lower()
+
+
+def price_fact_matches_product(value: Any, item: dict[str, Any]) -> bool:
+    fact_prices = parse_fact_prices(value)
+    if not fact_prices:
+        return False
+    data = item.get("data") if isinstance(item.get("data"), dict) else {}
+    for container in (item, data):
+        for key in ("price", "price_wan", "unit_price", "报价", "标价"):
+            try:
+                product_price = parse_fact_price(container.get(key))
+            except AttributeError:
+                product_price = 0.0
+            if product_price > 0 and any(abs(product_price - fact_price) <= 0.03 for fact_price in fact_prices):
+                return True
+    return False
+
+
+def parse_fact_prices(value: Any) -> list[float]:
+    if isinstance(value, (int, float)):
+        price = float(value)
+        return [price] if price > 0 else []
+    text = str(value or "")
+    if not text.strip():
+        return []
+    candidates: list[float] = []
+
+    def append_price(raw: str) -> None:
+        try:
+            price = float(raw)
+        except (TypeError, ValueError):
+            return
+        if price <= 0:
+            return
+        if price not in candidates:
+            candidates.append(price)
+
+    # Prefer explicit money-like numbers so years such as "2021款" do not steal
+    # authority attribution from a real product price later in the same sentence.
+    for match in re.finditer(r"(\d+(?:\.\d+)?)\s*(?:万|万元|w|W)", text):
+        append_price(match.group(1))
+
+    price_phrase = re.compile(r"(?:价格|报价|标价|售价|车价|首付|总价|预算)\D{0,8}(\d+(?:\.\d+)?)")
+    for match in price_phrase.finditer(text):
+        append_price(match.group(1))
+
+    for match in re.finditer(r"(\d+(?:\.\d+)?)", text):
+        raw = match.group(1)
+        try:
+            numeric = float(raw)
+        except ValueError:
+            continue
+        if numeric <= 0:
+            continue
+        if raw.isdigit() and 1900 <= numeric <= 2099:
+            continue
+        append_price(raw)
+    return candidates
+
+
+def parse_fact_price(value: Any) -> float:
+    prices = parse_fact_prices(value)
+    return prices[0] if prices else 0.0
+
+
+def iter_evidence_pack_conversation_contexts(evidence_pack: dict[str, Any]) -> list[dict[str, Any]]:
+    contexts: list[dict[str, Any]] = []
+    conversation = evidence_pack.get("conversation") if isinstance(evidence_pack.get("conversation"), dict) else {}
+    context = conversation.get("context") if isinstance(conversation.get("context"), dict) else {}
+    if context:
+        contexts.append(context)
+    knowledge = evidence_pack.get("knowledge") if isinstance(evidence_pack.get("knowledge"), dict) else {}
+    context = knowledge.get("conversation_context") if isinstance(knowledge.get("conversation_context"), dict) else {}
+    if context:
+        contexts.append(context)
+    return contexts
+
+
+def find_product_evidence_item(evidence_pack: dict[str, Any], product_id: str) -> dict[str, Any]:
+    normalized = normalize_source_id(product_id)
+    if not normalized:
+        return {}
+    knowledge = evidence_pack.get("knowledge") if isinstance(evidence_pack.get("knowledge"), dict) else {}
+    evidence = knowledge.get("evidence") if isinstance(knowledge.get("evidence"), dict) else {}
+    product_master = knowledge.get("product_master") if isinstance(knowledge.get("product_master"), dict) else {}
+    for bucket in (evidence.get("products", []), evidence.get("catalog_candidates", []), product_master.get("items", [])):
+        for item in bucket or []:
+            if not isinstance(item, dict):
+                continue
+            for key in ("id", "product_id", "sku"):
+                if normalize_source_id(item.get(key)) == normalized:
+                    return item
+    return {}
+
+
+def collect_plan_product_ids(plan: dict[str, Any]) -> list[str]:
+    ids: list[str] = []
+    evidence = plan.get("evidence_used") if isinstance(plan.get("evidence_used"), dict) else {}
+    for value in evidence.get("product_ids", []) or []:
+        append_unique_source_id(ids, value)
+    for fact in plan.get("facts_claimed", []) or []:
+        if not isinstance(fact, dict):
+            continue
+        fact_type = str(fact.get("fact_type") or "")
+        source_level = str(fact.get("source_level") or "")
+        if fact_type in PRODUCT_FACT_TYPES and source_level in {"product_master", "product_scoped_formal"}:
+            for source_id in split_fact_source_ids(fact.get("source_id")):
+                append_unique_source_id(ids, source_id)
+    return ids
+
+
+def append_unique_source_id(ids: list[str], value: Any) -> None:
+    text = normalize_source_id(value)
+    if text and text not in ids:
+        ids.append(text)
+
+
+def merge_product_buckets(existing: Any, additions: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    result: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for item in list(existing or []) + list(additions or []):
+        if not isinstance(item, dict):
+            continue
+        item_id = normalize_source_id(item.get("id") or item.get("product_id") or item.get("sku"))
+        key = item_id or str(item.get("name") or "").strip().lower()
+        if not key or key in seen:
+            continue
+        result.append(item)
+        seen.add(key)
+    return result
+
+
 def collect_formal_ids(evidence_pack: dict[str, Any]) -> set[str]:
     knowledge = evidence_pack.get("knowledge") if isinstance(evidence_pack.get("knowledge"), dict) else {}
     evidence = knowledge.get("evidence") if isinstance(knowledge.get("evidence"), dict) else {}
@@ -1003,9 +2918,10 @@ def collect_formal_ids(evidence_pack: dict[str, Any]) -> set[str]:
     for bucket in (evidence.get("faq", []), evidence.get("product_scoped", []), formal.get("faq", []), formal.get("product_scoped", [])):
         for item in bucket or []:
             if isinstance(item, dict):
-                value = str(item.get("id") or item.get("knowledge_id") or "").strip()
-                if value:
-                    ids.add(value)
+                for key in ("id", "knowledge_id", "intent", "policy_id"):
+                    value = str(item.get(key) or "").strip()
+                    if value:
+                        ids.add(value)
     policies = evidence.get("policies") if isinstance(evidence.get("policies"), dict) else {}
     formal_policies = formal.get("policies") if isinstance(formal.get("policies"), dict) else {}
     for payload in (policies, formal_policies):
@@ -1015,4 +2931,42 @@ def collect_formal_ids(evidence_pack: dict[str, Any]) -> set[str]:
                 item_id = str(value.get("id") or value.get("knowledge_id") or "").strip()
                 if item_id:
                     ids.add(item_id)
+    for marker in collect_formal_evidence_markers(evidence_pack):
+        ids.add(marker)
     return ids
+
+
+def collect_formal_evidence_markers(evidence_pack: dict[str, Any]) -> set[str]:
+    """Collect formal-knowledge ids from generated evidence markers.
+
+    The evidence builder may expose FAQ and policy references only through
+    prefixed markers such as ``faq:chejin_loan_policy``. Normalizing those
+    markers here keeps Brain fact validation aligned with the evidence pack
+    without allowing unbacked policy facts.
+    """
+
+    markers: set[str] = set()
+    formal_prefixes = ("faq:", "policy:", "formal:", "formal_knowledge:", "product_scoped:")
+    for item in collect_evidence_marker_values(evidence_pack):
+        text = str(item or "").strip()
+        if not text:
+            continue
+        lowered = text.lower()
+        if not lowered.startswith(formal_prefixes):
+            continue
+        normalized = normalize_source_id(text)
+        if normalized:
+            markers.add(normalized)
+    return markers
+
+
+def collect_evidence_marker_values(evidence_pack: dict[str, Any]) -> list[str]:
+    values: list[str] = []
+    direct = evidence_pack.get("evidence_ids")
+    if isinstance(direct, list):
+        values.extend(str(item) for item in direct if str(item).strip())
+    audit_summary = evidence_pack.get("audit_summary") if isinstance(evidence_pack.get("audit_summary"), dict) else {}
+    audit_ids = audit_summary.get("evidence_ids")
+    if isinstance(audit_ids, list):
+        values.extend(str(item) for item in audit_ids if str(item).strip())
+    return values

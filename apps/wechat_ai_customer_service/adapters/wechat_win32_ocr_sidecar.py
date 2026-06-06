@@ -23,6 +23,10 @@ from ctypes import wintypes
 from pathlib import Path
 from typing import Any
 
+PROJECT_ROOT = Path(__file__).resolve().parents[3]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
 try:
     import pyperclip as _pyperclip
 except Exception:  # pragma: no cover - optional clipboard convenience package.
@@ -79,7 +83,6 @@ CHAT_HEADER_MAX_Y = 90
 CHAT_INPUT_BOTTOM_OFFSET = 52
 DEFAULT_MESSAGE_BOTTOM_EXCLUDE_PX = 95
 OCR_MIN_CONFIDENCE = 0.45
-PROJECT_ROOT = Path(__file__).resolve().parents[3]
 SEND_GUARD_PATH = PROJECT_ROOT / "runtime" / "wechat_win32_ocr_send_guard.json"
 UI_ACTION_GUARD_PATH = PROJECT_ROOT / "runtime" / "wechat_win32_ocr_ui_action_guard.json"
 UI_ACTION_AUDIT_PATH = PROJECT_ROOT / "runtime" / "wechat_win32_ocr_ui_actions.jsonl"
@@ -1576,6 +1579,12 @@ def normalize_send_trigger_mode(raw_mode: str | None, *, default: str = DEFAULT_
     mode = str(raw_mode or default).strip().lower()
     if mode not in {"click_only", "enter_only", "enter_then_click"}:
         return default
+    if mode == "enter_then_click":
+        # Dual triggering is too easy to classify as mechanical, and can also
+        # double-send when WeChat is slow. Keep the trigger single-path.
+        return "enter_only"
+    if mode == "click_only" and not env_flag("WECHAT_WIN32_OCR_ALLOW_CLICK_SEND_TRIGGER", default=False):
+        return "enter_only"
     return mode
 
 
@@ -2010,6 +2019,7 @@ def input_text_region_state(
         histogram = crop.histogram()
         total = max(1, int(sum(histogram)))
         dark_ratio = float(sum(histogram[:180])) / float(total)
+        bright_ratio = float(sum(histogram[200:])) / float(total)
         mean = float(sum(index * count for index, count in enumerate(histogram))) / float(total)
     except Exception as exc:
         return {
@@ -2019,7 +2029,16 @@ def input_text_region_state(
             "bounds": list(bounds),
             "ocr_hits": ocr_hits,
         }
-    pixel_visible = dark_ratio >= INPUT_TEXT_DARK_RATIO_MIN
+    # In dark-mode WeChat the whole input region can be dark even when blank.
+    # Treat a uniformly dark crop without OCR or bright text strokes as blank;
+    # otherwise the send guard will repeatedly refuse to type into an empty box.
+    dark_theme_blank_like = bool(
+        ocr_hits == 0
+        and dark_ratio >= 0.90
+        and mean <= 90.0
+        and bright_ratio <= 0.002
+    )
+    pixel_visible = dark_ratio >= INPUT_TEXT_DARK_RATIO_MIN and not dark_theme_blank_like
     # OCR boxes can drift into the lower chat/input boundary on fresh captures.
     # Treat OCR as draft evidence only when the crop also contains text-like
     # dark pixels; otherwise a blank white input area would block safe typing.
@@ -2031,8 +2050,10 @@ def input_text_region_state(
         "bounds": list(bounds),
         "ocr_hits": ocr_hits,
         "dark_ratio": round(dark_ratio, 6),
+        "bright_ratio": round(bright_ratio, 6),
         "mean": round(mean, 3),
         "threshold": INPUT_TEXT_DARK_RATIO_MIN,
+        "dark_theme_blank_like": dark_theme_blank_like,
     }
 
 
@@ -3992,15 +4013,15 @@ def jitter_input_click_point(x: int, y: int, geometry: dict[str, Any]) -> tuple[
         return int(x), int(y)
     jitter_x = bounded_int(
         os.getenv("WECHAT_WIN32_OCR_INPUT_POINT_JITTER_X"),
-        default=7,
+        default=24,
         minimum=0,
-        maximum=20,
+        maximum=60,
     )
     jitter_y = bounded_int(
         os.getenv("WECHAT_WIN32_OCR_INPUT_POINT_JITTER_Y"),
-        default=6,
+        default=14,
         minimum=0,
-        maximum=18,
+        maximum=36,
     )
     split_x = session_split_x(width)
     safe_min_x = max(split_x + 30, int(width * 0.52))
@@ -4020,6 +4041,126 @@ def jitter_input_click_point(x: int, y: int, geometry: dict[str, Any]) -> tuple[
         maximum=safe_max_y,
     )
     return jittered_x, jittered_y
+
+
+def rpa_click_surface_jitter_enabled() -> bool:
+    return env_flag("WECHAT_WIN32_OCR_CLICK_SURFACE_JITTER_ENABLED", default=True)
+
+
+def jitter_client_click_surface_point(hwnd: int, x: int, y: int) -> tuple[int, int, dict[str, Any]]:
+    """Apply a final low-risk spread so fixed caller coordinates do not leak through."""
+    original_x = int(x)
+    original_y = int(y)
+    if not rpa_click_surface_jitter_enabled():
+        return original_x, original_y, {"enabled": False, "original": [original_x, original_y], "final": [original_x, original_y]}
+    role = "generic"
+    jitter_x = 3
+    jitter_y = 2
+    min_x = 0
+    min_y = 0
+    max_x = max(0, original_x + jitter_x)
+    max_y = max(0, original_y + jitter_y)
+    try:
+        geometry = get_window_geometry(hwnd)
+        width = int(geometry.get("width") or 0)
+        height = int(geometry.get("height") or 0)
+        if width > 0 and height > 0:
+            split_x = session_split_x(width)
+            max_x = max(0, width - 1)
+            max_y = max(0, height - 1)
+            if original_x > split_x + 40 and original_y > int(height * 0.70):
+                role = "input_area"
+                jitter_x = bounded_int(
+                    os.getenv("WECHAT_WIN32_OCR_CLICK_SURFACE_INPUT_JITTER_X"),
+                    default=12,
+                    minimum=0,
+                    maximum=36,
+                )
+                jitter_y = bounded_int(
+                    os.getenv("WECHAT_WIN32_OCR_CLICK_SURFACE_INPUT_JITTER_Y"),
+                    default=7,
+                    minimum=0,
+                    maximum=20,
+                )
+                min_x = max(split_x + 35, int(width * 0.48))
+                max_x = min(width - 78, max(min_x, original_x + max(jitter_x, 1)))
+                min_y = max(int(height * 0.73), height - 228)
+                max_y = min(height - 82, max(min_y, original_y + max(jitter_y, 1)))
+            elif original_x < split_x and original_y > 86:
+                role = "session_or_sidebar"
+                jitter_x = bounded_int(
+                    os.getenv("WECHAT_WIN32_OCR_CLICK_SURFACE_SESSION_JITTER_X"),
+                    default=5,
+                    minimum=0,
+                    maximum=14,
+                )
+                jitter_y = bounded_int(
+                    os.getenv("WECHAT_WIN32_OCR_CLICK_SURFACE_SESSION_JITTER_Y"),
+                    default=3,
+                    minimum=0,
+                    maximum=8,
+                )
+                min_x = 72
+                max_x = max(min_x, min(split_x - 38, original_x + max(jitter_x, 1)))
+                min_y = 84
+                max_y = max(min_y, min(height - 20, original_y + max(jitter_y, 1)))
+            elif original_x < split_x and original_y <= 86:
+                role = "search_or_header"
+                jitter_x = bounded_int(
+                    os.getenv("WECHAT_WIN32_OCR_CLICK_SURFACE_HEADER_JITTER_X"),
+                    default=3,
+                    minimum=0,
+                    maximum=8,
+                )
+                jitter_y = bounded_int(
+                    os.getenv("WECHAT_WIN32_OCR_CLICK_SURFACE_HEADER_JITTER_Y"),
+                    default=2,
+                    minimum=0,
+                    maximum=5,
+                )
+                min_x = 70
+                max_x = max(min_x, min(split_x - 28, original_x + max(jitter_x, 1)))
+                min_y = 38
+                max_y = max(min_y, min(88, original_y + max(jitter_y, 1)))
+    except Exception:
+        pass
+    final_x = bounded_int(
+        original_x + random.randint(-jitter_x, jitter_x),
+        default=original_x,
+        minimum=max(0, min_x),
+        maximum=max(max_x, min_x),
+    )
+    final_y = bounded_int(
+        original_y + random.randint(-jitter_y, jitter_y),
+        default=original_y,
+        minimum=max(0, min_y),
+        maximum=max(max_y, min_y),
+    )
+    return final_x, final_y, {
+        "enabled": True,
+        "role": role,
+        "original": [original_x, original_y],
+        "final": [final_x, final_y],
+        "jitter": [jitter_x, jitter_y],
+    }
+
+
+def jitter_screen_click_surface_point(x: int, y: int) -> tuple[int, int, dict[str, Any]]:
+    original_x = int(x)
+    original_y = int(y)
+    if not rpa_click_surface_jitter_enabled():
+        return original_x, original_y, {"enabled": False, "original": [original_x, original_y], "final": [original_x, original_y]}
+    jitter_x = bounded_int(os.getenv("WECHAT_WIN32_OCR_SCREEN_CLICK_JITTER_X"), default=3, minimum=0, maximum=8)
+    jitter_y = bounded_int(os.getenv("WECHAT_WIN32_OCR_SCREEN_CLICK_JITTER_Y"), default=2, minimum=0, maximum=6)
+    final_x = max(0, original_x + random.randint(-jitter_x, jitter_x))
+    final_y = max(0, original_y + random.randint(-jitter_y, jitter_y))
+    return final_x, final_y, {
+        "enabled": True,
+        "role": "screen",
+        "original": [original_x, original_y],
+        "final": [final_x, final_y],
+        "jitter": [jitter_x, jitter_y],
+    }
 
 
 def jitter_send_click_point(x: int, y: int, geometry: dict[str, Any]) -> tuple[int, int]:
@@ -4312,10 +4453,17 @@ def active_chat_matches(ocr_items: list[dict[str, Any]], image_size: tuple[int, 
 
 
 def scroll_chat_history(hwnd: int, load_times: int, *, wheel_units: int = 8, delay_seconds: float = 0.18) -> None:
-    require_active_ui_action_budget("scroll_chat_history", metadata={"load_times": int(load_times or 0)})
     rect = win32gui.GetWindowRect(hwnd)
     x = max(380, int((rect[2] - rect[0]) * 0.6)) + random.randint(-12, 12)
     y = max(180, int((rect[3] - rect[1]) * 0.45)) + random.randint(-10, 10)
+    require_active_ui_action_budget(
+        "scroll_chat_history",
+        metadata={
+            "load_times": int(load_times or 0),
+            "cursor": [int(x), int(y)],
+            "wheel_units": int(wheel_units or 0),
+        },
+    )
     activate_window(hwnd)
     ensure_left_button_released()
     screen_x, screen_y = win32gui.ClientToScreen(hwnd, (x, y))
@@ -4336,10 +4484,16 @@ def scroll_chat_history(hwnd: int, load_times: int, *, wheel_units: int = 8, del
 
 
 def scroll_chat_to_latest(hwnd: int, *, attempts: int = 16) -> None:
-    require_active_ui_action_budget("scroll_chat_to_latest", metadata={"attempts": int(attempts or 0)})
+    requested_attempts = max(0, int(attempts or 0))
+    spread = 2 if requested_attempts >= 10 else 1
+    actual_attempts = max(1, requested_attempts + random.randint(-spread, spread))
     rect = win32gui.GetWindowRect(hwnd)
     x = max(380, int((rect[2] - rect[0]) * 0.6)) + random.randint(-12, 12)
     y = max(180, int((rect[3] - rect[1]) * 0.55)) + random.randint(-10, 10)
+    require_active_ui_action_budget(
+        "scroll_chat_to_latest",
+        metadata={"attempts": requested_attempts, "actual_attempts": actual_attempts, "cursor": [int(x), int(y)]},
+    )
     activate_window(hwnd)
     ensure_left_button_released()
     screen_x, screen_y = win32gui.ClientToScreen(hwnd, (x, y))
@@ -4347,7 +4501,7 @@ def scroll_chat_to_latest(hwnd: int, *, attempts: int = 16) -> None:
     humanized_action_sleep(45, 110)
     wheel_message = getattr(win32con, "WM_MOUSEWHEEL", 0x020A)
     lparam = ((int(screen_y) & 0xFFFF) << 16) | (int(screen_x) & 0xFFFF)
-    for _ in range(max(0, int(attempts))):
+    for _ in range(actual_attempts):
         delta = int(-random.randint(5, 7) * 120)
         try:
             win32gui.PostMessage(hwnd, wheel_message, (delta & 0xFFFF) << 16, lparam)
@@ -5251,10 +5405,14 @@ def ensure_left_button_released() -> None:
 
 def client_click(hwnd: int, x: int, y: int) -> None:
     """Click a WeChat client coordinate without relying on global DPI math."""
-    require_active_ui_action_budget("client_click", metadata={"hwnd": int(hwnd or 0), "x": int(x), "y": int(y)})
+    click_x, click_y, jitter_meta = jitter_client_click_surface_point(hwnd, int(x), int(y))
+    require_active_ui_action_budget(
+        "client_click",
+        metadata={"hwnd": int(hwnd or 0), "x": click_x, "y": click_y, "jitter": jitter_meta},
+    )
     activate_window(hwnd)
     ensure_left_button_released()
-    lparam = ((int(y) & 0xFFFF) << 16) | (int(x) & 0xFFFF)
+    lparam = ((int(click_y) & 0xFFFF) << 16) | (int(click_x) & 0xFFFF)
     win32gui.SendMessage(hwnd, win32con.WM_MOUSEMOVE, 0, lparam)
     humanized_action_sleep(20, 55)
     win32gui.SendMessage(hwnd, win32con.WM_LBUTTONDOWN, win32con.MK_LBUTTON, lparam)
@@ -5265,12 +5423,16 @@ def client_click(hwnd: int, x: int, y: int) -> None:
 
 def human_client_click(hwnd: int, x: int, y: int) -> None:
     """Move the real cursor with small jitter before clicking a client point."""
-    require_active_ui_action_budget("human_client_click", metadata={"hwnd": int(hwnd or 0), "x": int(x), "y": int(y)})
+    click_x, click_y, jitter_meta = jitter_client_click_surface_point(hwnd, int(x), int(y))
+    require_active_ui_action_budget(
+        "human_client_click",
+        metadata={"hwnd": int(hwnd or 0), "x": click_x, "y": click_y, "jitter": jitter_meta},
+    )
     activate_window(hwnd)
     ensure_left_button_released()
     left_down_sent = False
     try:
-        screen_x, screen_y = client_to_screen(hwnd, int(x), int(y))
+        screen_x, screen_y = client_to_screen(hwnd, int(click_x), int(click_y))
         start_x, start_y = win32api.GetCursorPos()
         steps = random.randint(5, 9)
         for step in range(1, steps + 1):
@@ -5291,7 +5453,7 @@ def human_client_click(hwnd: int, x: int, y: int) -> None:
         time.sleep(random.uniform(0.12, 0.28))
     except Exception:
         # Some desktop policies deny SetCursorPos; fall back to PostMessage clicks.
-        client_click(hwnd, x, y)
+        client_click(hwnd, click_x, click_y)
     finally:
         if left_down_sent:
             ensure_left_button_released()
@@ -5340,9 +5502,10 @@ def client_to_screen(hwnd: int, x: int, y: int) -> tuple[int, int]:
 
 
 def click(x: int, y: int) -> None:
-    require_active_ui_action_budget("screen_click", metadata={"x": int(x), "y": int(y)})
+    click_x, click_y, jitter_meta = jitter_screen_click_surface_point(int(x), int(y))
+    require_active_ui_action_budget("screen_click", metadata={"x": click_x, "y": click_y, "jitter": jitter_meta})
     ensure_left_button_released()
-    win32api.SetCursorPos((int(x), int(y)))
+    win32api.SetCursorPos((int(click_x), int(click_y)))
     humanized_action_sleep(20, 55)
     win32api.mouse_event(win32con.MOUSEEVENTF_LEFTDOWN, 0, 0, 0, 0)
     humanized_action_sleep(35, 85)

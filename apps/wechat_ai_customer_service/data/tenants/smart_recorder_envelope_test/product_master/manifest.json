@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "authority": "product_master",
+  "category_id": "products",
+  "tenant_id": "smart_recorder_envelope_test",
+  "updated_at": "2026-06-04T15:59:43",
+  "items_path": "items",
+  "compatibility": {
+    "legacy_read_fallback": "knowledge_bases/products",
+    "new_writes_to_legacy": false
+  }
+}

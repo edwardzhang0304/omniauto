@@ -43,11 +43,69 @@ GENERIC_CATALOG_ALIAS_TERMS = {
     "油车",
     "家用",
     "通勤",
+    "代步",
+    "代步车",
+    "练手",
+    "练手车",
+    "小车",
     "省心",
     "空间",
+    "大空间",
     "七座",
     "自动挡",
 }
+
+WEAK_DESCRIPTIVE_CATALOG_ALIAS_TERMS = (
+    "预算",
+    "以内",
+    "以下",
+    "左右",
+    "省油",
+    "油耗",
+    "省心",
+    "家用",
+    "通勤",
+    "代步",
+    "代步车",
+    "练手",
+    "练手车",
+    "小车",
+    "大空间",
+    "好停车",
+    "城市代步",
+    "新手",
+    "接待",
+    "二胎",
+    "需求",
+)
+
+CARGO_SPACE_NEED_TERMS = (
+    "后备厢",
+    "后备箱",
+    "装载",
+    "装东西",
+    "放东西",
+    "放物料",
+    "拉物料",
+    "拉货",
+    "灯架",
+    "展架",
+    "背景架",
+    "折叠桌",
+    "工具箱",
+    "梯子",
+    "电钻",
+    "油漆桶",
+    "第二排",
+    "放倒",
+    "空间大",
+    "大空间",
+    "不只看轿车",
+    "不想只看轿车",
+)
+
+CARGO_SPACE_FIT_CATEGORY_TERMS = ("suv", "mpv", "旅行", "两厢", "掀背", "皮卡", "van")
+CARGO_SPACE_WEAK_CATEGORY_TERMS = ("轿车", "三厢")
 
 CATALOG_PRICE_SUPERLATIVE_TERMS = (
     "最贵",
@@ -71,12 +129,17 @@ CATALOG_LIST_REQUEST_TERMS = (
     "在售",
     "有哪些车",
     "有什么车",
-    "你们这儿",
-    "你们这边",
     "发一下价格",
     "发下价格",
     "发一下报价",
     "发下报价",
+)
+
+WEAK_CATALOG_CONTEXT_TERMS = (
+    "你们这儿",
+    "你们这边",
+    "你们家",
+    "你这",
 )
 
 QUOTE_HARD_BOUNDARY_TERMS = (
@@ -101,12 +164,16 @@ QUOTE_HARD_BOUNDARY_TERMS = (
 RELATIVE_CONTEXT_PRODUCT_TERMS = (
     "这辆",
     "这台",
+    "这两台",
+    "这两个",
     "这个",
     "这款",
     "这车",
     "这个车",
     "那辆",
     "那台",
+    "哪台",
+    "哪个",
     "那款",
     "那车",
     "那一个",
@@ -123,9 +190,25 @@ CONTEXT_PRODUCT_DETAIL_TERMS = (
     "价格",
     "车况",
     "配置",
+    "第二排",
+    "后排",
+    "座椅",
+    "放倒",
+    "后备厢",
+    "后备箱",
+    "尾门",
+    "空间",
+    "尺寸",
+    "装东西",
+    "装载",
+    "器材",
+    "箱子",
     "公里",
     "贷款",
     "置换",
+    "保值",
+    "再卖",
+    "亏得少",
 )
 
 GENERIC_PRODUCT_REFERENCE_TERMS = {
@@ -201,7 +284,9 @@ def build_reply_evidence_pack(
         max_rag_hits=int(settings.get("max_rag_hits", DEFAULT_MAX_RAG_HITS) or DEFAULT_MAX_RAG_HITS),
         max_rag_text_chars=int(settings.get("max_rag_text_chars", DEFAULT_MAX_TEXT_CHARS) or DEFAULT_MAX_TEXT_CHARS),
         max_catalog_candidates=int(settings.get("max_catalog_candidates", 8) or 8),
+        context_override=context,
     )
+    compact_knowledge["conversation_context"] = context
     common_sense = common_sense_prompt_fragment(
         build_common_sense_guidance(
             customer_message=combined,
@@ -245,6 +330,11 @@ def build_reply_evidence_pack(
             "raw_conversation_id": raw_conversation_id(raw_capture),
         },
         "existing_reply": {
+            "authority": "non_authoritative_legacy_candidate",
+            "usage_policy": (
+                "This payload is an advisory legacy draft for audit/risk context only. "
+                "It must not authorize facts, override product/formal evidence, or finalize customer-visible replies."
+            ),
             "decision": compact_decision(decision),
             "reply_text": truncate_text(reply_text, 1000),
             "rag_reply": compact_mapping(rag_reply, max_text_chars=500),
@@ -350,10 +440,14 @@ def compact_knowledge_pack(
     max_rag_hits: int,
     max_rag_text_chars: int,
     max_catalog_candidates: int,
+    context_override: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     evidence = pack.get("evidence", {}) or {}
     rag_evidence = pack.get("rag_evidence", {}) or {}
-    context = pack.get("conversation_context") if isinstance(pack.get("conversation_context"), dict) else {}
+    if isinstance(context_override, dict):
+        context = context_override
+    else:
+        context = pack.get("conversation_context") if isinstance(pack.get("conversation_context"), dict) else {}
     catalog_candidates = catalog_product_candidates(text, limit=max_catalog_candidates, context=context)
     item_limit = max(1, max_catalog_candidates)
     products = [
@@ -365,7 +459,14 @@ def compact_knowledge_pack(
         for item in catalog_candidates
         if isinstance(item, dict)
     ]
-    if any(is_explicit_catalog_candidate(item) for item in catalog_candidates):
+    context_recent_candidates = [item for item in catalog_candidates if is_context_recent_product_candidate(item)]
+    if context_recent_candidates:
+        other_catalog_candidates = [item for item in catalog_candidates if not is_context_recent_product_candidate(item)]
+        product_master = dedupe_authoritative_products(context_recent_candidates, products, other_catalog_candidates)[:item_limit]
+    elif any(is_context_need_catalog_candidate(item) for item in catalog_candidates):
+        products_for_merge = [item for item in products if not is_weak_catalog_only_product_candidate(item)]
+        product_master = dedupe_authoritative_products(catalog_candidates, products_for_merge)[:item_limit]
+    elif any(is_explicit_catalog_candidate(item) for item in catalog_candidates):
         products_for_merge = [item for item in products if not is_context_only_product_candidate(item)]
         product_master = dedupe_authoritative_products(catalog_candidates, products_for_merge)[:item_limit]
     else:
@@ -511,17 +612,31 @@ def relax_soft_synthesis_safety(pack: dict[str, Any], *, text: str = "") -> None
     The base safety layer may mark a broad natural-language question as
     `no_relevant_business_evidence` before catalog candidates are attached. For
     soft selection questions this module can now provide formal catalog
-    candidates plus runtime-allowed retrieval evidence. We only relax that narrow no-evidence marker;
-    authority, price, finance, after-sales, or policy reasons remain untouched.
+    candidates plus runtime-allowed retrieval evidence. Finance is only relaxed
+    for broad process explanations with formal boundary evidence; exact numbers
+    and approval promises remain hard handoff.
     """
     intent_tags = {str(item) for item in pack.get("intent_tags", []) or [] if str(item)}
-    hard_authority_tags = intent_group("rag_authority_block") - {"quote"}
-    if intent_tags & hard_authority_tags:
-        return
     safety = pack.get("safety", {}) or {}
     if not isinstance(safety, dict) or not safety.get("must_handoff"):
         return
     reasons = {str(item) for item in safety.get("reasons", []) or [] if str(item)}
+    if relax_finance_process_safety(pack, text=text, reasons=reasons):
+        mark_finance_process_evidence_auto_reply_allowed(pack)
+        safety["must_handoff"] = False
+        safety["allowed_auto_reply"] = True
+        safety["reasons"] = []
+        safety["finance_process_soft_evidence_override"] = True
+        return
+    if relax_appointment_schedule_safety(pack, text=text, reasons=reasons):
+        safety["must_handoff"] = False
+        safety["allowed_auto_reply"] = True
+        safety["reasons"] = []
+        safety["appointment_schedule_soft_boundary_override"] = True
+        return
+    hard_authority_tags = intent_group("rag_authority_block") - {"quote"}
+    if intent_tags & hard_authority_tags:
+        return
     if relax_product_master_grounded_quote_safety(pack, text=text, reasons=reasons):
         safety["must_handoff"] = False
         safety["allowed_auto_reply"] = True
@@ -536,6 +651,167 @@ def relax_soft_synthesis_safety(pack: dict[str, Any], *, text: str = "") -> None
     safety["allowed_auto_reply"] = True
     safety["reasons"] = []
     safety["llm_synthesis_soft_evidence_override"] = True
+
+
+def relax_finance_process_safety(pack: dict[str, Any], *, text: str, reasons: set[str]) -> bool:
+    if not reasons or not reasons <= {"matched_faq_requires_handoff", "finance_details_need_human"}:
+        return False
+    intent_tags = {str(item) for item in pack.get("intent_tags", []) or [] if str(item)}
+    if not (intent_tags & {"finance", "payment"} or contains_finance_term(text)):
+        return False
+    if not formal_finance_boundary_present(pack):
+        return False
+    if is_specific_finance_commitment_question(text):
+        return False
+    return is_finance_process_question(text)
+
+
+def formal_finance_boundary_present(pack: dict[str, Any]) -> bool:
+    evidence = pack.get("evidence") if isinstance(pack.get("evidence"), dict) else {}
+    faq = evidence.get("faq") if isinstance(evidence.get("faq"), list) else []
+    policies = evidence.get("policies") if isinstance(evidence.get("policies"), dict) else {}
+    text_parts: list[str] = []
+    for item in faq:
+        if isinstance(item, dict):
+            text_parts.append(str(item.get("answer") or ""))
+            text_parts.extend(str(keyword) for keyword in item.get("matched_keywords", []) or [])
+    text_parts.extend(str(value) for value in policies.values())
+    combined = "".join(text_parts)
+    return contains_finance_term(combined) and any(term in combined for term in ("资方", "审批", "审核", "不能承诺", "一对一评估"))
+
+
+def mark_finance_process_evidence_auto_reply_allowed(pack: dict[str, Any]) -> None:
+    for bucket in finance_faq_buckets(pack):
+        for item in bucket:
+            if not isinstance(item, dict):
+                continue
+            item_text = "".join(
+                [
+                    str(item.get("answer") or ""),
+                    str(item.get("reason") or ""),
+                    str(item.get("policy_type") or ""),
+                    "".join(str(keyword) for keyword in item.get("matched_keywords", []) or []),
+                ]
+            )
+            if not contains_finance_term(item_text):
+                continue
+            if item.get("needs_handoff") is True:
+                item["original_needs_handoff"] = True
+            if item.get("auto_reply_allowed") is False:
+                item["original_auto_reply_allowed"] = False
+            item["needs_handoff"] = False
+            item["auto_reply_allowed"] = True
+            item["finance_process_auto_reply_allowed"] = True
+
+
+def finance_faq_buckets(pack: dict[str, Any]) -> list[list[dict[str, Any]]]:
+    buckets: list[list[dict[str, Any]]] = []
+    evidence = pack.get("evidence") if isinstance(pack.get("evidence"), dict) else {}
+    faq = evidence.get("faq") if isinstance(evidence.get("faq"), list) else []
+    buckets.append(faq)
+    formal = pack.get("formal_knowledge") if isinstance(pack.get("formal_knowledge"), dict) else {}
+    formal_faq = formal.get("faq") if isinstance(formal.get("faq"), list) else []
+    buckets.append(formal_faq)
+    return buckets
+
+
+def contains_finance_term(text: str) -> bool:
+    clean = str(text or "")
+    return any(term in clean for term in ("贷款", "分期", "金融", "按揭", "首付", "月供", "利率", "资方"))
+
+
+def is_finance_process_question(text: str) -> bool:
+    clean = re.sub(r"\s+", "", str(text or ""))
+    if not contains_finance_term(clean):
+        return False
+    process_terms = (
+        "流程",
+        "怎么走",
+        "怎么做",
+        "怎么办",
+        "大概",
+        "一般",
+        "可以吗",
+        "能不能",
+        "支持",
+        "谁给",
+        "谁来",
+        "谁算",
+        "方案",
+        "需要什么",
+        "要什么资料",
+    )
+    return any(term in clean for term in process_terms)
+
+
+def relax_appointment_schedule_safety(pack: dict[str, Any], *, text: str, reasons: set[str]) -> bool:
+    if reasons and not reasons <= {"matched_faq_requires_handoff", "missing_authoritative_evidence", "no_relevant_business_evidence"}:
+        return False
+    intent_tags = {str(item) for item in pack.get("intent_tags", []) or [] if str(item)}
+    if not (intent_tags & {"appointment", "visit", "test_drive"} or is_appointment_schedule_question(text)):
+        return False
+    if is_direct_appointment_commitment_request(text):
+        return True
+    return is_appointment_schedule_question(text)
+
+
+def is_appointment_schedule_question(text: str) -> bool:
+    clean = re.sub(r"\s+", "", str(text or ""))
+    if not clean:
+        return False
+    appointment_terms = ("到店", "看车", "试驾", "预约", "安排", "过去", "来店", "来看看", "周六", "周日", "周末", "上午", "下午", "几点")
+    question_terms = ("能", "可以", "行吗", "方便", "安排", "预约", "过去", "去看", "带", "到店")
+    return any(term in clean for term in appointment_terms) and any(term in clean for term in question_terms)
+
+
+def is_direct_appointment_commitment_request(text: str) -> bool:
+    clean = re.sub(r"\s+", "", str(text or ""))
+    commitment_terms = (
+        "直接约好",
+        "帮我约好",
+        "给我约好",
+        "留车",
+        "预留",
+        "保证有车",
+        "一定能看",
+        "去了就能看",
+        "直接过去",
+    )
+    return any(term in clean for term in commitment_terms)
+
+
+def is_specific_finance_commitment_question(text: str) -> bool:
+    clean = re.sub(r"\s+", "", str(text or ""))
+    if not clean:
+        return False
+    hard_terms = (
+        "包过",
+        "保证过",
+        "保证能过",
+        "保证能批",
+        "肯定能批",
+        "一定能批",
+        "一定通过",
+        "保证通过",
+        "最低价",
+        "最低能",
+        "底价",
+        "优惠",
+        "折扣",
+        "便宜点",
+        "少点",
+    )
+    if any(term in clean for term in hard_terms):
+        return True
+    hard_patterns = (
+        r"(月供|利率|首付).{0,8}(多少|几|最低|具体|准确|算一下|给我算)",
+        r"(多少|几成|几万).{0,8}(首付|月供|利率|贷款|分期)",
+        r"(包过|保证|肯定|一定).{0,10}(贷款|审批|通过|征信|能批)",
+        r"(贷款|审批|通过|征信|能批).{0,10}(包过|保证|肯定|一定)",
+        r"(零首付|不看征信|黑户|征信黑|征信花|逾期|查询多)",
+        r"(最低|固定).{0,8}(利率|月供|首付)",
+    )
+    return any(re.search(pattern, clean, re.IGNORECASE) for pattern in hard_patterns)
 
 
 def relax_product_master_grounded_quote_safety(pack: dict[str, Any], *, text: str, reasons: set[str]) -> bool:
@@ -577,7 +853,8 @@ def catalog_product_candidates(text: str, *, limit: int, context: dict[str, Any]
     except Exception:
         return []
     context = context if isinstance(context, dict) else {}
-    context_product = context_product_candidate(runtime, context, text, items=items)
+    context_products = context_product_candidates(runtime, context, text, items=items)
+    context_product = context_products[0] if context_products else None
     scored = []
     normalized = str(text or "").lower()
     catalog_request_mode = detect_catalog_request_mode(normalized)
@@ -607,22 +884,52 @@ def catalog_product_candidates(text: str, *, limit: int, context: dict[str, Any]
     elif catalog_request_mode == "price_list" and not any(is_explicit_catalog_candidate(item) for item in ranked):
         ranked = catalog_request_candidates(items, limit=limit, mode=catalog_request_mode)
     budget_upper = extract_catalog_budget_upper(normalized)
-    if budget_upper is not None and should_attach_budget_alternatives(normalized, ranked):
-        ranked = merge_catalog_ranked_candidates(
-            ranked,
-            budget_alternative_catalog_candidates(
-                items,
+    budget_target = extract_catalog_budget_target(normalized)
+    context_need_active = should_apply_context_need_candidates(normalized, ranked, context)
+    if budget_upper is None and context_need_active:
+        context_need_text = str(context.get("last_customer_need_text") or "").lower()
+        budget_upper = extract_catalog_budget_upper(context_need_text)
+        budget_target = extract_catalog_budget_target(context_need_text)
+    if budget_upper is not None:
+        preference_text = " ".join(
+            item
+            for item in (
+                normalized,
+                str(context.get("last_customer_need_text") or "").lower(),
+            )
+            if item
+        )
+        budget_fit_candidates = budget_alternative_catalog_candidates(
+            items,
+            limit=limit,
+            budget_upper=budget_upper,
+            budget_target=budget_target,
+            target=ranked[0] if ranked and is_explicit_catalog_candidate(ranked[0]) else None,
+            preference_text=preference_text,
+        )
+        if should_attach_budget_alternatives(normalized, ranked):
+            ranked = merge_catalog_ranked_candidates(ranked, budget_fit_candidates, limit=limit)
+        elif should_attach_budget_fit_candidates(normalized, context_need_active):
+            ranked = merge_catalog_priority_candidates(
+                budget_fit_candidates,
+                ranked,
                 limit=limit,
-                budget_upper=budget_upper,
-                target=ranked[0] if ranked else None,
+            )
+    if should_apply_context_need_candidates(normalized, ranked, context):
+        ranked = merge_catalog_ranked_candidates(
+            context_need_catalog_candidates(
+                items,
+                context_text=str(context.get("last_customer_need_text") or ""),
+                limit=limit,
             ),
+            ranked,
             limit=limit,
         )
-    if context_product:
-        context_id = str(context_product.get("id") or "")
-        ranked = [context_product, *[item for item in ranked if str(item.get("id") or "") != context_id]]
+    if context_products:
+        context_ids = {str(item.get("id") or "") for item in context_products if str(item.get("id") or "")}
+        ranked = [*context_products, *[item for item in ranked if str(item.get("id") or "") not in context_ids]]
         if should_focus_context_product(text):
-            ranked = ranked[:1]
+            ranked = ranked[: max(1, min(limit, len(context_products)))]
     return ranked[: max(0, limit)]
 
 
@@ -633,16 +940,111 @@ def should_attach_budget_alternatives(normalized_text: str, ranked: list[dict[st
     return any(compact_match_text(term) in compact for term in ("预算", "替代", "备选", "够不到", "超预算"))
 
 
+def should_attach_budget_fit_candidates(normalized_text: str, context_need_active: bool) -> bool:
+    compact = compact_match_text(normalized_text)
+    if not compact:
+        return False
+    recommendation_terms = (
+        "推荐",
+        "挑",
+        "选",
+        "合适",
+        "靠谱",
+        "省油",
+        "省心",
+        "别太费油",
+        "帮我筛",
+        "给我筛",
+        "直接给我",
+        "先看",
+        "方向",
+        "两三个",
+        "几个方向",
+        "后备厢",
+        "后备箱",
+        "物料",
+        "装载",
+        "不只看轿车",
+        "不想只看轿车",
+    )
+    return context_need_active or any(compact_match_text(term) in compact for term in recommendation_terms)
+
+
+def should_apply_context_need_candidates(
+    normalized_text: str,
+    ranked: list[dict[str, Any]],
+    context: dict[str, Any],
+) -> bool:
+    context_text = str(context.get("last_customer_need_text") or "").strip()
+    if not context_text or any(is_explicit_catalog_candidate(item) for item in ranked):
+        return False
+    compact = compact_match_text(normalized_text)
+    if not compact:
+        return False
+    followup_terms = (
+        "推荐",
+        "合适",
+        "哪台",
+        "哪个",
+        "你觉得",
+        "直接",
+        "预算",
+        "不说太死",
+        "先看",
+        "就这",
+        "这个",
+        "那台",
+        "它",
+    )
+    return len(compact) <= 28 or any(compact_match_text(term) in compact for term in followup_terms)
+
+
+def context_need_catalog_candidates(
+    items: list[dict[str, Any]],
+    *,
+    context_text: str,
+    limit: int,
+) -> list[dict[str, Any]]:
+    context_text = str(context_text or "").strip()
+    if not context_text:
+        return []
+    normalized_context = context_text.lower()
+    scored: list[tuple[int, int, dict[str, Any]]] = []
+    context_tokens = [token for token in tokenize_for_catalog(normalized_context) if len(token) >= 2]
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        if str(item.get("status") or "active") not in {"active", "approved", "published"}:
+            continue
+        data = item.get("data", {}) or {}
+        searchable = product_searchable_text(data)
+        matched_aliases = collect_catalog_product_aliases(data, normalized_context)
+        token_hits = [token for token in context_tokens if token and token in searchable]
+        score = catalog_alias_match_score(matched_aliases) + len(token_hits)
+        if score <= 0:
+            continue
+        payload = catalog_product_payload(item)
+        aliases = ["conversation_context_need", *matched_aliases[:6], *token_hits[:4]]
+        payload["matched_aliases"] = list(dict.fromkeys(alias for alias in aliases if alias))
+        payload["match_reason"] = "conversation_context_need"
+        payload["context_used"] = True
+        scored.append((score, max_catalog_alias_length(matched_aliases), payload))
+    scored.sort(key=lambda pair: (pair[0], pair[1]), reverse=True)
+    return [payload for _score, _alias_len, payload in scored[: max(0, int(limit or 0))]]
+
+
 def budget_alternative_catalog_candidates(
     items: list[dict[str, Any]],
     *,
     limit: int,
     budget_upper: float,
-    target: dict[str, Any] | None,
+    target: dict[str, Any] | None = None,
+    budget_target: float | None = None,
+    preference_text: str = "",
 ) -> list[dict[str, Any]]:
     target_id = str((target or {}).get("id") or "").strip()
     target_category = catalog_category_label(target or {})
-    candidates: list[tuple[int, float, float, dict[str, Any]]] = []
+    candidates: list[tuple[int, int, float, float, dict[str, Any]]] = []
     for item in items:
         if not isinstance(item, dict):
             continue
@@ -654,18 +1056,62 @@ def budget_alternative_catalog_candidates(
         price = catalog_price_value(payload)
         if price <= 0 or price > budget_upper + 0.03:
             continue
+        preference_rank = catalog_preference_rank(payload, preference_text)
+        if preference_rank == 0 and is_cargo_space_need(preference_text):
+            payload["match_reason"] = "budget_alternative_cargo_fit"
+            payload["matched_aliases"] = list(dict.fromkeys([*payload.get("matched_aliases", []), "cargo_space_fit"]))
         same_category_rank = 0 if target_category and catalog_category_label(payload) == target_category else 1
-        payload["matched_aliases"] = ["budget_alternative"]
-        payload["match_reason"] = "budget_alternative_price_fit"
-        candidates.append((same_category_rank, abs(budget_upper - price), -price, payload))
-    candidates.sort(key=lambda item: (item[0], item[1], item[2]))
-    return [payload for _same_rank, _gap, _neg_price, payload in candidates[: max(0, int(limit or 0))]]
+        payload["matched_aliases"] = list(dict.fromkeys([*payload.get("matched_aliases", []), "budget_alternative"]))
+        payload.setdefault("match_reason", "budget_alternative_price_fit")
+        target_price = budget_target if budget_target is not None and budget_target > 0 else budget_upper
+        candidates.append((preference_rank, same_category_rank, abs(target_price - price), -price, payload))
+    candidates.sort(key=lambda item: (item[0], item[1], item[2], item[3]))
+    return [payload for _pref_rank, _same_rank, _gap, _neg_price, payload in candidates[: max(0, int(limit or 0))]]
+
+
+def catalog_preference_rank(item: dict[str, Any], preference_text: str) -> int:
+    if not is_cargo_space_need(preference_text):
+        return 0
+    searchable = compact_match_text(
+        " ".join(
+            str(item.get(key) or "")
+            for key in ("name", "category", "specs", "recommendation", "warranty_policy", "shipping_policy")
+        )
+    )
+    category = compact_match_text(catalog_category_label(item))
+    if any(compact_match_text(term) in searchable or compact_match_text(term) in category for term in CARGO_SPACE_FIT_CATEGORY_TERMS):
+        return 0
+    if any(compact_match_text(term) in searchable or compact_match_text(term) in category for term in CARGO_SPACE_WEAK_CATEGORY_TERMS):
+        return 2
+    return 1
+
+
+def is_cargo_space_need(text: str) -> bool:
+    compact = compact_match_text(text)
+    return any(compact_match_text(term) in compact for term in CARGO_SPACE_NEED_TERMS)
 
 
 def merge_catalog_ranked_candidates(primary: list[dict[str, Any]], additions: list[dict[str, Any]], *, limit: int) -> list[dict[str, Any]]:
     merged: list[dict[str, Any]] = []
     seen: set[str] = set()
     for item in [*(primary[:1] if primary else []), *additions, *(primary[1:] if len(primary) > 1 else [])]:
+        item_id = str(item.get("id") or "")
+        if item_id and item_id in seen:
+            continue
+        if item_id:
+            seen.add(item_id)
+        merged.append(item)
+        if len(merged) >= max(0, int(limit or 0)):
+            break
+    return merged
+
+
+def merge_catalog_priority_candidates(primary: list[dict[str, Any]], additions: list[dict[str, Any]], *, limit: int) -> list[dict[str, Any]]:
+    merged: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for item in [*primary, *additions]:
+        if not isinstance(item, dict):
+            continue
         item_id = str(item.get("id") or "")
         if item_id and item_id in seen:
             continue
@@ -689,10 +1135,151 @@ def extract_catalog_budget_upper(text: str) -> float | None:
     range_match = re.search(r"(\d+(?:\.\d+)?)\s*(?:到|-|~|至|—|－)\s*(\d+(?:\.\d+)?)\s*万", raw)
     if range_match:
         return max(float(range_match.group(1)), float(range_match.group(2)))
+    around_matches = [
+        catalog_budget_around_upper(float(item))
+        for item in re.findall(r"(\d+(?:\.\d+)?)\s*(?:万|w|W)\s*(?:左右|上下|附近|出头)", raw)
+    ]
+    if around_matches:
+        return max(around_matches)
+    chinese_around_matches = [
+        catalog_budget_around_upper(value)
+        for value in (
+            chinese_wan_budget_to_float(match.group(1))
+            for match in re.finditer(
+                r"([零〇一二两三四五六七八九十百]+(?:点[零〇一二两三四五六七八九]+)?)\s*万\s*(?:左右|上下|附近|出头)",
+                raw,
+            )
+        )
+        if value is not None
+    ]
+    if chinese_around_matches:
+        return max(chinese_around_matches)
     matches = [float(item) for item in re.findall(r"(\d+(?:\.\d+)?)\s*(?:万|w|W)", raw)]
     if matches:
         return max(matches)
+    chinese_matches = [
+        value
+        for value in (chinese_wan_budget_to_float(match.group(0)) for match in re.finditer(r"[零〇一二两三四五六七八九十百]+(?:点[零〇一二两三四五六七八九]+)?\s*万", raw))
+        if value is not None
+    ]
+    if chinese_matches:
+        return max(chinese_matches)
     return None
+
+
+def extract_catalog_budget_target(text: str) -> float | None:
+    raw = str(text or "")
+    range_match = re.search(r"(\d+(?:\.\d+)?)\s*(?:到|-|~|至|—|－)\s*(\d+(?:\.\d+)?)\s*万", raw)
+    if range_match:
+        left = float(range_match.group(1))
+        right = float(range_match.group(2))
+        return (left + right) / 2
+    around_matches = [float(item) for item in re.findall(r"(\d+(?:\.\d+)?)\s*(?:万|w|W)\s*(?:左右|上下|附近|出头)", raw)]
+    if around_matches:
+        return max(around_matches)
+    chinese_around_matches = [
+        value
+        for value in (
+            chinese_wan_budget_to_float(match.group(1))
+            for match in re.finditer(
+                r"([零〇一二两三四五六七八九十百]+(?:点[零〇一二两三四五六七八九]+)?)\s*万\s*(?:左右|上下|附近|出头)",
+                raw,
+            )
+        )
+        if value is not None
+    ]
+    if chinese_around_matches:
+        return max(chinese_around_matches)
+    matches = [float(item) for item in re.findall(r"(\d+(?:\.\d+)?)\s*(?:万|w|W)", raw)]
+    if matches:
+        return max(matches)
+    chinese_matches = [
+        value
+        for value in (chinese_wan_budget_to_float(match.group(0)) for match in re.finditer(r"[零〇一二两三四五六七八九十百]+(?:点[零〇一二两三四五六七八九]+)?\s*万", raw))
+        if value is not None
+    ]
+    if chinese_matches:
+        return max(chinese_matches)
+    return None
+
+
+def catalog_budget_around_upper(value: float) -> float:
+    """Treat "X万左右" as a real-world shopping band, not a hard ceiling."""
+
+    if value <= 0:
+        return value
+    if value <= 6:
+        return value + 1.0
+    if value <= 15:
+        return value + 1.5
+    return value * 1.12
+
+
+def chinese_wan_budget_to_float(text: str) -> float | None:
+    token = re.sub(r"\s*万.*$", "", str(text or "").strip())
+    if not token:
+        return None
+    if "点" in token:
+        integer_text, decimal_text = token.split("点", 1)
+        integer_value = chinese_integer_to_int(integer_text)
+        digits = []
+        digit_map = chinese_digit_map()
+        for char in decimal_text:
+            if char not in digit_map:
+                return None
+            digits.append(str(digit_map[char]))
+        if integer_value is None or not digits:
+            return None
+        return float(f"{integer_value}.{''.join(digits)}")
+    integer_value = chinese_integer_to_int(token)
+    return float(integer_value) if integer_value is not None else None
+
+
+def chinese_integer_to_int(text: str) -> int | None:
+    token = str(text or "").strip()
+    if not token:
+        return None
+    digit_map = chinese_digit_map()
+    total = 0
+    current = 0
+    has_unit = False
+    for char in token:
+        if char in digit_map:
+            current = digit_map[char]
+            continue
+        if char == "十":
+            has_unit = True
+            total += (current or 1) * 10
+            current = 0
+            continue
+        if char == "百":
+            has_unit = True
+            total += (current or 1) * 100
+            current = 0
+            continue
+        return None
+    if has_unit:
+        return total + current
+    if len(token) == 1 and token in digit_map:
+        return digit_map[token]
+    return None
+
+
+def chinese_digit_map() -> dict[str, int]:
+    return {
+        "零": 0,
+        "〇": 0,
+        "一": 1,
+        "二": 2,
+        "两": 2,
+        "三": 3,
+        "四": 4,
+        "五": 5,
+        "六": 6,
+        "七": 7,
+        "八": 8,
+        "九": 9,
+    }
 
 
 def detect_catalog_request_mode(normalized_text: str) -> str:
@@ -703,6 +1290,13 @@ def detect_catalog_request_mode(normalized_text: str) -> str:
         return "price_desc"
     if any(compact_match_text(term) in compact for term in CATALOG_LIST_REQUEST_TERMS):
         return "price_list"
+    # Weak shop-context words alone are not a catalog-list request.  In real
+    # chats they often appear with a specific model ("你们这儿有个奥迪A4"), and
+    # treating them as a price-list request can bury the exact product evidence
+    # before the Brain ever sees it.
+    if any(compact_match_text(term) in compact for term in WEAK_CATALOG_CONTEXT_TERMS):
+        if any(compact_match_text(term) in compact for term in ("有哪些", "有什么", "报价", "价格", "价目", "清单")):
+            return "price_list"
     return ""
 
 
@@ -770,6 +1364,8 @@ def is_concrete_catalog_alias(alias: str) -> bool:
         return False
     if compact in {compact_match_text(item) for item in GENERIC_CATALOG_ALIAS_TERMS}:
         return False
+    if any(compact_match_text(term) in compact for term in WEAK_DESCRIPTIVE_CATALOG_ALIAS_TERMS):
+        return False
     return True
 
 
@@ -783,6 +1379,19 @@ def is_explicit_catalog_candidate(item: dict[str, Any]) -> bool:
 def is_context_only_product_candidate(item: dict[str, Any]) -> bool:
     aliases = [str(alias) for alias in item.get("matched_aliases", []) or [] if str(alias)]
     return bool(aliases) and set(aliases) <= {"conversation_context"}
+
+
+def is_context_need_catalog_candidate(item: dict[str, Any]) -> bool:
+    return str(item.get("match_reason") or "") == "conversation_context_need"
+
+
+def is_context_recent_product_candidate(item: dict[str, Any]) -> bool:
+    return str(item.get("match_reason") or "") == "conversation_context_recent_products"
+
+
+def is_weak_catalog_only_product_candidate(item: dict[str, Any]) -> bool:
+    aliases = [str(alias) for alias in item.get("matched_aliases", []) or [] if str(alias)]
+    return bool(aliases) and set(aliases) <= {"catalog"}
 
 
 def context_product_candidate(
@@ -811,6 +1420,51 @@ def context_product_candidate(
     return payload
 
 
+def context_product_candidates(
+    runtime: KnowledgeRuntime,
+    context: dict[str, Any],
+    text: str,
+    *,
+    items: list[dict[str, Any]] | None = None,
+) -> list[dict[str, Any]]:
+    if not should_focus_context_product(text):
+        return []
+    if text_has_explicit_other_catalog_product_reference(text, items=items, exclude_product_id=""):
+        return []
+    if not has_relative_context_product_reference(text) and text_has_unresolved_explicit_product_reference(text, items=items):
+        return []
+    raw_ids = context.get("recent_product_ids") if isinstance(context.get("recent_product_ids"), list) else []
+    if not raw_ids:
+        last_product_id = str(context.get("last_product_id") or "").strip()
+        raw_ids = [last_product_id] if last_product_id else []
+    payloads: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for raw_id in raw_ids[:5]:
+        product_id = str(raw_id or "").strip()
+        if not product_id or product_id in seen:
+            continue
+        seen.add(product_id)
+        try:
+            item = runtime.get_item("products", product_id)
+        except Exception:
+            continue
+        if not isinstance(item, dict):
+            continue
+        payload = catalog_product_payload(item)
+        payload["matched_aliases"] = ["conversation_context_recent"]
+        payload["match_reason"] = "conversation_context_recent_products"
+        payload["context_used"] = True
+        payloads.append(payload)
+    return payloads
+
+
+def has_relative_context_product_reference(text: str) -> bool:
+    compact = compact_match_text(text)
+    if not compact:
+        return False
+    return any(compact_match_text(term) in compact for term in RELATIVE_CONTEXT_PRODUCT_TERMS)
+
+
 def text_has_explicit_other_catalog_product_reference(
     text: str,
     *,
@@ -825,7 +1479,7 @@ def text_has_explicit_other_catalog_product_reference(
         if not isinstance(item, dict):
             continue
         item_id = str(item.get("id") or "").strip()
-        if not item_id or item_id == exclude:
+        if not item_id or (exclude and item_id == exclude):
             continue
         if str(item.get("status") or "active") not in {"active", "approved", "published"}:
             continue

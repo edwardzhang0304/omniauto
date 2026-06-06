@@ -3,7 +3,7 @@
   "authority": "product_master",
   "category_id": "products",
   "tenant_id": "chejin_usedcar_regression",
-  "updated_at": "2026-06-04T14:44:51",
+  "updated_at": "2026-06-05T23:10:02",
   "items_path": "items",
   "compatibility": {
     "legacy_read_fallback": "knowledge_bases/products",

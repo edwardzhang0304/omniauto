@@ -24,6 +24,8 @@ from apps.wechat_ai_customer_service.knowledge_paths import active_tenant_id, te
 STATE_VERSION = 2
 DEFAULT_PENDING_SESSION_TTL_SECONDS = 1800
 DEFAULT_READY_REPLY_TTL_SECONDS = 900
+DEFAULT_READY_REPLY_HISTORY_RETENTION_SECONDS = 7 * 24 * 60 * 60
+DEFAULT_MAX_STORED_READY_REPLIES = 500
 MAX_STORED_EVENTS = 500
 
 
@@ -293,6 +295,100 @@ def append_event(state: dict[str, Any], event: str, **payload: Any) -> dict[str,
     return item
 
 
+def seconds_since(value: Any, *, now: str | None = None) -> float:
+    ts = _iso_to_ts(value)
+    if ts <= 0:
+        return 0.0
+    now_ts = _iso_to_ts(now) if now else time.time()
+    if now_ts <= 0:
+        now_ts = time.time()
+    return max(0.0, now_ts - ts)
+
+
+def cleanup_scheduler_state(
+    state: dict[str, Any],
+    *,
+    config: SchedulerConfig | None = None,
+    now: str | None = None,
+) -> dict[str, Any]:
+    """Lightly prune stale scheduler noise without deleting recent audit data.
+
+    The hot path should not carry old reply ids inside session records forever:
+    that makes each tick do extra stale bookkeeping and obscures live state.  We
+    keep recent reply objects for audit/summary, but session ``ready_reply_ids``
+    only tracks replies that can still affect sending.
+    """
+
+    cfg = config or SchedulerConfig()
+    replies = state.setdefault("ready_replies", {})
+    if not isinstance(replies, dict):
+        state["ready_replies"] = {}
+        replies = state["ready_replies"]
+    active_statuses = {"ready", "sending"}
+    for session in (state.get("sessions", {}) or {}).values():
+        if not isinstance(session, dict):
+            continue
+        ids = [str(item) for item in (session.get("ready_reply_ids") or []) if str(item)]
+        active_ids = [
+            reply_id
+            for reply_id in ids
+            if isinstance(replies.get(reply_id), dict)
+            and str(replies[reply_id].get("status") or "") in active_statuses
+        ]
+        if active_ids != ids:
+            session["ready_reply_ids"] = active_ids[-20:]
+
+    retention_seconds = max(
+        DEFAULT_READY_REPLY_HISTORY_RETENTION_SECONDS,
+        int(getattr(cfg, "reply_ready_ttl_seconds", DEFAULT_READY_REPLY_TTL_SECONDS) or DEFAULT_READY_REPLY_TTL_SECONDS),
+    )
+    removable_statuses = {"sent", "stale", "send_failed"}
+    removable: list[tuple[float, str]] = []
+    for reply_id, reply in list(replies.items()):
+        if not isinstance(reply, dict):
+            removable.append((0.0, reply_id))
+            continue
+        status = str(reply.get("status") or "")
+        if status not in removable_statuses:
+            continue
+        stamp = reply.get("sent_at") or reply.get("stale_at") or reply.get("ready_at")
+        age = seconds_since(stamp, now=now)
+        if age >= retention_seconds:
+            removable.append((age, reply_id))
+
+    # Keep storage bounded even on very long-running nodes, but never prune
+    # active ready/sending replies.
+    historical = [
+        (
+            _iso_to_ts(reply.get("sent_at") or reply.get("stale_at") or reply.get("ready_at")),
+            reply_id,
+        )
+        for reply_id, reply in replies.items()
+        if isinstance(reply, dict) and str(reply.get("status") or "") in removable_statuses
+    ]
+    overflow_count = max(0, len(replies) - DEFAULT_MAX_STORED_READY_REPLIES)
+    if overflow_count > 0:
+        for _, reply_id in sorted(historical)[:overflow_count]:
+            removable.append((retention_seconds, reply_id))
+
+    removed_ids: list[str] = []
+    for _, reply_id in removable:
+        if reply_id in replies:
+            replies.pop(reply_id, None)
+            removed_ids.append(reply_id)
+    if removed_ids:
+        append_event(
+            state,
+            "scheduler_state_cleanup",
+            removed_ready_reply_count=len(removed_ids),
+            removed_ready_reply_ids=removed_ids[:20],
+        )
+    return {
+        "removed_ready_reply_count": len(removed_ids),
+        "session_ready_reply_refs_cleaned": True,
+    }
+
+
 def has_active_session_work(state: dict[str, Any], target_name: str) -> bool:
     """Return True when a target already has unsent/in-flight scheduler work."""
 
@@ -389,6 +485,13 @@ def enqueue_pending_session(
     session["last_detected_at"] = now
     session["status"] = "capture_pending"
     session["priority_score"] = int(session.get("priority_score") or 50)
+    trace = session.get("latency_trace") if isinstance(session.get("latency_trace"), dict) else {}
+    trace = {
+        **trace,
+        "unread_detected_at": trace.get("unread_detected_at") or now,
+        "pending_enqueued_at": now,
+    }
+    session["latency_trace"] = trace
     append_event(state, "scheduler_capture_enqueued", target_name=session["target_name"], reason=reason)
     return session
 
@@ -492,6 +595,9 @@ def mark_capture_started(state: dict[str, Any], target_name: str, *, now: str | 
     session = ensure_session(state, target_name, now=now)
     session["status"] = "capturing"
     session["last_dispatched_at"] = now
+    trace = session.get("latency_trace") if isinstance(session.get("latency_trace"), dict) else {}
+    trace = {**trace, "capture_started_at": now}
+    session["latency_trace"] = trace
     risk_state = session.get("risk_state") if isinstance(session.get("risk_state"), dict) else {}
     if risk_state:
         risk_state.pop("capture_retry_not_before", None)
@@ -558,6 +664,10 @@ def record_capture_result(
         "overflow_messages": copy.deepcopy(overflow_messages),
         "history_backfill": history_backfill or {},
         "status": "captured" if new_messages else "empty",
+        "latency_trace": {
+            **(session.get("latency_trace") if isinstance(session.get("latency_trace"), dict) else {}),
+            "capture_finished_at": now,
+        },
     }
     state.setdefault("captures", {})[capture_id] = capture
     append_event(
@@ -605,6 +715,10 @@ def enqueue_llm_task(
         "attempt": 1,
         "result": None,
         "error": None,
+        "latency_trace": {
+            **(capture.get("latency_trace") if isinstance(capture.get("latency_trace"), dict) else {}),
+            "brain_queued_at": now,
+        },
     }
     state.setdefault("llm_tasks", {})[task_id] = task
     session["llm_inflight_task_id"] = task_id
@@ -620,6 +734,8 @@ def mark_llm_started(state: dict[str, Any], task_id: str, *, now: str | None = N
         raise KeyError(f"llm task not found: {task_id}")
     task["status"] = "running"
     task["started_at"] = now
+    trace = task.get("latency_trace") if isinstance(task.get("latency_trace"), dict) else {}
+    task["latency_trace"] = {**trace, "brain_started_at": now}
     session = ensure_session(state, str(task.get("target_name") or ""), now=now)
     session["status"] = "llm_running"
     session["llm_inflight_task_id"] = task_id
@@ -686,7 +802,10 @@ def complete_llm_task(
     input_version = int(task.get("input_context_version") or 0)
     current_version = int(session.get("context_version") or 0)
     task["finished_at"] = now
+    trace = task.get("latency_trace") if isinstance(task.get("latency_trace"), dict) else {}
     payload = copy.deepcopy(result_payload if isinstance(result_payload, dict) else {})
+    result_trace = payload.get("latency_trace") if isinstance(payload.get("latency_trace"), dict) else {}
+    task["latency_trace"] = {**trace, **result_trace, "brain_finished_at": now}
     payload["reply_text"] = reply_text
     payload["decision"] = decision or {}
     task["result"] = payload
@@ -767,6 +886,10 @@ def enqueue_polish_task(
         "attempt": 1,
         "result": None,
         "error": None,
+        "latency_trace": {
+            **(planner_task.get("latency_trace") if isinstance(planner_task.get("latency_trace"), dict) else {}),
+            "final_polish_queued_at": now,
+        },
     }
     state.setdefault("polish_tasks", {})[task_id] = task
     session["polish_inflight_task_id"] = task_id
@@ -789,6 +912,8 @@ def mark_polish_started(state: dict[str, Any], task_id: str, *, now: str | None 
         raise KeyError(f"polish task not found: {task_id}")
     task["status"] = "running"
     task["started_at"] = now
+    trace = task.get("latency_trace") if isinstance(task.get("latency_trace"), dict) else {}
+    task["latency_trace"] = {**trace, "final_polish_started_at": now}
     session = ensure_session(state, str(task.get("target_name") or ""), now=now)
     session["status"] = "polish_running"
     session["polish_inflight_task_id"] = task_id
@@ -834,6 +959,7 @@ def complete_polish_task(
     *,
     reply_text: str,
     decision: dict[str, Any] | None = None,
+    result_payload: dict[str, Any] | None = None,
     degraded: bool = False,
     now: str | None = None,
 ) -> dict[str, Any]:
@@ -846,7 +972,14 @@ def complete_polish_task(
     input_version = int(task.get("input_context_version") or 0)
     current_version = int(session.get("context_version") or 0)
     task["finished_at"] = now
-    task["result"] = {"reply_text": reply_text, "decision": decision or {}, "degraded": bool(degraded)}
+    trace = task.get("latency_trace") if isinstance(task.get("latency_trace"), dict) else {}
+    payload = copy.deepcopy(result_payload if isinstance(result_payload, dict) else {})
+    polish_duration = payload.get("duration_seconds")
+    result_trace = payload.get("latency_trace") if isinstance(payload.get("latency_trace"), dict) else {}
+    if polish_duration is not None:
+        result_trace = {**result_trace, "final_polish_duration_seconds": polish_duration}
+    task["latency_trace"] = {**trace, **result_trace, "final_polish_finished_at": now}
+    task["result"] = {"reply_text": reply_text, "decision": decision or {}, "degraded": bool(degraded), "polish_result": payload}
     if input_version < current_version:
         task["status"] = "stale"
         if session.get("polish_inflight_task_id") == task_id:
@@ -939,6 +1072,23 @@ def _enqueue_ready_reply_from_payload(
         "last_send_error": "",
         "freshness_check": None,
         "priority": {"ready_sequence": sequence},
+        "latency_trace": {
+            **(
+                (
+                    state.get("polish_tasks", {}).get(source_task_id, {})
+                    if source_task_kind == "polish"
+                    else state.get("llm_tasks", {}).get(source_task_id, {})
+                ).get("latency_trace", {})
+                if isinstance(
+                    state.get("polish_tasks", {}).get(source_task_id, {})
+                    if source_task_kind == "polish"
+                    else state.get("llm_tasks", {}).get(source_task_id, {}),
+                    dict,
+                )
+                else {}
+            ),
+            "ready_at": now,
+        },
     }
     state.setdefault("ready_replies", {})[reply_id] = reply
     session = ensure_session(state, target_name, now=now)
@@ -1017,6 +1167,8 @@ def mark_reply_sending(state: dict[str, Any], reply_id: str, *, now: str | None 
         raise KeyError(f"reply not found: {reply_id}")
     reply["status"] = "sending"
     reply["send_started_at"] = now
+    trace = reply.get("latency_trace") if isinstance(reply.get("latency_trace"), dict) else {}
+    reply["latency_trace"] = {**trace, "send_started_at": now}
     reply["send_attempts"] = int(reply.get("send_attempts") or 0) + 1
     session = ensure_session(state, str(reply.get("target_name") or ""), now=now)
     session["status"] = "sending"
@@ -1031,6 +1183,8 @@ def mark_reply_sent(state: dict[str, Any], reply_id: str, *, send_result: dict[s
         raise KeyError(f"reply not found: {reply_id}")
     reply["status"] = "sent"
     reply["sent_at"] = now
+    trace = reply.get("latency_trace") if isinstance(reply.get("latency_trace"), dict) else {}
+    reply["latency_trace"] = {**trace, "send_finished_at": now}
     reply["send_result"] = send_result or {}
     target_name = str(reply.get("target_name") or "")
     session = ensure_session(state, target_name, now=now)
@@ -1078,6 +1232,8 @@ def mark_reply_stale(state: dict[str, Any], reply_id: str, *, reason: str, now: 
         raise KeyError(f"reply not found: {reply_id}")
     reply["status"] = "stale"
     reply["stale_at"] = now
+    trace = reply.get("latency_trace") if isinstance(reply.get("latency_trace"), dict) else {}
+    reply["latency_trace"] = {**trace, "stale_at": now}
     reply["stale_reason"] = reason
     session = ensure_session(state, str(reply.get("target_name") or ""), now=now)
     session["status"] = "captured" if session.get("pending_message_count") else "idle"
@@ -1108,6 +1264,23 @@ def state_summary(state: dict[str, Any]) -> dict[str, Any]:
     planner_running = sum(1 for item in planner_tasks if item.get("status") == "running")
     polish_queued = sum(1 for item in polish_tasks if item.get("status") == "queued")
     polish_running = sum(1 for item in polish_tasks if item.get("status") == "running")
+    pending_ages = [
+        seconds_since(item.get("pending_since") or item.get("last_detected_at"))
+        for item in sessions
+        if item.get("pending_capture")
+    ]
+    ready_ages = [
+        seconds_since(item.get("ready_at"))
+        for item in replies
+        if item.get("status") == "ready"
+    ]
+    active_lock_reason = ""
+    if planner_running or polish_running:
+        active_lock_reason = "llm_or_polish_running"
+    elif any(item.get("status") == "sending" for item in replies):
+        active_lock_reason = "reply_sending"
+    elif any(item.get("status") == "capturing" for item in sessions):
+        active_lock_reason = "capture_running"
     return {
         "sessions": len(sessions),
         "pending_sessions": sum(1 for item in sessions if item.get("pending_capture")),
@@ -1121,4 +1294,7 @@ def state_summary(state: dict[str, Any]) -> dict[str, Any]:
         "reply_stale": sum(1 for item in replies if item.get("status") == "stale"),
         "reply_sent": sum(1 for item in replies if item.get("status") == "sent"),
         "reply_failed": sum(1 for item in replies if item.get("status") == "send_failed"),
+        "pending_age_seconds_max": round(max(pending_ages), 3) if pending_ages else 0.0,
+        "oldest_ready_age_seconds": round(max(ready_ages), 3) if ready_ages else 0.0,
+        "active_lock_reason": active_lock_reason,
     }

@@ -270,6 +270,8 @@ def check_catalog_candidate_semantic_product_matching() -> dict[str, Any]:
         sienna_homophone = catalog_product_candidates("塞纳多少钱？", limit=5, context={})
         sienna_canonical = catalog_product_candidates("赛那多少钱？", limit=5, context={})
         qinplus = catalog_product_candidates("秦PLUS多少钱？", limit=5, context={})
+        audi_shorthand = catalog_product_candidates("我记得你们这儿有个奥迪A4不错，具体情况发我看看", limit=8, context={})
+        audi_brand_inventory = catalog_product_candidates("你再看看库存，里面没奥迪吗", limit=8, context={})
         most_expensive = catalog_product_candidates("你们这儿最贵的车是哪款，介绍一下情况", limit=5, context={})
         quoted_list = catalog_product_candidates("给我发一下你的标价就行，最终价格我们可以谈", limit=5, context={})
         explicit_sienna_after_qinplus_context = catalog_product_candidates(
@@ -301,6 +303,14 @@ def check_catalog_candidate_semantic_product_matching() -> dict[str, Any]:
     assert_true(
         str(qinplus[0].get("id") or "") == "chejin_qinplus_2022_dmi55",
         f"秦PLUS should outrank generic PLUS matches such as Tesla SRPLUS: {qinplus[:3]}",
+    )
+    assert_true(
+        any("a4l" in str(item.get("id") or "").lower() for item in audi_shorthand[:2]),
+        f"奥迪A4 shorthand should surface Audi A4L product evidence before generic catalog items: {audi_shorthand[:4]}",
+    )
+    assert_true(
+        any("a4l" in str(item.get("id") or "").lower() for item in audi_brand_inventory[:2]),
+        f"brand inventory challenge should surface Audi A4L product evidence before generic catalog items: {audi_brand_inventory[:4]}",
     )
     assert_true(most_expensive, "price superlative query should recall product-master candidates")
     assert_true(
@@ -339,6 +349,8 @@ def check_catalog_candidate_semantic_product_matching() -> dict[str, Any]:
         "ok": True,
         "sienna_product_id": sienna_homophone[0].get("id"),
         "qinplus_product_id": qinplus[0].get("id"),
+        "audi_shorthand_first_ids": [item.get("id") for item in audi_shorthand[:3]],
+        "audi_inventory_first_ids": [item.get("id") for item in audi_brand_inventory[:3]],
         "most_expensive_product_id": most_expensive[0].get("id"),
         "explicit_sienna_after_qinplus_context": explicit_sienna_after_qinplus_context[0].get("id"),
         "compact_first_product": explicit_products[0].get("id"),
@@ -751,6 +763,15 @@ def assert_guarded_synthesis_participated(event: dict[str, Any], case_id: str) -
 
 
 def assert_foreground_path_handled(event: dict[str, Any], case_id: str) -> None:
+    brain = event.get("customer_service_brain") if isinstance(event.get("customer_service_brain"), dict) else {}
+    brain_adopted = event.get("customer_service_brain_adopted") if isinstance(event.get("customer_service_brain_adopted"), dict) else {}
+    decision = event.get("decision") if isinstance(event.get("decision"), dict) else {}
+    if bool(brain.get("applied")) and bool(brain_adopted.get("applied")):
+        assert_true(
+            str(decision.get("rule_name") or "").startswith("customer_service_brain_"),
+            f"{case_id} Brain First adoption should own the visible reply: {event}",
+        )
+        return
     synthesis = event.get("llm_reply_synthesis", {}) or {}
     if bool(synthesis.get("applied")):
         assert_guarded_synthesis_participated(event, case_id)
