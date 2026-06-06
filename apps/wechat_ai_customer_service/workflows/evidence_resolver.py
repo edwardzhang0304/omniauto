@@ -148,7 +148,7 @@ def build_safety_summary(intent_tags: list[str], evidence_items: list[dict[str, 
     style_only = bool(set(intent_tags) <= {"greeting", "small_talk"})
     customer_data_only = "customer_data" in intent_tags and not (set(intent_tags) - {"customer_data"})
     if not has_business_evidence and not style_only and not customer_data_only:
-        if "unknown" in intent_tags or not has_chat_evidence or (set(intent_tags) & business_intents()):
+        if "unknown" in intent_tags or not has_chat_evidence or (set(intent_tags) & evidence_required_intents()):
             reasons.append("no_relevant_business_evidence")
             must_handoff = True
     return {
@@ -156,6 +156,10 @@ def build_safety_summary(intent_tags: list[str], evidence_items: list[dict[str, 
         "must_handoff": must_handoff,
         "reasons": dedupe(reasons),
     }
+
+
+def evidence_required_intents() -> set[str]:
+    return set(business_intents()) | {"product", "scene_product", "spec", "warranty"}
 
 
 def has_authoritative_business_evidence(intent_tags: list[str], evidence_items: list[dict[str, Any]]) -> bool:

@@ -161,8 +161,8 @@ def main() -> int:
         check_low_information_ack_does_not_block_explicit_vehicle_candidates(),
         check_low_information_handoff_ack_is_humanized_short(),
         check_handoff_social_offtopic_uses_soft_redirect(),
-        check_guard_social_offtopic_soft_redirect_under_missing_evidence(),
-        check_guard_social_offtopic_with_context_prefix_uses_soft_redirect(),
+        check_guard_social_offtopic_requires_brain_repair_under_missing_evidence(),
+        check_guard_social_offtopic_with_context_prefix_requires_brain_repair(),
         check_uncertain_message_routes_to_business_clarify_reply(),
         check_vehicle_compare_reply_has_explicit_recommendation_cue(),
         check_recommendation_with_monthly_payment_context_still_uses_candidates(),
@@ -2268,7 +2268,7 @@ def check_handoff_social_offtopic_uses_soft_redirect() -> dict[str, Any]:
     return {"name": "handoff_social_offtopic_uses_soft_redirect", "ok": ok, "reply_text": text}
 
 
-def check_guard_social_offtopic_soft_redirect_under_missing_evidence() -> dict[str, Any]:
+def check_guard_social_offtopic_requires_brain_repair_under_missing_evidence() -> dict[str, Any]:
     candidate = {
         "can_answer": True,
         "reply": "这个我先去确认。",
@@ -2289,22 +2289,22 @@ def check_guard_social_offtopic_soft_redirect_under_missing_evidence() -> dict[s
         evidence_pack=evidence_pack,
         settings={"advisor_mode": "none"},
     )
-    reply_text = str(result.get("reply") or "")
     ok = (
-        result.get("allowed") is True
-        and result.get("action") == "handoff"
-        and result.get("reason") == "social_offtopic_soft_redirect"
-        and "不乱接梗" in reply_text
-        and "预算、用途、是否置换" in reply_text
+        result.get("allowed") is False
+        and result.get("action") == "repair"
+        and result.get("severity") == "repair"
+        and result.get("reason") == "social_offtopic_needs_brain_repair"
+        and "Brain" in str(result.get("repair_instruction") or "")
+        and "guard 不应代写" in str(result.get("repair_instruction") or "")
     )
     return {
-        "name": "guard_social_offtopic_soft_redirect_under_missing_evidence",
+        "name": "guard_social_offtopic_requires_brain_repair_under_missing_evidence",
         "ok": ok,
         "result": result,
     }
 
 
-def check_guard_social_offtopic_with_context_prefix_uses_soft_redirect() -> dict[str, Any]:
+def check_guard_social_offtopic_with_context_prefix_requires_brain_repair() -> dict[str, Any]:
     candidate = {
         "can_answer": True,
         "reply": "这个我先去确认。",
@@ -2335,16 +2335,16 @@ def check_guard_social_offtopic_with_context_prefix_uses_soft_redirect() -> dict
         evidence_pack=evidence_pack,
         settings={"advisor_mode": "none"},
     )
-    reply_text = str(result.get("reply") or "")
     ok = (
-        result.get("allowed") is True
-        and result.get("action") == "handoff"
-        and result.get("reason") == "social_offtopic_soft_redirect"
-        and "不乱接梗" in reply_text
-        and "预算、用途、是否置换" in reply_text
+        result.get("allowed") is False
+        and result.get("action") == "repair"
+        and result.get("severity") == "repair"
+        and result.get("reason") == "social_offtopic_needs_brain_repair"
+        and "Brain" in str(result.get("repair_instruction") or "")
+        and "guard 不应代写" in str(result.get("repair_instruction") or "")
     )
     return {
-        "name": "guard_social_offtopic_with_context_prefix_uses_soft_redirect",
+        "name": "guard_social_offtopic_with_context_prefix_requires_brain_repair",
         "ok": ok,
         "result": result,
     }
@@ -3810,7 +3810,7 @@ def check_listener_humanized_send_env_mapping() -> dict[str, Any]:
         and mapped.get("WECHAT_WIN32_OCR_HUMANIZED_TYPING_CHAR_DELAY_MAX_MS") == "120"
         and mapped.get("WECHAT_WIN32_OCR_HUMANIZED_SEND_PRE_DELAY_MAX_MS") == "900"
         and mapped.get("WECHAT_WIN32_OCR_HUMANIZED_SEND_POST_INPUT_DELAY_MAX_MS") == "350"
-        and mapped.get("WECHAT_WIN32_OCR_SEND_TRIGGER_MODE") == "click_only"
+        and mapped.get("WECHAT_WIN32_OCR_SEND_TRIGGER_MODE") == "enter_only"
         and mapped.get("WECHAT_WIN32_OCR_SEND_INPUT_CONFIRM_ATTEMPTS") == "1"
         and mapped.get("WECHAT_WIN32_OCR_SEND_MIN_INTERVAL_SECONDS") == "90"
         and mapped.get("WECHAT_WIN32_OCR_SEND_BURST_LIMIT") == "2"

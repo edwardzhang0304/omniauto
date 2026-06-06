@@ -29,6 +29,7 @@ from apps.wechat_ai_customer_service.admin_backend.services.customer_service_sch
     SchedulerConfig,
     SchedulerStateStore,
     append_event,
+    cleanup_scheduler_state,
     complete_llm_task,
     complete_polish_task,
     enqueue_llm_task,
@@ -139,6 +140,8 @@ def recover_high_sensitivity_short_pending_batch(
     pending_text = str(pending_signal.get("pending_signal_text") or pending_signal.get("preview_content") or "").strip()
     semantic_pending_text, speaker_meta = _short_pending_semantic_text(pending_text, target_name=target_name)
     pending_compact = normalize_repeatable_probe_text(semantic_pending_text)
+    if short_pending_text_is_media_only(semantic_pending_text):
+        return []
     if not pending_compact or len(pending_compact) > 7:
         return []
     detected_at = str(
@@ -215,6 +218,22 @@ def recover_high_sensitivity_short_pending_batch(
         synthetic["original_content"] = speaker_meta.get("original_content")
         synthetic["ocr_speaker_prefix"] = speaker_meta
     return [synthetic]
+
+
+def short_pending_text_is_media_only(text: str) -> bool:
+    compact = normalize_repeatable_probe_text(text)
+    return compact in {
+        "[图片]",
+        "图片",
+        "[表情]",
+        "表情",
+        "[视频]",
+        "视频",
+        "[语音]",
+        "语音",
+        "[文件]",
+        "文件",
+    }
 
 
 def _apply_rpa_humanized_send_runtime_env(config: dict[str, Any]) -> None:
@@ -304,6 +323,9 @@ class CustomerServiceSchedulerRuntime:
         phase_started = started
         state = self.store.load()
         events: list[dict[str, Any]] = []
+        cleanup_result = cleanup_scheduler_state(state, config=self.config, now=now)
+        if int(cleanup_result.get("removed_ready_reply_count") or 0) > 0:
+            events.append({"event": "state_cleanup", **cleanup_result})
 
         for signal in session_signals or []:
             session = record_session_signal(state, signal, now=now)
@@ -377,6 +399,7 @@ class CustomerServiceSchedulerRuntime:
             "phase_durations": phase_durations,
             "events": events,
             "summary": summary,
+            "cleanup": cleanup_result,
         }
 
     def _capture_pending(self, state: dict[str, Any], *, now: str | None = None) -> list[dict[str, Any]]:
@@ -623,6 +646,7 @@ class CustomerServiceSchedulerRuntime:
                 task_id,
                 reply_text=reply_text,
                 decision=result.get("decision") if isinstance(result.get("decision"), dict) else {},
+                result_payload=result,
                 degraded=bool(result.get("degraded")),
                 now=now,
             )
@@ -639,7 +663,18 @@ class CustomerServiceSchedulerRuntime:
             reply_id = str(reply.get("reply_id") or "")
             mark_reply_sending(state, reply_id, now=now)
             callback_reply = self._reply_for_callbacks(state, reply)
+            freshness_started_at = datetime.now().isoformat(timespec="seconds")
+            live_reply = (state.get("ready_replies", {}) or {}).get(reply_id)
+            if isinstance(live_reply, dict):
+                trace = live_reply.get("latency_trace") if isinstance(live_reply.get("latency_trace"), dict) else {}
+                live_reply["latency_trace"] = {**trace, "freshness_check_started_at": freshness_started_at}
             freshness = self.freshness_fn(copy.deepcopy(callback_reply))
+            freshness_finished_at = datetime.now().isoformat(timespec="seconds")
+            live_reply = (state.get("ready_replies", {}) or {}).get(reply_id)
+            if isinstance(live_reply, dict):
+                trace = live_reply.get("latency_trace") if isinstance(live_reply.get("latency_trace"), dict) else {}
+                live_reply["freshness_check"] = copy.deepcopy(freshness)
+                live_reply["latency_trace"] = {**trace, "freshness_check_finished_at": freshness_finished_at}
             if freshness.get("stale") or freshness.get("has_newer_messages"):
                 mark_reply_stale(state, reply_id, reason=str(freshness.get("reason") or "freshness_stale"), now=now)
                 if self.config.stale_reply_policy == "discard_and_requeue":
@@ -654,11 +689,21 @@ class CustomerServiceSchedulerRuntime:
                 events.append({"event": "reply_stale", "reply_id": reply_id, "target_name": reply.get("target_name"), "freshness": freshness})
                 continue
             try:
+                send_rpa_started_at = datetime.now().isoformat(timespec="seconds")
+                live_reply = (state.get("ready_replies", {}) or {}).get(reply_id)
+                if isinstance(live_reply, dict):
+                    trace = live_reply.get("latency_trace") if isinstance(live_reply.get("latency_trace"), dict) else {}
+                    live_reply["latency_trace"] = {**trace, "send_rpa_started_at": send_rpa_started_at}
                 send_result = self.send_fn(copy.deepcopy(callback_reply))
             except Exception as exc:  # noqa: BLE001
                 mark_reply_failed(state, reply_id, reason=repr(exc), now=now)
                 events.append({"event": "send_failed", "reply_id": reply_id, "error": repr(exc)})
                 continue
+            send_rpa_finished_at = datetime.now().isoformat(timespec="seconds")
+            live_reply = (state.get("ready_replies", {}) or {}).get(reply_id)
+            if isinstance(live_reply, dict):
+                trace = live_reply.get("latency_trace") if isinstance(live_reply.get("latency_trace"), dict) else {}
+                live_reply["latency_trace"] = {**trace, "send_rpa_finished_at": send_rpa_finished_at}
             send_observability = self._extract_send_observability(send_result)
             if send_result.get("ok") is False or send_result.get("verified") is False:
                 mark_reply_failed(state, reply_id, reason=str(send_result.get("reason") or send_result.get("error") or "send_failed"), send_result=send_result, now=now)
@@ -1105,6 +1150,8 @@ class ManagedListenerSchedulerBridge:
         wf = self._workflow
         with self._tenant_environment():
             config = wf["load_config"](self.config_path)
+            if self.allow_send:
+                config["_require_customer_service_brain_first_startup_guard"] = True
             config = wf["apply_local_customer_service_settings"](config)
         self.config = config
         _apply_rpa_humanized_send_runtime_env(config)

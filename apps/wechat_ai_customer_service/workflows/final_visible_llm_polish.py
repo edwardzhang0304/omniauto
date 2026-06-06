@@ -36,18 +36,61 @@ DEFAULT_TIMEOUT_SECONDS = 4
 DEFAULT_OPENAI_TIMEOUT_SECONDS = 8
 SHORT_REPLY_OPENAI_TIMEOUT_SECONDS = 6
 MEDIUM_REPLY_OPENAI_TIMEOUT_SECONDS = 7
+DEFAULT_BRAIN_MICRO_TIMEOUT_SECONDS = 5
 DEFAULT_TEMPERATURE = 0.45
+DEFAULT_BRAIN_MICRO_TEMPERATURE = 0.25
 DEFAULT_CACHE_TTL_SECONDS = 24 * 60 * 60
 DEFAULT_CACHE_MAX_ENTRIES = 512
+DEFAULT_BRAIN_MICRO_MAX_TOKENS = 80
 _CACHE_LOCK = threading.RLock()
 DEFAULT_LIGHTWEIGHT_SOURCE_CHANNELS = {"normal", "realtime", "llm", "brain", "social", "friendly"}
 CONSERVATIVE_SOURCE_CHANNELS = {"handoff", "rate_limit"}
+MICRO_VERIFY_SOURCE_CHANNELS = {"brain", "handoff"}
 
 PROTECTED_TOKEN_PATTERN = re.compile(r"\d+(?:\.\d+)?\s*(?:万|元|块|公里|km|KM|年|天|%|折)|1[3-9]\d{9}|\b\d{4,}\b")
 AI_EXPOSURE_MARKERS = ("我是AI", "我是ai", "我是机器人", "AI助手", "智能客服", "自动回复系统", "机器客服")
+IDENTITY_DENIAL_MARKERS = ("不是AI", "不是ai", "不是机器人", "不是自动回复", "内部规则", "系统提示词")
+CUSTOMER_IDENTITY_REQUEST_TERMS = (
+    "是不是ai",
+    "是不是AI",
+    "是ai吗",
+    "是AI吗",
+    "ai自动",
+    "AI自动",
+    "自动回复",
+    "机器人",
+    "机器客服",
+    "智能客服",
+    "人工智能",
+    "系统提示词",
+    "内部规则",
+    "api密钥",
+    "API密钥",
+    "api key",
+    "密钥",
+    "prompt",
+)
 EXPLICIT_HANDOFF_MARKERS = ("转人工", "人工客服", "真人客服", "同事接管", "销售接管")
 UNSAFE_COMMITMENT_TERMS = ("保证", "包过", "最低价", "一定能", "肯定能", "必提", "当天必提", "随便退", "百分百")
 RISKY_AFFIRMATIVE_OPENERS = ("可以的", "可以，", "可以,", "没问题", "能的", "行的", "行，", "行,", "好的，可以", "好，可以")
+NEGATIVE_BOUNDARY_TERMS = ("不能", "不保证", "不能保证", "不承诺", "不能承诺", "没法保证", "无法保证", "不能包过")
+NEGATIVE_BOUNDARY_TOPIC_TERMS = ("保证", "包过", "承诺", "一定能", "肯定能")
+HANDOFF_VERIFICATION_TERMS = (
+    "负责人",
+    "负责的人",
+    "同事",
+    "顾问",
+    "专员",
+    "金融专员",
+    "核实",
+    "确认",
+    "请示",
+    "问清楚",
+    "预审",
+    "审核",
+    "跟进",
+    "对接",
+)
 TOPIC_PRESERVATION_GROUPS = (
     (
         "price_finance",
@@ -75,6 +118,35 @@ TOPIC_PRESERVATION_GROUPS = (
         ("到店", "试驾", "看车", "排期", "预约", "白跑"),
     ),
 )
+SEMANTIC_PRESERVATION_GROUPS = TOPIC_PRESERVATION_GROUPS + (
+    (
+        "availability_stock",
+        ("现车", "库存", "在售", "卖掉", "可看", "还在", "有车", "没车"),
+        ("现车", "库存", "在售", "卖", "可看", "还在", "有车", "没车"),
+    ),
+    (
+        "condition_report",
+        ("车况", "检测", "报告", "事故", "水泡", "火烧", "出险", "维保", "公里数", "里程"),
+        ("车况", "检测", "报告", "事故", "水泡", "火烧", "出险", "维保", "公里", "里程"),
+    ),
+    (
+        "contact_info",
+        ("电话", "手机号", "微信", "地址", "定位", "门店"),
+        ("电话", "手机号", "微信", "地址", "定位", "门店"),
+    ),
+)
+SEMANTIC_ENTITY_TOKEN_PATTERN = re.compile(
+    r"(?:[A-Za-z]{2,}\d*|[\u4e00-\u9fff]{1,8}[A-Za-z0-9][A-Za-z0-9\u4e00-\u9fff]{0,12})"
+)
+SEMANTIC_ENTITY_STOPWORDS = {
+    "AI",
+    "OCR",
+    "RPA",
+    "LLM",
+    "JSON",
+    "km",
+    "KM",
+}
 
 RESPONSE_SCHEMA = {
     "type": "object",
@@ -160,9 +232,10 @@ def maybe_polish_customer_visible_reply(
         ),
         settings,
     )
-    guard = guard_polished_reply(
+    guard = guard_final_visible_polish_candidate(
         base_reply=draft,
         polished_reply=polished,
+        customer_message=customer_message,
         recent_reply_texts=recent_replies,
         settings=settings,
         source_channel=source_channel,
@@ -201,15 +274,46 @@ def maybe_polish_customer_visible_reply(
                     ),
                     settings,
                 )
-                guard = guard_polished_reply(
+                guard = guard_final_visible_polish_candidate(
                     base_reply=draft,
                     polished_reply=polished,
+                    customer_message=customer_message,
                     recent_reply_texts=recent_replies,
                     settings=settings,
                     source_channel=source_channel,
                 )
                 payload["candidate"] = compact_candidate(candidate)
                 payload["guard"] = guard
+        if not guard.get("allowed") and should_use_draft_after_micro_reject(
+            settings=settings,
+            source_channel=source_channel,
+            draft=draft,
+        ):
+            draft_guard = guard_final_visible_polish_candidate(
+                base_reply=draft,
+                polished_reply=draft,
+                customer_message=customer_message,
+                recent_reply_texts=recent_replies,
+                settings=settings,
+                source_channel=source_channel,
+            )
+            if draft_guard.get("allowed"):
+                payload["guard"] = {
+                    "allowed": True,
+                    "reason": "brain_micro_candidate_rejected_used_draft",
+                    "rejected_candidate_guard": guard,
+                    "draft_guard": draft_guard,
+                }
+                payload.update(
+                    {
+                        "passed": True,
+                        "applied": False,
+                        "reason": f"final_visible_llm_polish_{normalized_source_channel(source_channel)}_draft_verified_no_delta",
+                        "raw_reply_text": draft,
+                        "reply_text": draft,
+                    }
+                )
+                return finish(payload)
         payload["reason"] = str(guard.get("reason") or "final_polish_guard_rejected")
         payload["reply_text"] = draft
         if not guard.get("allowed"):
@@ -261,6 +365,13 @@ def effective_settings(config: dict[str, Any]) -> dict[str, Any]:
     settings.setdefault("cache_ttl_seconds", DEFAULT_CACHE_TTL_SECONDS)
     settings.setdefault("cache_max_entries", DEFAULT_CACHE_MAX_ENTRIES)
     settings.setdefault("required_for_send", bool(settings.get("enabled", False)))
+    settings.setdefault("brain_source_policy", "llm_micro_verify")
+    settings.setdefault("brain_micro_guard_fallback_to_draft", True)
+    settings.setdefault("brain_micro_timeout_seconds", DEFAULT_BRAIN_MICRO_TIMEOUT_SECONDS)
+    settings.setdefault("brain_micro_max_tokens", DEFAULT_BRAIN_MICRO_MAX_TOKENS)
+    settings.setdefault("brain_micro_temperature", DEFAULT_BRAIN_MICRO_TEMPERATURE)
+    settings.setdefault("brain_micro_min_similarity", 0.72)
+    settings.setdefault("micro_verify_source_channels", sorted(MICRO_VERIFY_SOURCE_CHANNELS))
     return settings
 
 
@@ -458,11 +569,14 @@ def final_polish_cache_key(
     needs_handoff: bool,
 ) -> str:
     key_payload = {
-        "version": 1,
+        "version": 2,
         "provider": str(settings.get("provider") or ""),
         "model": str(settings.get("model") or ""),
         "model_tier": str(settings.get("model_tier") or ""),
         "fast_prompt_enabled": settings.get("fast_prompt_enabled", True) is not False,
+        "brain_source_policy": str(settings.get("brain_source_policy") or ""),
+        "handoff_source_policy": str(settings.get("handoff_source_policy") or ""),
+        "micro_verify_source_channels": sorted(source_channel_set_from_settings(settings.get("micro_verify_source_channels"), MICRO_VERIFY_SOURCE_CHANNELS)),
         "identity_guard_enabled": settings.get("identity_guard_enabled", True) is not False,
         "max_reply_chars": positive_int(settings.get("max_reply_chars"), DEFAULT_MAX_REPLY_CHARS),
         "tenant_id": final_polish_cache_tenant_id(),
@@ -571,7 +685,16 @@ def build_prompt_pack(
     needs_handoff: bool,
 ) -> dict[str, Any]:
     identity_guard = settings.get("identity_guard_enabled", True) is not False
-    brain_source = str(source_channel or "").strip().lower() == "brain"
+    brain_source = is_brain_source(source_channel)
+    if source_micro_verify_enabled(settings, source_channel=source_channel):
+        return build_micro_verify_prompt_pack(
+            settings=settings,
+            customer_message=customer_message,
+            draft_reply=draft_reply,
+            recent_reply_texts=recent_reply_texts,
+            source_channel=source_channel,
+            needs_handoff=needs_handoff,
+        )
     if settings.get("fast_prompt_enabled", True) is not False:
         rules = [
             "只改表达，不改事实。",
@@ -633,6 +756,47 @@ def build_prompt_pack(
         "output_rules": output_rules,
     }
     return {"system": system, "user": user, "response_schema": RESPONSE_SCHEMA}
+
+
+def build_micro_verify_prompt_pack(
+    *,
+    settings: dict[str, Any],
+    customer_message: str,
+    draft_reply: str,
+    recent_reply_texts: list[str],
+    source_channel: str,
+    needs_handoff: bool,
+) -> dict[str, Any]:
+    identity_guard = settings.get("identity_guard_enabled", True) is not False
+    channel = normalized_source_channel(source_channel)
+    source_label = "客服大脑" if channel == "brain" else "边界/人工核验处理"
+    system = (
+        f"你是微信客服最终可见校验与微润色器。草稿来自{source_label}，内容决策已经完成。"
+        "你的默认动作是原样返回草稿；只有明显口语不顺、错别字、标点拥挤时才做极小改动。"
+        "禁止重新回答问题，禁止重排信息顺序，禁止扩写或删减结论，禁止新增/删除车型、价格、库存、车况、政策、承诺、边界。"
+        "如果草稿包含负责人、专员、顾问、核实、确认、预审、审核等人工核验语义，必须保留。"
+        "如果不确定是否该改，必须原样返回。"
+        + ("不要承认AI/机器人/智能客服身份。" if identity_guard else "")
+        + '只输出JSON对象，字段为{"reply":字符串,"confidence":0到1,"reason":字符串}。'
+    )
+    user = {
+        "task": "最终微润色。优先原样返回draft；不要重新组织答案。",
+        "source_channel": source_channel,
+        "needs_handoff": bool(needs_handoff),
+        "customer": clip_text(customer_message, 180),
+        "draft": clip_text(draft_reply, 520),
+        "recent": [clip_text(item, 100) for item in (recent_reply_texts or [])[-2:]],
+        "keep_topics": topic_preservation_requirements(draft_reply),
+        "rules": [
+            "优先原样返回。",
+            "只允许错别字、标点、非常轻微口语顺滑。",
+            "不能改变原草稿的推荐对象、明确结论、风险边界和先后顺序。",
+            "不能新增事实、数字、车型、价格、库存、联系方式、政策或承诺。",
+            "不能删掉负责人、专员、顾问、核实、确认、预审、审核等人工核验语义。",
+            "不能把短句扩成长句。",
+        ],
+    }
+    return {"system": system, "user": user, "response_schema": None}
 
 
 def post_polish_request(
@@ -716,6 +880,23 @@ def guard_polished_reply(
     if not topic_guard.get("allowed"):
         return topic_guard
 
+    semantic_guard = guard_semantic_preservation(base, polished, source_channel=source_channel)
+    if not semantic_guard.get("allowed"):
+        return semantic_guard
+
+    boundary_guard = guard_negative_boundary_preservation(base, polished)
+    if not boundary_guard.get("allowed"):
+        return boundary_guard
+
+    handoff_guard = guard_handoff_verification_preservation(base, polished, source_channel=source_channel)
+    if not handoff_guard.get("allowed"):
+        return handoff_guard
+
+    if source_micro_verify_enabled(settings, source_channel=source_channel):
+        micro_guard = guard_micro_verify_delta(base, polished, settings=settings, source_channel=source_channel)
+        if not micro_guard.get("allowed"):
+            return micro_guard
+
     max_recent_similarity = max((reply_similarity(polished, recent) for recent in recent_reply_texts[-4:]), default=0.0)
     if recent_reply_texts and max_recent_similarity >= 0.96:
         return {"allowed": False, "reason": "polish_repeats_recent_reply", "similarity": max_recent_similarity}
@@ -723,6 +904,144 @@ def guard_polished_reply(
     if base and reply_similarity(base, polished) < min_similarity_for_source(source_channel):
         return {"allowed": False, "reason": "polish_changed_meaning_too_much", "similarity": reply_similarity(base, polished)}
     return {"allowed": True, "reason": "final_polish_guard_passed"}
+
+
+def guard_final_visible_polish_candidate(
+    *,
+    base_reply: str,
+    polished_reply: str,
+    customer_message: str,
+    recent_reply_texts: list[str],
+    settings: dict[str, Any],
+    source_channel: str,
+) -> dict[str, Any]:
+    identity_guard = guard_identity_denial_relevance(customer_message=customer_message, polished_reply=polished_reply, settings=settings)
+    if not identity_guard.get("allowed"):
+        return identity_guard
+    return guard_polished_reply(
+        base_reply=base_reply,
+        polished_reply=polished_reply,
+        recent_reply_texts=recent_reply_texts,
+        settings=settings,
+        source_channel=source_channel,
+    )
+
+
+def guard_identity_denial_relevance(*, customer_message: str, polished_reply: str, settings: dict[str, Any]) -> dict[str, Any]:
+    if settings.get("identity_guard_enabled", True) is False:
+        return {"allowed": True, "reason": "identity_guard_disabled"}
+    if not looks_like_identity_denial_reply(polished_reply):
+        return {"allowed": True, "reason": "not_identity_denial_reply"}
+    if customer_asks_identity_or_internal_info(customer_message):
+        return {"allowed": True, "reason": "identity_denial_matches_customer_probe"}
+    return {"allowed": False, "reason": "identity_denial_for_non_identity_request"}
+
+
+def looks_like_identity_denial_reply(text: str) -> bool:
+    clean = re.sub(r"\s+", "", str(text or ""))
+    return any(re.sub(r"\s+", "", marker) in clean for marker in IDENTITY_DENIAL_MARKERS)
+
+
+def customer_asks_identity_or_internal_info(text: str) -> bool:
+    clean = re.sub(r"\s+", "", current_polish_customer_text(text)).lower()
+    return any(re.sub(r"\s+", "", term).lower() in clean for term in CUSTOMER_IDENTITY_REQUEST_TERMS)
+
+
+def current_polish_customer_text(text: str) -> str:
+    raw = str(text or "")
+    marker = "当前客户问题："
+    if marker in raw:
+        return raw.rsplit(marker, 1)[-1].strip()
+    lines = [line.strip() for line in raw.strip().splitlines() if line.strip()]
+    if len(lines) >= 2:
+        return lines[-1]
+    return raw.strip()
+
+
+def should_use_draft_after_micro_reject(*, settings: dict[str, Any], source_channel: str, draft: str) -> bool:
+    if not draft.strip():
+        return False
+    channel = normalized_source_channel(source_channel)
+    if channel not in {"brain", "handoff"}:
+        return False
+    if settings.get("brain_micro_guard_fallback_to_draft", True) is False:
+        return False
+    return source_micro_verify_enabled(settings, source_channel=source_channel)
+
+
+def is_brain_source(source_channel: str) -> bool:
+    return normalized_source_channel(source_channel) == "brain"
+
+
+def brain_micro_verify_enabled(settings: dict[str, Any], *, source_channel: str) -> bool:
+    return source_micro_verify_enabled(settings, source_channel=source_channel)
+
+
+def source_micro_verify_enabled(settings: dict[str, Any], *, source_channel: str) -> bool:
+    channel = normalized_source_channel(source_channel)
+    channels = source_channel_set_from_settings(settings.get("micro_verify_source_channels"), MICRO_VERIFY_SOURCE_CHANNELS)
+    if channel not in channels:
+        return False
+    if channel == "brain":
+        policy = str(settings.get("brain_source_policy") or "llm_micro_verify").strip().lower()
+        return policy in {"llm_micro_verify", "micro_verify", "verify_micro", "micro"}
+    if channel == "handoff":
+        policy = str(settings.get("handoff_source_policy") or "llm_micro_verify").strip().lower()
+        return policy in {"llm_micro_verify", "micro_verify", "verify_micro", "micro"}
+    return False
+
+
+def normalized_source_channel(source_channel: str) -> str:
+    return str(source_channel or "normal").strip().lower() or "normal"
+
+
+def guard_handoff_verification_preservation(base_reply: str, polished_reply: str, *, source_channel: str) -> dict[str, Any]:
+    if normalized_source_channel(source_channel) != "handoff":
+        return {"allowed": True, "reason": "handoff_verification_preservation_not_needed"}
+    base_terms = [term for term in HANDOFF_VERIFICATION_TERMS if term in str(base_reply or "")]
+    if not base_terms:
+        return {"allowed": True, "reason": "handoff_verification_preservation_not_needed"}
+    if any(term in str(polished_reply or "") for term in HANDOFF_VERIFICATION_TERMS):
+        return {"allowed": True, "reason": "handoff_verification_preservation_passed"}
+    return {
+        "allowed": False,
+        "reason": "polish_removed_handoff_verification",
+        "required_any": list(HANDOFF_VERIFICATION_TERMS),
+        "base_terms": base_terms,
+    }
+
+
+def guard_micro_verify_delta(base_reply: str, polished_reply: str, *, settings: dict[str, Any], source_channel: str) -> dict[str, Any]:
+    base = normalize_for_delta(base_reply)
+    polished = normalize_for_delta(polished_reply)
+    if base == polished:
+        return {"allowed": True, "reason": "micro_verify_delta_not_changed"}
+    similarity = reply_similarity(base, polished)
+    min_similarity = bounded_float(settings.get("brain_micro_min_similarity"), 0.72, low=0.5, high=0.98)
+    if similarity < min_similarity:
+        return {
+            "allowed": False,
+            "reason": f"polish_{normalized_source_channel(source_channel)}_micro_changed_too_much",
+            "similarity": round(similarity, 4),
+            "min_similarity": min_similarity,
+        }
+    max_length_delta = positive_int(settings.get("brain_micro_max_length_delta_chars"), 18)
+    if abs(len(polished) - len(base)) > max_length_delta:
+        return {
+            "allowed": False,
+            "reason": f"polish_{normalized_source_channel(source_channel)}_micro_length_delta_too_large",
+            "length_delta": len(polished) - len(base),
+            "max_length_delta": max_length_delta,
+        }
+    return {"allowed": True, "reason": "micro_verify_delta_passed", "similarity": round(similarity, 4)}
+
+
+def guard_brain_micro_delta(base_reply: str, polished_reply: str, *, settings: dict[str, Any]) -> dict[str, Any]:
+    return guard_micro_verify_delta(base_reply, polished_reply, settings=settings, source_channel="brain")
+
+
+def normalize_for_delta(text: str) -> str:
+    return re.sub(r"\s+", "", str(text or "")).strip()
 
 
 def protected_tokens(text: str) -> set[str]:
@@ -798,6 +1117,58 @@ def guard_topic_preservation(base_reply: str, polished_reply: str) -> dict[str, 
     return {"allowed": True, "reason": "topic_preservation_passed"}
 
 
+def guard_semantic_preservation(base_reply: str, polished_reply: str, *, source_channel: str) -> dict[str, Any]:
+    base = str(base_reply or "")
+    polished = str(polished_reply or "")
+    missing_groups = []
+    introduced_groups = []
+    for group_id, triggers, required_any in SEMANTIC_PRESERVATION_GROUPS:
+        base_has = any(term in base for term in triggers)
+        polished_has = any(term in polished for term in required_any)
+        polished_has_trigger = any(term in polished for term in triggers)
+        if base_has and not polished_has:
+            missing_groups.append(group_id)
+        if polished_has_trigger and not base_has:
+            introduced_groups.append(group_id)
+    if missing_groups:
+        return {"allowed": False, "reason": "polish_removed_semantic_boundary", "missing_groups": missing_groups}
+    if introduced_groups:
+        return {"allowed": False, "reason": "polish_introduced_semantic_boundary", "introduced_groups": introduced_groups}
+    if str(source_channel or "").strip().lower() in {"brain", "handoff"}:
+        missing_entities = sorted(semantic_entity_tokens(base) - semantic_entity_tokens(polished))
+        if missing_entities:
+            return {"allowed": False, "reason": "polish_removed_brain_entity_token", "missing_entities": missing_entities}
+    return {"allowed": True, "reason": "semantic_preservation_passed"}
+
+
+def guard_negative_boundary_preservation(base_reply: str, polished_reply: str) -> dict[str, Any]:
+    base = str(base_reply or "")
+    polished = str(polished_reply or "")
+    if not any(term in base for term in NEGATIVE_BOUNDARY_TERMS):
+        return {"allowed": True, "reason": "negative_boundary_preservation_not_needed"}
+    if not any(term in base for term in NEGATIVE_BOUNDARY_TOPIC_TERMS):
+        return {"allowed": True, "reason": "negative_boundary_preservation_not_needed"}
+    if any(term in polished for term in NEGATIVE_BOUNDARY_TERMS):
+        return {"allowed": True, "reason": "negative_boundary_preservation_passed"}
+    return {
+        "allowed": False,
+        "reason": "polish_removed_negative_boundary",
+        "required_any": list(NEGATIVE_BOUNDARY_TERMS),
+    }
+
+
+def semantic_entity_tokens(text: str) -> set[str]:
+    tokens: set[str] = set()
+    for match in SEMANTIC_ENTITY_TOKEN_PATTERN.finditer(str(text or "")):
+        token = re.sub(r"\s+", "", match.group(0)).strip()
+        if not token or token in SEMANTIC_ENTITY_STOPWORDS:
+            continue
+        if len(token) < 2:
+            continue
+        tokens.add(token)
+    return tokens
+
+
 def reply_similarity(left: str, right: str) -> float:
     a = re.sub(r"\s+", "", str(left or ""))
     b = re.sub(r"\s+", "", str(right or ""))
@@ -807,11 +1178,12 @@ def reply_similarity(left: str, right: str) -> float:
 
 
 def min_similarity_for_source(source_channel: str) -> float:
-    if source_channel == "brain":
-        return 0.42
-    if source_channel == "handoff":
+    channel = str(source_channel or "").strip().lower()
+    if channel == "brain":
+        return 0.72
+    if channel == "handoff":
         return 0.22
-    if source_channel == "rate_limit":
+    if channel == "rate_limit":
         return 0.28
     return 0.24
 
@@ -845,7 +1217,7 @@ def resolve_polish_runtime_budget(
     profile = "default"
     short_reply = False
     medium_reply = False
-    channel = str(source_channel or "normal").strip().lower() or "normal"
+    channel = normalized_source_channel(source_channel)
     lightweight_channels = source_channel_set_from_settings(
         settings.get("lightweight_source_channels"),
         DEFAULT_LIGHTWEIGHT_SOURCE_CHANNELS,
@@ -854,6 +1226,18 @@ def resolve_polish_runtime_budget(
         settings.get("conservative_source_channels"),
         CONSERVATIVE_SOURCE_CHANNELS,
     )
+    if source_micro_verify_enabled(settings, source_channel=channel):
+        timeout_seconds = resolve_brain_micro_polish_timeout(settings, provider)
+        return {
+            "profile": "brain_micro" if channel == "brain" else "handoff_micro",
+            "char_count": char_count,
+            "timeout_seconds": timeout_seconds,
+            "max_tokens": min(max_tokens, positive_int(settings.get("brain_micro_max_tokens"), DEFAULT_BRAIN_MICRO_MAX_TOKENS)),
+            "temperature": min(
+                temperature,
+                bounded_float(settings.get("brain_micro_temperature"), DEFAULT_BRAIN_MICRO_TEMPERATURE, low=0.0, high=0.6),
+            ),
+        }
     # Keep handoff/rate-limit conservative; optimize all ordinary customer-visible
     # drafts regardless of whether they came from realtime, LLM, or local routing.
     if not needs_handoff and channel in lightweight_channels and channel not in conservative_channels:
@@ -900,6 +1284,15 @@ def resolve_final_polish_timeout(
     return configured
 
 
+def resolve_brain_micro_polish_timeout(settings: dict[str, Any], provider: str) -> int:
+    configured = positive_int(settings.get("brain_micro_timeout_seconds"), DEFAULT_BRAIN_MICRO_TIMEOUT_SECONDS)
+    base = positive_int(settings.get("timeout_seconds"), DEFAULT_TIMEOUT_SECONDS)
+    timeout = min(base, configured) if base > 0 else configured
+    if str(provider or "").strip().lower() == "openai":
+        return max(4, min(timeout, DEFAULT_BRAIN_MICRO_TIMEOUT_SECONDS))
+    return max(1, timeout)
+
+
 def source_channel_set_from_settings(value: Any, default: set[str]) -> set[str]:
     if isinstance(value, str):
         items = [item.strip().lower() for item in value.split(",") if item.strip()]
@@ -926,7 +1319,7 @@ def truncate_reply_naturally(text: str, max_chars: int) -> str:
         return clean
     cutoff = max(1, max_chars)
     preferred = -1
-    for marker in ("。", "！", "？", "!", "?", "；", ";", "，", ","):
+    for marker in ("。", "！", "？", "!", "?", "；", ";"):
         index = clean.rfind(marker, 0, cutoff)
         if index > preferred:
             preferred = index

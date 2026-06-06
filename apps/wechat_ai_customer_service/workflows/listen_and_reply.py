@@ -70,8 +70,15 @@ from customer_service_brain import (
 from product_knowledge import decide_product_knowledge_reply, load_product_knowledge
 from rag_answer_layer import maybe_build_rag_reply
 from rag_experience_store import record_rag_reply_experience
-from reply_evidence_builder import compact_knowledge_pack
+from reply_evidence_builder import (
+    compact_knowledge_pack,
+    collect_catalog_product_aliases,
+    is_concrete_catalog_alias,
+    mark_finance_process_evidence_auto_reply_allowed,
+    relax_finance_process_safety,
+)
 from realtime_reply_router import (
+    build_direct_catalog_price_reply,
     build_synthesis_config_for_route,
     choose_reply_variant,
     current_customer_text,
@@ -107,6 +114,35 @@ from apps.wechat_ai_customer_service.knowledge_paths import active_tenant_id
 CONFIG_PATH = ROOT / "apps/wechat_ai_customer_service/configs/default.example.json"
 MAX_STORED_IDS = 1000
 DEFAULT_MAX_BATCH_MESSAGES = 8
+
+
+class CustomerServiceBrainStartupError(RuntimeError):
+    """Raised when live customer-service startup would not run Brain First."""
+
+    def __init__(self, summary: dict[str, Any]) -> None:
+        self.summary = summary
+        reasons = ", ".join(str(item) for item in summary.get("fail_reasons", []) or []) or "brain_first_guard_failed"
+        super().__init__(f"customer service Brain First guard failed: {reasons}")
+
+
+BRAIN_FAILURE_ALERT_REASONS = {
+    "customer_service_brain_exception",
+    "customer_service_brain_llm_unavailable",
+    "brain_plan_validation_failed",
+    "brain_quality_verification_failed",
+    "brain_guard_rejected",
+}
+
+
+def parse_positive_int(value: Any, default: int, *, minimum: int = 1, maximum: int | None = None) -> int:
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        parsed = default
+    parsed = max(minimum, parsed)
+    if maximum is not None:
+        parsed = min(maximum, parsed)
+    return parsed
 
 
 def write_workflow_phase(phase: str, **payload: Any) -> None:
@@ -350,6 +386,11 @@ def main() -> int:
         write_runtime_status("thinking", "正在读取微信消息并调用必要的大模型。")
         write_workflow_phase("workflow_start", config=str(args.config), send=bool(args.send), write_data=bool(args.write_data))
         result = run_workflow(args)
+    except CustomerServiceBrainStartupError as exc:
+        write_workflow_phase("workflow_brain_startup_guard_failed", summary=exc.summary)
+        message = f"微信自动客服启动前安全护栏未通过：{exc}"
+        write_runtime_status("stopped", message, brain_startup_guard=exc.summary, last_error=repr(exc))
+        result = {"ok": False, "error": str(exc), "brain_startup_guard": exc.summary}
     except Exception as exc:
         write_workflow_phase("workflow_exception", error=repr(exc))
         write_runtime_status("idle", "本轮处理出错，监听会自动重试。", last_error=repr(exc))
@@ -369,6 +410,8 @@ def run_workflow(args: argparse.Namespace) -> dict[str, Any]:
         return gate_error
 
     config = load_config(args.config)
+    if bool(args.send) and not bool(args.bootstrap):
+        config["_require_customer_service_brain_first_startup_guard"] = True
     config = apply_local_customer_service_settings(config)
     session_routing = config.get("_local_customer_service_session_routing", {}) or {}
     if not isinstance(session_routing, dict):
@@ -723,6 +766,7 @@ def process_target(
     routing_batch = normalize_batch_content_for_reply_routing(batch)
     semantic_batch_plan = plan_message_batch_semantics(routing_batch, config)
     combined = str(semantic_batch_plan.get("combined_text") or "\n".join(str(item.get("content") or "") for item in batch))
+    update_conversation_preference_context(target_state, combined)
     message_ids = [str(item.get("id") or "") for item in batch]
     if send and should_defer_standalone_greeting(config, routing_batch, combined):
         mark_coalesced_messages(
@@ -960,11 +1004,26 @@ def process_target(
         adoptable=bool(event["customer_service_brain"].get("adoptable")),
         reason=event["customer_service_brain"].get("reason"),
     )
-    if should_adopt_customer_service_brain(event["customer_service_brain"]):
+    event["customer_service_brain_failure_alert"] = maybe_record_customer_service_brain_failure_alert(
+        config=config,
+        target_state=target_state,
+        target=target,
+        batch=batch,
+        combined=combined,
+        brain_result=event["customer_service_brain"],
+        product_knowledge=product_knowledge,
+    )
+    if customer_service_brain_controls_reply(event["customer_service_brain"]):
+        if not should_adopt_customer_service_brain(event["customer_service_brain"]):
+            event["customer_service_brain"] = build_brain_safe_fallback_payload(
+                event["customer_service_brain"],
+                combined=combined,
+                reason=customer_service_brain_failure_reason(event["customer_service_brain"]),
+            )
         config = config_with_legacy_reply_generators_disabled_for_brain(config)
         event["customer_service_brain_legacy_generators"] = {
             "disabled": True,
-            "reason": "brain_first_reply_ready",
+            "reason": "brain_first_authoritative_control",
             "disabled_modules": ["rag_response", "realtime_reply", "llm_reply_synthesis"],
         }
     write_workflow_phase("rag_reply_start", target=target.name)
@@ -1150,6 +1209,39 @@ def process_target(
     token_budget = update_token_budget_from_synthesis(token_budget, llm_synthesis)
     event["token_budget"] = token_budget
     event["llm_reply_synthesis"] = llm_synthesis
+    direct_price_fact_fallback = maybe_build_direct_product_price_fact_fallback(
+        runtime_route=runtime_route,
+        llm_synthesis=llm_synthesis,
+        combined=realtime_combined,
+        evidence_pack=realtime_evidence_pack,
+        recent_reply_texts=recent_reply_texts,
+    )
+    if direct_price_fact_fallback.get("applied"):
+        realtime_reply = direct_price_fact_fallback
+        event["realtime_reply"] = realtime_reply
+        llm_synthesis = {
+            "enabled": synthesis_enabled,
+            "applied": False,
+            "reason": "skipped_by_realtime_route",
+            "route_level": runtime_route.get("level"),
+            "route_reason": runtime_route.get("reason"),
+            "realtime_fact_reply": True,
+            "replaced_handoff_reason": direct_price_fact_fallback.get("replaced_handoff_reason"),
+        }
+        event["llm_reply_synthesis"] = llm_synthesis
+        decision = ReplyDecision(
+            reply_text=str(realtime_reply.get("raw_reply_text") or ""),
+            rule_name=str(realtime_reply.get("rule_name") or "realtime_catalog_price_fact"),
+            matched=True,
+            need_handoff=False,
+            reason=str(realtime_reply.get("reason") or "product_master_direct_price_fact"),
+        )
+        reply_text = format_reply(str(realtime_reply.get("raw_reply_text") or ""), configured_reply_prefix(config))
+        event["decision"] = {
+            **decision.__dict__,
+            "raw_reply_text": decision.reply_text,
+            "reply_text": reply_text,
+        }
     if llm_synthesis.get("applied"):
         decision = ReplyDecision(
             reply_text=str(llm_synthesis.get("raw_reply_text") or ""),
@@ -1275,6 +1367,8 @@ def process_target(
             "reply_text": reply_text,
         }
 
+    event["brain_first_reply_audit"] = build_brain_first_reply_audit(event, reply_text=reply_text)
+
     if send:
         write_workflow_phase("freshness_check_start", target=target.name)
         freshness = detect_newer_messages_before_send(
@@ -1344,11 +1438,16 @@ def process_target(
             recent_reply_texts=recent_reply_texts,
         )
         preserve_social_handoff_redirect = bool(social_handoff_redirect)
+        preserve_specific_boundary_refusal = bool(specific_boundary_refusal_for_request(combined)) and is_specific_boundary_refusal_reply(prebuilt_handoff_reply_text)
         if preserve_social_handoff_redirect:
             prebuilt_handoff_reply_text = format_reply(social_handoff_redirect, configured_reply_prefix(config))
             event["reply_style_adapter_handoff"] = {"applied": False, "reason": "social_offtopic_redirect_preserved"}
             event["outbound_naturalness_handoff"] = {"applied": False, "reason": "social_offtopic_redirect_preserved"}
             event["final_visible_llm_polish_handoff"] = {"applied": False, "reason": "social_offtopic_redirect_preserved"}
+        elif preserve_specific_boundary_refusal:
+            event["reply_style_adapter_handoff"] = {"applied": False, "reason": "specific_boundary_refusal_preserved"}
+            event["outbound_naturalness_handoff"] = {"applied": False, "reason": "specific_boundary_refusal_preserved"}
+            event["final_visible_llm_polish_handoff"] = {"applied": False, "reason": "specific_boundary_refusal_preserved"}
         else:
             handoff_style_adaptation = adapt_reply_style(
                 config=config,
@@ -1389,6 +1488,15 @@ def process_target(
                     return block_for_final_visible_polish_failure(event, target, final_handoff_polish)
                 elif final_visible_polish_degraded(final_handoff_polish, config=config):
                     event["final_visible_llm_polish_handoff_degraded"] = True
+        if is_identity_or_internal_probe_request(combined) and not is_identity_guard_denial_reply(prebuilt_handoff_reply_text):
+            restored_identity_reply = identity_guard_denial_fallback_reply(combined, config)
+            event["identity_probe_denial_guard_handoff"] = {
+                "applied": True,
+                "original_reply_text": prebuilt_handoff_reply_text,
+                "reply_text": restored_identity_reply,
+                "reason": "identity_denial_removed_by_handoff_postprocessing",
+            }
+            prebuilt_handoff_reply_text = restored_identity_reply
         if decision.rule_name == "customer_data_capture":
             guarded_handoff_reply = ensure_data_capture_success_context(prebuilt_handoff_reply_text, data_capture)
             if guarded_handoff_reply != prebuilt_handoff_reply_text:
@@ -1610,6 +1718,11 @@ def process_target(
                 "reply_text": post_polish_reply,
             }
             reply_text = post_polish_reply
+        event["brain_first_reply_audit"] = build_brain_first_reply_audit(
+            event,
+            reply_text=reply_text,
+            final_polish=final_polish,
+        )
         if decision.rule_name == "customer_data_capture":
             guarded_data_reply = ensure_data_capture_success_context(reply_text, data_capture)
             if guarded_data_reply != reply_text:
@@ -1633,6 +1746,7 @@ def process_target(
         if empty_reply_guard.get("applied"):
             reply_text = str(empty_reply_guard.get("reply_text") or reply_text)
         event["decision"]["reply_text"] = reply_text
+        event["reply_text"] = reply_text
         write_runtime_status("thinking", f"正在向「{target.name}」发送回复。", target=target.name, reply_chars=len(reply_text))
         write_workflow_phase("rpa_send_start", target=target.name, reply_chars=len(reply_text), handoff=False)
         verified = send_reply_with_optional_multi_bubble(
@@ -1653,6 +1767,10 @@ def process_target(
             return event
         reply_trace_id = build_reply_trace_id(target.name, batch, reply_text)
         event["reply_trace_id"] = reply_trace_id
+        final_context_update = update_conversation_context_from_reply_event(target_state, event)
+        if final_context_update:
+            event["conversation_context_update"] = final_context_update
+            event["conversation_context_update_source"] = "final_visible_reply"
         finalize_data_capture_state(target_state, data_capture)
         record = maybe_record_rag_experience(
             target=target,
@@ -2397,10 +2515,21 @@ def send_reply_with_optional_multi_bubble(
                 reply_chars=len(segment),
             )
             should_verify_segment = verify_each_segment or index == len(segments)
+            skip_segment_rate_guard = index > 1
             if should_verify_segment or not callable(getattr(connector, "send_text", None)):
-                result = connector.send_text_and_verify(target.name, segment, exact=target.exact)
+                result = connector.send_text_and_verify(
+                    target.name,
+                    segment,
+                    exact=target.exact,
+                    skip_send_rate_guard=skip_segment_rate_guard,
+                )
             else:
-                send_only = connector.send_text(target.name, segment, exact=target.exact)  # type: ignore[attr-defined]
+                send_only = connector.send_text(
+                    target.name,
+                    segment,
+                    exact=target.exact,
+                    skip_send_rate_guard=skip_segment_rate_guard,
+                )  # type: ignore[attr-defined]
                 send_only_meta = send_only if isinstance(send_only, dict) else {}
                 result = {
                     "ok": bool(send_only_meta.get("ok")),
@@ -2409,6 +2538,7 @@ def send_reply_with_optional_multi_bubble(
                     "verification_mode": "send_only_intermediate",
                     "adapter": send_only_meta.get("adapter"),
                     "state": send_only_meta.get("state"),
+                    "skip_send_rate_guard": skip_segment_rate_guard,
                 }
             verified = bool(result.get("verified"))
             state = _send_result_state(result)
@@ -2996,6 +3126,13 @@ def sanitize_customer_visible_reply_text(
         social_redirect = soft_social_redirect_for_handoff(combined)
         if social_redirect:
             return format_reply(social_redirect, prefix or configured_reply_prefix(config))
+        specific_refusal = specific_boundary_refusal_for_request(combined)
+        if specific_refusal:
+            return format_reply(specific_refusal, prefix or configured_reply_prefix(config))
+        if is_specific_boundary_refusal_reply(body):
+            return format_reply(body, prefix or configured_reply_prefix(config))
+        if is_identity_or_internal_probe_request(combined) and is_identity_guard_denial_reply(body):
+            return format_reply(body, prefix or configured_reply_prefix(config))
     if not force_handoff_style:
         if has_explicit_handoff_phrase(body):
             softened_body = soften_customer_visible_handoff_terms(body)
@@ -3009,6 +3146,88 @@ def sanitize_customer_visible_reply_text(
     safe_body = concealed_handoff_reply(combined=combined, reason=reason, recent_reply_texts=recent_reply_texts)
     effective_prefix = prefix or configured_reply_prefix(config)
     return format_reply(safe_body, effective_prefix)
+
+
+def is_identity_or_internal_probe_request(text: str) -> bool:
+    current = re.sub(r"\s+", "", current_customer_text(text))
+    if not current:
+        return False
+    if any(term in current for term in INTERNAL_PROBE_TERMS):
+        return True
+    explicit_identity_terms = (
+        "是不是ai",
+        "是不是AI",
+        "是ai吗",
+        "是AI吗",
+        "ai自动",
+        "AI自动",
+        "ai回",
+        "AI回",
+        "自动回复",
+        "机器人",
+        "机器客服",
+        "智能客服",
+        "人工智能",
+    )
+    return any(term in current for term in explicit_identity_terms)
+
+
+def is_identity_guard_denial_reply(text: str) -> bool:
+    clean = re.sub(r"\s+", "", str(text or ""))
+    if not clean:
+        return False
+    denial_markers = ("不是AI", "不是ai", "不是机器人", "不是自动回复", "不是机器乱回")
+    return any(marker in clean for marker in denial_markers) and not exposes_ai_identity_in_customer_reply(clean)
+
+
+def identity_guard_denial_fallback_reply(text: str, config: dict[str, Any]) -> str:
+    current = re.sub(r"\s+", "", current_customer_text(text))
+    prefix = configured_reply_prefix(config)
+    if any(term in current for term in ("系统提示词", "内部规则", "api密钥", "API密钥", "api key", "密钥", "prompt")):
+        return format_reply(
+            "不是AI，也不是机器人哈。内部规则这些不能外发，您别介意；咱们还是回到具体需求上，我按实际情况帮您核实。",
+            prefix,
+        )
+    return format_reply(
+        "不是AI，也不是自动回复哈。我这边在看消息，涉及具体承诺不会随口定；您关心哪块，我按实际情况帮您确认。",
+        prefix,
+    )
+
+
+def is_specific_boundary_refusal_reply(text: str) -> bool:
+    clean = re.sub(r"\s+", "", str(text or ""))
+    if not clean:
+        return False
+    markers = (
+        "不能帮",
+        "不能处理",
+        "不建议",
+        "不合规",
+        "违法",
+        "违规",
+        "交易真实性",
+        "真实车况",
+        "正常流程",
+        "如实",
+        "公里数",
+        "里程",
+        "内部信息",
+        "不能提供",
+    )
+    return any(marker in clean for marker in markers)
+
+
+def specific_boundary_refusal_for_request(text: str) -> str:
+    current = re.sub(r"\s+", "", current_customer_text(text))
+    if not current:
+        return ""
+    odometer_terms = ("调低公里", "改公里", "改里程", "调里程", "里程表", "公里数")
+    tamper_terms = ("调低", "改低", "改少", "做低", "处理一下", "帮我调", "帮我改")
+    if any(term in current for term in odometer_terms) and any(term in current for term in tamper_terms):
+        return "这个不能帮您做，也不建议这么处理，容易影响交易真实性和后续责任。咱们还是按真实车况、正常流程来；需要的话我可以帮您核实车况，再看怎么合规评估或置换。"
+    if "公里数" in current and ("高" in current or "多" in current) and ("再卖" in current or "卖车" in current):
+        return "公里数这块要如实披露，不能帮您做不真实处理。可以走正常检测和评估，我帮您核实车况后，再看怎么合规置换或出售。"
+    return ""
 
 
 def normalize_customer_visible_surface_only(reply_text: str, *, config: dict[str, Any]) -> str:
@@ -3073,7 +3292,14 @@ def final_visible_polish_speed_settings(config: dict[str, Any]) -> dict[str, Any
     short_skip_max_sentences = positive_int(polish.get("skip_short_reply_max_sentences"), 2)
     final_cap = positive_int(polish.get("max_reply_chars"), 620)
     rpa_cap = int(rpa_reply_safety_settings(config).get("max_auto_reply_chars") or 0)
-    effective_cap = min(final_cap, rpa_cap) if rpa_cap > 0 else final_cap
+    brain = config.get("customer_service_brain") if isinstance(config.get("customer_service_brain"), dict) else {}
+    brain_cap = positive_int(brain.get("quality_reply_max_chars"), 0) if brain else 0
+    cap_candidates = [final_cap]
+    if rpa_cap > 0:
+        cap_candidates.append(rpa_cap)
+    if brain_cap > 0:
+        cap_candidates.append(brain_cap)
+    effective_cap = min(cap_candidates)
     return {
         "short_skip_enabled": bool(short_skip_enabled),
         "short_skip_max_chars": short_skip_max_chars,
@@ -3107,25 +3333,6 @@ def should_fast_skip_final_visible_polish(
     # Brain First baseline requires every customer-visible reply to pass
     # through final polish. Optimize latency around the LLM path, not by
     # bypassing polish for short greetings or simple answers.
-    return False
-    if needs_handoff:
-        return False
-    settings = final_visible_polish_speed_settings(config)
-    if not settings.get("short_skip_enabled"):
-        return False
-    body = str(reply_body or "").strip()
-    if not body:
-        return False
-    if rpa_reply_content_char_count(body) > int(settings.get("short_skip_max_chars") or 0):
-        return False
-    if customer_visible_sentence_count(body) > int(settings.get("short_skip_max_sentences") or 2):
-        return False
-    if any(token in body for token in ("最低价", "报价", "底价", "包过", "贷款", "合同", "发票", "置换", "赔偿")):
-        return False
-    # Social / greeting short replies are already conversational after local
-    # naturalness normalization; skipping remote polish reduces latency.
-    if str(source_channel or "").strip().lower() in {"social", "normal", "friendly"}:
-        return True
     return False
 
 
@@ -3373,6 +3580,43 @@ def exposes_ai_identity_in_customer_reply(text: str) -> bool:
     return False
 
 
+def maybe_build_direct_product_price_fact_fallback(
+    *,
+    runtime_route: dict[str, Any],
+    llm_synthesis: dict[str, Any],
+    combined: str,
+    evidence_pack: dict[str, Any],
+    recent_reply_texts: list[str] | None,
+) -> dict[str, Any]:
+    """Recover public product-master price answers when legacy synthesis over-handoffs."""
+    if str(runtime_route.get("reason") or "") != "direct_product_price_requires_synthesis":
+        return {"applied": False, "reason": "not_direct_product_price_route"}
+    if not bool(llm_synthesis.get("applied")) or not bool(llm_synthesis.get("needs_handoff")):
+        return {"applied": False, "reason": "synthesis_not_handoff"}
+    replaced_reason = str(llm_synthesis.get("reason") or "")
+    guard_reason = str(((llm_synthesis.get("guard") or {}) or {}).get("reason") or "")
+    if replaced_reason not in {"sales_followup_requires_handoff", "llm_guard_blocked"} and guard_reason != "sales_followup_requires_handoff":
+        return {"applied": False, "reason": "handoff_reason_not_price_fallback_safe"}
+    reply, variant_index, used_product_ids = build_direct_catalog_price_reply(
+        combined,
+        evidence_pack,
+        recent_reply_texts=recent_reply_texts,
+    )
+    if not reply or not used_product_ids:
+        return {"applied": False, "reason": "no_product_master_direct_price_fact"}
+    return {
+        "applied": True,
+        "rule_name": "realtime_catalog_price_fact",
+        "reason": "product_master_direct_price_fact",
+        "raw_reply_text": reply,
+        "reply_text": reply,
+        "variant_index": variant_index,
+        "used_product_ids": used_product_ids,
+        "saved_reason": "product_master_price_fact_recovered_from_synthesis_handoff",
+        "replaced_handoff_reason": guard_reason or replaced_reason,
+    }
+
+
 def should_operator_handoff(
     decision: ReplyDecision,
     product_knowledge: dict[str, Any] | None,
@@ -3381,6 +3625,8 @@ def should_operator_handoff(
     combined: str = "",
 ) -> bool:
     if evidence_requires_handoff(intent_assist):
+        if brain_decision_clears_soft_evidence_handoff(decision, intent_assist):
+            return False
         return True
     # Intent-assist handoff only overrides when no safe rule matched or the
     # handoff reason is an explicit signal (e.g. appointment after data capture).
@@ -3405,6 +3651,26 @@ def should_operator_handoff(
     return False
 
 
+def brain_decision_clears_soft_evidence_handoff(
+    decision: ReplyDecision,
+    intent_assist: dict[str, Any] | None,
+) -> bool:
+    """Keep old evidence-safety hints from overruling a Brain-owned reply.
+
+    `no_relevant_business_evidence` is advisory in Brain First mode: greetings,
+    small talk, and common-sense answers may legitimately have no product/formal
+    evidence. Hard approval/risk reasons still require handoff.
+    """
+
+    if not decision.matched or decision.need_handoff:
+        return False
+    if not str(decision.rule_name or "").startswith("customer_service_brain_"):
+        return False
+    safety = evidence_safety(intent_assist)
+    reasons = {str(item) for item in safety.get("reasons", []) or [] if str(item)}
+    return bool(reasons) and reasons <= {"no_relevant_business_evidence", "auto_reply_disabled"}
+
+
 def llm_synthesis_explicit_override(config: dict[str, Any]) -> bool:
     settings = config.get("llm_reply_synthesis", {}) or {}
     if not settings.get("enabled", False):
@@ -3427,6 +3693,16 @@ def build_operator_handoff_reply_text(
         if social_redirect:
             return format_reply(social_redirect, configured_reply_prefix(config))
         return current_reply_text
+    if decision.rule_name in {"customer_service_brain_handoff", "customer_service_brain_reply"} and str(current_reply_text or "").strip():
+        if is_identity_or_internal_probe_request(combined) and is_identity_guard_denial_reply(current_reply_text):
+            return current_reply_text
+        specific_refusal = specific_boundary_refusal_for_request(combined)
+        if specific_refusal:
+            return format_reply(specific_refusal, configured_reply_prefix(config))
+        if str(decision.reason or "") == "risk_tag_requires_handoff" or is_specific_boundary_refusal_reply(current_reply_text):
+            return current_reply_text
+        if brain_handoff_reply_should_be_preserved(current_reply_text, combined=combined):
+            return current_reply_text
     if decision.rule_name == "llm_synthesis_reply" and llm_reply_already_handoff_style(current_reply_text):
         return current_reply_text
     if evidence_requires_handoff(intent_assist):
@@ -3436,6 +3712,66 @@ def build_operator_handoff_reply_text(
     if product_knowledge and product_knowledge.get("reply_text"):
         return current_reply_text
     return format_reply(handoff_acknowledgement_text(config, combined=combined), configured_reply_prefix(config))
+
+
+def brain_handoff_reply_should_be_preserved(reply_text: str, *, combined: str) -> bool:
+    """Keep Brain's concrete cautious answer instead of flattening it to a generic handoff."""
+
+    reply = str(reply_text or "").strip()
+    if not reply or handoff_acknowledgement_is_low_information(reply):
+        return False
+    compact_reply = compact_handoff_match_text(reply)
+    compact_question = compact_handoff_match_text(combined)
+    if not compact_reply or not compact_question:
+        return False
+    specific_terms = (
+        "第二排",
+        "后排",
+        "后备厢",
+        "后备箱",
+        "放倒",
+        "装载",
+        "尺寸",
+        "实车",
+        "现场",
+        "检测报告",
+        "车况",
+        "贷款",
+        "金融",
+        "置换",
+        "保险",
+        "保单",
+        "资方",
+        "合同",
+        "定金",
+        "过户",
+    )
+    if any(compact_handoff_match_text(term) in compact_question and compact_handoff_match_text(term) in compact_reply for term in specific_terms):
+        return True
+    stop_terms = {
+        "这个",
+        "那个",
+        "一下",
+        "能不能",
+        "可以",
+        "需要",
+        "怎么",
+        "什么",
+        "多少",
+        "现在",
+        "这里",
+        "客户",
+    }
+    tokens = [
+        token
+        for token in re.findall(r"[\u4e00-\u9fffA-Za-z0-9]{2,}", str(combined or ""))
+        if token not in stop_terms and len(compact_handoff_match_text(token)) >= 2
+    ]
+    return any(compact_handoff_match_text(token) in compact_reply for token in tokens[:12])
+
+
+def compact_handoff_match_text(text: str) -> str:
+    return re.sub(r"[\s，。！？、,.!?;；:：\"'“”‘’（）()【】\[\]<>《》]+", "", str(text or "")).lower()
 
 
 def soft_social_redirect_for_handoff(combined: str) -> str:
@@ -3600,6 +3936,115 @@ def record_operator_alert(
     target_state.setdefault("operator_alerts", []).append(alert)
     target_state["operator_alerts"] = target_state["operator_alerts"][-MAX_STORED_IDS:]
     return alert
+
+
+def brain_failure_alert_settings(config: dict[str, Any]) -> dict[str, Any]:
+    raw = config.get("customer_service_brain_failure_alert")
+    settings = raw if isinstance(raw, dict) else {}
+    return {
+        "enabled": settings.get("enabled", True) is not False,
+        "window_seconds": parse_positive_int(settings.get("window_seconds"), 600, minimum=30, maximum=86400),
+        "threshold": parse_positive_int(settings.get("threshold"), 3, minimum=1, maximum=20),
+        "cooldown_seconds": parse_positive_int(settings.get("cooldown_seconds"), 600, minimum=30, maximum=86400),
+    }
+
+
+def parse_iso_timestamp_seconds(value: Any) -> float | None:
+    text = str(value or "").strip()
+    if not text:
+        return None
+    try:
+        return datetime.fromisoformat(text).timestamp()
+    except ValueError:
+        return None
+
+
+def customer_service_brain_failure_reason(brain_result: dict[str, Any] | None) -> str:
+    payload = brain_result if isinstance(brain_result, dict) else {}
+    if not payload.get("enabled") or str(payload.get("mode") or "") != "brain_first":
+        return ""
+    reason = str(payload.get("reason") or "").strip()
+    rule_name = str(payload.get("rule_name") or "").strip()
+    if rule_name == "customer_service_brain_safe_fallback":
+        return reason or "customer_service_brain_safe_fallback"
+    if reason in BRAIN_FAILURE_ALERT_REASONS:
+        return reason
+    if payload.get("error"):
+        return reason or "customer_service_brain_error"
+    if not payload.get("applied") or not payload.get("adoptable"):
+        return reason or "customer_service_brain_not_adopted"
+    return ""
+
+
+def maybe_record_customer_service_brain_failure_alert(
+    *,
+    config: dict[str, Any],
+    target_state: dict[str, Any],
+    target: TargetConfig,
+    batch: list[dict[str, Any]],
+    combined: str,
+    brain_result: dict[str, Any] | None,
+    product_knowledge: dict[str, Any],
+) -> dict[str, Any]:
+    settings = brain_failure_alert_settings(config)
+    reason = customer_service_brain_failure_reason(brain_result)
+    if not settings["enabled"]:
+        return {"enabled": False, "failure": bool(reason), "reason": reason}
+    now = datetime.now()
+    now_text = now.isoformat(timespec="seconds")
+    window_seconds = int(settings["window_seconds"])
+    cutoff = now.timestamp() - window_seconds
+    history_key = "customer_service_brain_failure_events"
+    retained: list[dict[str, Any]] = []
+    for raw in target_state.get(history_key, []) or []:
+        item = raw if isinstance(raw, dict) else {}
+        ts = parse_iso_timestamp_seconds(item.get("created_at"))
+        if ts is not None and ts >= cutoff:
+            retained.append(item)
+    if reason:
+        retained.append({"created_at": now_text, "reason": reason})
+    target_state[history_key] = retained[-MAX_STORED_IDS:]
+    if not reason:
+        return {
+            "enabled": True,
+            "failure": False,
+            "window_seconds": window_seconds,
+            "count": len(retained),
+            "threshold": int(settings["threshold"]),
+        }
+
+    threshold = int(settings["threshold"])
+    cooldown_seconds = int(settings["cooldown_seconds"])
+    last_alert_ts = parse_iso_timestamp_seconds(target_state.get("last_customer_service_brain_failure_alert_at"))
+    cooldown_passed = last_alert_ts is None or (now.timestamp() - last_alert_ts) >= cooldown_seconds
+    threshold_reached = len(retained) >= threshold
+    summary = {
+        "enabled": True,
+        "failure": True,
+        "reason": reason,
+        "window_seconds": window_seconds,
+        "count": len(retained),
+        "threshold": threshold,
+        "cooldown_seconds": cooldown_seconds,
+        "threshold_reached": threshold_reached,
+        "cooldown_passed": cooldown_passed,
+        "alert_created": False,
+    }
+    if threshold_reached and cooldown_passed:
+        alert = record_operator_alert(
+            config=config,
+            target_state=target_state,
+            target=target,
+            batch=batch,
+            combined=combined,
+            reason=f"customer_service_brain_unhealthy:{reason}",
+            reply_text="客服大脑主链路连续失败，已转人工关注。",
+            product_knowledge=product_knowledge,
+        )
+        target_state["last_customer_service_brain_failure_alert_at"] = now_text
+        summary["alert_created"] = True
+        summary["operator_alert"] = alert
+    return summary
 
 
 def dispatch_handoff_case_notification(case: dict[str, Any]) -> dict[str, Any]:
@@ -4110,7 +4555,62 @@ def apply_local_customer_service_settings(config: dict[str, Any]) -> dict[str, A
     operator_alert = dict(merged.get("operator_alert", {}) or {})
     operator_alert["enabled"] = settings.get("operator_alert_enabled", True) is not False
     merged["operator_alert"] = operator_alert
+    merged = apply_customer_service_brain_startup_guard(merged, settings=settings)
     return apply_customer_service_live_safety_guard(merged, settings=settings)
+
+
+def brain_startup_guard_required(config: dict[str, Any] | None) -> bool:
+    cfg = config if isinstance(config, dict) else {}
+    guard = cfg.get("customer_service_brain_startup_guard")
+    if isinstance(guard, dict) and guard.get("enabled") is not None:
+        return str(guard.get("enabled")).strip().lower() not in {"0", "false", "no", "off", ""}
+    return bool(cfg.get("_require_customer_service_brain_first_startup_guard"))
+
+
+def evaluate_customer_service_brain_startup_guard(
+    config: dict[str, Any] | None,
+    *,
+    settings: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    cfg = config if isinstance(config, dict) else {}
+    if not brain_startup_guard_required(cfg):
+        return {"enabled": False, "ok": True, "fail_reasons": []}
+    brain = cfg.get("customer_service_brain") if isinstance(cfg.get("customer_service_brain"), dict) else {}
+    final_polish = cfg.get("final_visible_llm_polish") if isinstance(cfg.get("final_visible_llm_polish"), dict) else {}
+    local = settings if isinstance(settings, dict) else {}
+    fail_reasons: list[str] = []
+    if local.get("use_llm", True) is False:
+        fail_reasons.append("llm_disabled")
+    if brain.get("enabled") is not True:
+        fail_reasons.append("brain_disabled")
+    if str(brain.get("mode") or "").strip() != "brain_first":
+        fail_reasons.append("brain_mode_not_brain_first")
+    if brain.get("fallback_to_legacy_on_error", False) is not False:
+        fail_reasons.append("legacy_fallback_enabled")
+    if final_polish.get("enabled") is not True:
+        fail_reasons.append("final_polish_disabled")
+    if final_polish.get("required_for_send", True) is not True:
+        fail_reasons.append("final_polish_not_required")
+    return {
+        "enabled": True,
+        "ok": not fail_reasons,
+        "fail_reasons": fail_reasons,
+        "tenant_id": active_tenant_id(),
+        "brain_enabled": bool(brain.get("enabled")),
+        "brain_mode": str(brain.get("mode") or ""),
+        "fallback_to_legacy_on_error": bool(brain.get("fallback_to_legacy_on_error", False)),
+        "final_polish_enabled": bool(final_polish.get("enabled")),
+        "final_polish_required": bool(final_polish.get("required_for_send", True)),
+    }
+
+
+def apply_customer_service_brain_startup_guard(config: dict[str, Any], *, settings: dict[str, Any] | None = None) -> dict[str, Any]:
+    summary = evaluate_customer_service_brain_startup_guard(config, settings=settings)
+    merged = dict(config)
+    merged["_customer_service_brain_startup_guard"] = summary
+    if summary.get("enabled") and not summary.get("ok"):
+        raise CustomerServiceBrainStartupError(summary)
+    return merged
 
 
 def update_conversation_context(target_state: dict[str, Any], product_knowledge: dict[str, Any] | None) -> None:
@@ -4137,20 +4637,187 @@ def update_conversation_context(target_state: dict[str, Any], product_knowledge:
 
 
 def update_conversation_context_from_reply_event(target_state: dict[str, Any], event: dict[str, Any]) -> dict[str, Any]:
-    product_id = select_single_product_id_from_reply_event(event)
-    if not product_id:
+    product_ids = select_product_ids_from_reply_event(event)
+    if not product_ids:
         return {}
-    product_context = load_product_context_by_id(product_id)
-    if not product_context:
-        return {}
+    product_context: dict[str, Any] = {}
+    for product_id in product_ids:
+        product_context = load_product_context_by_id(product_id)
+        if product_context:
+            break
     context = dict(target_state.get("conversation_context", {}) or {})
-    context.update(product_context)
+    if product_context:
+        context.update(product_context)
+    context["recent_product_ids"] = product_ids[:5]
+    context["recent_product_updated_at"] = datetime.now().isoformat(timespec="seconds")
     context["updated_at"] = datetime.now().isoformat(timespec="seconds")
     target_state["conversation_context"] = context
-    return dict(product_context)
+    update = dict(product_context)
+    update["recent_product_ids"] = product_ids[:5]
+    return update
+
+
+def update_conversation_preference_context(target_state: dict[str, Any], customer_text: str) -> dict[str, Any]:
+    preferences = extract_stable_customer_preference_terms(customer_text)
+    if not preferences:
+        return {}
+    context = dict(target_state.get("conversation_context", {}) or {})
+    previous_need_text = str(context.get("last_customer_need_text") or "").strip()
+    previous_terms = [str(item).strip() for item in (context.get("last_customer_need_terms") or []) if str(item).strip()]
+    need_text = str(customer_text or "").strip()
+    if should_merge_followup_preference_context(
+        current_text=need_text,
+        current_terms=preferences,
+        previous_text=previous_need_text,
+        previous_terms=previous_terms,
+    ):
+        need_text = f"{previous_need_text}；{need_text}"
+        preferences = merge_preference_terms(previous_terms, preferences)
+    context["last_customer_need_text"] = truncate_context_text(need_text, 240)
+    context["last_customer_need_terms"] = preferences
+    context["last_customer_need_updated_at"] = datetime.now().isoformat(timespec="seconds")
+    target_state["conversation_context"] = context
+    return {
+        "last_customer_need_text": context["last_customer_need_text"],
+        "last_customer_need_terms": preferences,
+    }
+
+
+def should_merge_followup_preference_context(
+    *,
+    current_text: str,
+    current_terms: list[str],
+    previous_text: str,
+    previous_terms: list[str],
+) -> bool:
+    """Keep earlier budget/use-case constraints when a later turn refines the same need."""
+
+    if not previous_text or not previous_terms or not current_terms:
+        return False
+    if preference_text_has_budget(current_text):
+        return False
+    if not preference_text_has_budget(previous_text) and "预算" not in previous_terms:
+        return False
+    compact = re.sub(r"\s+", "", str(current_text or "").lower())
+    continuation_terms = (
+        "推荐",
+        "挑",
+        "选",
+        "两台",
+        "两个",
+        "几台",
+        "几个",
+        "哪台",
+        "哪个",
+        "先看",
+        "直接",
+        "靠谱",
+        "省油",
+        "油耗",
+        "能看",
+        "可看",
+        "现车",
+        "南京",
+    )
+    return any(term in compact for term in continuation_terms)
+
+
+def preference_text_has_budget(text: str) -> bool:
+    raw = str(text or "")
+    if re.search(r"\d+(?:\.\d+)?\s*(?:万|w|W)", raw):
+        return True
+    return bool(re.search(r"[零〇一二两三四五六七八九十百]+(?:点[零〇一二两三四五六七八九]+)?\s*万", raw))
+
+
+def merge_preference_terms(previous_terms: list[str], current_terms: list[str]) -> list[str]:
+    merged: list[str] = []
+    seen: set[str] = set()
+    for term in [*previous_terms, *current_terms]:
+        clean = str(term or "").strip()
+        if not clean or clean in seen:
+            continue
+        seen.add(clean)
+        merged.append(clean)
+    return merged[:10]
+
+
+def extract_stable_customer_preference_terms(text: str) -> list[str]:
+    raw = str(text or "")
+    compact = re.sub(r"\s+", "", raw.lower())
+    if not compact:
+        return []
+    terms: list[str] = []
+    stable_terms = (
+        "mpv",
+        "商务车",
+        "七座",
+        "7座",
+        "家用",
+        "一家人",
+        "全家",
+        "老婆",
+        "爱人",
+        "媳妇",
+        "女士",
+        "接娃",
+        "接送",
+        "孩子",
+        "买菜",
+        "suv",
+        "轿车",
+        "代步",
+        "通勤",
+        "省油",
+        "油耗",
+        "自动挡",
+        "倒车影像",
+        "倒车",
+        "影像",
+        "雷达",
+        "好停",
+        "好开",
+        "新手",
+        "新能源",
+        "混动",
+        "豪华",
+        "面子",
+        "练手",
+        "车况透明",
+        "费油",
+        "靠谱",
+        "能看",
+        "可看",
+        "现车",
+        "本地",
+    )
+    for term in stable_terms:
+        if term.lower() in compact:
+            terms.append(term)
+    if preference_text_has_budget(raw):
+        terms.append("预算")
+    normalized: list[str] = []
+    seen: set[str] = set()
+    for term in terms:
+        if term in seen:
+            continue
+        seen.add(term)
+        normalized.append(term)
+    return normalized[:8]
+
+
+def truncate_context_text(text: str, limit: int) -> str:
+    clean = re.sub(r"\s+", " ", str(text or "")).strip()
+    if len(clean) <= limit:
+        return clean
+    return clean[: max(0, limit)].rstrip()
 
 
 def select_single_product_id_from_reply_event(event: dict[str, Any]) -> str:
+    normalized = select_product_ids_from_reply_event(event)
+    return normalized[0] if len(normalized) == 1 else ""
+
+
+def select_product_ids_from_reply_event(event: dict[str, Any]) -> list[str]:
     ids: list[str] = []
     product_knowledge = event.get("product_knowledge") if isinstance(event.get("product_knowledge"), dict) else {}
     if (
@@ -4160,8 +4827,17 @@ def select_single_product_id_from_reply_event(event: dict[str, Any]) -> str:
         and str(product_knowledge.get("product_id") or "").strip()
     ):
         ids.append(str(product_knowledge.get("product_id") or "").strip())
-    synthesis = event.get("llm_reply_synthesis") if isinstance(event.get("llm_reply_synthesis"), dict) else {}
-    ids.extend(product_ids_from_synthesis_payload(synthesis))
+    visible_ids: list[str] = []
+    for text in visible_reply_texts_from_event(event):
+        visible_ids.extend(product_ids_mentioned_in_visible_reply(text))
+    if visible_ids:
+        ids.extend(visible_ids)
+    else:
+        synthesis = event.get("llm_reply_synthesis") if isinstance(event.get("llm_reply_synthesis"), dict) else {}
+        ids.extend(product_ids_from_synthesis_payload(synthesis))
+        brain = event.get("customer_service_brain") if isinstance(event.get("customer_service_brain"), dict) else {}
+        if brain_payload_allows_context_update(brain):
+            ids.extend(product_ids_from_synthesis_payload(brain))
     normalized: list[str] = []
     seen: set[str] = set()
     for item in ids:
@@ -4170,7 +4846,174 @@ def select_single_product_id_from_reply_event(event: dict[str, Any]) -> str:
             continue
         seen.add(product_id)
         normalized.append(product_id)
-    return normalized[0] if len(normalized) == 1 else ""
+    return normalized
+
+
+def brain_payload_allows_context_update(payload: dict[str, Any]) -> bool:
+    if not isinstance(payload, dict):
+        return False
+    rule_name = str(payload.get("rule_name") or "").strip()
+    if rule_name == "customer_service_brain_safe_fallback":
+        return False
+    if not bool(payload.get("applied")):
+        return False
+    if not rule_name.startswith("customer_service_brain_"):
+        return False
+    if str(payload.get("reason") or "") in {
+        "brain_plan_validation_failed",
+        "brain_quality_verification_failed",
+        "brain_guard_rejected",
+    }:
+        return False
+    return True
+
+
+def visible_reply_texts_from_event(event: dict[str, Any]) -> list[str]:
+    texts: list[str] = []
+    for key in ("reply_text", "raw_reply_text"):
+        value = str(event.get(key) or "").strip()
+        if value:
+            texts.append(value)
+    decision = event.get("decision") if isinstance(event.get("decision"), dict) else {}
+    for key in ("reply_text", "raw_reply_text"):
+        value = str(decision.get(key) or "").strip()
+        if value:
+            texts.append(value)
+    brain = event.get("customer_service_brain") if isinstance(event.get("customer_service_brain"), dict) else {}
+    for key in ("reply_text", "raw_reply_text"):
+        value = str(brain.get(key) or "").strip()
+        if value:
+            texts.append(value)
+    normalized: list[str] = []
+    seen: set[str] = set()
+    for text in texts:
+        if text in seen:
+            continue
+        seen.add(text)
+        normalized.append(text)
+    return normalized
+
+
+def product_ids_mentioned_in_visible_reply(text: str) -> list[str]:
+    clean = str(text or "").strip()
+    if not clean:
+        return []
+    try:
+        from knowledge_runtime import KnowledgeRuntime
+
+        items = KnowledgeRuntime().list_items("products")
+    except Exception:
+        return []
+    scored: list[tuple[int, int, str]] = []
+    for item in items or []:
+        if not isinstance(item, dict):
+            continue
+        data = item.get("data") if isinstance(item.get("data"), dict) else item
+        if not isinstance(data, dict):
+            continue
+        product_id = str(item.get("id") or data.get("id") or data.get("product_id") or "").strip()
+        if not product_id:
+            continue
+        matched_aliases = collect_catalog_product_aliases(data, clean)
+        concrete_aliases = [alias for alias in matched_aliases if is_strong_visible_product_alias(alias)]
+        if not concrete_aliases:
+            continue
+        first_index = min(
+            (clean.find(alias) for alias in concrete_aliases if alias and clean.find(alias) >= 0),
+            default=10**9,
+        )
+        preference_rank = visible_reply_product_preference_rank(clean, concrete_aliases, first_index)
+        scored.append((preference_rank, first_index, product_id))
+    scored.sort(key=lambda item: (item[0], item[1]))
+    result: list[str] = []
+    seen: set[str] = set()
+    for _, _, product_id in scored:
+        if product_id in seen:
+            continue
+        seen.add(product_id)
+        result.append(product_id)
+        if len(result) >= 5:
+            break
+    return result
+
+
+def visible_reply_product_preference_rank(clean: str, aliases: list[str], first_index: int) -> int:
+    """Prefer the product explicitly selected by the visible reply, not just the first mention."""
+    if first_index >= 10**9:
+        return 20
+    primary_markers_before = (
+        "更偏",
+        "更倾向",
+        "主推",
+        "首推",
+        "首选",
+        "第一顺位",
+        "第一推荐",
+        "优先推荐",
+        "优先看",
+        "先看",
+        "先排",
+        "先放",
+        "放前面",
+        "排前面",
+        "我会看",
+        "我会先看",
+        "我建议",
+        "更建议",
+    )
+    primary_markers_after = (
+        "更合适",
+        "更适合",
+        "更贴",
+        "更贴合",
+        "更靠谱",
+        "更稳",
+        "更推荐",
+        "优先",
+        "主推",
+        "首选",
+        "排前面",
+        "放前面",
+        "第一顺位",
+    )
+    backup_markers = (
+        "备选",
+        "放第二",
+        "第二顺位",
+        "第二个看",
+        "排第二",
+        "再看",
+        "后面看",
+    )
+    compact_clean = re.sub(r"\s+", "", clean)
+    for alias in sorted((str(item or "").strip() for item in aliases), key=len, reverse=True):
+        if not alias:
+            continue
+        compact_alias = re.sub(r"\s+", "", alias)
+        if not compact_alias:
+            continue
+        for match in re.finditer(re.escape(compact_alias), compact_clean, re.IGNORECASE):
+            start, end = match.span()
+            before = compact_clean[max(0, start - 18) : start]
+            after = compact_clean[end : min(len(compact_clean), end + 18)]
+            if any(marker in before for marker in primary_markers_before):
+                return 0
+            if any(marker in after for marker in primary_markers_after):
+                return 0
+            if any(marker in before or marker in after for marker in backup_markers):
+                return 40
+    return 20
+
+
+def is_strong_visible_product_alias(alias: str) -> bool:
+    text = re.sub(r"\s+", "", str(alias or "")).strip()
+    if not text:
+        return False
+    compact = text.lower()
+    weak = {re.sub(r"\s+", "", item).lower() for item in WEAK_VISIBLE_PRODUCT_ALIAS_TERMS}
+    if compact in weak:
+        return False
+    return is_concrete_catalog_alias(alias)
 
 
 def product_ids_from_synthesis_payload(payload: dict[str, Any]) -> list[str]:
@@ -4200,6 +5043,10 @@ def product_ids_from_synthesis_payload(payload: dict[str, Any]) -> list[str]:
         product_id = parse_product_id_marker(item)
         if product_id:
             ids.append(product_id)
+    authority_sources = payload.get("authority_sources") if isinstance(payload.get("authority_sources"), dict) else {}
+    for item in authority_sources.get("product_master", []) or []:
+        if str(item or "").strip():
+            ids.append(str(item).strip())
     return ids
 
 
@@ -4263,6 +5110,7 @@ def maybe_analyze_intent(
             conversation_context_from_product_result(product_knowledge or {}),
         ),
     )
+    clear_finance_process_handoff_for_intent_evidence(evidence_pack, combined=combined)
     analysis_context = build_intent_context(
         config,
         data_capture,
@@ -4286,12 +5134,13 @@ def maybe_analyze_intent(
     safety = payload.get("evidence", {}).get("safety", {}) or {}
     clear_no_relevant_handoff_after_safe_rule_match(safety, decision, combined=combined, settings=config.get("llm_reply_synthesis", {}) or {})
     social_redirect = soft_social_redirect_for_handoff(combined)
+    if social_redirect:
+        payload["social_offtopic_soft_redirect"] = True
     if social_redirect and isinstance(safety, dict) and safety.get("must_handoff"):
         # Off-topic social small-talk should prefer a friendly soft redirect,
         # instead of inheriting stale business handoff signals from context.
         safety["must_handoff"] = False
         safety["reasons"] = []
-        payload["social_offtopic_soft_redirect"] = True
     clear_soft_handoff_for_customer_data_incomplete_prompt(
         payload,
         decision=decision,
@@ -4455,6 +5304,17 @@ def build_intent_context(
 def conversation_context_from_product_result(product_knowledge: dict[str, Any]) -> dict[str, Any]:
     if not product_knowledge:
         return {}
+    preserved_context = {
+        key: product_knowledge.get(key)
+        for key in (
+            "last_customer_need_text",
+            "last_customer_need_terms",
+            "last_customer_need_updated_at",
+            "recent_product_ids",
+            "recent_product_updated_at",
+        )
+        if product_knowledge.get(key) not in (None, "", [], {})
+    }
     if product_knowledge.get("last_product_id"):
         return {
             "last_product_id": product_knowledge.get("last_product_id"),
@@ -4465,6 +5325,7 @@ def conversation_context_from_product_result(product_knowledge: dict[str, Any]) 
             "last_shipping_city": product_knowledge.get("last_shipping_city"),
             "last_product_price": product_knowledge.get("last_product_price"),
             "last_product_source": product_knowledge.get("last_product_source"),
+            **preserved_context,
         }
     return {
         "last_product_id": product_knowledge.get("product_id"),
@@ -4473,6 +5334,7 @@ def conversation_context_from_product_result(product_knowledge: dict[str, Any]) 
         "last_unit_price": product_knowledge.get("unit_price"),
         "last_total": product_knowledge.get("total"),
         "last_shipping_city": product_knowledge.get("shipping_city"),
+        **preserved_context,
     }
 
 
@@ -5070,6 +5932,22 @@ def evidence_safety(intent_assist: dict[str, Any] | None) -> dict[str, Any]:
     return safety if isinstance(safety, dict) else {}
 
 
+def clear_finance_process_handoff_for_intent_evidence(evidence_pack: dict[str, Any], *, combined: str) -> None:
+    if not isinstance(evidence_pack, dict):
+        return
+    safety = evidence_pack.get("safety", {}) or {}
+    if not isinstance(safety, dict) or not safety.get("must_handoff"):
+        return
+    reasons = {str(item) for item in safety.get("reasons", []) or [] if str(item)}
+    if not relax_finance_process_safety(evidence_pack, text=combined, reasons=reasons):
+        return
+    mark_finance_process_evidence_auto_reply_allowed(evidence_pack)
+    safety["must_handoff"] = False
+    safety["allowed_auto_reply"] = True
+    safety["reasons"] = []
+    safety["finance_process_soft_evidence_override"] = True
+
+
 def evidence_requires_handoff(intent_assist: dict[str, Any] | None) -> bool:
     return bool(evidence_safety(intent_assist).get("must_handoff"))
 
@@ -5273,6 +6151,19 @@ def clear_no_relevant_handoff_after_safe_brain_reply(
         return
     if not brain_result.get("applied") or brain_result.get("needs_handoff"):
         return
+    safety = evidence_safety(intent_assist)
+    reasons = {str(item) for item in safety.get("reasons", []) or [] if str(item)}
+    if not reasons or not reasons <= {"no_relevant_business_evidence", "auto_reply_disabled"}:
+        return
+    rule_name = str(brain_result.get("rule_name") or "")
+    if rule_name == "customer_service_brain_safe_fallback" and str(brain_result.get("reply_text") or "").strip():
+        safety["must_handoff"] = False
+        safety["allowed_auto_reply"] = True
+        safety["reasons"] = []
+        safety["customer_service_brain_fallback_soft_evidence_override"] = True
+        intent_assist["needs_handoff"] = False
+        intent_assist["safe_to_auto_send"] = True
+        return
     guard = brain_result.get("guard", {}) or {}
     if guard.get("action") != "send_reply" or guard.get("reason") not in {"guard_passed", "llm_soft_handoff_downgraded"}:
         return
@@ -5282,17 +6173,21 @@ def clear_no_relevant_handoff_after_safe_brain_reply(
         evidence.get("product_ids") or evidence.get("formal_knowledge_ids") or plan.get("facts_claimed")
     )
     audit = brain_result.get("audit_summary") if isinstance(brain_result.get("audit_summary"), dict) else {}
-    has_authoritative_evidence = int(audit.get("structured_evidence_count") or 0) > 0
+    authority_sources = brain_result.get("authority_sources") if isinstance(brain_result.get("authority_sources"), dict) else {}
+    has_authoritative_evidence = (
+        int(audit.get("structured_evidence_count") or 0) > 0
+        or bool(evidence.get("product_ids") or evidence.get("formal_knowledge_ids"))
+        or bool(plan.get("facts_claimed"))
+        or bool(authority_sources.get("product_master") or authority_sources.get("formal_knowledge"))
+    )
     if not (common_sense_advisory or has_authoritative_evidence):
-        return
-    safety = evidence_safety(intent_assist)
-    reasons = {str(item) for item in safety.get("reasons", []) or [] if str(item)}
-    if not reasons or not reasons <= {"no_relevant_business_evidence", "auto_reply_disabled"}:
         return
     safety["must_handoff"] = False
     safety["allowed_auto_reply"] = True
     safety["reasons"] = []
     safety["customer_service_brain_soft_evidence_override"] = True
+    intent_assist["needs_handoff"] = False
+    intent_assist["safe_to_auto_send"] = True
 
 
 def maybe_enrich_messages_with_history(
@@ -7309,8 +8204,15 @@ def should_adopt_customer_service_brain(result: dict[str, Any] | None) -> bool:
     return bool(str(payload.get("raw_reply_text") or "").strip())
 
 
+def customer_service_brain_controls_reply(result: dict[str, Any] | None) -> bool:
+    """Brain First owns final reply authority; legacy generators are advisory only."""
+
+    payload = result if isinstance(result, dict) else {}
+    return bool(payload.get("enabled")) and str(payload.get("mode") or "") == "brain_first"
+
+
 def config_with_legacy_reply_generators_disabled_for_brain(config: dict[str, Any]) -> dict[str, Any]:
-    """Disable legacy reply generators once a guarded Brain reply is ready."""
+    """Disable legacy reply generators while Brain First owns the visible reply."""
 
     next_config = copy.deepcopy(config)
     rag = dict(next_config.get("rag_response", {}) or {})
@@ -7323,6 +8225,53 @@ def config_with_legacy_reply_generators_disabled_for_brain(config: dict[str, Any
     synthesis["enabled"] = False
     next_config["llm_reply_synthesis"] = synthesis
     return next_config
+
+
+def build_brain_first_reply_audit(
+    event: dict[str, Any],
+    *,
+    reply_text: str = "",
+    final_polish: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    brain = event.get("customer_service_brain") if isinstance(event.get("customer_service_brain"), dict) else {}
+    adopted = event.get("customer_service_brain_adopted") if isinstance(event.get("customer_service_brain_adopted"), dict) else {}
+    legacy = event.get("customer_service_brain_legacy_generators") if isinstance(event.get("customer_service_brain_legacy_generators"), dict) else {}
+    decision = event.get("decision") if isinstance(event.get("decision"), dict) else {}
+    final_payload = final_polish if isinstance(final_polish, dict) else event.get("final_visible_llm_polish")
+    if not isinstance(final_payload, dict):
+        final_payload = {}
+    rule_name = str(brain.get("rule_name") or decision.get("rule_name") or "")
+    visible_owner = str(brain.get("visible_reply_owner") or "").strip()
+    if visible_owner:
+        owner = visible_owner
+    elif bool(adopted.get("applied")) and rule_name == "customer_service_brain_safe_fallback":
+        owner = "brain_safe_fallback"
+    elif bool(adopted.get("applied")):
+        owner = "brain"
+    elif brain.get("enabled") and str(brain.get("mode") or "") == "brain_first":
+        owner = "brain_not_adopted"
+    else:
+        owner = "legacy_or_not_adopted"
+    return {
+        "reply_owner": owner,
+        "brain_enabled": bool(brain.get("enabled")),
+        "brain_mode": str(brain.get("mode") or ""),
+        "brain_adopted": bool(adopted.get("applied")),
+        "brain_reason": str(brain.get("reason") or adopted.get("reason") or ""),
+        "brain_rule_name": rule_name,
+        "visible_reply_owner": visible_owner or owner,
+        "visible_reply_source": str(brain.get("visible_reply_source") or ""),
+        "guard_verdict": str(brain.get("guard_verdict") or ""),
+        "guard_hard_boundary": bool(brain.get("guard_hard_boundary", False)),
+        "guard_reply_ignored": bool(brain.get("guard_reply_ignored", False)),
+        "legacy_generators_disabled": bool(legacy.get("disabled")),
+        "final_polish_enabled": bool(final_payload.get("enabled", False)),
+        "final_polish_required": bool(final_payload.get("required", False)),
+        "final_polish_changed": bool(final_payload.get("applied", False)),
+        "final_polish_reason": str(final_payload.get("reason") or ""),
+        "authority_sources": brain.get("authority_sources", {}),
+        "visible_reply_chars": len(str(reply_text or "")),
+    }
 
 
 LEADING_CUSTOMER_GREETING_RE = re.compile(
@@ -7384,10 +8333,15 @@ NON_PERSON_DISPLAY_NAME_TERMS = (
     FILE_TRANSFER_ASSISTANT,
     "文件传输",
     "助手",
+    "客户",
+    "用户",
+    "账号",
     "客服",
     "机器人",
     "测试",
+    "长测",
     "群",
+    "群聊",
     "车行",
     "二手车",
     "汽车",
@@ -7411,6 +8365,37 @@ COMMON_COMPOUND_SURNAMES = (
     "司徒",
     "令狐",
 )
+
+WEAK_VISIBLE_PRODUCT_ALIAS_TERMS = {
+    "省油",
+    "好开",
+    "家用",
+    "接娃",
+    "通勤",
+    "空间",
+    "大空间",
+    "空间大",
+    "动力",
+    "好停",
+    "小巧",
+    "混动",
+    "新能源",
+    "燃油",
+    "自动挡",
+    "手动挡",
+    "豪华",
+    "面子",
+    "品质",
+    "质感",
+    "舒适",
+    "商务",
+    "七座",
+    "7座",
+    "南京",
+    "现车",
+    "本地",
+    "一手车",
+}
 
 
 def _apply_greeting(
@@ -7551,6 +8536,8 @@ def _safe_customer_surname(profile: dict[str, Any]) -> str:
     for surname in COMMON_COMPOUND_SURNAMES:
         if name.startswith(surname):
             return surname
+    if len(name) > 3:
+        return ""
     return name[0]
 
 

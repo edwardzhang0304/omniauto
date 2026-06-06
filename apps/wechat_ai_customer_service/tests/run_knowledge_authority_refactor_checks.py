@@ -118,7 +118,7 @@ def check_guard_blocks_unsupported_price_fact() -> dict[str, Any]:
         evidence_pack={"current_message": "我想买个通勤车", "knowledge": {"evidence": {}}, "intent_tags": []},
         settings={"require_evidence": False},
     )
-    ok = guard.get("action") == "handoff" and guard.get("reason") == "unsupported_price_without_product_master"
+    ok = guard.get("action") == "repair" and guard.get("reason") == "unsupported_price_without_product_master"
     return {"name": "guard_blocks_unsupported_price_fact", "ok": ok, "guard": guard}
 
 

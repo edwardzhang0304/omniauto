@@ -22,6 +22,7 @@ from apps.wechat_ai_customer_service.workflows.product_name_matcher import colle
 def main() -> int:
     checks = [
         check_collect_matched_aliases_homophone_and_typo,
+        check_collect_matched_aliases_model_shorthand,
         check_knowledge_loader_select_products_homophone,
         check_knowledge_index_field_matches_homophone,
         check_no_false_positive_for_unrelated_model,
@@ -46,6 +47,15 @@ def check_collect_matched_aliases_homophone_and_typo() -> None:
 
     typo = collect_matched_aliases(aliases, "赛哪什么价")
     assert_true("赛那" in typo, "small typo text should match alias")
+
+
+def check_collect_matched_aliases_model_shorthand() -> None:
+    aliases = ["奥迪A4L", "A4L", "豪华品牌"]
+    missing_tail = collect_matched_aliases(aliases, "我记得你们这儿有个奥迪A4不错，具体情况发我看看")
+    assert_true("奥迪A4L" in missing_tail, "model shorthand should still match product-master alias")
+
+    brand_only = collect_matched_aliases(aliases, "你再看看库存，里面没奥迪吗")
+    assert_true("奥迪A4L" in brand_only, "brand availability question should recall matching brand/model aliases")
 
 
 def check_knowledge_loader_select_products_homophone() -> None:

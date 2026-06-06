@@ -252,7 +252,7 @@ def maybe_synthesize_reply(
             return payload
         action = str(guard.get("action") or "")
         if action == "send_reply":
-            raw_reply = truncate_reply(str(guard.get("reply") or candidate.get("reply") or ""), settings)
+            raw_reply = truncate_reply(str(candidate.get("reply") or ""), settings)
             payload.update(
                 {
                     "applied": True,
@@ -265,7 +265,7 @@ def maybe_synthesize_reply(
             )
             return payload
         if action == "handoff":
-            raw_reply = truncate_reply(str(guard.get("reply") or candidate.get("reply") or ""), settings)
+            raw_reply = truncate_reply(str(candidate.get("reply") or ""), settings)
             payload.update(
                 {
                     "applied": True,
@@ -289,6 +289,33 @@ def maybe_synthesize_reply(
         payload["reason"] = "shadow_mode"
         return payload
     if not guard.get("allowed"):
+        fallback = fallback_to_existing_reply_after_guard_rejection(
+            guard=guard,
+            decision=decision,
+            reply_text=reply_text,
+            evidence_pack=evidence_pack,
+            settings=settings,
+        )
+        if fallback:
+            payload["candidate"] = compact_candidate(fallback["candidate"])
+            payload["guard"] = guard_for_audit(fallback["guard"])
+            raw_reply = normalize_advisor_synthesis_reply(
+                str(fallback["guard"].get("reply") or fallback["candidate"].get("reply") or ""),
+                evidence_pack=evidence_pack,
+                settings=settings,
+            )
+            payload.update(
+                {
+                    "applied": True,
+                    "rule_name": "llm_synthesis_reply",
+                    "reason": fallback["reason"],
+                    "needs_handoff": False,
+                    "raw_reply_text": raw_reply,
+                    "reply_text": raw_reply,
+                    "guard_repair_fallback_to_existing_reply": True,
+                }
+            )
+            return payload
         payload["reason"] = str(guard.get("reason") or "guard_rejected")
         return payload
 
@@ -322,7 +349,7 @@ def maybe_synthesize_reply(
         return payload
     if action == "send_reply":
         raw_reply = normalize_advisor_synthesis_reply(
-            str(guard.get("reply") or ""),
+            str(candidate.get("reply") or ""),
             evidence_pack=evidence_pack,
             settings=settings,
         )
@@ -339,7 +366,7 @@ def maybe_synthesize_reply(
         )
         return payload
     if action == "handoff":
-        raw_reply = truncate_reply(str(guard.get("reply") or ""), settings)
+        raw_reply = truncate_reply(str(candidate.get("reply") or ""), settings)
         payload.update(
             {
                 "applied": True,
@@ -749,7 +776,7 @@ def fallback_to_existing_reply_after_guard_rejection(
     safe_fallback_reasons = {
         "product_price_conflicts_with_product_master",
     }
-    if action != "handoff" or reason not in safe_fallback_reasons:
+    if action not in {"handoff", "repair"} or reason not in safe_fallback_reasons:
         return None
     candidate = build_existing_reply_fallback_candidate(
         decision=decision,
@@ -1843,9 +1870,14 @@ def guard_for_audit(guard: dict[str, Any]) -> dict[str, Any]:
     return {
         "allowed": guard.get("allowed"),
         "action": guard.get("action"),
+        "severity": guard.get("severity"),
+        "guard_role": guard.get("guard_role"),
         "reason": guard.get("reason"),
+        "repair_instruction": guard.get("repair_instruction"),
+        "warnings": guard.get("warnings", []),
         "authority_tags": guard.get("authority_tags", []),
         "confidence": guard.get("confidence"),
         "min_confidence": guard.get("min_confidence"),
         "errors": guard.get("errors", []),
+        "hard_boundary": guard.get("hard_boundary"),
     }

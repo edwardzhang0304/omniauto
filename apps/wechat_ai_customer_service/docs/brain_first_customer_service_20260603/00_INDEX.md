@@ -45,6 +45,12 @@
 6. [`06_RISKS_ROLLOUT_AND_OPEN_DECISIONS.md`](06_RISKS_ROLLOUT_AND_OPEN_DECISIONS.md)
    - 风险清单、灰度开关、回滚方案、需要保留的人工判断点。
 
+7. [`07_BRAIN_AUTHORITY_CORRECTION_AUDIT.md`](07_BRAIN_AUTHORITY_CORRECTION_AUDIT.md)
+   - Brain 主控原则的纠偏审计，列出不应继续采用的结构化补丁方向、当前残留风险和修复前检查清单。
+
+8. [`08_GUARD_AUTHORITY_CORRECTION_V2.md`](08_GUARD_AUTHORITY_CORRECTION_V2.md)
+   - Guard/质量门越权的 V2 架构纠偏合同，规定客户可见回复所有权、Guard 分级 verdict、硬边界白名单和验收审计要求。
+
 ## 和现有文档的关系
 
 本组文档继承以下已确认原则：

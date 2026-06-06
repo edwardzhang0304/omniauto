@@ -88,7 +88,7 @@ class FakeConnector:
             "messages": messages,
         }
 
-    def send_text_and_verify(self, target: str, text: str, exact: bool = True) -> dict[str, Any]:
+    def send_text_and_verify(self, target: str, text: str, exact: bool = True, *, skip_send_rate_guard: bool = False) -> dict[str, Any]:
         self.sent_texts.append(text)
         return {"ok": True, "verified": True, "target": target, "exact": exact, "text": text}
 

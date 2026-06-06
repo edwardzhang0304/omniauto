@@ -5,7 +5,7 @@
   "status": "active",
   "source": {
     "type": "test_fixture",
-    "batch_token": "LLMSYN_20260604_144427"
+    "batch_token": "LLMSYN_20260605_230931"
   },
   "data": {
     "name": "2021款丰田凯美瑞2.0G豪华版",
@@ -36,9 +36,9 @@
   "review_state": {
     "is_new": false,
     "new_reason": "newly_added_formal_knowledge",
-    "marked_at": "2026-06-04T14:44:51",
-    "updated_at": "2026-06-04T14:44:51",
-    "read_at": "2026-06-04T14:44:51",
+    "marked_at": "2026-06-05T23:10:02",
+    "updated_at": "2026-06-05T23:10:02",
+    "read_at": "2026-06-05T23:10:02",
     "read_by": "test",
     "source": {
       "source_module": "jiangsu_chejin_test",
@@ -47,8 +47,8 @@
     }
   },
   "metadata": {
-    "created_at": "2026-06-04T14:44:51",
-    "updated_at": "2026-06-04T14:44:51",
+    "created_at": "2026-06-05T23:10:02",
+    "updated_at": "2026-06-05T23:10:02",
     "created_by": "admin",
     "updated_by": "admin"
   }

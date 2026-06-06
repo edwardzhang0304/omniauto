@@ -5,7 +5,9 @@ from __future__ import annotations
 import ast
 import os
 from pathlib import Path
+import subprocess
 import sys
+import tempfile
 import types
 
 from PIL import Image, ImageDraw
@@ -69,6 +71,7 @@ from apps.wechat_ai_customer_service.adapters.wechat_win32_ocr_sidecar import ( 
     input_region_visual_delta_confirms,
     input_region_soft_blank_noise,
     is_message_noise,
+    jitter_client_click_surface_point,
     jitter_input_click_point,
     jitter_send_click_point,
     sendinput_safe_text,
@@ -124,6 +127,29 @@ class FakeValuePattern:
 def assert_true(condition: bool, message: str) -> None:
     if not condition:
         raise AssertionError(message)
+
+
+def test_sidecar_script_bootstraps_project_root_without_pythonpath() -> None:
+    script = PROJECT_ROOT / "apps" / "wechat_ai_customer_service" / "adapters" / "wechat_win32_ocr_sidecar.py"
+    env = dict(os.environ)
+    env.pop("PYTHONPATH", None)
+    with tempfile.TemporaryDirectory() as temp:
+        result = subprocess.run(
+            [sys.executable, str(script), "--help"],
+            cwd=temp,
+            env=env,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            timeout=20,
+            check=False,
+        )
+    assert_true(
+        result.returncode == 0,
+        f"sidecar script should bootstrap project root before absolute apps imports: rc={result.returncode}, stderr={result.stderr[-500:]}",
+    )
 
 
 def test_parse_sessions_from_ocr() -> None:
@@ -365,6 +391,41 @@ def test_send_points_apply_small_safe_jitter() -> None:
     assert_true(640 <= input_y <= 778, f"input jitter should remain near draft box: {(input_x, input_y)}")
     assert_true(848 <= send_x <= 960, f"send jitter should remain near send button: {(send_x, send_y)}")
     assert_true(768 <= send_y <= 844, f"send jitter should remain near send button row: {(send_x, send_y)}")
+
+
+def test_input_click_jitter_has_enough_entropy() -> None:
+    previous = {
+        "WECHAT_WIN32_OCR_INPUT_POINT_JITTER_X": os.environ.get("WECHAT_WIN32_OCR_INPUT_POINT_JITTER_X"),
+        "WECHAT_WIN32_OCR_INPUT_POINT_JITTER_Y": os.environ.get("WECHAT_WIN32_OCR_INPUT_POINT_JITTER_Y"),
+        "WECHAT_WIN32_OCR_CLICK_SURFACE_INPUT_JITTER_X": os.environ.get("WECHAT_WIN32_OCR_CLICK_SURFACE_INPUT_JITTER_X"),
+        "WECHAT_WIN32_OCR_CLICK_SURFACE_INPUT_JITTER_Y": os.environ.get("WECHAT_WIN32_OCR_CLICK_SURFACE_INPUT_JITTER_Y"),
+    }
+    sidecar_mod = sys.modules["apps.wechat_ai_customer_service.adapters.wechat_win32_ocr_sidecar"]
+    original_geometry = sidecar_mod.get_window_geometry
+    try:
+        for key in previous:
+            os.environ.pop(key, None)
+        geometry = {"width": 980, "height": 860}
+        points = [jitter_input_click_point(637, 715, geometry) for _ in range(80)]
+        xs = [point[0] for point in points]
+        ys = [point[1] for point in points]
+        assert_true(len(set(points)) >= 24, f"input point jitter should avoid repeated exact coordinates: {len(set(points))}")
+        assert_true(max(xs) - min(xs) >= 28, f"input point jitter should spread x enough: {min(xs)}..{max(xs)}")
+        assert_true(max(ys) - min(ys) >= 16, f"input point jitter should spread y enough: {min(ys)}..{max(ys)}")
+        sidecar_mod.get_window_geometry = lambda _hwnd: {"width": 980, "height": 860}
+        surface_points = [jitter_client_click_surface_point(1001, 637, 715) for _ in range(80)]
+        finals = [tuple(item[:2]) for item in surface_points]
+        roles = {str(item[2].get("role") or "") for item in surface_points}
+        assert_true("input_area" in roles, f"input-area click surface jitter should classify input clicks: {roles}")
+        assert_true(len(set(finals)) >= 18, f"surface jitter should protect fixed caller points: {len(set(finals))}")
+        assert_true(all(item[2].get("original") == [637, 715] for item in surface_points), "surface jitter should keep original point in metadata")
+    finally:
+        sidecar_mod.get_window_geometry = original_geometry
+        for key, value in previous.items():
+            if value is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = value
 
 
 def test_input_region_visual_delta_confirmation() -> None:
@@ -1028,6 +1089,27 @@ def test_send_verify_handles_split_multiline_messages() -> None:
     assert_true(
         verify_send_from_messages(payload, expected_text=expected),
         "split multiline messages should be considered verified",
+    )
+
+
+def test_send_verify_tolerates_common_ocr_noise_on_long_self_reply() -> None:
+    expected = "哥，10万左右接娃通勤，先看这两台比较合适。大众Polo 4.58万，自动挡，小巧好停，日常市区通勤挺合适。丰田凯美瑞 8.98万，预算内空间更宽敞，接娃家用会更从容些。"
+    payload = {
+        "messages": [
+            {
+                "sender": "self",
+                "content": "哥，10万左右接娃通勤，先看这两台比较合适。大众Polo4.58万，自动挡，小I巧好停，日常市区通勤挺合适。丰田凯美瑞8.98万，预算内空间更宽,接娃家用会更从容些。",
+            }
+        ]
+    }
+    assert_true(
+        verify_send_from_messages(payload, expected_text=expected),
+        "post-send verification should tolerate common OCR glyph/punctuation noise on long self replies",
+    )
+    unrelated = {"messages": [{"sender": "self", "content": "这是一条完全无关的短消息"}]}
+    assert_true(
+        verify_send_from_messages(unrelated, expected_text=expected) is False,
+        "OCR-tolerant verification must not accept unrelated content",
     )
 
 
@@ -1819,10 +1901,21 @@ def test_sendinput_unicode_aborts_when_window_guard_fails() -> None:
 
 
 def test_send_trigger_mode_defaults_to_enter_only() -> None:
-    assert_true(normalize_send_trigger_mode(None) == "enter_only", "default send trigger should avoid clicking the send button")
-    assert_true(normalize_send_trigger_mode("click_only") == "click_only", "single-click trigger should remain opt-in")
-    assert_true(normalize_send_trigger_mode("enter_then_click") == "enter_then_click", "legacy trigger should remain opt-in")
-    assert_true(normalize_send_trigger_mode("bad") == "enter_only", "bad trigger mode should fail safe")
+    previous = os.environ.get("WECHAT_WIN32_OCR_ALLOW_CLICK_SEND_TRIGGER")
+    try:
+        os.environ.pop("WECHAT_WIN32_OCR_ALLOW_CLICK_SEND_TRIGGER", None)
+        assert_true(normalize_send_trigger_mode(None) == "enter_only", "default send trigger should avoid clicking the send button")
+        assert_true(normalize_send_trigger_mode("click_only") == "enter_only", "click send trigger should be disabled by default")
+        assert_true(normalize_send_trigger_mode("enter_then_click") == "enter_only", "dual trigger should never be used")
+        assert_true(normalize_send_trigger_mode("bad") == "enter_only", "bad trigger mode should fail safe")
+        os.environ["WECHAT_WIN32_OCR_ALLOW_CLICK_SEND_TRIGGER"] = "1"
+        assert_true(normalize_send_trigger_mode("click_only") == "click_only", "single-click trigger should require explicit debug opt-in")
+        assert_true(normalize_send_trigger_mode("enter_then_click") == "enter_only", "dual trigger should remain disabled even with click opt-in")
+    finally:
+        if previous is None:
+            os.environ.pop("WECHAT_WIN32_OCR_ALLOW_CLICK_SEND_TRIGGER", None)
+        else:
+            os.environ["WECHAT_WIN32_OCR_ALLOW_CLICK_SEND_TRIGGER"] = previous
 
 
 def test_input_text_region_state_distinguishes_blank_and_text() -> None:
@@ -1841,6 +1934,19 @@ def test_input_text_region_state_distinguishes_blank_and_text() -> None:
     assert_true(
         blank_with_boundary_ocr.get("has_visible_text") is False,
         f"OCR boundary drift on a white input area should not block typing: {blank_with_boundary_ocr}",
+    )
+    dark_blank = Image.new("RGB", (980, 860), (30, 30, 30))
+    dark_blank_state = input_text_region_state(dark_blank, [], geometry=geometry)
+    assert_true(
+        dark_blank_state.get("has_visible_text") is False,
+        f"dark-mode blank input should stay retry-safe: {dark_blank_state}",
+    )
+    dark_text_image = dark_blank.copy()
+    ImageDraw.Draw(dark_text_image).rectangle([370, 690, 560, 715], fill="white")
+    dark_text_state = input_text_region_state(dark_text_image, [], geometry=geometry)
+    assert_true(
+        dark_text_state.get("has_visible_text") is True,
+        f"bright strokes on dark input should still block duplicate typing: {dark_text_state}",
     )
     text_image = blank.copy()
     ImageDraw.Draw(text_image).rectangle([370, 690, 560, 715], fill="black")
@@ -2484,12 +2590,15 @@ def test_scroll_actions_randomize_wheel_and_cursor_cadence() -> None:
     assert_true("random.randint(-12, 12)" in history_source, "history scroll should jitter cursor X")
     assert_true("random.randint(-10, 10)" in history_source, "history scroll should jitter cursor Y")
     assert_true("random.choice([-1, 0, 1])" in history_source, "history scroll should vary wheel units")
+    assert_true('"cursor"' in history_source, "history scroll audit should record final cursor point")
+    assert_true("actual_attempts" in latest_source, "scroll-to-latest should vary actual attempt count")
     assert_true("random.randint(5, 7)" in latest_source, "scroll-to-latest should vary wheel units")
     assert_true("humanized_action_sleep(85, 180)" in latest_source, "scroll-to-latest should avoid fixed cadence")
 
 
 def main() -> int:
     tests = [
+        test_sidecar_script_bootstraps_project_root_without_pythonpath,
         test_parse_sessions_from_ocr,
         test_parse_sessions_detects_visual_unread_red_dot,
         test_parse_sessions_normalizes_truncated_file_transfer,
@@ -2505,6 +2614,7 @@ def main() -> int:
         test_connector_helpers,
         test_send_geometry_guard,
         test_send_points_apply_small_safe_jitter,
+        test_input_click_jitter_has_enough_entropy,
         test_send_rate_guard,
         test_wechat_rpa_lock_recovers_stale_lock_and_times_out_on_live_lock,
         test_uia_control_selection_prefers_chatbox,
@@ -2542,6 +2652,7 @@ def main() -> int:
         test_service_subview_back_target_detection,
         test_connector_rpa_priority_and_wxauto_reserve_toggle,
         test_send_verify_handles_split_multiline_messages,
+        test_send_verify_tolerates_common_ocr_noise_on_long_self_reply,
         test_blind_send_without_ocr_verification_fallback,
         test_guarded_send_confirmation_fallback,
         test_fast_send_confirmation_skips_slow_message_read_when_guard_is_strong,

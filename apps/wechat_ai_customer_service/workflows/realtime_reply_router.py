@@ -592,7 +592,7 @@ def decide_realtime_reply_route(
     enabled = settings.get("enabled", True) is not False
     route: dict[str, Any] = {
         "enabled": enabled,
-        "level": "legacy",
+        "level": "disabled",
         "reason": "realtime_reply_disabled",
         "foreground_llm_allowed": bool((config.get("llm_reply_synthesis", {}) or {}).get("enabled", False)),
         "max_prompt_tokens": int(settings.get("max_prompt_tokens", DEFAULT_MAX_PROMPT_TOKENS) or DEFAULT_MAX_PROMPT_TOKENS),
@@ -3188,8 +3188,8 @@ def build_feature_guidance_reply(query: str, *, recent_reply_texts: list[str] | 
 def build_comfort_highway_reply(query: str, *, recent_reply_texts: list[str] | None = None) -> tuple[str, int]:
     return choose_natural_reply_variant(
         [
-            "后排孩子坐、偶尔跑高速的话，重点看底盘稳定性、座椅支撑、轮胎胎况、隔音胎噪和悬挂有没有松散异响。SUV不是只看空间，试驾时过减速带、烂路和高速巡航感受都要一起看，检测报告里底盘件和轮胎也要核。",
-            "这个问题问得细。别只看后排大不大，还要看座椅角度、悬挂支撑、胎噪、风噪和底盘有没有松旷；孩子坐得舒服不舒服，试驾一圈比参数更准。车况、轮胎和避震状态也会明显影响舒适度。",
+            "后排家人坐、偶尔跑高速的话，重点看底盘稳定性、座椅支撑、轮胎胎况、隔音胎噪和悬挂有没有松散异响。SUV不是只看空间，试驾时过减速带、烂路和高速巡航感受都要一起看，检测报告里底盘件和轮胎也要核。",
+            "这个问题问得细。别只看后排大不大，还要看座椅角度、悬挂支撑、胎噪、风噪和底盘有没有松旷；家人坐得舒服不舒服，试驾一圈比参数更准。车况、轮胎和避震状态也会明显影响舒适度。",
             "如果想长途舒服一点，我会把后排坐姿、底盘滤震、隔音、轮胎和车况记录放前面看。尤其二手SUV，里程和底盘保养很关键，不是配置高就一定坐着舒服。",
         ],
         key_text=query,

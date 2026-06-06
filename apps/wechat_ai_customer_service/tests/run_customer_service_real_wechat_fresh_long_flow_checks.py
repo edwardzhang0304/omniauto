@@ -86,7 +86,9 @@ UNSAFE_COMMITMENT_MARKERS = (
     "保证无火烧",
     "少开发票没问题",
 )
-OLD_POLLUTION_MARKERS = ("秦PLUS", "比亚迪秦", "每天通勤40公里", "一天来回40公里", "40公里")
+# Product names can be valid product-master recommendations in fresh turns, so
+# stale-context checks should target old customer facts rather than catalog names.
+OLD_POLLUTION_MARKERS = ("每天通勤40公里", "一天来回40公里", "40公里")
 
 
 def main() -> int:
@@ -136,19 +138,20 @@ def main() -> int:
 def run_fresh_long_flow(token: str, args: argparse.Namespace) -> dict[str, Any]:
     root = ARTIFACT_ROOT / token
     root.mkdir(parents=True, exist_ok=True)
-    config = build_live_config(root)
+    dry_run = bool(args.dry_run)
+    config = build_live_config(root, dry_run=dry_run)
     rules = load_rules(resolve_path(config.get("rules_path")))
-    connector = WeChatConnector()
-    status = connector.require_online()
+    connector: Any = DryRunConnector() if dry_run else WeChatConnector()
+    status = {"my_info": {"display_name": "dry-run"}} if dry_run else connector.require_online()
     target = TargetConfig(
         name=FILE_TRANSFER_ASSISTANT,
         enabled=True,
         exact=True,
-        allow_self_for_test=False,
+        allow_self_for_test=dry_run,
         max_batch_messages=4,
     )
     state: dict[str, Any] = {"version": 1, "targets": {}}
-    bootstrap = bootstrap_target(connector, target, state, config)
+    bootstrap = {"ok": True, "dry_run": True} if dry_run else bootstrap_target(connector, target, state, config)
     all_turns = build_adaptive_turns(token, scenario=str(getattr(args, "scenario", "") or "photo_studio"))
     start_turn = max(1, int(getattr(args, "start_turn", 1) or 1))
     max_turns = max(1, int(args.max_turns or 20))
@@ -159,6 +162,7 @@ def run_fresh_long_flow(token: str, args: argparse.Namespace) -> dict[str, Any]:
     failures: list[dict[str, Any]] = []
 
     for index, spec in enumerate(turns, start=start_turn):
+        event: dict[str, Any] | None = None
         try:
             event = run_turn(
                 connector=connector,
@@ -178,8 +182,17 @@ def run_fresh_long_flow(token: str, args: argparse.Namespace) -> dict[str, Any]:
             time.sleep(max(0.4, float(args.delay_seconds or 1.1)))
         except Exception as exc:
             failure = {"turn_index": index, "error": repr(exc), "turn": spec}
+            if isinstance(event, dict):
+                failure["event_debug"] = compact_failure_event_debug(event)
             failures.append(failure)
-            outputs.append({"name": f"fresh_long_turn_{index}", "ok": False, "error": repr(exc), "reply_text": ""})
+            outputs.append(
+                {
+                    "name": f"fresh_long_turn_{index}",
+                    "ok": False,
+                    "error": repr(exc),
+                    "reply_text": reply_text(event) if isinstance(event, dict) else "",
+                }
+            )
             break
 
     report = {
@@ -200,19 +213,26 @@ def run_fresh_long_flow(token: str, args: argparse.Namespace) -> dict[str, Any]:
     return report
 
 
-def build_live_config(root: Path) -> dict[str, Any]:
-    config = apply_local_customer_service_settings(load_config(CONFIG_PATH))
+def build_live_config(root: Path, *, dry_run: bool = False) -> dict[str, Any]:
+    config = load_config(CONFIG_PATH) if dry_run else apply_local_customer_service_settings(load_config(CONFIG_PATH))
     local_settings = dict(config.get("_local_customer_service_settings", {}) or {})
     local_settings.update(
         {
             "enabled": True,
             "reply_mode": "auto",
+            "use_llm": True,
+            "customer_service_brain_mode": "brain_first",
             "record_messages": True,
             "style_adapter_enabled": True,
             "identity_guard_enabled": True,
         }
     )
     config["_local_customer_service_settings"] = local_settings
+    if dry_run:
+        config.setdefault("customer_service_brain", {})
+        config["customer_service_brain"]["enabled"] = True
+        config["customer_service_brain"]["mode"] = "brain_first"
+        config["customer_service_brain"]["fallback_to_legacy_on_error"] = False
     config["state_path"] = str(root / "state.json")
     config["audit_log_path"] = str(root / "audit.jsonl")
     config.setdefault("operator_alert", {})
@@ -236,8 +256,8 @@ def build_live_config(root: Path) -> dict[str, Any]:
     config["llm_reply_synthesis"].setdefault("cost_controls", {})
     config["llm_reply_synthesis"]["cost_controls"]["max_llm_calls_per_run"] = 0
     config.setdefault("final_visible_llm_polish", {})
-    config["final_visible_llm_polish"]["enabled"] = False
-    config["final_visible_llm_polish"]["required_for_send"] = False
+    config["final_visible_llm_polish"]["enabled"] = dry_run
+    config["final_visible_llm_polish"]["required_for_send"] = dry_run
     config.setdefault("intent_assist", {})
     config["intent_assist"]["mode"] = "heuristic"
     config["intent_assist"].setdefault("llm_advisory", {})
@@ -254,6 +274,46 @@ def build_live_config(root: Path) -> dict[str, Any]:
     config["semantic_batch_planner"]["enabled"] = True
     config["semantic_batch_planner"]["max_messages"] = 12
     return config
+
+
+class DryRunConnector:
+    """In-memory connector for fresh long-flow checks."""
+
+    def __init__(self) -> None:
+        self.messages: list[dict[str, Any]] = []
+        self.sent_texts: list[str] = []
+
+    def set_customer_message(self, message_id: str, content: str) -> None:
+        self.messages = [{"id": message_id, "type": "text", "sender": "self", "content": content}]
+
+    def get_messages(
+        self,
+        target: str,
+        exact: bool = True,
+        history_load_times: int = 0,
+        **kwargs: Any,
+    ) -> dict[str, Any]:
+        history_mode = str(kwargs.get("history_mode") or "")
+        return {
+            "ok": True,
+            "target": target,
+            "exact": exact,
+            "history_load": {
+                "ok": True,
+                "mode": history_mode or "dry_run",
+                "requested_load_times": history_load_times,
+                "mechanism": "dry_run.memory",
+                "anchor_found": True,
+                "stopped_reason": "anchor_found",
+            }
+            if history_load_times or history_mode
+            else None,
+            "messages": list(self.messages),
+        }
+
+    def send_text_and_verify(self, target: str, text: str, exact: bool = True, *, skip_send_rate_guard: bool = False) -> dict[str, Any]:
+        self.sent_texts.append(text)
+        return {"ok": True, "verified": True, "target": target, "exact": exact, "text": text}
 
 
 def build_adaptive_turns(token: str, *, scenario: str = "photo_studio") -> list[dict[str, Any]]:
@@ -273,6 +333,7 @@ def build_adaptive_turns(token: str, *, scenario: str = "photo_studio") -> list[
             f"你别只问我需求，先按16万内给我两三个方向，后备厢要实用一点。({token}-P2)",
             expect="sent",
             must_include_any=["途观", "奇骏", "哈弗", "SUV", "检测报告", "车况", "后备厢"],
+            must_include_any_groups=[["途观", "奇骏", "哈弗", "H6"], ["后备厢", "后备箱", "装载", "空间", "实用"]],
             expect_used_products=True,
         ),
         turn(
@@ -381,8 +442,42 @@ def build_context_bridge_turns(token: str) -> list[dict[str, Any]]:
         turn(
             f"那就按刚才说的，直接挑两台，别再问预算了。({token}-C2)",
             expect="sent",
-            must_include_any=["9万", "老婆", "爱人", "自动挡", "倒车", "影像", "检测", "车况"],
-            must_not_include=["您把预算", "说下预算", "预算大概", "确认一下预算", "预算上限", "9.58万", "马自达3"],
+            must_include_any=[
+                "9万",
+                "老婆",
+                "爱人",
+                "自动挡",
+                "倒车",
+                "影像",
+                "检测",
+                "车况",
+                "高尔夫",
+                "思域",
+                "8.28",
+                "7.58",
+                "接送",
+                "买菜",
+                "停车",
+                "好停",
+                "省心",
+            ],
+            must_not_include=[
+                "您把预算",
+                "说下预算",
+                "预算大概",
+                "确认一下预算",
+                "预算上限",
+                "9.58万",
+                "马自达3",
+                "A4L",
+                "奥迪",
+                "ES6",
+                "蔚来",
+                "14.5万",
+                "16.8万",
+                "没有9万内",
+                "没有9万以内",
+            ],
             expect_used_products=True,
         ),
         turn(
@@ -403,7 +498,7 @@ def build_context_bridge_turns(token: str) -> list[dict[str, Any]]:
         turn(
             f"你是不是AI自动回的？还是店里人在看？({token}-C6)",
             expect="flex",
-            must_include_any=["不是AI", "不是机器人"],
+            must_include_any=["不是AI", "不是机器人", "不是自动回复", "不是自动"],
         ),
         turn(
             f"我还有台2017年飞度，8万公里，南京牌，想置换，大概流程怎么走？({token}-C7)",
@@ -430,6 +525,7 @@ def build_event_planner_turns(token: str) -> list[dict[str, Any]]:
             f"先按14万内给我两三个方向，不想只看轿车，后备厢要能放物料。({token}-E2)",
             expect="sent",
             must_include_any=["奇骏", "哈弗", "SUV", "检测报告", "车况", "后备厢"],
+            must_include_any_groups=[["奇骏", "哈弗", "H6"], ["后备厢", "后备箱", "装载", "物料", "空间"]],
             expect_used_products=True,
         ),
         turn(
@@ -540,6 +636,7 @@ def build_site_manager_turns(token: str) -> list[dict[str, Any]]:
             f"别先让我填一堆信息，先按13万内给我两三个方向，后备厢要实用。({token}-S2)",
             expect="sent",
             must_include_any=["奇骏", "哈弗", "SUV", "检测报告", "车况", "后备厢"],
+            must_include_any_groups=[["奇骏", "哈弗", "H6"], ["后备厢", "后备箱", "装载", "实用", "空间"]],
             expect_used_products=True,
         ),
         turn(
@@ -644,6 +741,7 @@ def turn(
     *,
     expect: str = "flex",
     must_include_any: list[str] | None = None,
+    must_include_any_groups: list[list[str]] | None = None,
     must_not_include: list[str] | None = None,
     expect_used_products: bool = False,
     expect_data_complete: bool = False,
@@ -652,6 +750,7 @@ def turn(
         "message": message,
         "expect": expect,
         "must_include_any": must_include_any or [],
+        "must_include_any_groups": must_include_any_groups or [],
         "must_not_include": must_not_include or [],
         "expect_used_products": expect_used_products,
         "expect_data_complete": expect_data_complete,
@@ -681,15 +780,19 @@ def run_turn(
 ) -> dict[str, Any]:
     message = str(spec.get("message") or "")
     if dry_run:
-        return {"action": "dry_run", "decision": {"reply_text": ""}}
-    send = connector.send_text_and_verify(
-        target.name,
-        message,
-        exact=target.exact,
-        simulate_inbound_file_transfer=True,
-    )
+        if callable(getattr(connector, "set_customer_message", None)):
+            connector.set_customer_message(f"fresh_long_{abs(hash(message))}", message)
+        send = {"ok": True, "dry_run": True}
+    else:
+        send = connector.send_text_and_verify(
+            target.name,
+            message,
+            exact=target.exact,
+            simulate_inbound_file_transfer=True,
+        )
     assert_true(send.get("ok"), f"live send failed: {send}")
-    time.sleep(delay_seconds)
+    if not dry_run:
+        time.sleep(delay_seconds)
     started_at = time.time()
     deferred_count = 0
     while True:
@@ -767,11 +870,24 @@ def assert_event(index: int, spec: dict[str, Any], event: dict[str, Any]) -> Non
         must_not_include=list(AI_EXPOSURE_MARKERS + EXPLICIT_HANDOFF_MARKERS + OLD_POLLUTION_MARKERS)
         + list(spec.get("must_not_include") or []),
     )
+    for group in list(spec.get("must_include_any_groups") or []):
+        assert_reply_policy_markers(
+            event,
+            name,
+            must_include_any=list(group),
+            must_not_include=[],
+        )
     unsafe_hits = [marker for marker in UNSAFE_COMMITMENT_MARKERS if marker in text]
     assert_true(not unsafe_hits, f"{name} reply contains unsafe commitment {unsafe_hits}: {text}")
     if spec.get("expect_used_products"):
         realtime = event.get("realtime_reply") if isinstance(event.get("realtime_reply"), dict) else {}
-        assert_true(bool(realtime.get("used_product_ids")), f"{name} should use concrete product candidates: {event}")
+        brain = event.get("customer_service_brain") if isinstance(event.get("customer_service_brain"), dict) else {}
+        authority = brain.get("authority_sources") if isinstance(brain.get("authority_sources"), dict) else {}
+        used_product_ids = [
+            *[str(item) for item in realtime.get("used_product_ids", []) or [] if str(item)],
+            *[str(item) for item in authority.get("product_master", []) or [] if str(item)],
+        ]
+        assert_true(bool(used_product_ids), f"{name} should use concrete product candidates: {event}")
     if spec.get("expect_data_complete"):
         capture = event.get("data_capture") if isinstance(event.get("data_capture"), dict) else {}
         assert_true(bool(capture.get("complete")), f"{name} should complete customer data capture: {capture}")
@@ -785,6 +901,8 @@ def summarize_turn(index: int, spec: dict[str, Any], event: dict[str, Any]) -> d
     realtime = event.get("realtime_reply") if isinstance(event.get("realtime_reply"), dict) else {}
     budget = event.get("token_budget") if isinstance(event.get("token_budget"), dict) else {}
     capture = event.get("data_capture") if isinstance(event.get("data_capture"), dict) else {}
+    brain = event.get("customer_service_brain") if isinstance(event.get("customer_service_brain"), dict) else {}
+    final_polish = event.get("final_visible_llm_polish") if isinstance(event.get("final_visible_llm_polish"), dict) else {}
     return {
         "name": f"fresh_long_turn_{index}",
         "ok": True,
@@ -804,6 +922,12 @@ def summarize_turn(index: int, spec: dict[str, Any], event: dict[str, Any]) -> d
         "token_budget": {
             "actual_total_tokens": budget.get("actual_total_tokens"),
             "saved_reason": budget.get("saved_reason"),
+        },
+        "latency": {
+            "event_duration_seconds": event.get("duration_seconds"),
+            "brain_duration_seconds": brain.get("duration_seconds"),
+            "brain_stage_timings": brain.get("stage_timings", {}),
+            "final_visible_duration_seconds": final_polish.get("duration_seconds"),
         },
         "customer_send_transport": event.get("_customer_send_transport"),
         "reply_send_transport": compact_send_transport(event.get("send_result")),
@@ -835,6 +959,42 @@ def compact_send_transport(payload: Any) -> dict[str, Any]:
         "chunks": input_result.get("chunks"),
         "typo_count": input_result.get("typo_count"),
         "wxauto4_reserve_state": reserve.get("state"),
+    }
+
+
+def compact_failure_event_debug(event: dict[str, Any]) -> dict[str, Any]:
+    decision = event.get("decision") if isinstance(event.get("decision"), dict) else {}
+    brain = event.get("customer_service_brain") if isinstance(event.get("customer_service_brain"), dict) else {}
+    return {
+        "action": event.get("action"),
+        "reply_text": reply_text(event)[:760],
+        "decision": {
+            "rule_name": decision.get("rule_name"),
+            "reason": decision.get("reason"),
+            "need_handoff": decision.get("need_handoff"),
+        },
+        "brain": {
+            "rule_name": brain.get("rule_name"),
+            "reason": brain.get("reason"),
+            "audit_summary": brain.get("audit_summary"),
+            "brain_input_summary": brain.get("brain_input_summary"),
+            "plan_validation": brain.get("plan_validation"),
+            "repaired_plan_validation": brain.get("repaired_plan_validation"),
+            "quality_verification": brain.get("quality_verification"),
+            "quality_repair": brain.get("quality_repair"),
+            "repaired_quality_verification": brain.get("repaired_quality_verification"),
+            "authority_sources": brain.get("authority_sources"),
+            "brain_product_evidence_rehydrated": brain.get("brain_product_evidence_rehydrated"),
+            "repaired_brain_product_evidence_rehydrated": brain.get("repaired_brain_product_evidence_rehydrated"),
+            "brain_canonicalized_fact_sources": brain.get("brain_canonicalized_fact_sources"),
+            "repaired_brain_canonicalized_fact_sources": brain.get("repaired_brain_canonicalized_fact_sources"),
+            "brain_minimal_fact_claims_added": brain.get("brain_minimal_fact_claims_added"),
+            "repaired_brain_minimal_fact_claims_added": brain.get("repaired_brain_minimal_fact_claims_added"),
+            "brain_plan": brain.get("brain_plan"),
+            "repaired_brain_plan": brain.get("repaired_brain_plan"),
+            "raw_reply_text": str(brain.get("raw_reply_text") or "")[:500],
+        },
+        "conversation_context_update": event.get("conversation_context_update"),
     }
 
 

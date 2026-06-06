@@ -35,8 +35,8 @@ from knowledge_loader import build_evidence_pack  # noqa: E402
 from llm_intent_router import IntentRouteResult, route_intent  # noqa: E402
 from llm_reply_synthesis import maybe_synthesize_reply  # noqa: E402
 from realtime_reply_router import decide_realtime_reply_route, maybe_build_realtime_reply  # noqa: E402
+from customer_service_brain import maybe_run_customer_service_brain  # noqa: E402
 from listen_and_reply import (  # noqa: E402
-    apply_local_customer_service_settings,
     handoff_acknowledgement_text,
     handoff_acknowledgement_is_low_information,
     load_config,
@@ -130,10 +130,17 @@ def main() -> int:
         for index, sample in enumerate(selected, start=1):
             result = simulate_one(sample=sample, config=config)
             if llm_probe_count < max(0, args.llm_probe_limit):
+                brain_probe = run_brain_probe(sample=sample, config=config, result=result)
+                result["brain_probe"] = brain_probe
+                if brain_probe.get("attempted"):
+                    llm_probe_count += 1
+            if llm_probe_count < max(0, args.llm_probe_limit) and not result.get("brain_probe", {}).get("attempted"):
                 probe = run_llm_probe(sample=sample, config=config, result=result)
                 result["llm_probe"] = probe
                 if probe.get("attempted"):
                     llm_probe_count += 1
+            result["effective_reply_text"] = effective_reply_text(result)
+            result["effective_reply_source"] = effective_reply_source(result)
             result["issues"] = detect_issues(sample.text, result)
             results.append(result)
             if index % 20 == 0:
@@ -162,7 +169,29 @@ def load_audit_config(raw_config: dict[str, Any]) -> dict[str, Any]:
     llm_synthesis = cfg.get("llm_reply_synthesis") if isinstance(cfg.get("llm_reply_synthesis"), dict) else {}
     llm_synthesis["enabled"] = False
     cfg["llm_reply_synthesis"] = llm_synthesis
-    return apply_local_customer_service_settings(cfg)
+
+    # This audit is an offline Brain First regression, so it must not inherit the
+    # operator's current local-console mode (which may intentionally be off while
+    # testing other accounts). Force the intended architecture in the test
+    # config without mutating tenant runtime settings on disk.
+    brain = cfg.get("customer_service_brain") if isinstance(cfg.get("customer_service_brain"), dict) else {}
+    brain["enabled"] = True
+    brain["mode"] = "brain_first"
+    brain["fallback_to_legacy_on_error"] = False
+    brain.setdefault("provider", "openai")
+    brain.setdefault("model_tier", "flash")
+    brain.setdefault("timeout_seconds", 35)
+    brain.setdefault("max_tokens", 900)
+    brain.setdefault("max_reply_segments", 3)
+    brain.setdefault("require_fact_claims", True)
+    brain.setdefault("require_final_visible_polish", True)
+    cfg["customer_service_brain"] = brain
+
+    final_polish = cfg.get("final_visible_llm_polish") if isinstance(cfg.get("final_visible_llm_polish"), dict) else {}
+    final_polish["enabled"] = True
+    final_polish["required_for_send"] = True
+    cfg["final_visible_llm_polish"] = final_polish
+    return cfg
 
 
 def collect_samples(raw_inbox_dir: Path, runtime_messages_path: Path) -> list[AuditSample]:
@@ -493,6 +522,49 @@ def run_llm_probe(*, sample: AuditSample, config: dict[str, Any], result: dict[s
     }
 
 
+def run_brain_probe(*, sample: AuditSample, config: dict[str, Any], result: dict[str, Any]) -> dict[str, Any]:
+    batch = [{"id": "sim_msg_1", "sender": "customer", "content": sample.text, "time": ""}]
+    product_result = result.get("product_result") if isinstance(result.get("product_result"), dict) else {}
+    decision = build_initial_decision(product_result)
+    route = result.get("route") if isinstance(result.get("route"), dict) else {}
+    intent_route = result.get("intent_route") if isinstance(result.get("intent_route"), dict) else {}
+    brain_result = maybe_run_customer_service_brain(
+        config=config,
+        target_name="模拟客户",
+        target_state={"conversation_context": {}},
+        batch=batch,
+        combined=sample.text,
+        decision=decision,
+        reply_text=str(result.get("reply_text") or ""),
+        intent_assist={
+            "intent": str(intent_route.get("intent") or "product_inquiry"),
+            "evidence": {"safety": route.get("safety") if isinstance(route.get("safety"), dict) else {}},
+        },
+        rag_reply={},
+        llm_reply={},
+        product_knowledge=product_result,
+        data_capture={},
+        raw_capture={"conversation": {"conversation_id": "real_chat_audit", "chat_type": "private"}},
+        customer_profile=None,
+    )
+    return {
+        "attempted": True,
+        "enabled": bool(brain_result.get("enabled")),
+        "applied": bool(brain_result.get("applied")),
+        "adoptable": bool(brain_result.get("adoptable")),
+        "rule_name": str(brain_result.get("rule_name") or ""),
+        "reason": str(brain_result.get("reason") or ""),
+        "mode": str(brain_result.get("mode") or ""),
+        "model": str((brain_result.get("llm_status") or {}).get("model") or ""),
+        "provider": str((brain_result.get("llm_status") or {}).get("provider") or ""),
+        "reply_text": str(brain_result.get("reply_text") or ""),
+        "needs_handoff": str(brain_result.get("rule_name") or "") == "customer_service_brain_handoff",
+        "llm_status": compact_mapping(brain_result.get("llm_status") or {}),
+        "audit_summary": compact_mapping(brain_result.get("audit_summary") or {}),
+        "duration_seconds": brain_result.get("duration_seconds"),
+    }
+
+
 def build_initial_decision(product_result: dict[str, Any]) -> ReplyDecision:
     if product_result.get("matched") and str(product_result.get("reply_text") or "").strip():
         return ReplyDecision(
@@ -513,7 +585,8 @@ def build_initial_decision(product_result: dict[str, Any]) -> ReplyDecision:
 
 def detect_issues(question: str, result: dict[str, Any]) -> list[dict[str, Any]]:
     issues: list[dict[str, Any]] = []
-    reply = str(result.get("reply_text") or "").strip()
+    brain_probe = result.get("brain_probe") if isinstance(result.get("brain_probe"), dict) else {}
+    reply = effective_reply_text(result)
     route = result.get("route") if isinstance(result.get("route"), dict) else {}
     realtime = result.get("realtime") if isinstance(result.get("realtime"), dict) else {}
     llm_probe = result.get("llm_probe") if isinstance(result.get("llm_probe"), dict) else {}
@@ -527,20 +600,28 @@ def detect_issues(question: str, result: dict[str, Any]) -> list[dict[str, Any]]
     expected_l0 = route_level == "L0" and route_reason in expected_l0_reasons
 
     if not reply:
-        issues.append(issue("empty_reply", "回复为空", "listen_and_reply / realtime_reply_router"))
+        issues.append(issue("empty_reply", "回复为空", "customer_service_brain / listen_and_reply"))
         return issues
+    if brain_probe.get("attempted") and not brain_probe.get("applied"):
+        issues.append(
+            issue(
+                "brain_not_applied",
+                f"Brain未采纳: {brain_probe.get('reason') or brain_probe.get('rule_name')}",
+                "customer_service_brain",
+            )
+        )
     llm_dependent_not_probed = bool(route.get("foreground_llm_allowed")) and not realtime.get("applied") and not llm_probe.get("attempted")
     if llm_dependent_not_probed:
         return issues
     if len(reply) > 180:
-        issues.append(issue("reply_too_long", f"回复偏长({len(reply)}字)", owner_from_result(route, realtime, llm_probe)))
+        issues.append(issue("reply_too_long", f"回复偏长({len(reply)}字)", owner_from_result(route, realtime, llm_probe, brain_probe)))
     if is_vehicle_choice_question(question) and not contains_any(reply, DIRECT_ANSWER_HINTS) and not expected_l0:
         issues.append(issue("no_clear_recommendation", "明确选择题未给出清晰建议", "realtime_reply_router"))
     budget_issue = detect_budget_deviation(question, reply)
     if budget_issue:
         issues.append(issue("budget_deviation", budget_issue, "realtime_reply_router.rank_product_candidates"))
     if contains_any(question, USED_CAR_TERMS) and not contains_any(reply, USED_CAR_TERMS) and not expected_l0:
-        issues.append(issue("weak_domain_alignment", "二手车问题回复缺少行业语义锚点", owner_from_result(route, realtime, llm_probe)))
+        issues.append(issue("weak_domain_alignment", "二手车问题回复缺少行业语义锚点", owner_from_result(route, realtime, llm_probe, brain_probe)))
     if not looks_high_risk(question) and contains_any(reply, HANDOFF_HINTS) and not expected_l0:
         issues.append(issue("possible_over_handoff", "非高风险问题出现转人工倾向", "realtime_reply_router / llm_reply_synthesis"))
     if contains_any(question, ("赛纳", "塞纳", "赛那")) and not contains_any(reply, ("赛那", "塞纳", "赛纳", "sienna")):
@@ -562,13 +643,39 @@ def issue(code: str, detail: str, owner: str) -> dict[str, Any]:
     return {"code": code, "detail": detail, "owner": owner}
 
 
-def owner_from_result(route: dict[str, Any], realtime: dict[str, Any], llm_probe: dict[str, Any]) -> str:
+def owner_from_result(route: dict[str, Any], realtime: dict[str, Any], llm_probe: dict[str, Any], brain_probe: dict[str, Any] | None = None) -> str:
+    brain = brain_probe if isinstance(brain_probe, dict) else {}
+    if brain.get("applied"):
+        return "customer_service_brain"
     if llm_probe.get("applied"):
         return "llm_reply_synthesis"
     if realtime.get("applied"):
         return "realtime_reply_router"
     if route.get("foreground_llm_allowed"):
         return "realtime_reply_router -> llm_reply_synthesis"
+    return "listen_and_reply / realtime_reply_router"
+
+
+def effective_reply_text(result: dict[str, Any]) -> str:
+    brain_probe = result.get("brain_probe") if isinstance(result.get("brain_probe"), dict) else {}
+    if brain_probe.get("attempted") and str(brain_probe.get("reply_text") or "").strip():
+        return str(brain_probe.get("reply_text") or "").strip()
+    llm_probe = result.get("llm_probe") if isinstance(result.get("llm_probe"), dict) else {}
+    if llm_probe.get("attempted") and str(llm_probe.get("reply_text") or "").strip():
+        return str(llm_probe.get("reply_text") or "").strip()
+    return str(result.get("reply_text") or "").strip()
+
+
+def effective_reply_source(result: dict[str, Any]) -> str:
+    brain_probe = result.get("brain_probe") if isinstance(result.get("brain_probe"), dict) else {}
+    if brain_probe.get("attempted") and str(brain_probe.get("reply_text") or "").strip():
+        return "customer_service_brain"
+    llm_probe = result.get("llm_probe") if isinstance(result.get("llm_probe"), dict) else {}
+    if llm_probe.get("attempted") and str(llm_probe.get("reply_text") or "").strip():
+        return "llm_reply_synthesis"
+    realtime = result.get("realtime") if isinstance(result.get("realtime"), dict) else {}
+    if realtime.get("applied"):
+        return "realtime_reply_router"
     return "listen_and_reply / realtime_reply_router"
 
 
@@ -690,7 +797,7 @@ def build_report(
     for item in results:
         category = str(item.get("category") or "unknown")
         category_counter[category] += 1
-        reply_key = normalize_dedupe_key(str(item.get("reply_text") or ""))
+        reply_key = normalize_dedupe_key(effective_reply_text(item))
         if reply_key:
             reply_template_counter[reply_key] += 1
         for issue_item in item.get("issues", []) or []:
@@ -702,7 +809,8 @@ def build_report(
                 examples_by_issue[code].append(
                     {
                         "question": item.get("question"),
-                        "reply": item.get("reply_text"),
+                        "reply": effective_reply_text(item),
+                        "reply_source": effective_reply_source(item),
                         "route_reason": (item.get("route") or {}).get("reason"),
                         "issue_detail": issue_item.get("detail"),
                         "owner": owner,

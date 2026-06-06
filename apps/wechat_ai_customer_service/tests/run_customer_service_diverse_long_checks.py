@@ -92,7 +92,7 @@ class FakeConnector:
             },
         }
 
-    def send_text_and_verify(self, target: str, text: str, exact: bool = True) -> dict[str, Any]:
+    def send_text_and_verify(self, target: str, text: str, exact: bool = True, *, skip_send_rate_guard: bool = False) -> dict[str, Any]:
         self.sent_texts.append(text)
         return {"ok": True, "verified": True, "target": target, "exact": exact, "text": text}
 
@@ -327,6 +327,7 @@ def check_process_target_multi_round_conversation() -> dict[str, Any]:
                 assert_equal(event.get("action"), "sent", f"{msg_id} should stay as normal customer-service reply")
             if msg_id == "round-2":
                 assert_true(any(term in reply_text for term in ("后排", "舒适", "年限", "高速", "车况")), "comfort follow-up should answer the new preference")
+                assert_true("孩子" not in reply_text, "comfort follow-up must not invent an unmentioned passenger")
             if msg_id == "round-4":
                 assert_true(any(term in reply_text for term in ("车源", "排期", "白跑", "到店", "现车")), "appointment follow-up should confirm availability/schedule")
             transcript.append(

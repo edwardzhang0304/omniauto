@@ -11,6 +11,7 @@ import copy
 import json
 import os
 import sys
+import tempfile
 from types import SimpleNamespace
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -37,7 +38,9 @@ from customer_intent_assist import IntentAssistResult, call_deepseek_advisory  #
 from customer_service_review_queue import build_review_queue  # noqa: E402
 from knowledge_loader import build_evidence_pack  # noqa: E402
 from listen_and_reply import (  # noqa: E402
+    CustomerServiceBrainStartupError,
     ReplyDecision,
+    TargetConfig,
     apply_local_customer_service_settings,
     build_iteration_targets,
     build_operator_handoff_reply_text,
@@ -45,6 +48,7 @@ from listen_and_reply import (  # noqa: E402
     coalesce_active_targets,
     concealed_handoff_reply,
     configured_reply_prefix,
+    conversation_context_from_product_result,
     customer_data_complete_can_auto_ack,
     customer_data_write_allowed_before_handoff,
     detect_newer_messages_before_send,
@@ -60,8 +64,10 @@ from listen_and_reply import (  # noqa: E402
     plan_message_batch_semantics,
     maybe_apply_llm_reply,
     maybe_analyze_intent,
+    maybe_record_customer_service_brain_failure_alert,
     multi_target_change_warmup_delay_seconds,
     finalize_customer_visible_reply_with_llm,
+    final_visible_polish_speed_settings,
     parse_targets,
     polish_customer_visible_reply_text,
     process_target,
@@ -77,6 +83,7 @@ from listen_and_reply import (  # noqa: E402
     rpa_reply_content_char_count,
     send_reply_with_optional_multi_bubble,
     split_customer_visible_reply_for_multi_bubble,
+    update_conversation_preference_context,
     _apply_greeting,
 )
 from apps.wechat_ai_customer_service.wechat_message_normalizer import normalize_wechat_message_record  # noqa: E402
@@ -154,13 +161,13 @@ class FakeConnector:
             "messages": messages,
         }
 
-    def send_text_and_verify(self, target: str, text: str, exact: bool = True) -> dict[str, Any]:
+    def send_text_and_verify(self, target: str, text: str, exact: bool = True, *, skip_send_rate_guard: bool = False) -> dict[str, Any]:
         self.sent_texts.append(text)
         return {"ok": True, "verified": True, "target": target, "exact": exact, "text": text}
 
 
 class RateLimitedTransportConnector(FakeConnector):
-    def send_text_and_verify(self, target: str, text: str, exact: bool = True) -> dict[str, Any]:
+    def send_text_and_verify(self, target: str, text: str, exact: bool = True, *, skip_send_rate_guard: bool = False) -> dict[str, Any]:
         self.sent_texts.append(text)
         return {
             "ok": False,
@@ -179,7 +186,7 @@ class RateLimitedTransportConnector(FakeConnector):
 
 
 class InputNotReadyTransportConnector(FakeConnector):
-    def send_text_and_verify(self, target: str, text: str, exact: bool = True) -> dict[str, Any]:
+    def send_text_and_verify(self, target: str, text: str, exact: bool = True, *, skip_send_rate_guard: bool = False) -> dict[str, Any]:
         self.sent_texts.append(text)
         return {
             "ok": False,
@@ -201,7 +208,7 @@ class RetryThenSuccessTransportConnector(FakeConnector):
         super().__init__(messages)
         self.send_calls = 0
 
-    def send_text_and_verify(self, target: str, text: str, exact: bool = True) -> dict[str, Any]:
+    def send_text_and_verify(self, target: str, text: str, exact: bool = True, *, skip_send_rate_guard: bool = False) -> dict[str, Any]:
         self.send_calls += 1
         self.sent_texts.append(text)
         if self.send_calls == 1:
@@ -236,15 +243,23 @@ class FinalSegmentVerifyConnector(FakeConnector):
         super().__init__(messages)
         self.send_calls = 0
         self.verify_calls = 0
+        self.send_rate_guard_skips: list[bool] = []
 
-    def send_text(self, target: str, text: str, exact: bool = True) -> dict[str, Any]:
+    def send_text(self, target: str, text: str, exact: bool = True, *, skip_send_rate_guard: bool = False) -> dict[str, Any]:
         self.send_calls += 1
         self.sent_texts.append(text)
-        return {"ok": True, "adapter": "win32_ocr", "state": "send_win32_rpa"}
+        self.send_rate_guard_skips.append(bool(skip_send_rate_guard))
+        return {
+            "ok": True,
+            "adapter": "win32_ocr",
+            "state": "send_win32_rpa",
+            "skip_send_rate_guard": bool(skip_send_rate_guard),
+        }
 
-    def send_text_and_verify(self, target: str, text: str, exact: bool = True) -> dict[str, Any]:
+    def send_text_and_verify(self, target: str, text: str, exact: bool = True, *, skip_send_rate_guard: bool = False) -> dict[str, Any]:
         self.verify_calls += 1
         self.sent_texts.append(text)
+        self.send_rate_guard_skips.append(bool(skip_send_rate_guard))
         return {
             "ok": True,
             "verified": True,
@@ -255,6 +270,7 @@ class FinalSegmentVerifyConnector(FakeConnector):
             "adapter": "win32_ocr",
             "state": "send_win32_rpa",
             "verification_mode": "send_guard_confirmed_fast",
+            "skip_send_rate_guard": bool(skip_send_rate_guard),
         }
 
 
@@ -291,6 +307,8 @@ def run_checks() -> dict[str, Any]:
         check_anchor_history_blocks_when_anchor_not_found,
         check_semantic_batch_planner_groups_split_need,
         check_semantic_batch_planner_detects_mixed_risk_questions,
+        check_customer_preference_context_preserves_spouse_parking_need,
+        check_conversation_context_preserves_need_fields_for_evidence_pack,
         check_mixed_safety_batch_forces_handoff,
         check_incomplete_customer_data_is_completed_and_written,
         check_explicit_name_phone_is_written_even_when_intent_is_appointment,
@@ -315,6 +333,7 @@ def run_checks() -> dict[str, Any]:
         check_force_handoff_style_preserves_social_offtopic_redirect,
         check_social_offtopic_intent_assist_does_not_force_stale_handoff,
         check_contextual_greeting_avoids_repeated_file_transfer_honorific,
+        check_contextual_greeting_does_not_surname_longrun_test_customer,
         check_concealed_handoff_acknowledges_contact_appointment,
         check_customer_data_handoff_keeps_trade_in_context,
         check_customer_data_visit_ack_does_not_force_handoff_on_customer_to_store_phrase,
@@ -335,9 +354,17 @@ def run_checks() -> dict[str, Any]:
         check_final_visible_polish_blocks_unpolished_send_when_required,
         check_final_visible_polish_transient_failure_can_degrade_when_enabled,
         check_final_visible_polish_lightweight_budget_covers_realtime_and_llm,
+        check_final_visible_polish_uses_brain_reply_max_cap,
         check_final_visible_polish_brain_source_is_lightweight_but_stricter,
+        check_final_visible_polish_brain_micro_prompt_is_verify_only,
+        check_final_visible_polish_brain_micro_rejects_rewrite_and_uses_draft,
+        check_final_visible_polish_handoff_micro_preserves_verification_signal,
+        check_final_visible_polish_rejects_identity_denial_for_finance_boundary,
+        check_final_visible_polish_semantic_guard_preserves_brain_decision,
         check_final_visible_polish_does_not_fast_skip_short_reply_by_default,
         check_safe_brain_reply_clears_soft_no_evidence_handoff,
+        check_brain_safe_fallback_does_not_become_soft_handoff,
+        check_brain_handoff_preserves_specific_uncertain_reply,
         check_customer_data_write_allows_soft_handoff_only,
         check_multi_target_iteration_scans_whitelist_even_without_active_changes,
         check_multi_target_default_rpa_low_risk_prefers_active_only,
@@ -346,6 +373,8 @@ def run_checks() -> dict[str, Any]:
         check_deepseek_flash_is_default,
         check_provider_switch_ignores_stale_provider_scoped_overrides,
         check_local_customer_service_settings_follow_active_tenant_for_brain_mode,
+        check_customer_service_brain_startup_guard_requires_brain_first,
+        check_customer_service_brain_failure_alert_threshold,
         check_local_customer_service_settings_follow_active_provider_for_llm_modules,
         check_llm_reply_application_guards,
         check_llm_boundary_fallback_on_invalid_model_output,
@@ -963,6 +992,45 @@ def check_semantic_batch_planner_detects_mixed_risk_questions() -> None:
     )
     assert_equal(plan.get("kind"), "multi_question_mixed_risk", "document boundary mixed with normal needs should be flagged")
     assert_equal(plan.get("risk_level"), "boundary", "mixed risk batch should keep boundary risk level")
+
+
+def check_customer_preference_context_preserves_spouse_parking_need() -> None:
+    target_state: dict[str, Any] = {}
+    update = update_conversation_preference_context(
+        target_state,
+        "我想给我老婆换台代步车，平时接送孩子和买菜，预算9万以内，自动挡，最好有倒车影像。",
+    )
+    terms = update.get("last_customer_need_terms") or []
+    for expected in ("老婆", "接送", "孩子", "买菜", "自动挡", "倒车影像"):
+        assert_true(expected in terms, f"{expected} should be preserved in customer need context: {terms}")
+    context = target_state.get("conversation_context") or {}
+    assert_true("9万以内" in str(context.get("last_customer_need_text") or ""), "original contextual budget should be retained")
+
+
+def check_conversation_context_preserves_need_fields_for_evidence_pack() -> None:
+    context = {
+        "last_product_id": "chejin_camry_2021_20g",
+        "last_product_name": "2021款丰田凯美瑞2.0G豪华版",
+        "last_customer_need_text": "接娃通勤用，预算十万左右，别太费油，南京能看最好。",
+        "last_customer_need_terms": ["接娃", "通勤", "费油", "能看"],
+        "recent_product_ids": ["chejin_camry_2021_20g", "chejin_audi_a4l_2018_40tfsi"],
+    }
+    packed = conversation_context_from_product_result(context)
+    assert_equal(
+        packed.get("last_customer_need_text"),
+        context["last_customer_need_text"],
+        "evidence context must preserve last customer need text",
+    )
+    assert_equal(
+        packed.get("last_customer_need_terms"),
+        context["last_customer_need_terms"],
+        "evidence context must preserve stable need terms",
+    )
+    assert_equal(
+        packed.get("recent_product_ids"),
+        context["recent_product_ids"],
+        "evidence context must preserve recent product ids",
+    )
 
 
 def check_wechat_main_window_recognition() -> None:
@@ -1924,6 +1992,15 @@ def check_rpa_safety_caps_visible_reply() -> None:
     ):
         assert_true("..." not in capped and "…" not in capped, f"visible truncator should avoid ellipsis: {capped}")
         assert_true(capped.endswith(("。", "！", "？", ".", "!", "?")), f"visible truncator should end naturally: {capped}")
+    polished_long = (
+        "我先给您挑两台：第一台是2021款凯美瑞2.0G，8.98万，南京现车，家用通勤更稳妥，也更贴您十万左右的预算。"
+        "第二台是2018款奥迪A4L 40TFSI，14.5万，南京本地一手车，4S保养记录可查，想要档次和动力的话会更合适，不过预算会高一些。"
+        "如果更看重省油省心，建议先看凯美瑞；您要是愿意，我可以接着按这两台给您细讲怎么选。"
+    )
+    capped_polish = final_polish_module.truncate_reply(polished_long, {"max_reply_chars": 150})
+    assert_true("您要是愿意。" not in capped_polish, f"final polish should not emit an incomplete polite tail: {capped_polish}")
+    assert_true(len(capped_polish) <= 150, f"final polish cap should respect max chars: {capped_polish}")
+    assert_true(capped_polish.endswith(("。", "！", "？", ".", "!", "?")), f"final polish cap should end as a complete sentence: {capped_polish}")
 
 
 def check_reply_multi_bubble_splits_long_reply() -> None:
@@ -2025,6 +2102,10 @@ def check_reply_multi_bubble_verifies_only_final_segment_by_default() -> None:
     assert_true(int(result.get("segment_count") or 0) >= 2, "reply should split into at least two segments for this check")
     assert_equal(connector.verify_calls, 1, "default strategy should verify only the final segment")
     assert_true(connector.send_calls >= 1, "intermediate segments should use send-only path")
+    assert_true(
+        connector.send_rate_guard_skips[0] is False and all(connector.send_rate_guard_skips[1:]),
+        "only the first bubble should use the normal reply rate guard; follow-up bubbles continue the same reply",
+    )
     assert_equal(
         str(result.get("verification_strategy") or ""),
         "verify_final_segment_only",
@@ -2064,6 +2145,10 @@ def check_reply_multi_bubble_can_verify_each_segment_when_enabled() -> None:
     assert_true(segment_count >= 2, "reply should split for verification-mode check")
     assert_equal(connector.send_calls, 0, "verify-each-segment mode should not use send-only intermediate path")
     assert_equal(connector.verify_calls, segment_count, "verify-each-segment mode should verify every segment")
+    assert_true(
+        connector.send_rate_guard_skips[0] is False and all(connector.send_rate_guard_skips[1:]),
+        "verify-each mode should still bypass reply-level rate guard for continuation bubbles",
+    )
     assert_equal(
         str(result.get("verification_strategy") or ""),
         "verify_each_segment",
@@ -2099,7 +2184,11 @@ def check_identity_guard_setting_controls_ai_disclosure() -> None:
         evidence_pack=dict(evidence_pack),
         settings={"identity_guard_enabled": True},
     )
-    assert_equal(guard_enabled.get("action"), "handoff", "identity guard should force handoff on AI identity probes")
+    assert_equal(guard_enabled.get("action"), "repair", "identity guard should ask Brain to repair AI identity probes")
+    assert_true(
+        guard_enabled.get("customer_visible_reply_source") != "guard_handoff_ack",
+        "identity guard must not author customer-visible handoff text",
+    )
 
     guard_disabled = guard_synthesized_reply(
         candidate=dict(candidate),
@@ -2202,6 +2291,23 @@ def check_contextual_greeting_avoids_repeated_file_transfer_honorific() -> None:
         not repeated.startswith(("哥，", "老板，", "您好，", "你好，")),
         "mid-chat replies should not keep adding generic honorifics",
     )
+
+
+def check_contextual_greeting_does_not_surname_longrun_test_customer() -> None:
+    config = {"customer_profiles": {"greeting": {"enabled": True}}}
+    profile = {
+        "display_name": "长测客户",
+        "basic_info": {"gender": "male", "gender_confidence": 0.95},
+    }
+    reply = _apply_greeting(
+        "这台我先按预算帮您看一下。",
+        profile,
+        config,
+        target_state={},
+        combined="你好，帮我推荐一台省油的车",
+        recent_reply_texts=[],
+    )
+    assert_true("长哥" not in reply, "long-run/test customer labels must not become surname honorifics")
 
 
 def check_concealed_handoff_acknowledges_contact_appointment() -> None:
@@ -2854,10 +2960,23 @@ def check_final_visible_polish_lightweight_budget_covers_realtime_and_llm() -> N
     )
     assert_equal(realtime_budget.get("profile"), "short", "realtime short drafts should use the lightweight polish budget")
     assert_equal(llm_budget.get("profile"), "short", "LLM short drafts should use the lightweight polish budget")
-    assert_equal(handoff_budget.get("profile"), "default", "handoff drafts should keep the conservative polish budget")
+    assert_equal(handoff_budget.get("profile"), "handoff_micro", "handoff drafts should use micro-verify instead of full rewrite")
     assert_true(int(realtime_budget.get("max_tokens") or 0) <= 120, "realtime short polish should cap completion tokens")
     assert_true(int(llm_budget.get("max_tokens") or 0) <= 120, "LLM short polish should cap completion tokens")
-    assert_true(int(handoff_budget.get("max_tokens") or 0) == 260, "handoff polish should not inherit short-token cap")
+    assert_true(int(handoff_budget.get("max_tokens") or 0) <= 80, "handoff micro polish should keep a small output budget")
+
+
+def check_final_visible_polish_uses_brain_reply_max_cap() -> None:
+    config = load_smoke_config()
+    config["final_visible_llm_polish"] = {"enabled": True, "max_reply_chars": 620}
+    config["rpa_reply_safety"] = {"enabled": True, "max_auto_reply_chars": 150}
+    config["customer_service_brain"] = {"quality_reply_max_chars": 120}
+    settings = final_visible_polish_speed_settings(config)
+    assert_equal(
+        settings.get("effective_polish_chars_cap"),
+        120,
+        "final visible polish should honor Brain's customer-visible reply budget before RPA safety cap",
+    )
 
 
 def check_final_visible_polish_brain_source_is_lightweight_but_stricter() -> None:
@@ -2867,6 +2986,7 @@ def check_final_visible_polish_brain_source_is_lightweight_but_stricter() -> Non
         "timeout_seconds": 8,
         "max_tokens": 260,
         "temperature": 0.45,
+        "brain_source_policy": "llm_micro_verify",
     }
     brain_budget = resolve_polish_runtime_budget(
         settings=settings,
@@ -2882,12 +3002,13 @@ def check_final_visible_polish_brain_source_is_lightweight_but_stricter() -> Non
         source_channel="brain",
         needs_handoff=True,
     )
-    assert_equal(brain_budget.get("profile"), "short", "Brain replies should still use lightweight final polish when concise")
+    assert_equal(brain_budget.get("profile"), "brain_micro", "Brain replies should use final micro-verify budget")
     assert_equal(
         brain_handoff_budget.get("profile"),
-        "default",
-        "Brain handoff/boundary replies should keep conservative final polish budget",
+        "brain_micro",
+        "Brain handoff/boundary replies should also avoid full rewrite by default",
     )
+    assert_true(int(brain_budget.get("max_tokens") or 0) <= 80, "Brain micro polish should use a small output budget")
     assert_true(
         min_similarity_for_source("brain") > min_similarity_for_source("normal"),
         "Brain-source final polish should be stricter than normal drafts",
@@ -2903,6 +3024,217 @@ def check_final_visible_polish_brain_source_is_lightweight_but_stricter() -> Non
         guard.get("reason"),
         "polish_removed_protected_token",
         "Brain-source polish must not remove protected price facts while changing the recommendation",
+    )
+
+
+def check_final_visible_polish_brain_micro_prompt_is_verify_only() -> None:
+    prompt = final_polish_module.build_prompt_pack(
+        settings={"brain_source_policy": "llm_micro_verify", "identity_guard_enabled": True},
+        customer_message="秦PLUS多少钱？",
+        draft_reply="秦PLUS这台目前报价8.68万，通勤省油方向挺合适。",
+        recent_reply_texts=[],
+        source_channel="brain",
+        needs_handoff=False,
+    )
+    system = str(prompt.get("system") or "")
+    user = prompt.get("user") if isinstance(prompt.get("user"), dict) else {}
+    rules = " ".join(str(item) for item in user.get("rules", []) or [])
+    assert_true("优先原样返回" in system or "优先原样返回" in rules, "Brain micro prompt should prefer no semantic rewrite")
+    assert_true("禁止重新回答" in system, "Brain micro prompt must not let final polish re-answer")
+    assert_true("不能改变原草稿" in rules, "Brain micro prompt should preserve the original decision")
+
+
+def check_final_visible_polish_brain_micro_rejects_rewrite_and_uses_draft() -> None:
+    original_polish = final_polish_module.polish_with_llm
+
+    def fake_polish(**kwargs: Any) -> dict[str, Any]:
+        return {
+            "ok": True,
+            "provider": "openai",
+            "model": "unit-polish-model",
+            "candidate": {
+                "reply": "您预算大概多少，想看轿车还是SUV？",
+                "confidence": 0.99,
+                "reason": "bad semantic rewrite",
+            },
+        }
+
+    config = {
+        "final_visible_llm_polish": {
+            "enabled": True,
+            "required_for_send": True,
+            "provider": "openai",
+            "model": "unit-polish-model",
+            "cache_enabled": False,
+            "brain_source_policy": "llm_micro_verify",
+            "brain_micro_guard_fallback_to_draft": True,
+        }
+    }
+    draft = "秦PLUS这台目前报价8.68万，通勤省油方向挺合适。"
+    try:
+        final_polish_module.polish_with_llm = fake_polish
+        result = maybe_polish_customer_visible_reply(
+            config=config,
+            customer_message="秦PLUS多少钱？",
+            reply_text=draft,
+            recent_reply_texts=[],
+            source_channel="brain",
+            needs_handoff=False,
+        )
+    finally:
+        final_polish_module.polish_with_llm = original_polish
+    assert_true(result.get("passed") is True, f"Brain draft should pass after rejecting bad micro rewrite: {result}")
+    assert_true(result.get("applied") is False, "Rejected Brain micro rewrite should not be applied")
+    assert_equal(result.get("reply_text"), draft, "Final visible layer should use the Brain draft when polish drifts")
+    guard = result.get("guard") if isinstance(result.get("guard"), dict) else {}
+    assert_equal(guard.get("reason"), "brain_micro_candidate_rejected_used_draft", "Audit should explain Brain draft fallback")
+
+
+def check_final_visible_polish_handoff_micro_preserves_verification_signal() -> None:
+    original_polish = final_polish_module.polish_with_llm
+
+    def fake_polish(**kwargs: Any) -> dict[str, Any]:
+        return {
+            "ok": True,
+            "provider": "openai",
+            "model": "unit-polish-model",
+            "candidate": {
+                "reply": "分期这边可以先给您算个大致方向，但审批结果、利率和月供还是要看资方。",
+                "confidence": 0.99,
+                "reason": "removed handoff verification",
+            },
+        }
+
+    config = {
+        "final_visible_llm_polish": {
+            "enabled": True,
+            "required_for_send": True,
+            "provider": "openai",
+            "model": "unit-polish-model",
+            "cache_enabled": False,
+            "handoff_source_policy": "llm_micro_verify",
+            "micro_verify_source_channels": ["brain", "handoff"],
+            "brain_micro_guard_fallback_to_draft": True,
+        }
+    }
+    draft = "贷款这边不能保证包过，审批要以资方审核为准；我建议让金融专员帮您先做预审。"
+    try:
+        final_polish_module.polish_with_llm = fake_polish
+        result = maybe_polish_customer_visible_reply(
+            config=config,
+            customer_message="我征信一般，你能不能先保证贷款包过？",
+            reply_text=draft,
+            recent_reply_texts=[],
+            source_channel="handoff",
+            needs_handoff=True,
+        )
+    finally:
+        final_polish_module.polish_with_llm = original_polish
+    assert_true(result.get("passed") is True, f"handoff draft should pass when bad micro rewrite is rejected: {result}")
+    assert_equal(result.get("reply_text"), draft, "handoff micro guard should keep the original verification signal")
+    guard = result.get("guard") if isinstance(result.get("guard"), dict) else {}
+    assert_equal(guard.get("reason"), "brain_micro_candidate_rejected_used_draft", "handoff draft fallback should be audited")
+
+
+def check_final_visible_polish_rejects_identity_denial_for_finance_boundary() -> None:
+    original_polish = final_polish_module.polish_with_llm
+
+    def fake_polish(**kwargs: Any) -> dict[str, Any]:
+        return {
+            "ok": True,
+            "provider": "openai",
+            "model": "unit-polish-model",
+            "candidate": {
+                "reply": "不是AI，也不是机器人哈。内部规则这些不对外说，您别介意；咱们还是回到具体需求上。",
+                "confidence": 0.99,
+                "reason": "identity drift",
+            },
+        }
+
+    config = {
+        "final_visible_llm_polish": {
+            "enabled": True,
+            "required_for_send": True,
+            "provider": "openai",
+            "model": "unit-polish-model",
+            "cache_enabled": False,
+            "handoff_source_policy": "llm_micro_verify",
+            "micro_verify_source_channels": ["brain", "handoff"],
+            "brain_micro_guard_fallback_to_draft": True,
+            "identity_guard_enabled": True,
+        }
+    }
+    draft = "贷款这边不能保证包过，审批要以资方审核为准；价格也要核实后给您准话。"
+    try:
+        final_polish_module.polish_with_llm = fake_polish
+        result = maybe_polish_customer_visible_reply(
+            config=config,
+            customer_message="贷款你能不能保证包过？再给我最低价，我现在就定。",
+            reply_text=draft,
+            recent_reply_texts=[],
+            source_channel="handoff",
+            needs_handoff=True,
+        )
+    finally:
+        final_polish_module.polish_with_llm = original_polish
+    assert_true(result.get("passed") is True, f"finance draft should survive identity-denial drift: {result}")
+    assert_equal(result.get("reply_text"), draft, "identity-denial drift must be rejected and draft reused")
+    guard = result.get("guard") if isinstance(result.get("guard"), dict) else {}
+    rejected = guard.get("rejected_candidate_guard") if isinstance(guard.get("rejected_candidate_guard"), dict) else {}
+    assert_equal(
+        rejected.get("reason"),
+        "identity_denial_for_non_identity_request",
+        f"guard should explain non-identity question drift: {result}",
+    )
+
+
+def check_final_visible_polish_semantic_guard_preserves_brain_decision() -> None:
+    entity_guard = guard_polished_reply(
+        base_reply="秦PLUS这台更适合通勤，油耗方向比较稳。",
+        polished_reply="这台更适合通勤，油耗方向比较稳。",
+        recent_reply_texts=[],
+        settings={"identity_guard_enabled": True, "max_reply_chars": 620},
+        source_channel="brain",
+    )
+    assert_equal(
+        entity_guard.get("reason"),
+        "polish_removed_brain_entity_token",
+        "Brain-source polish must not remove model/entity tokens",
+    )
+    boundary_guard = guard_polished_reply(
+        base_reply="可以置换，也能贷款；旧车这块要按实车评估后抵车款。",
+        polished_reply="您预算大概多少，想看轿车还是SUV？",
+        recent_reply_texts=[],
+        settings={"identity_guard_enabled": True, "max_reply_chars": 620},
+        source_channel="brain",
+    )
+    assert_true(
+        boundary_guard.get("reason") in {"polish_changed_topic_terms", "polish_removed_semantic_boundary"},
+        f"final polish must not drop trade-in/finance semantic boundaries: {boundary_guard}",
+    )
+    handoff_entity_guard = guard_polished_reply(
+        base_reply="这个贷款问题我这边不能做包过承诺，审批要以资方最终审核为准。秦PLUS这台车可以继续了解。",
+        polished_reply="分期这边可以先帮您算个大致方向，但审批结果和月供还是要看资方。",
+        recent_reply_texts=[],
+        settings={"identity_guard_enabled": True, "max_reply_chars": 620},
+        source_channel="handoff",
+    )
+    assert_equal(
+        handoff_entity_guard.get("reason"),
+        "polish_removed_brain_entity_token",
+        f"handoff polish must preserve product/entity anchors: {handoff_entity_guard}",
+    )
+    negative_boundary_guard = guard_polished_reply(
+        base_reply="这个贷款问题我这边不能做包过承诺，审批要以资方最终审核为准。",
+        polished_reply="贷款这边可以先帮您算个大致方向，但审批结果还是要看资方。",
+        recent_reply_texts=[],
+        settings={"identity_guard_enabled": True, "max_reply_chars": 620},
+        source_channel="handoff",
+    )
+    assert_equal(
+        negative_boundary_guard.get("reason"),
+        "polish_removed_negative_boundary",
+        f"handoff polish must preserve negative guarantee boundary: {negative_boundary_guard}",
     )
 
 
@@ -2968,6 +3300,44 @@ def check_safe_brain_reply_clears_soft_no_evidence_handoff() -> None:
         "Brain soft override should be auditable",
     )
 
+    rehydrated_product = {
+        "evidence": {
+            "safety": {
+                "must_handoff": True,
+                "allowed_auto_reply": False,
+                "reasons": ["no_relevant_business_evidence"],
+            }
+        }
+    }
+    product_brain_result = {
+        "applied": True,
+        "needs_handoff": False,
+        "guard": {"action": "send_reply", "reason": "llm_soft_handoff_downgraded"},
+        "brain_plan": {
+            "evidence_used": {
+                "product_ids": ["chejin_tiguanl_2021_330tsi"],
+                "formal_knowledge_ids": [],
+                "common_sense_topics": ["装载场景需要核实座椅放倒"],
+            },
+            "facts_claimed": [
+                {
+                    "fact_type": "product_name",
+                    "source_level": "product_master",
+                    "source_id": "chejin_tiguanl_2021_330tsi",
+                    "value": "途观L",
+                }
+            ],
+        },
+        "audit_summary": {"structured_evidence_count": 0},
+        "authority_sources": {"product_master": ["chejin_tiguanl_2021_330tsi"]},
+    }
+    clear_no_relevant_handoff_after_safe_brain_reply(rehydrated_product, product_brain_result)
+    product_safety = rehydrated_product["evidence"]["safety"]
+    assert_true(
+        product_safety.get("must_handoff") is False,
+        "Brain reply with rehydrated product evidence should clear soft no-evidence handoff",
+    )
+
     hard = {
         "evidence": {
             "safety": {
@@ -2979,6 +3349,122 @@ def check_safe_brain_reply_clears_soft_no_evidence_handoff() -> None:
     }
     clear_no_relevant_handoff_after_safe_brain_reply(hard, brain_result)
     assert_true(hard["evidence"]["safety"].get("must_handoff") is True, "hard risk handoff must stay blocked")
+
+
+def check_brain_safe_fallback_does_not_become_soft_handoff() -> None:
+    intent_assist = {
+        "needs_handoff": True,
+        "safe_to_auto_send": False,
+        "evidence": {
+            "safety": {
+                "must_handoff": True,
+                "allowed_auto_reply": False,
+                "reasons": ["no_relevant_business_evidence"],
+            }
+        },
+    }
+    decision = ReplyDecision(
+        reply_text="我这边先确认一下，马上回复您。",
+        rule_name="customer_service_brain_safe_fallback",
+        matched=True,
+        need_handoff=False,
+        reason="brain_quality_verification_failed",
+    )
+    assert_true(
+        should_operator_handoff(decision, None, False, intent_assist=intent_assist, combined="你觉得今晚吃火锅还是烤肉？")
+        is False,
+        "Brain-owned non-handoff fallback must not be upgraded by soft no-evidence safety",
+    )
+    clear_no_relevant_handoff_after_safe_brain_reply(
+        intent_assist,
+        {
+            "applied": True,
+            "rule_name": "customer_service_brain_safe_fallback",
+            "reply_text": "我这边先确认一下，马上回复您。",
+            "needs_handoff": False,
+        },
+    )
+    safety = intent_assist["evidence"]["safety"]
+    assert_true(safety.get("must_handoff") is False, f"soft evidence handoff should be cleared for Brain fallback: {intent_assist}")
+    assert_true(intent_assist.get("needs_handoff") is False, f"intent assist handoff flag should be cleared: {intent_assist}")
+
+    hard_intent_assist = {
+        "evidence": {
+            "safety": {
+                "must_handoff": True,
+                "allowed_auto_reply": False,
+                "reasons": ["discount_requires_approval"],
+            }
+        },
+    }
+    assert_true(
+        should_operator_handoff(decision, None, False, intent_assist=hard_intent_assist, combined="最低价能不能再便宜两万？")
+        is True,
+        "hard evidence safety must still require handoff",
+    )
+
+
+def check_brain_handoff_preserves_specific_uncertain_reply() -> None:
+    config = load_smoke_config()
+    specific_reply = (
+        "这个我现在不能直接确认，因为我手上没有这台车第二排放倒和装载空间的正式资料。\n"
+        "这类灯架和箱子是否装得下，需要按官方参数或实车尺寸核实。"
+    )
+    preserved = build_operator_handoff_reply_text(
+        config,
+        ReplyDecision(
+            reply_text=specific_reply,
+            rule_name="customer_service_brain_handoff",
+            matched=True,
+            need_handoff=True,
+            reason="sales_followup_requires_handoff",
+        ),
+        None,
+        specific_reply,
+        intent_assist={"evidence": {"safety": {"must_handoff": True, "reasons": ["no_relevant_business_evidence"]}}},
+        combined="我有两套灯架、背景架和三个箱子，第二排能不能放倒装东西？",
+    )
+    assert_true(
+        "第二排" in preserved and "装载" in preserved and "尺寸" in preserved,
+        f"specific Brain handoff reply should be preserved: {preserved}",
+    )
+    preserved_reply_path = build_operator_handoff_reply_text(
+        config,
+        ReplyDecision(
+            reply_text=specific_reply,
+            rule_name="customer_service_brain_reply",
+            matched=True,
+            need_handoff=True,
+            reason="evidence_safety:no_relevant_business_evidence",
+        ),
+        None,
+        specific_reply,
+        intent_assist={"evidence": {"safety": {"must_handoff": True, "reasons": ["no_relevant_business_evidence"]}}},
+        combined="我有两套灯架、背景架和三个箱子，第二排能不能放倒装东西？",
+    )
+    assert_true(
+        "第二排" in preserved_reply_path and "装载" in preserved_reply_path and "尺寸" in preserved_reply_path,
+        f"specific Brain reply-path handoff text should be preserved: {preserved_reply_path}",
+    )
+
+    low_info = build_operator_handoff_reply_text(
+        config,
+        ReplyDecision(
+            reply_text="这个问题我当前无法直接确认，我把情况记下，问清楚负责人意见后再回复您。",
+            rule_name="customer_service_brain_handoff",
+            matched=True,
+            need_handoff=True,
+            reason="sales_followup_requires_handoff",
+        ),
+        None,
+        "这个问题我当前无法直接确认，我把情况记下，问清楚负责人意见后再回复您。",
+        intent_assist={"evidence": {"safety": {"must_handoff": True, "reasons": ["no_relevant_business_evidence"]}}},
+        combined="我有两套灯架、背景架和三个箱子，第二排能不能放倒装东西？",
+    )
+    assert_true(
+        low_info != "这个问题我当前无法直接确认，我把情况记下，问清楚负责人意见后再回复您。",
+        f"generic low-info Brain handoff should still be rebuilt by normal handoff wording: {low_info}",
+    )
 
 
 def check_customer_data_write_allows_soft_handoff_only() -> None:
@@ -3194,6 +3680,135 @@ def check_local_customer_service_settings_follow_active_tenant_for_brain_mode() 
             os.environ.pop("WECHAT_KNOWLEDGE_TENANT", None)
         else:
             os.environ["WECHAT_KNOWLEDGE_TENANT"] = old_tenant
+
+
+def check_customer_service_brain_startup_guard_requires_brain_first() -> None:
+    tenant_id = "workflow_brain_startup_guard_probe"
+    settings_store = CustomerServiceSettings(tenant_id=tenant_id)
+    old_tenant = os.environ.get("WECHAT_KNOWLEDGE_TENANT")
+    os.environ["WECHAT_KNOWLEDGE_TENANT"] = tenant_id
+    remove_file(settings_store.settings_path)
+    try:
+        settings_store.save(
+            {
+                "use_llm": True,
+                "customer_service_brain_mode": "off",
+                "final_visible_llm_polish_enabled": True,
+            }
+        )
+        blocked_config = load_smoke_config()
+        blocked_config["_require_customer_service_brain_first_startup_guard"] = True
+        try:
+            apply_local_customer_service_settings(blocked_config)
+        except CustomerServiceBrainStartupError as exc:
+            summary = exc.summary
+        else:
+            raise AssertionError("Brain startup guard should reject non-brain_first mode")
+        assert_true("brain_disabled" in summary.get("fail_reasons", []), f"expected brain_disabled: {summary}")
+        assert_true("brain_mode_not_brain_first" in summary.get("fail_reasons", []), f"expected brain mode failure: {summary}")
+
+        settings_store.save(
+            {
+                "use_llm": True,
+                "customer_service_brain_mode": "brain_first",
+                "final_visible_llm_polish_enabled": True,
+            }
+        )
+        allowed_config = load_smoke_config()
+        allowed_config["_require_customer_service_brain_first_startup_guard"] = True
+        normalized = apply_local_customer_service_settings(allowed_config)
+        guard = normalized.get("_customer_service_brain_startup_guard") or {}
+        assert_true(guard.get("ok") is True, f"Brain startup guard should pass in brain_first mode: {guard}")
+    finally:
+        remove_file(settings_store.settings_path)
+        if old_tenant is None:
+            os.environ.pop("WECHAT_KNOWLEDGE_TENANT", None)
+        else:
+            os.environ["WECHAT_KNOWLEDGE_TENANT"] = old_tenant
+
+
+def check_customer_service_brain_failure_alert_threshold() -> None:
+    target = TargetConfig(
+        name="许聪",
+        enabled=True,
+        exact=True,
+        allow_self_for_test=False,
+        max_batch_messages=3,
+    )
+    batch = [{"id": "m1", "content": "秦PLUS多少钱？"}]
+    target_state: dict[str, Any] = {}
+    with tempfile.TemporaryDirectory() as temp:
+        root = Path(temp)
+        config = load_smoke_config()
+        config["operator_alert"] = {"enabled": True, "alert_log_path": str(root / "operator_alerts.jsonl")}
+        config["handoff"] = {"enabled": True, "case_store_enabled": False}
+        config["customer_service_brain_failure_alert"] = {
+            "enabled": True,
+            "window_seconds": 600,
+            "threshold": 3,
+            "cooldown_seconds": 600,
+        }
+        healthy = maybe_record_customer_service_brain_failure_alert(
+            config=config,
+            target_state=target_state,
+            target=target,
+            batch=batch,
+            combined="秦PLUS多少钱？",
+            brain_result={
+                "enabled": True,
+                "mode": "brain_first",
+                "applied": True,
+                "adoptable": True,
+                "rule_name": "customer_service_brain_reply",
+                "reason": "brain_guard_passed",
+            },
+            product_knowledge={},
+        )
+        assert_true(healthy.get("failure") is False, f"healthy Brain result should not alert: {healthy}")
+
+        for idx in range(2):
+            partial = maybe_record_customer_service_brain_failure_alert(
+                config=config,
+                target_state=target_state,
+                target=target,
+                batch=batch,
+                combined="秦PLUS多少钱？",
+                brain_result={
+                    "enabled": True,
+                    "mode": "brain_first",
+                    "applied": True,
+                    "adoptable": True,
+                    "rule_name": "customer_service_brain_safe_fallback",
+                    "reason": "customer_service_brain_llm_unavailable",
+                },
+                product_knowledge={},
+            )
+            assert_true(partial.get("alert_created") is False, f"failure #{idx + 1} should only accumulate: {partial}")
+
+        threshold = maybe_record_customer_service_brain_failure_alert(
+            config=config,
+            target_state=target_state,
+            target=target,
+            batch=batch,
+            combined="秦PLUS多少钱？",
+            brain_result={
+                "enabled": True,
+                "mode": "brain_first",
+                "applied": True,
+                "adoptable": True,
+                "rule_name": "customer_service_brain_safe_fallback",
+                "reason": "customer_service_brain_llm_unavailable",
+            },
+            product_knowledge={},
+        )
+        assert_true(threshold.get("alert_created") is True, f"third Brain failure should create alert: {threshold}")
+        assert_equal(len(target_state.get("operator_alerts", [])), 1, "threshold alert should be stored on target state")
+        alert = target_state["operator_alerts"][0]
+        assert_true(
+            str(alert.get("reason") or "").startswith("customer_service_brain_unhealthy:"),
+            f"alert reason should identify Brain health failure: {alert}",
+        )
+        assert_true((root / "operator_alerts.jsonl").exists(), "Brain failure alert should write operator alert log")
 
 
 def check_llm_reply_application_guards() -> None:

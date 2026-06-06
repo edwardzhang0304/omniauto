@@ -224,7 +224,7 @@ class FakeConnector:
     def get_messages(self, target: str, exact: bool = True) -> dict[str, Any]:
         return {"ok": True, "target": target, "exact": exact, "messages": self.messages}
 
-    def send_text_and_verify(self, target: str, text: str, exact: bool = True) -> dict[str, Any]:
+    def send_text_and_verify(self, target: str, text: str, exact: bool = True, *, skip_send_rate_guard: bool = False) -> dict[str, Any]:
         self.sent_texts.append(text)
         return {"ok": True, "verified": True, "target": target, "exact": exact, "text": text}
 
@@ -399,8 +399,8 @@ def check_rag_only_authority_topic_forces_handoff() -> None:
         )
     finally:
         synthesis_module.build_reply_evidence_pack = original_builder
-    assert_true(result.get("applied"), "unsafe authority synthesis should apply as a handoff decision")
-    assert_true(result.get("needs_handoff"), "RAG-only authority answer must force handoff")
+    assert_true(not result.get("applied"), "unsafe authority synthesis must not become a visible guard handoff reply")
+    assert_true(result.get("guard", {}).get("action") == "repair", "RAG-only authority answer should request repair")
     assert_equal(
         result.get("guard", {}).get("reason"),
         "authority_topic_without_structured_evidence",
@@ -453,9 +453,9 @@ def check_safe_llm_handoff_wording_is_preserved() -> None:
         )
     finally:
         synthesis_module.build_reply_evidence_pack = original_builder
-    assert_true(result.get("applied"), "safe handoff synthesis should apply")
-    assert_true(result.get("needs_handoff"), "safe handoff synthesis should still require operator handoff")
-    assert_true("不能直接" in str(result.get("raw_reply_text") or ""), "guard should preserve safe LLM handoff wording")
+    assert_true(not result.get("applied"), "legacy safe handoff wording should not bypass Brain repair under Guard V2")
+    assert_true(result.get("guard", {}).get("action") == "repair", "handoff wording should be reviewed as Brain repair feedback")
+    assert_true("guard_handoff_ack" != str(result.get("guard", {}).get("customer_visible_reply_source") or ""), "guard must not write visible handoff text")
 
 
 def check_shadow_mode_does_not_apply() -> None:
@@ -731,7 +731,8 @@ def check_guard_allows_safe_store_visit_advisory_but_blocks_commitment() -> None
         evidence_pack=evidence_pack,
         settings={"require_evidence": False},
     )
-    assert_true(commitment.get("action") == "handoff", commitment)
+    assert_true(commitment.get("action") == "repair", commitment)
+    assert_true(commitment.get("hard_boundary") is True, commitment)
     assert_true(str(commitment.get("reason") or "") == "appointment_or_reservation_commitment_requires_handoff", commitment)
 
 
