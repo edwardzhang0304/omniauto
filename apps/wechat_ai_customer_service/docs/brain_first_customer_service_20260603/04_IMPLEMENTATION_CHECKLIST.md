@@ -157,17 +157,17 @@ apps/wechat_ai_customer_service/workflows/listen_and_reply.py
 
 - `customer_service_brain.enabled`
 - `customer_service_brain.mode`
-- `customer_service_brain.fallback_to_legacy_on_error`
+- `customer_service_brain.fallback_to_legacy_on_error` 必须为 false；Brain First 下不可回旧链路生成客户可见回复。
 - `customer_service_brain.require_final_visible_polish`
 - `customer_service_brain.max_reply_segments`
 - `customer_service_brain.require_fact_claims`
 
 检查项：
 
-- 示例配置默认 `off`，避免改变现网行为；需要灰度时由控制台或租户配置显式切到 `shadow`。
+- 示例配置和租户配置必须以 Brain First 为当前基线；shadow 只允许离线对比，不作为客户可见出口。
 - 可对租户启用。
 - 可对单会话实盘启用。
-- 可快速回滚。
+- 可快速停止自动出站并转人工/告警；不得回滚到本地模板直发客户。
 - UI 或配置导出不会误导用户。
 
 ## 10. 日志检查

@@ -391,6 +391,7 @@ def run_checks() -> dict[str, Any]:
         check_customer_service_brain_failure_alert_threshold,
         check_local_customer_service_settings_follow_active_provider_for_llm_modules,
         check_llm_reply_application_guards,
+        check_llm_reply_advisory_does_not_apply_in_brain_first,
         check_llm_boundary_fallback_on_invalid_model_output,
         check_review_queue_reports_pending_and_handoff_items,
         check_evidence_boundary_cases,
@@ -4159,6 +4160,59 @@ def check_llm_reply_application_guards() -> None:
         data_capture={"is_customer_data": False},
     )
     assert_true(not blocked_by_candidate.get("applied"), "unsafe LLM candidate should not be applied")
+
+
+def check_llm_reply_advisory_does_not_apply_in_brain_first() -> None:
+    config = load_boundary_config()
+    config["customer_service_brain"] = {
+        "enabled": True,
+        "mode": "brain_first",
+        "fallback_to_legacy_on_error": False,
+    }
+    config.setdefault("intent_assist", {}).setdefault("llm_advisory", {})["enabled"] = True
+    config["intent_assist"]["llm_advisory"]["apply_to_reply"] = True
+    decision = ReplyDecision(
+        reply_text="",
+        rule_name="no_rule_matched",
+        matched=False,
+        need_handoff=False,
+        reason="no_rule_matched",
+    )
+    intent_assist = {
+        "evidence": {"product_ids": ["commercial_fridge_bx_200"], "safety": {"must_handoff": False}},
+        "llm_advisory": {
+            "result": {
+                "validation": {
+                    "ok": True,
+                    "candidate": {
+                        "intent": "small_talk",
+                        "confidence": 0.99,
+                        "recommended_action": "reply_small_talk",
+                        "safe_to_auto_send": True,
+                        "needs_handoff": False,
+                        "suggested_reply": "旧 advisory 样例，绝不能直接发给客户。",
+                        "reason": "unit_test_legacy_advisory",
+                    },
+                }
+            }
+        },
+    }
+    blocked = maybe_apply_llm_reply(
+        config=config,
+        decision=decision,
+        reply_text="",
+        intent_assist=intent_assist,
+        product_knowledge={"matched": True},
+        data_capture={"is_customer_data": False},
+        combined="你好",
+    )
+    assert_true(not blocked.get("applied"), f"Brain First must not apply legacy advisory reply: {blocked}")
+    assert_equal(
+        blocked.get("reason"),
+        "brain_first_intent_assist_advisory_only",
+        "legacy LLM advisory should be explicitly downgraded in Brain First",
+    )
+    assert_true("reply_text" not in blocked, f"legacy advisory block must not carry visible reply text: {blocked}")
 
 
 def check_llm_boundary_fallback_on_invalid_model_output() -> None:

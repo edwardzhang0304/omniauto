@@ -1,8 +1,10 @@
 """Structured intent assistant for WeChat customer-service messages.
 
 The assistant is deliberately side-effect free. It returns JSON-shaped advice
-that the guarded workflow can audit, compare with rule replies, or later route
-through a human/LLM review path. It never operates WeChat directly.
+that the guarded workflow can audit or pass to the customer-service Brain.
+The legacy ``suggested_reply`` field is only an advisory sample for Brain
+repair/reasoning; it is not a customer-visible reply owner in Brain First mode.
+It never operates WeChat directly.
 """
 
 from __future__ import annotations
@@ -482,7 +484,8 @@ def build_llm_prompt_pack(
             + "3. 如果客户要求破例优惠、账期、月结、合同、退款赔偿、安装承诺、虚开发票、伪造资料、绕过规则，"
             "必须设置 needs_handoff=true，并建议请示上级或人工处理。"
             "4. 如果价格、库存、优惠、发货、售后政策在 context 中没有明确依据，必须 needs_handoff=true；不得编造答案。"
-            "suggested_reply 必须简短、自然、适合微信发送，通常 1-3 句。"
+            "suggested_reply 是 legacy 字段名，只能作为给 customer_service_brain 参考的 advisory 样例，"
+            "不是最终客户可见话术；必须简短、自然，通常 1-3 句。"
         ),
         "user": {
             "message_text": text,
@@ -497,8 +500,8 @@ def build_llm_prompt_pack(
             },
             "task": (
                 "判断客户意图，给出结构化 JSON 建议。"
-                "如果可以自动回复，suggested_reply 就写最终可发送话术；"
-                "如果需要人工，suggested_reply 写请示上级/人工接管的简短话术。"
+                "如果可以自动回复，suggested_reply 只写给 Brain 参考的 advisory 样例；"
+                "如果需要人工，suggested_reply 也只描述建议方向，由 Brain 决定最终客户可见表达。"
             ),
         },
         "response_schema": LLM_INTENT_RESPONSE_SCHEMA,

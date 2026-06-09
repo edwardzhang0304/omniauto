@@ -232,8 +232,8 @@
 1. 新增 Brain contract 和 shadow runner。
 2. 在 `listen_and_reply.py` 接入 shadow，不改变现有回复。
 3. 做离线对比测试。
-4. 启用 hybrid_shadow，低风险场景采纳 Brain。
-5. 降级 realtime local reply。
+4. 使用 shadow_offline_compare_only 做离线对比；客户可见出口仍只允许 Brain。
+5. 降级 realtime local reply 为 advisory/evidence hints。
 6. 强化 guard。
 7. 单会话实盘。
 8. 双会话实盘。

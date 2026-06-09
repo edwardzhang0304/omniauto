@@ -5709,6 +5709,11 @@ def maybe_apply_llm_reply(
     if not payload["apply_to_reply"]:
         payload["reason"] = "apply_to_reply_disabled"
         return payload
+    if brain_first_requires_brain_owned_visible_reply(config):
+        payload["reason"] = "brain_first_intent_assist_advisory_only"
+        payload["advisory_only"] = True
+        payload["legacy_candidate_field"] = "suggested_reply"
+        return payload
     if evidence_requires_handoff(intent_assist) or (product_knowledge and product_knowledge.get("needs_handoff")) or (product_knowledge and product_knowledge.get("auto_reply_allowed") is False):
         payload["reason"] = "handoff_required_before_llm_reply"
         return payload

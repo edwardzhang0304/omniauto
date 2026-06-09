@@ -38,6 +38,9 @@ def main() -> int:
         check_guard_has_no_visible_handoff_ack_path(),
         check_scheduler_blocks_non_brain_ready_replies_before_send(),
         check_listen_and_reply_disables_legacy_generators_for_brain_first(),
+        check_legacy_intent_assist_is_advisory_only(),
+        check_realtime_router_is_archived_as_advisory(),
+        check_only_brain_first_mode_is_adoptable(),
         check_no_forbidden_visible_reply_source_literals(),
     ]
     failures = [result for result in results if not result.ok]
@@ -133,6 +136,7 @@ def check_listen_and_reply_disables_legacy_generators_for_brain_first() -> CaseR
         'rag["enabled"] = False',
         'realtime["enabled"] = False',
         'synthesis["enabled"] = False',
+        "brain_first_intent_assist_advisory_only",
         "def block_for_customer_service_brain_no_visible_reply",
         '"customer_visible_reply_blocked"] = True',
         '"reply_text": ""',
@@ -140,6 +144,74 @@ def check_listen_and_reply_disables_legacy_generators_for_brain_first() -> CaseR
     ]
     ok = all(token in text for token in required)
     return CaseResult("listen_and_reply_disables_legacy_generators_for_brain_first", ok, {"missing": [token for token in required if token not in text]})
+
+
+def check_legacy_intent_assist_is_advisory_only() -> CaseResult:
+    path = WORKFLOWS_ROOT / "customer_intent_assist.py"
+    text = read(path)
+    forbidden = [
+        "suggested_reply 就写最终可发送话术",
+        "suggested_reply 写请示上级/人工接管的简短话术",
+    ]
+    required = [
+        "legacy ``suggested_reply`` field is only an advisory sample",
+        "不是最终客户可见话术",
+        "只写给 Brain 参考的 advisory 样例",
+    ]
+    ok = all(token in text for token in required) and not any(token in text for token in forbidden)
+    return CaseResult(
+        "legacy_intent_assist_is_advisory_only",
+        ok,
+        {
+            "missing": [token for token in required if token not in text],
+            "forbidden_present": [token for token in forbidden if token in text],
+        },
+    )
+
+
+def check_realtime_router_is_archived_as_advisory() -> CaseResult:
+    path = WORKFLOWS_ROOT / "realtime_reply_router.py"
+    text = read(path)
+    forbidden = [
+        "Deterministic facts, handoff",
+        "boundaries, greetings, and high-frequency recommendation patterns stay local",
+    ]
+    required = [
+        "Legacy/advisory fast routing",
+        "must not own or finalize",
+        "customer_service_brain",
+        "legacy-mode",
+    ]
+    ok = all(token in text for token in required) and not any(token in text for token in forbidden)
+    return CaseResult(
+        "realtime_router_is_archived_as_advisory",
+        ok,
+        {
+            "missing": [token for token in required if token not in text],
+            "forbidden_present": [token for token in forbidden if token in text],
+        },
+    )
+
+
+def check_only_brain_first_mode_is_adoptable() -> CaseResult:
+    path = WORKFLOWS_ROOT / "customer_service_brain.py"
+    text = read(path)
+    forbidden = [
+        'payload["mode"] in {"brain_first", "hybrid_shadow"}',
+        '"adoptable": payload["mode"] in',
+    ]
+    required = [
+        '"adoptable": payload["mode"] == "brain_first"',
+    ]
+    ok = all(token in text for token in required) and not any(token in text for token in forbidden)
+    return CaseResult(
+        "only_brain_first_mode_is_adoptable",
+        ok,
+        {
+            "missing": [token for token in required if token not in text],
+            "forbidden_present": [token for token in forbidden if token in text],
+        },
+    )
 
 
 def check_no_forbidden_visible_reply_source_literals() -> CaseResult:

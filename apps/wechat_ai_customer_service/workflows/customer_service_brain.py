@@ -965,7 +965,7 @@ def maybe_run_customer_service_brain(
         payload.update(
             {
                 "applied": True,
-                "adoptable": payload["mode"] in {"brain_first", "hybrid_shadow"},
+                "adoptable": payload["mode"] == "brain_first",
                 "rule_name": "customer_service_brain_reply",
                 "reason": str(guard.get("reason") or "brain_guard_passed"),
                 "needs_handoff": False,
@@ -982,7 +982,7 @@ def maybe_run_customer_service_brain(
         payload.update(
             {
                 "applied": True,
-                "adoptable": payload["mode"] in {"brain_first", "hybrid_shadow"},
+                "adoptable": payload["mode"] == "brain_first",
                 "rule_name": "customer_service_brain_handoff",
                 "reason": str(guard.get("reason") or "brain_handoff"),
                 "needs_handoff": True,

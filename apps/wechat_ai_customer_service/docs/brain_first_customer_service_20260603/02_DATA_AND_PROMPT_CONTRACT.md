@@ -331,14 +331,14 @@ ready_reply.source_message_ids 仍未被同会话更新覆盖
 
 ## 8. 兼容合同
 
-Brain First 启用初期必须支持：
+历史兼容说明：以下旧灰度模式仅用于归档理解和离线对比，当前生产基线以 `customer_visible_reply_ownership_baseline.md` 为准。Brain First 下不允许 legacy fallback 生成客户可见回复：
 
 ```json
 {
   "customer_service_brain": {
     "enabled": true,
     "mode": "hybrid_shadow",
-    "fallback_to_legacy_on_error": true,
+    "fallback_to_legacy_on_error": false,
     "require_final_visible_polish": true,
     "allow_legacy_local_reply_for_hard_system_notice": true
   }
@@ -349,9 +349,9 @@ Brain First 启用初期必须支持：
 
 - `off`：完全旧链路。
 - `shadow`：Brain 只审计，不改变回复。
-- `hybrid_shadow`：Brain 输出与旧链路并行比较，低风险可采纳。
+- `hybrid_shadow`：历史灰度术语，仅用于离线比较；不得作为当前客户可见出口策略。
 - `brain_first`：正常业务默认采纳 Brain。
-- `legacy_safe_fallback`：Brain 出错时回旧链路，但必须经过 guard 和最终润色。
+- `legacy_safe_fallback`：已归档废弃。Brain 出错、超时、不可采纳或返修失败时必须阻断出站并触发内部告警，不回旧链路发客户可见文本。
 
 ## 9. 不可变约束
 

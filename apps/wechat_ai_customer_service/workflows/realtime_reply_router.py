@@ -1,8 +1,10 @@
-"""Fast foreground routing for WeChat customer-service replies.
+"""Legacy/advisory fast routing for WeChat customer-service replies.
 
-The real-time path should only call an LLM when the current customer-visible
-reply genuinely needs semantic composition. Deterministic facts, handoff
-boundaries, greetings, and high-frequency recommendation patterns stay local.
+When Brain First is enabled, this module must not own or finalize
+customer-visible wording. The main workflow disables these legacy generators and
+may only use their outputs as routing/evidence hints for the
+customer_service_brain. Direct local replies are kept for explicit legacy-mode
+compatibility tests only.
 """
 
 from __future__ import annotations
