@@ -321,20 +321,14 @@ apps/wechat_ai_customer_service/workflows/final_visible_llm_polish.py
 ```json
 {
   "customer_service_brain": {
-    "enabled": false,
-    "mode": "off",
+    "enabled": true,
+    "mode": "brain_first",
     "default_for_normal_business": true,
-    "fallback_to_legacy_on_error": true,
+    "fallback_to_legacy_on_error": false,
     "require_final_visible_polish": true,
     "max_reply_segments": 3,
     "require_fact_claims": true,
-    "legacy_local_reply_allowed_reasons": [
-      "hard_safety_handoff",
-      "wechat_offline",
-      "white_screen",
-      "rpa_focus_lost",
-      "manual_handoff"
-    ]
+    "legacy_local_reply_allowed_reasons": []
   }
 }
 ```
@@ -342,8 +336,7 @@ apps/wechat_ai_customer_service/workflows/final_visible_llm_polish.py
 ### 9.2 灰度顺序
 
 ```text
-shadow
-hybrid_shadow
+shadow_offline_compare_only
 brain_first_for_file_transfer_only
 brain_first_for_chejin_single_session
 brain_first_for_chejin_multi_session

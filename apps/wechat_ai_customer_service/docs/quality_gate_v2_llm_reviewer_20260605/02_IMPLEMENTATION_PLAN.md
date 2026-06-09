@@ -370,7 +370,7 @@ Prompt 中应明确审稿维度：
 
 ### 8.3 最终可见层短链路
 
-- Brain 的 `reply_segments` 必须已接近最终可发送。
+- Brain 的 `reply_segments` 必须已接近最终客户可见短句，但仍需经过轻量校验/自然化，不由润色层改写策略。
 - 最终可见层使用微润色 prompt，优先原样返回。
 - 微润色 token 默认 80，timeout 默认 5 秒。
 - 微润色候选被 guard 拒绝时，不再让润色层阻断 Brain 安全回复，而是采用 Brain 原草稿。
