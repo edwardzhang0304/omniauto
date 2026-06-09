@@ -216,13 +216,27 @@ def evaluate_customer_service_recent_bootstrap_guard(
 
     allowed_targets = _name_list(guard.get("allowed_targets") or guard.get("targets"))
     max_age_seconds = int(guard.get("bootstrap_max_age_seconds") or 900)
+    allow_pending_visible = _truthy(guard.get("allow_pending_visible_bootstrap"), default=True)
     tick = float(now_ts if now_ts is not None else time.time())
     targets_state = (state or {}).get("targets") if isinstance((state or {}).get("targets"), dict) else {}
     missing: list[str] = []
     stale: list[str] = []
     bootstrapped: dict[str, str] = {}
+    pending_visible: dict[str, str] = {}
     for target in allowed_targets:
         target_state = targets_state.get(target) if isinstance(targets_state, dict) else {}
+        pending_at = ""
+        pending_ts = 0.0
+        if allow_pending_visible and isinstance(target_state, dict):
+            pending = target_state.get("bootstrap_pending_visible")
+            if isinstance(pending, dict):
+                pending_at = str(pending.get("created_at") or "")
+                pending_ts = _parse_iso_timestamp(pending_at)
+                if pending_ts and max_age_seconds > 0 and tick - pending_ts > max_age_seconds:
+                    pending_at = ""
+                    pending_ts = 0.0
+                if pending_ts:
+                    pending_visible[target] = pending_at
         events = target_state.get("bootstrap_events", []) if isinstance(target_state, dict) else []
         latest_at = ""
         latest_ts = 0.0
@@ -235,10 +249,14 @@ def evaluate_customer_service_recent_bootstrap_guard(
                 latest_ts = created_ts
                 latest_at = created_at
         if not latest_ts:
+            if pending_ts:
+                continue
             missing.append(target)
             continue
         bootstrapped[target] = latest_at
         if max_age_seconds > 0 and tick - latest_ts > max_age_seconds:
+            if pending_ts and pending_ts >= latest_ts:
+                continue
             stale.append(target)
 
     fail_reasons: list[str] = []
@@ -252,7 +270,10 @@ def evaluate_customer_service_recent_bootstrap_guard(
         "fail_reasons": fail_reasons,
         "allowed_targets": allowed_targets,
         "max_age_seconds": max_age_seconds,
+        "allow_pending_visible_bootstrap": allow_pending_visible,
         "bootstrapped_targets": bootstrapped,
+        "pending_visible_targets": pending_visible,
+        "pending_visible_message": "当前不在可见会话列表里，待收到新消息时会自动识别" if pending_visible else "",
         "missing_targets": missing,
         "stale_targets": stale,
     }
@@ -340,6 +361,8 @@ def apply_customer_service_live_safety_guard(
                     "initial_preview_can_raise_unread": False,
                     "preview_change_can_raise_unread": False,
                     "short_preview_can_raise_unread": True,
+                    "require_unread_badge_for_dispatch": True,
+                    "require_preview_signal_with_unread_badge": True,
                     "change_warmup_enabled": False,
                     "change_warmup_min_seconds": 0.0,
                     "change_warmup_max_seconds": 0.0,
@@ -367,12 +390,14 @@ def apply_customer_service_live_safety_guard(
                     "initial_preview_can_raise_unread": False,
                     "preview_change_can_raise_unread": False,
                     "short_preview_can_raise_unread": True,
+                    "require_unread_badge_for_dispatch": True,
+                    "require_preview_signal_with_unread_badge": True,
                     "change_warmup_enabled": False,
                     "change_warmup_min_seconds": 0.0,
                     "change_warmup_max_seconds": 0.0,
-                    "switch_human_delay_enabled": False,
-                    "switch_human_delay_min_seconds": 0.0,
-                    "switch_human_delay_max_seconds": 0.0,
+                    "switch_human_delay_enabled": True,
+                    "switch_human_delay_min_seconds": 1.0,
+                    "switch_human_delay_max_seconds": 3.0,
                     "capture_one_target_per_round": False,
                 }
             )
@@ -516,6 +541,7 @@ def apply_customer_service_live_safety_guard(
                     "freshness_load_times": 0,
                     "trigger_when_anchor_missing": True,
                     "block_on_anchor_not_found": True,
+                    "overflow_batch_on_anchor_missing": True,
                     "restore_to_latest": True,
                     "max_scroll_steps": min(int(history_backfill.get("max_scroll_steps") or 4), 6),
                     "max_duration_seconds": min(int(history_backfill.get("max_duration_seconds") or 10), 15),

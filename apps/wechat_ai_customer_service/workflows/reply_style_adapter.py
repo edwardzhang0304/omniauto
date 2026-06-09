@@ -183,19 +183,20 @@ def apply_fast_local_style(
         )
         return reply, "identity_guard_denial"
     if needs_handoff or source_channel == "handoff" or has_handoff_marker(base_reply):
-        specific = handoff_specific_reply(context, recent_reply_texts)
+        handoff_context = str(customer_message or "").strip()
+        specific = handoff_specific_reply(handoff_context, recent_reply_texts)
         if specific:
-            return de_template_reply_text(specific, key_text=context, recent_reply_texts=recent_reply_texts), "handoff_specific_soften"
+            return de_template_reply_text(specific, key_text=handoff_context, recent_reply_texts=recent_reply_texts), "handoff_specific_soften"
         reply, _ = choose_reply_variant(
             [
                 "您这个问题问得对，我这边不能随口定，免得给您说错。您稍等，我把情况核实清楚后回复您。",
-                "这点我先跟负责人确认一下，避免给您说错。您稍等，我核实清楚后回复您。",
+                "这点我先按正式流程核实一下，避免给您说错。您稍等，我核实清楚后回复您。",
                 "可以，我把您的问题记下，核实清楚再回复您，这样对您也更稳一点。",
             ],
-            key_text=context,
+            key_text=handoff_context or context,
             recent_reply_texts=recent_reply_texts,
         )
-        return de_template_reply_text(reply, key_text=context, recent_reply_texts=recent_reply_texts), "handoff_soften"
+        return de_template_reply_text(reply, key_text=handoff_context or context, recent_reply_texts=recent_reply_texts), "handoff_soften"
 
     if not examples:
         return base_reply, "no_style_examples"
@@ -342,7 +343,7 @@ def handoff_specific_reply(context: str, recent_reply_texts: list[str]) -> str:
         if contains_any(clean, ("少开", "低开", "金额")):
             return choose_reply_variant(
                 [
-                    "我理解您是想把流程提前问清楚，合同和发票金额这块必须按实际交易和门店流程走，不能随口答应调整。我请负责人确认合同流程和开票要求，核清楚再回复您。",
+                    "我理解您是想把流程提前问清楚，合同和发票金额这块必须按实际交易和门店流程走，不能随口答应调整。我先确认合同流程和开票要求，核清楚再回复您。",
                     "这个我先帮您问清楚，发票金额和合同信息要按实际交易来确认，不能直接口头定。您稍等，我问下领导后再给您明确说法。",
                     "这块确实要提前确认好，免得后面来回改。合同签署和开票金额都要按流程核实，您稍等一下，我确认清楚后回您。",
                 ],
@@ -362,9 +363,9 @@ def handoff_specific_reply(context: str, recent_reply_texts: list[str]) -> str:
     if has_finance_boundary and has_price_boundary:
         return choose_reply_variant(
             [
-                "我理解您想把贷款和价格先问准，贷款要看资方审核，价格也要按车源和门店审批核准；我先确认车型、付款方式和负责人意见，再给您准话。",
-                "我理解您想把价格和贷款一次问清楚，金融审批和成交价不能先口头定死；我先核实车源、首付月供方向和价格审批，再给您准话。",
-                "这类问题我会谨慎点，帮您争取可以，但贷款看资方、价格看门店审批；我先核实付款方案和负责人意见，再给您准话。",
+                "我理解您想把贷款和价格先问准，贷款要看资方审核，成交条件也要按门店流程核准；我先确认付款方案和可谈边界，再给您准话。",
+                "我理解您想把价格和贷款一次问清楚，金融审批和最终成交条件不能先口头定死；我先按正式流程核准后再回复您。",
+                "这类问题我会谨慎点，帮您争取可以，但贷款看资方、价格看正式核准；我先确认付款方案和可谈范围，再给您准话。",
             ],
             key_text=context,
             recent_reply_texts=recent_reply_texts,
@@ -382,9 +383,9 @@ def handoff_specific_reply(context: str, recent_reply_texts: list[str]) -> str:
     if has_price_boundary:
         return choose_reply_variant(
             [
-                "价格和优惠我会帮您核，但超出公开规则的部分不能直接口头答应。我先把数量、库存和负责人意见确认好，再给您明确答复。",
-                "价格我肯定帮您争取，但最低价或破例优惠不能直接口头保证。我核实一下商品、数量和负责人意见，再回复您。",
-                "这个我先帮您往下问，争取归争取，但价格、库存和审批结果都要确认过才稳。我核清楚后再给您准话。",
+                "价格和优惠我会帮您核，但超出公开规则的部分不能直接口头答应。我先按门店流程确认，再给您明确答复。",
+                "价格我可以帮您确认和争取，但最低价或破例优惠不能直接口头保证。我核准后再回复您。",
+                "这个我先按正式流程核一下，可谈范围和最终成交条件确认后，再给您准话。",
             ],
             key_text=context,
             recent_reply_texts=recent_reply_texts,
@@ -412,7 +413,7 @@ def handoff_specific_reply(context: str, recent_reply_texts: list[str]) -> str:
     if contains_any(clean, TRADE_IN_TERMS):
         return choose_reply_variant(
             [
-                "可以先做个大概区间。您这台2018年的朗逸、6万多公里、苏州牌我先记下，再补一下配置版本、有没有事故水泡火烧、外观内饰成色，最好加几张照片，我按行情先给您粗估。",
+                "可以先做个大概区间。旧车这边我先按车型、年份、公里数、上牌地和车况信息记录，您再补下配置、过户次数、保养和事故水泡火烧情况，估价会更准。",
                 "置换流程没问题，我先按年份、公里数、上牌地和车况给您看大概区间。您再发下配置、过户次数、保养和事故水泡火烧情况，我核实行情后判断会更准。",
                 "这台车信息已经有基础了，可以先估一版。您把配置版本、车况瑕疵、有没有出险水泡火烧，再加外观内饰照片发我，我按检测和行情给您看区间。",
             ],

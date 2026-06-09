@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 import time
 from typing import Any
 
@@ -266,6 +267,11 @@ def review_brain_reply_semantics(
         plan=plan,
         brain_input=brain_input,
     )
+    review = relax_bounded_finance_review(
+        review=review,
+        plan=plan,
+        brain_input=brain_input,
+    )
     review = relax_bounded_advisory_review(
         review=review,
         plan=plan,
@@ -362,6 +368,217 @@ def relax_allowed_common_sense_review(
 def plan_uses_common_sense(plan: dict[str, Any]) -> bool:
     evidence = plan.get("evidence_used") if isinstance(plan.get("evidence_used"), dict) else {}
     return bool(evidence.get("common_sense_topics"))
+
+
+def relax_bounded_finance_review(
+    *,
+    review: dict[str, Any],
+    plan: dict[str, Any],
+    brain_input: dict[str, Any],
+) -> dict[str, Any]:
+    """Keep semantic review from over-blocking bounded finance explanations."""
+
+    if not review.get("invoked") or review.get("status") != "ok":
+        return review
+    hard_concerns = string_list(review.get("hard_boundary_concerns"))
+    original_semantic_errors = string_list(review.get("semantic_errors"))
+    if not hard_concerns and not original_semantic_errors:
+        return review
+    if brain_plan_requests_handoff(plan):
+        return review
+    question = current_message_text(brain_input)
+    reply = join_reply_segments(plan.get("reply_segments", []) or [])
+    if not is_bounded_finance_question(question):
+        return review
+    if not plan_uses_formal_knowledge(plan):
+        return review
+    if not bounded_finance_reply_has_boundary(reply):
+        return review
+    if reply_has_product_price(reply) and not plan_uses_product_master(plan):
+        return review
+
+    remaining = [
+        concern
+        for concern in hard_concerns
+        if not is_relaxable_bounded_finance_concern(concern)
+    ]
+    semantic_errors = [
+        error
+        for error in original_semantic_errors
+        if not is_relaxable_bounded_finance_semantic_error(error)
+    ]
+    if len(remaining) == len(hard_concerns) and len(semantic_errors) == len(original_semantic_errors):
+        return review
+
+    result = dict(review)
+    result["hard_boundary_concerns"] = remaining
+    result["semantic_errors"] = semantic_errors
+    errors = list(semantic_errors)
+    errors.extend(f"hard_boundary_concern:{item}" for item in remaining)
+    result["errors"] = errors
+    warnings = list(result.get("warnings", []) or [])
+    warnings.append("bounded_finance_review_relaxed")
+    result["warnings"] = warnings
+    result["bounded_finance_relaxed_concerns"] = [
+        concern for concern in hard_concerns if concern not in remaining
+    ]
+    result["bounded_finance_relaxed_semantic_errors"] = [
+        error for error in original_semantic_errors if error not in semantic_errors
+    ]
+    if not remaining and not semantic_errors:
+        result["ok"] = True
+        result["verdict"] = "pass"
+        result["repair_instruction"] = ""
+        result["reason"] = append_reason(
+            str(result.get("reason") or ""),
+            "bounded_finance_boundary_with_formal_knowledge",
+        )
+    else:
+        result["ok"] = False
+    return result
+
+
+def plan_uses_formal_knowledge(plan: dict[str, Any]) -> bool:
+    evidence = plan.get("evidence_used") if isinstance(plan.get("evidence_used"), dict) else {}
+    return bool(evidence.get("formal_knowledge_ids"))
+
+
+def brain_plan_requests_handoff(plan: dict[str, Any]) -> bool:
+    risk = plan.get("risk") if isinstance(plan.get("risk"), dict) else {}
+    return (
+        str(plan.get("recommended_action") or "").strip() in {"handoff", "handoff_for_approval"}
+        or str(plan.get("answer_mode") or "").strip() == "handoff"
+        or bool(risk.get("needs_handoff"))
+        or bool(plan.get("needs_handoff"))
+    )
+
+
+def plan_uses_product_master(plan: dict[str, Any]) -> bool:
+    evidence = plan.get("evidence_used") if isinstance(plan.get("evidence_used"), dict) else {}
+    return bool(evidence.get("product_ids"))
+
+
+def is_bounded_finance_question(text: str) -> bool:
+    return contains_any(str(text or ""), ("贷款", "分期", "首付", "月供", "利率", "资方", "征信", "金融"))
+
+
+def bounded_finance_reply_has_boundary(reply: str) -> bool:
+    clean = str(reply or "")
+    if not clean:
+        return False
+    if has_unqualified_finance_forbidden_phrase(clean):
+        return False
+    if has_unqualified_finance_number_commitment(clean):
+        return False
+    return contains_any(clean, ("贷款", "分期", "首付", "月供", "利率", "资方", "征信", "金融")) and contains_any(
+        clean,
+        ("以资方", "以审核", "最终审核", "不能承诺", "不能直接定", "不能先给", "结合", "评估"),
+    )
+
+
+def reply_has_product_price(reply: str) -> bool:
+    return bool(re.search(r"\d+(?:\.\d+)?\s*万(?!\s*(?:公里|km|KM|里))", str(reply or "")))
+
+
+def has_unqualified_finance_forbidden_phrase(reply: str) -> bool:
+    clean = re.sub(r"\s+", "", str(reply or ""))
+    if not clean:
+        return False
+    boundary_markers = (
+        "不能",
+        "无法",
+        "没法",
+        "不承诺",
+        "不能承诺",
+        "不保证",
+        "不能保证",
+        "不能直接",
+        "不能先",
+        "不是",
+        "不可以",
+        "以资方",
+        "以审核",
+        "最终审核",
+        "审核为准",
+        "审批为准",
+        "评估为准",
+    )
+    risky_patterns = (
+        r"(保证|包过|肯定|一定).{0,8}(贷款|审批|通过|征信|能批)",
+        r"(贷款|审批|通过|征信|能批).{0,8}(保证|包过|肯定|一定)",
+        r"(零首付|最低首付可以|低首付可以)",
+    )
+    for pattern in risky_patterns:
+        for match in re.finditer(pattern, clean):
+            window = clean[max(0, match.start() - 16) : match.end() + 18]
+            if not any(marker in window for marker in boundary_markers):
+                return True
+    return False
+
+
+def has_unqualified_finance_number_commitment(reply: str) -> bool:
+    clean = re.sub(r"\s+", "", str(reply or ""))
+    if not clean:
+        return False
+    if not re.search(r"(首付|月供|利率).{0,8}\d", clean):
+        return False
+    safe_markers = ("不能", "无法", "没法", "以资方", "以审核", "最终审核", "结合", "评估")
+    return not any(marker in clean for marker in safe_markers)
+
+
+def is_relaxable_bounded_finance_concern(text: str) -> bool:
+    clean = str(text or "")
+    if not clean:
+        return True
+    if contains_any(clean, COMMON_SENSE_NON_RELAXABLE_ERROR_TERMS):
+        return False
+    if contains_any(clean, ("价格冲突", "商品库冲突", "编造", "虚构", "伪造", "错会话", "跨会话")):
+        return False
+    return contains_any(
+        clean,
+        (
+            "finance",
+            "金融",
+            "贷款",
+            "首付",
+            "月供",
+            "资方",
+            "审批",
+            "审核",
+            "must_handoff",
+            "allowed_auto_reply=false",
+            "finance_details_need_human",
+            "人工",
+            "专员",
+        ),
+    )
+
+
+def is_relaxable_bounded_finance_semantic_error(text: str) -> bool:
+    clean = str(text or "")
+    if not clean:
+        return True
+    if contains_any(clean, COMMON_SENSE_NON_RELAXABLE_ERROR_TERMS):
+        return False
+    if contains_any(clean, ("价格冲突", "商品库冲突", "编造", "虚构", "伪造", "错会话", "跨会话")):
+        return False
+    return contains_any(
+        clean,
+        (
+            "finance",
+            "金融",
+            "贷款",
+            "首付",
+            "月供",
+            "资方",
+            "审批",
+            "审核",
+            "直接发送金融相关答复",
+            "不符合既定边界",
+            "人工",
+            "专员",
+        ),
+    )
 
 
 def relax_bounded_advisory_review(
@@ -508,7 +725,7 @@ def effective_reviewer_settings(settings: dict[str, Any]) -> dict[str, Any]:
     cfg["timeout_seconds"] = positive_int(cfg.get("semantic_reviewer_timeout_seconds"), DEFAULT_REVIEWER_TIMEOUT_SECONDS)
     cfg["fallback_timeout_seconds"] = positive_int(
         cfg.get("semantic_reviewer_fallback_timeout_seconds"),
-        cfg["timeout_seconds"],
+        45,
     )
     cfg["max_tokens"] = positive_int(cfg.get("semantic_reviewer_max_tokens"), DEFAULT_REVIEWER_MAX_TOKENS)
     cfg["temperature"] = float(cfg.get("semantic_reviewer_temperature", DEFAULT_REVIEWER_TEMPERATURE) or DEFAULT_REVIEWER_TEMPERATURE)
@@ -594,9 +811,9 @@ def run_quality_reviewer_llm(*, settings: dict[str, Any], request: dict[str, Any
         json_mode=True,
     )
     response["elapsed_ms"] = int((time.time() - started_at) * 1000)
-    response["provider"] = provider
-    response["model"] = model
-    response["base_url"] = base_url
+    response["primary_provider"] = provider
+    response["primary_model"] = model
+    response["primary_base_url"] = base_url
     if not response.get("ok"):
         return {
             "status": "error",
@@ -635,7 +852,8 @@ def build_quality_reviewer_prompt(request: dict[str, Any]) -> tuple[str, str]:
         "你只判断候选回复是否适合发送，不能生成客户可见回复。"
         "你不能授权商品事实、价格、库存、车况、政策或承诺；商品事实只能来自product_master，政策流程只能来自formal_knowledge。"
         "如果候选回复存在事实越权疑虑，写入hard_boundary_concerns；如果只是答非所问、上下文漂移、机械追问、语气生硬、多问题漏答，写入semantic_errors并给repair_instruction。"
-        "允许无伤大雅的闲聊先自然回应，再软引导回业务。"
+        "允许无伤大雅的闲聊先自然回应；是否软引导回业务要参考conversation_strategy_state和客户本轮意图。"
+        "客户已连续闲聊、试探身份或抗拒业务牵引时，机械转回预算/车型/上一台车应写入semantic_errors，而不是视为优点。"
         "只输出JSON，字段：verdict(pass/repair/block/handoff_suggest), confidence(0-1), semantic_errors(list), hard_boundary_concerns(list), repair_instruction(str), customer_visible_risk(low/medium/high), reason(str)。"
     )
     user = json.dumps({"task": "审稿候选Brain回复，不要生成客户回复。", "review_request": request}, ensure_ascii=False)

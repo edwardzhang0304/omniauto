@@ -10,10 +10,13 @@ from __future__ import annotations
 
 from typing import Any, Iterable
 
+from layer_contracts import layer_attribution
+
 
 PRODUCT_MASTER = "product_master"
 PRODUCT_SCOPED_FORMAL = "product_scoped_formal"
 FORMAL_KNOWLEDGE = "formal_knowledge"
+SHARED_PUBLIC_STRATEGY = "shared_public_strategy"
 CANDIDATE_KNOWLEDGE = "candidate_knowledge"
 RAG_EXPERIENCE = "rag_experience"
 AI_EXPERIENCE_POOL = "ai_experience_pool"
@@ -27,6 +30,7 @@ AUTHORITY_ORDER = [
     PRODUCT_SCOPED_FORMAL,
     FORMAL_KNOWLEDGE,
     CURRENT_CONVERSATION_FACT,
+    SHARED_PUBLIC_STRATEGY,
     CANDIDATE_KNOWLEDGE,
     AI_EXPERIENCE_POOL,
     LLM_COMMON_SENSE,
@@ -123,6 +127,12 @@ def authority_order_payload() -> list[dict[str, Any]]:
             "description": "当前对话中客户刚刚明确提供的信息，可用于本轮上下文理解和资料登记，但不能反写商品库或正式知识。",
         },
         {
+            "level": SHARED_PUBLIC_STRATEGY,
+            "rank": authority_rank(SHARED_PUBLIC_STRATEGY),
+            "can_authorize_product_facts": False,
+            "description": "共享公共策略层，只提供跨账号客服策略、实体归一、闲聊处理和表达原则，不授权商品或政策事实。",
+        },
+        {
             "level": CANDIDATE_KNOWLEDGE,
             "rank": authority_rank(CANDIDATE_KNOWLEDGE),
             "can_authorize_product_facts": False,
@@ -165,6 +175,15 @@ def classify_evidence(
 
     if layer == CURRENT_CONVERSATION_FACT or source in {"current_conversation", "current_conversation_fact"}:
         return CURRENT_CONVERSATION_FACT
+    if layer == SHARED_PUBLIC_STRATEGY or source in {
+        "shared_public_strategy",
+        "shared_strategy",
+        "global_guideline",
+        "global_guidelines",
+        "shared_guideline",
+        "shared_guidelines",
+    }:
+        return SHARED_PUBLIC_STRATEGY
     if category == "rag_experience" or layer == AI_EXPERIENCE_POOL or source in AI_EXPERIENCE_POOL_SOURCE_TYPES:
         return AI_EXPERIENCE_POOL
     if category == PRODUCT_MASTER_CATEGORY_ID or layer == PRODUCT_MASTER or authority in {"product_master", "manual_product_master_only"}:
@@ -192,6 +211,7 @@ def annotate_authority(
     level = classify_evidence(result, category_id=category_id, source_type=source_type)
     result["authority_level"] = level
     result["authority_rank"] = authority_rank(level)
+    result.update(layer_attribution(level))
     return result
 
 

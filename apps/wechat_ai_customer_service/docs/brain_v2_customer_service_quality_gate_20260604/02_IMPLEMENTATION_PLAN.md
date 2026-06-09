@@ -1,5 +1,12 @@
 # Brain v2 代码落地方案
 
+## 客户可见回复所有权硬基线
+
+- 所有客户可见回复必须由 `customer_service_brain` 发出：只能是首个有效 BrainPlan、Brain repair 后的 BrainPlan，或 Brain 自己生成的硬边界/拒绝/转人工类说明。
+- Guard、质量门、语义审稿、RAG、实时路由、本地模板、旧合成器、最终润色和任何兜底模块都不能生成、替换、拼接客户可见回复；它们只能提供证据、风险、审稿意见、返修指令或轻量表达校验。
+- Brain 不可用、超时、不可采纳或返修失败时，不允许本地 safe fallback 代替 Brain 发客户可见话术；必须阻断发送、记录审计，并触发内部人工/告警接口。
+- 后续所有客服相关开发文档必须引用 [customer_visible_reply_ownership_baseline.md](../customer_visible_reply_ownership_baseline.md)。
+
 ## 改动范围
 
 本轮只修改以下范围：
@@ -46,7 +53,7 @@
 
 - 当 BrainPlan 权威校验失败、质量门失败或 authority guard 拒绝时触发。
 - 修复输入必须把结构化校验/质量门/guard 的具体意见转成 Brain 返修提示，让 Brain 重新理解和重新规划。
-- 若 provider 为 `manual_json` 或修复 LLM 不可用，则不修复，保留失败原因并进入 Brain 安全兜底或人工转接；Brain First 模式下不得退回旧结构化业务模板接管。
+- 若 provider 为 `manual_json` 或修复 LLM 不可用，则不修复，保留失败原因并阻断客户可见发送，进入内部人工/告警接口；Brain First 模式下不得退回旧结构化业务模板或本地兜底接管。
 - 修复结果必须重新走 normalize、fact validation、quality verifier、authority guard。
 - 修复门不得输出客户可见模板，唯一输出仍是 BrainPlan。
 

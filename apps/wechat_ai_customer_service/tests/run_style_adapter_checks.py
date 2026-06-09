@@ -260,9 +260,11 @@ def check_price_and_finance_boundary_is_polite_but_safe() -> bool:
     return (
         result.get("applied") is True
         and "转人工" not in text
-        and any(term in text for term in ("理解", "帮您争取", "不糊弄", "给您准话"))
-        and any(term in text for term in ("负责人", "核实", "确认"))
+        and any(term in text for term in ("贷款", "金融", "资方", "价格", "成交"))
+        and any(term in text for term in ("核准", "核实", "确认", "准话"))
         and not any(term in text for term in ("保证包过", "保证最低价", "一定能批", "绝对最低"))
+        and "负责人意见" not in text
+        and "争取归争取" not in text
     )
 
 

@@ -866,6 +866,7 @@ def call_llm_request_with_failover(
     json_mode: bool = False,
     explicit_reasoning_effort: Any | None = None,
     allow_insecure_tls: Any | None = None,
+    allow_fallback: bool = True,
     config: dict[str, str] | None = None,
 ) -> dict[str, Any]:
     primary = call_llm_request_once(
@@ -884,6 +885,9 @@ def call_llm_request_with_failover(
     )
     if primary.get("ok"):
         primary["failover"] = {"attempted": False, "activated": False, "reason": "primary_ok"}
+        return primary
+    if not allow_fallback:
+        primary["failover"] = {"attempted": False, "activated": False, "reason": "fallback_disallowed_for_stage"}
         return primary
     fallback = resolve_llm_fallback_settings(config=config, tier=tier)
     if not fallback.get("enabled"):

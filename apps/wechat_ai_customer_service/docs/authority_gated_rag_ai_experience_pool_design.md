@@ -1,5 +1,12 @@
 # 权威分层 RAG 与 AI经验池总体方案
 
+## 客户可见回复所有权硬基线
+
+- 所有客户可见回复必须由 `customer_service_brain` 发出：只能是首个有效 BrainPlan、Brain repair 后的 BrainPlan，或 Brain 自己生成的硬边界/拒绝/转人工类说明。
+- Guard、质量门、语义审稿、RAG、实时路由、本地模板、旧合成器、最终润色和任何兜底模块都不能生成、替换、拼接客户可见回复；它们只能提供证据、风险、审稿意见、返修指令或轻量表达校验。
+- Brain 不可用、超时、不可采纳或返修失败时，不允许本地 safe fallback 代替 Brain 发客户可见话术；必须阻断发送、记录审计，并触发内部人工/告警接口。
+- 后续所有客服相关开发文档必须引用 [customer_visible_reply_ownership_baseline.md](customer_visible_reply_ownership_baseline.md)。
+
 ## 目标
 
 本方案把微信智能客服的知识流转统一收束为“入口治理、出口受控”的架构：
@@ -10,7 +17,7 @@
 4. 客户回复的内容依据只允许来自商品库、正式知识库、当前会话事实。
 5. LLM常识层只做通用分析，话术风格层只做表达润色，均不得生成或覆盖事实。
 6. 最大化复用现有 `rag_experience`、`review_candidates`、`style_memory`、`product_master` 和正式知识库代码，不推倒重做。
-7. 运行时客户回复必须由 `customer_service_brain` 作为最终决策主体；结构化知识、RAG、AI经验池、质量门、guard、最终润色只提供证据、候选、边界、审稿意见或轻量表达建议。
+7. 运行时所有客户可见回复必须由 `customer_service_brain` 发出；结构化知识、RAG、AI经验池、质量门、guard、最终润色只提供证据、候选、边界、审稿意见或轻量表达建议。Brain 不可用或不可采纳时阻断发送并触发内部人工/告警，不发送本地 fallback。
 8. 如果辅助层发现 Brain 输出不对，应把意见反馈给 Brain 重新思考，不能用结构化模板、本地关键词分支、旧合成器或润色层直接替代 Brain 的最终回复。
 
 ## 命名调整

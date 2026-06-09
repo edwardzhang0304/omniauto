@@ -398,6 +398,9 @@ class CustomerServiceRuntime:
         except CustomerServiceLiveSafetyError as exc:
             if not self._live_safety_failure_allows_bootstrap_refresh(exc.summary):
                 return self._live_safety_guard_failed_response(exc.summary, error=exc)
+            if not self._startup_auto_bootstrap_refresh_enabled(config_path):
+                bootstrap_refresh = self._startup_bootstrap_refresh_skipped_payload(exc.summary)
+                return self._live_safety_guard_failed_response(exc.summary, error=exc, bootstrap_refresh=bootstrap_refresh)
             bootstrap_refresh = self._refresh_recent_bootstrap_guard(config_path, token=token)
             if not bootstrap_refresh.get("ok"):
                 return self._live_safety_guard_failed_response(exc.summary, error=exc, bootstrap_refresh=bootstrap_refresh)
@@ -486,6 +489,9 @@ class CustomerServiceRuntime:
         if not worker_result.get("ok"):
             result["worker_warning"] = worker_result.get("message", "worker start warning")
         result["live_safety_guard"] = live_safety_guard
+        pending_visible = live_safety_guard.get("pending_visible_targets") if isinstance(live_safety_guard, dict) else {}
+        if pending_visible:
+            result["pending_visible_warning"] = "当前不在可见会话列表里，待收到新消息时会自动识别"
         return result
 
     def _live_safety_guard_failed_response(
@@ -495,7 +501,10 @@ class CustomerServiceRuntime:
         error: Exception,
         bootstrap_refresh: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
-        message = f"微信自动客服启动前安全护栏未通过：{error}"
+        if isinstance(bootstrap_refresh, dict) and bootstrap_refresh.get("reason") == "startup_auto_bootstrap_refresh_disabled":
+            message = "微信自动客服启动前安全护栏未通过：会话识别基线已过期。为避免启动时自动操作微信导致白屏或风控，请先在网页端重新识别并确认会话后再启动。"
+        else:
+            message = f"微信自动客服启动前安全护栏未通过：{error}"
         payload = dict(summary)
         if bootstrap_refresh is not None:
             payload["bootstrap_refresh"] = bootstrap_refresh
@@ -513,6 +522,31 @@ class CustomerServiceRuntime:
         reasons = {str(item) for item in summary.get("fail_reasons", []) or [] if str(item)}
         return bool(reasons) and reasons <= {"recent_bootstrap_missing", "recent_bootstrap_stale"}
 
+    def _startup_auto_bootstrap_refresh_enabled(self, config_path: Path) -> bool:
+        try:
+            payload = json.loads(config_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return False
+        guard = payload.get("live_safety_guard") if isinstance(payload.get("live_safety_guard"), dict) else {}
+        if not isinstance(guard, dict):
+            return False
+        value = guard.get("startup_auto_bootstrap_refresh_enabled")
+        if value is None:
+            value = guard.get("allow_startup_auto_bootstrap_refresh")
+        return self._truthy_flag(value, default=True)
+
+    @staticmethod
+    def _startup_bootstrap_refresh_skipped_payload(summary: dict[str, Any]) -> dict[str, Any]:
+        targets = summary.get("allowed_targets") or summary.get("targets") or []
+        return {
+            "ok": False,
+            "reason": "startup_auto_bootstrap_refresh_disabled",
+            "status": "skipped",
+            "safe_manual_action_required": True,
+            "targets": list(targets) if isinstance(targets, list) else [],
+            "guidance": "recent bootstrap is stale or missing; re-identify/confirm sessions from the UI before starting live RPA",
+        }
+
     def _refresh_recent_bootstrap_guard(self, config_path: Path, *, token: str = "") -> dict[str, Any]:
         workflow = APP_ROOT / "workflows" / "listen_and_reply.py"
         if not workflow.exists():
@@ -523,6 +557,8 @@ class CustomerServiceRuntime:
         env["WECHAT_KNOWLEDGE_TENANT"] = self.tenant_id
         env["PYTHONUTF8"] = "1"
         env["PYTHONIOENCODING"] = "utf-8"
+        env["WECHAT_WIN32_OCR_TARGET_SEARCH_FALLBACK"] = "0"
+        env["WECHAT_WIN32_OCR_TARGET_SEARCH_ENTER_FALLBACK"] = "0"
         if token:
             env["WECHAT_RUNTIME_SYNC_TOKEN"] = token
         write_runtime_status(
@@ -645,11 +681,18 @@ class CustomerServiceRuntime:
             for event in events
             if isinstance(event, dict) and str(event.get("action") or "") == "bootstrapped"
         }
-        missing = [target for target in expected_targets if target not in bootstrapped]
+        pending_visible = {
+            str(event.get("target") or "").strip()
+            for event in events
+            if isinstance(event, dict) and str(event.get("action") or "") == "pending_visible"
+        }
+        accepted = bootstrapped | pending_visible
+        missing = [target for target in expected_targets if target not in accepted]
         return {
             "ok": not missing,
             "reason": "" if not missing else "bootstrap_refresh_target_not_bootstrapped",
             "bootstrapped_targets": sorted(bootstrapped),
+            "pending_visible_targets": sorted(pending_visible),
             "missing_targets": missing,
             "event_count": len(events),
         }

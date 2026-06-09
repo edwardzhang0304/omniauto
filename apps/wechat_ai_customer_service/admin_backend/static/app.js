@@ -1629,10 +1629,15 @@ function renderCustomerService(counts = {}) {
   }
   const brainModeSelect = document.getElementById("customer-brain-mode");
   if (brainModeSelect) {
-    brainModeSelect.innerHTML = (item.customer_service_brain_modes || [])
+    const brainModes = (item.customer_service_brain_modes || []).length
+      ? item.customer_service_brain_modes
+      : [{id: "brain_first", label: "客服大脑优先：由大模型先思考再回复"}];
+    brainModeSelect.innerHTML = brainModes
       .map((mode) => `<option value="${escapeHtml(mode.id)}">${escapeHtml(mode.label)}</option>`)
       .join("");
-    brainModeSelect.value = settings.customer_service_brain_mode || "off";
+    brainModeSelect.value = "brain_first";
+    brainModeSelect.disabled = true;
+    brainModeSelect.title = "旧兼容模式已隐藏，客服回复固定走 Brain First。";
   }
   setChecked("customer-service-enabled", Boolean(settings.enabled));
   setChecked("customer-record-messages", settings.record_messages !== false);
@@ -2063,7 +2068,7 @@ async function saveCustomerServiceSettings() {
       identity_guard_enabled: document.getElementById("customer-identity-guard")?.checked,
       style_adapter_enabled: document.getElementById("customer-style-adapter")?.checked,
       final_visible_llm_polish_enabled: document.getElementById("customer-final-polish")?.checked,
-      customer_service_brain_mode: document.getElementById("customer-brain-mode")?.value || "off",
+      customer_service_brain_mode: "brain_first",
       respond_all_unread_sessions: document.getElementById("customer-respond-all-unread")?.checked,
     }),
   });

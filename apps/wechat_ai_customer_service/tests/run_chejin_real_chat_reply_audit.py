@@ -90,7 +90,23 @@ USED_CAR_TERMS = (
 )
 HANDOFF_HINTS = ("转人工", "人工", "负责人", "确认后回复", "请负责人")
 DIRECT_CHOICE_TERMS = ("哪个", "哪台", "哪款", "还是", "怎么选", "选一辆", "更推荐")
-DIRECT_ANSWER_HINTS = ("建议", "优先", "更推荐", "先看", "我会先", "可以先", "先排", "先缩到", "最高标价", "标价最高")
+DIRECT_ANSWER_HINTS = (
+    "建议",
+    "优先",
+    "更推荐",
+    "更偏向",
+    "更偏",
+    "更对路",
+    "先看",
+    "我会先",
+    "可以先",
+    "先排",
+    "排前面",
+    "放前面",
+    "先缩到",
+    "最高标价",
+    "标价最高",
+)
 VEHICLE_MODEL_TERMS = ("赛纳", "塞纳", "赛那", "凯美瑞", "雅阁", "奇骏", "途观", "gl8", "思域", "秦plus", "dm-i")
 VEHICLE_CHOICE_CONTEXT_TERMS = USED_CAR_TERMS + ("suv", "mpv", "轿车", "越野", "纯电", "混动", "油车")
 IDENTITY_OR_SYSTEM_TERMS = ("真人", "系统", "自动回", "机器人", "自动回复", "是不是ai", "是ai", "客服")
@@ -111,6 +127,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--max-total", type=int, default=220)
     parser.add_argument("--per-category", type=int, default=28)
     parser.add_argument("--llm-probe-limit", type=int, default=80)
+    parser.add_argument("--sample-offset", type=int, default=0)
+    parser.add_argument("--sample-stride", type=int, default=1)
     parser.add_argument("--report", type=Path, default=DEFAULT_REPORT_PATH)
     return parser.parse_args()
 
@@ -122,7 +140,13 @@ def main() -> int:
     raw_config = load_config(args.config)
     config = load_audit_config(raw_config)
     samples = collect_samples(args.raw_inbox_chats, args.runtime_messages)
-    selected = select_representative_samples(samples, max_total=max(20, args.max_total), per_category=max(3, args.per_category))
+    selected = select_representative_samples(
+        samples,
+        max_total=max(20, args.max_total),
+        per_category=max(3, args.per_category),
+        sample_offset=max(0, args.sample_offset),
+        sample_stride=max(1, args.sample_stride),
+    )
 
     results: list[dict[str, Any]] = []
     llm_probe_count = 0
@@ -139,6 +163,7 @@ def main() -> int:
                 result["llm_probe"] = probe
                 if probe.get("attempted"):
                     llm_probe_count += 1
+            mark_shadow_only_when_brain_first_not_probed(result, config=config)
             result["effective_reply_text"] = effective_reply_text(result)
             result["effective_reply_source"] = effective_reply_source(result)
             result["issues"] = detect_issues(sample.text, result)
@@ -146,7 +171,14 @@ def main() -> int:
             if index % 20 == 0:
                 print(f"[audit] simulated {index}/{len(selected)}")
 
-    report = build_report(samples=samples, selected=selected, results=results, config=args.config)
+    report = build_report(
+        samples=samples,
+        selected=selected,
+        results=results,
+        config=args.config,
+        sample_offset=max(0, args.sample_offset),
+        sample_stride=max(1, args.sample_stride),
+    )
     args.report.parent.mkdir(parents=True, exist_ok=True)
     args.report.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
     print(json.dumps(report["summary"], ensure_ascii=False, indent=2))
@@ -192,6 +224,21 @@ def load_audit_config(raw_config: dict[str, Any]) -> dict[str, Any]:
     final_polish["required_for_send"] = True
     cfg["final_visible_llm_polish"] = final_polish
     return cfg
+
+
+def mark_shadow_only_when_brain_first_not_probed(result: dict[str, Any], *, config: dict[str, Any]) -> None:
+    brain = config.get("customer_service_brain") if isinstance(config.get("customer_service_brain"), dict) else {}
+    if not (brain.get("enabled") and str(brain.get("mode") or "") == "brain_first"):
+        return
+    brain_probe = result.get("brain_probe") if isinstance(result.get("brain_probe"), dict) else {}
+    llm_probe = result.get("llm_probe") if isinstance(result.get("llm_probe"), dict) else {}
+    if brain_probe.get("attempted") or llm_probe.get("attempted"):
+        return
+    realtime = result.get("realtime") if isinstance(result.get("realtime"), dict) else {}
+    if not realtime.get("applied"):
+        return
+    result["legacy_route_shadow_only"] = True
+    result["legacy_route_shadow_reason"] = "brain_first_customer_visible_reply_not_probed"
 
 
 def collect_samples(raw_inbox_dir: Path, runtime_messages_path: Path) -> list[AuditSample]:
@@ -330,13 +377,74 @@ def is_likely_agent_reply_fragment(text: str) -> bool:
     clean = str(text or "").strip()
     if not clean:
         return False
+    if "您" in clean and not re.search(r"[？?]", clean):
+        first_person_terms = ("我这边", "我帮您", "我继续", "我再", "我先", "我会", "我这轮", "这边")
+        service_action_terms = (
+            "发您",
+            "给您",
+            "帮您看",
+            "帮您筛",
+            "先推荐",
+            "继续筛",
+            "继续把",
+            "先看看",
+            "按这个方向",
+            "排细一点",
+            "更偏向",
+            "更偏",
+            "门店评估",
+            "按实车",
+            "手续确认",
+            "确认后才能定",
+        )
+        if contains_any(clean, first_person_terms) and contains_any(clean, service_action_terms):
+            return True
+        if contains_any(clean, ("大概能换多少钱", "最终以", "具体还是以", "这边暂时不能直接报")) and contains_any(
+            clean,
+            ("实车", "手续", "检测报告", "门店", "确认"),
+        ):
+            return True
     stock_terms = ("上牌", "表显", "自动挡", "万公里", "检测报告", "看车城市", "到店时间", "贷款/置换")
     stock_hits = sum(1 for term in stock_terms if term in clean)
     if stock_hits >= 3 and len(clean) >= 56 and not re.search(r"[？?]", clean):
         return True
     if contains_any(clean, ("我再把优先级排细一点", "您把贷款/置换情况", "具体还是以检测报告为准")):
         return True
+    if contains_any(
+        clean,
+        (
+            "您先看看",
+            "先给您两台",
+            "先给您几台",
+            "先给你两台",
+            "先给你几台",
+            "给您两台",
+            "给您几台",
+            "给你两台",
+            "给你几台",
+            "我再按这个方向",
+            "我按这个方向继续",
+            "继续给您筛",
+            "顺着给您筛",
+            "您要的话我继续",
+            "我这边先推荐",
+            "我这边先给您推荐",
+            "先推荐两台",
+            "帮您看看还有没有",
+            "想要更运动一点也可以看",
+            "这轮更偏向",
+            "我这轮更偏",
+        ),
+    ):
+        return True
+    if contains_any(clean, ("发我一个大概", "发我一下", "我这边", "我帮您")) and contains_any(
+        clean,
+        ("继续筛", "按这个方向", "先看看", "给您筛", "排细一点"),
+    ):
+        return True
     if re.match(r"^[0-9一二三四五六七八九十]*\s*万[，,、；;）)]", clean) and len(clean) >= 24:
+        return True
+    if re.search(r"\d+(?:\.\d+)?\s*万", clean) and contains_any(clean, ("先给您", "先给你", "性价比", "更偏商务", "更偏家用", "接近您需求", "接近你需求")):
         return True
     if re.match(r"^(哥，按您|老板，按您|按您说的|如果先缩到两台)", clean):
         return True
@@ -361,17 +469,30 @@ def normalize_dedupe_key(text: str) -> str:
     return value.lower().strip()
 
 
-def select_representative_samples(samples: list[AuditSample], *, max_total: int, per_category: int) -> list[AuditSample]:
+def select_representative_samples(
+    samples: list[AuditSample],
+    *,
+    max_total: int,
+    per_category: int,
+    sample_offset: int = 0,
+    sample_stride: int = 1,
+) -> list[AuditSample]:
     grouped: dict[str, list[AuditSample]] = defaultdict(list)
     for sample in samples:
         grouped[classify_question(sample.text)].append(sample)
     selected: list[AuditSample] = []
     categories = sorted(grouped.keys(), key=lambda item: (0 if item == "used_car_core" else 1, item))
     for category in categories:
-        selected.extend(grouped[category][:per_category])
+        bucket = grouped[category][sample_offset::sample_stride] if sample_offset or sample_stride > 1 else grouped[category]
+        if not bucket:
+            bucket = grouped[category]
+        selected.extend(bucket[:per_category])
     if len(selected) < max_total:
         selected_keys = {normalize_dedupe_key(item.text) for item in selected}
-        for sample in samples:
+        fill_pool = samples[sample_offset::sample_stride] if sample_offset or sample_stride > 1 else samples
+        if not fill_pool:
+            fill_pool = samples
+        for sample in fill_pool:
             if len(selected) >= max_total:
                 break
             key = normalize_dedupe_key(sample.text)
@@ -561,8 +682,53 @@ def run_brain_probe(*, sample: AuditSample, config: dict[str, Any], result: dict
         "needs_handoff": str(brain_result.get("rule_name") or "") == "customer_service_brain_handoff",
         "llm_status": compact_mapping(brain_result.get("llm_status") or {}),
         "audit_summary": compact_mapping(brain_result.get("audit_summary") or {}),
+        "diagnostics": compact_brain_failure_diagnostics(brain_result),
         "duration_seconds": brain_result.get("duration_seconds"),
     }
+
+
+def compact_brain_failure_diagnostics(brain_result: dict[str, Any]) -> dict[str, Any]:
+    if not isinstance(brain_result, dict):
+        return {}
+    fields = (
+        "plan_validation",
+        "quality_verification",
+        "quality_gate_v2",
+        "quality_repair",
+        "repaired_plan_validation",
+        "repaired_quality_verification",
+        "repaired_quality_gate_v2",
+        "repaired_quality_soft_pass",
+        "guard",
+        "guard_repair",
+        "guard_repaired_plan_validation",
+        "guard_repaired_quality_verification",
+        "guard_repaired_quality_gate_v2",
+        "guard_repaired_quality_handoff_soft_pass",
+        "guard_repaired_guard",
+        "stage_timings",
+        "prompt_estimate",
+    )
+    result: dict[str, Any] = {}
+    for field in fields:
+        value = brain_result.get(field)
+        if value in (None, {}, []):
+            continue
+        result[field] = compact_mapping(value, max_text=360)
+    for plan_field in ("brain_plan", "repaired_brain_plan", "guard_repaired_brain_plan"):
+        plan = brain_result.get(plan_field)
+        if not isinstance(plan, dict):
+            continue
+        result[plan_field] = {
+            "answer_mode": plan.get("answer_mode"),
+            "recommended_action": plan.get("recommended_action"),
+            "can_answer": plan.get("can_answer"),
+            "reply_segments": plan.get("reply_segments", []),
+            "risk": compact_mapping(plan.get("risk") or {}, max_text=240),
+            "evidence_used": compact_mapping(plan.get("evidence_used") or {}, max_text=240),
+            "reason": str(plan.get("reason") or "")[:240],
+        }
+    return result
 
 
 def build_initial_decision(product_result: dict[str, Any]) -> ReplyDecision:
@@ -586,6 +752,8 @@ def build_initial_decision(product_result: dict[str, Any]) -> ReplyDecision:
 def detect_issues(question: str, result: dict[str, Any]) -> list[dict[str, Any]]:
     issues: list[dict[str, Any]] = []
     brain_probe = result.get("brain_probe") if isinstance(result.get("brain_probe"), dict) else {}
+    if result.get("legacy_route_shadow_only"):
+        return issues
     reply = effective_reply_text(result)
     route = result.get("route") if isinstance(result.get("route"), dict) else {}
     realtime = result.get("realtime") if isinstance(result.get("realtime"), dict) else {}
@@ -620,9 +788,16 @@ def detect_issues(question: str, result: dict[str, Any]) -> list[dict[str, Any]]
     budget_issue = detect_budget_deviation(question, reply)
     if budget_issue:
         issues.append(issue("budget_deviation", budget_issue, "realtime_reply_router.rank_product_candidates"))
-    if contains_any(question, USED_CAR_TERMS) and not contains_any(reply, USED_CAR_TERMS) and not expected_l0:
+    if (
+        classify_question(question) != "greeting"
+        and contains_any(question, USED_CAR_TERMS)
+        and not contains_any(reply, USED_CAR_TERMS)
+        and not expected_l0
+    ):
         issues.append(issue("weak_domain_alignment", "二手车问题回复缺少行业语义锚点", owner_from_result(route, realtime, llm_probe, brain_probe)))
-    if not looks_high_risk(question) and contains_any(reply, HANDOFF_HINTS) and not expected_l0:
+    hard_handoff_terms = ("转人工", "人工", "负责人", "请负责人", "专员")
+    soft_followup_only = contains_any(reply, ("确认后回复", "核实后回复", "确认后再回复")) and not contains_any(reply, hard_handoff_terms)
+    if not looks_high_risk(question) and contains_any(reply, HANDOFF_HINTS) and not expected_l0 and not soft_followup_only:
         issues.append(issue("possible_over_handoff", "非高风险问题出现转人工倾向", "realtime_reply_router / llm_reply_synthesis"))
     if contains_any(question, ("赛纳", "塞纳", "赛那")) and not contains_any(reply, ("赛那", "塞纳", "赛纳", "sienna")):
         issues.append(issue("entity_resolution_miss", "同义/同音车型识别后回复未显式对齐实体", "product_name_matcher / llm_product_name_matcher"))
@@ -663,6 +838,8 @@ def effective_reply_text(result: dict[str, Any]) -> str:
     llm_probe = result.get("llm_probe") if isinstance(result.get("llm_probe"), dict) else {}
     if llm_probe.get("attempted") and str(llm_probe.get("reply_text") or "").strip():
         return str(llm_probe.get("reply_text") or "").strip()
+    if result.get("legacy_route_shadow_only"):
+        return ""
     return str(result.get("reply_text") or "").strip()
 
 
@@ -673,6 +850,8 @@ def effective_reply_source(result: dict[str, Any]) -> str:
     llm_probe = result.get("llm_probe") if isinstance(result.get("llm_probe"), dict) else {}
     if llm_probe.get("attempted") and str(llm_probe.get("reply_text") or "").strip():
         return "llm_reply_synthesis"
+    if result.get("legacy_route_shadow_only"):
+        return "legacy_route_shadow_only"
     realtime = result.get("realtime") if isinstance(result.get("realtime"), dict) else {}
     if realtime.get("applied"):
         return "realtime_reply_router"
@@ -787,16 +966,28 @@ def build_report(
     selected: list[AuditSample],
     results: list[dict[str, Any]],
     config: Path,
+    sample_offset: int = 0,
+    sample_stride: int = 1,
 ) -> dict[str, Any]:
     issue_counter: Counter[str] = Counter()
     owner_counter: Counter[str] = Counter()
     category_counter: Counter[str] = Counter()
     reply_template_counter: Counter[str] = Counter()
     examples_by_issue: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    shadow_only_count = 0
+    brain_probe_attempted_count = 0
+    brain_probe_applied_count = 0
 
     for item in results:
         category = str(item.get("category") or "unknown")
         category_counter[category] += 1
+        if item.get("legacy_route_shadow_only"):
+            shadow_only_count += 1
+        brain_probe = item.get("brain_probe") if isinstance(item.get("brain_probe"), dict) else {}
+        if brain_probe.get("attempted"):
+            brain_probe_attempted_count += 1
+        if brain_probe.get("applied"):
+            brain_probe_applied_count += 1
         reply_key = normalize_dedupe_key(effective_reply_text(item))
         if reply_key:
             reply_template_counter[reply_key] += 1
@@ -833,7 +1024,12 @@ def build_report(
             "module_owner_hotspots": dict(owner_counter.most_common()),
             "category_coverage": dict(category_counter.most_common()),
             "repeated_reply_templates": repeated_templates,
+            "brain_probe_attempted_count": brain_probe_attempted_count,
+            "brain_probe_applied_count": brain_probe_applied_count,
+            "legacy_route_shadow_only_count": shadow_only_count,
             "config_path": str(config),
+            "sample_offset": sample_offset,
+            "sample_stride": sample_stride,
         },
         "examples_by_issue": dict(examples_by_issue),
         "results": results,

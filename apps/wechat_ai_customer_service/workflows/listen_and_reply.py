@@ -63,9 +63,13 @@ from knowledge_loader import build_evidence_pack
 from llm_intent_router import route_intent, IntentRouteResult
 from llm_reply_synthesis import maybe_synthesize_reply, normalize_visible_reply_surface_noise
 from customer_service_brain import (
-    build_brain_safe_fallback_payload,
+    build_brain_no_visible_reply_payload,
     effective_brain_settings,
     maybe_run_customer_service_brain,
+)
+from customer_service_conversation_strategy import (
+    strategy_state_public_audit,
+    update_conversation_strategy_state,
 )
 from product_knowledge import decide_product_knowledge_reply, load_product_knowledge
 from rag_answer_layer import maybe_build_rag_reply
@@ -98,7 +102,10 @@ from apps.wechat_ai_customer_service.admin_backend.services.customer_service_run
     summarize_listener_result,
     write_runtime_status,
 )
-from admin_backend.services.customer_service_settings import CustomerServiceSettings
+from admin_backend.services.customer_service_settings import (
+    CustomerServiceSettings,
+    normalize_customer_service_brain_mode,
+)
 from apps.wechat_ai_customer_service.admin_backend.services.knowledge_contamination_guard import (
     message_learning_exclusion_reason,
     text_has_model_reply_marker,
@@ -484,6 +491,11 @@ def run_workflow(args: argparse.Namespace) -> dict[str, Any]:
                 blacklist=ignored_session_names,
                 max_targets_per_iteration=int(multi_target_cfg.get("max_targets_per_iteration", 5)),
                 min_switch_interval_seconds=int(multi_target_cfg.get("min_switch_interval_seconds", 2)),
+                initial_preview_can_raise_unread=bool(multi_target_cfg.get("initial_preview_can_raise_unread", True)),
+                preview_change_can_raise_unread=bool(multi_target_cfg.get("preview_change_can_raise_unread", True)),
+                short_preview_can_raise_unread=bool(multi_target_cfg.get("short_preview_can_raise_unread", True)),
+                require_unread_badge_for_dispatch=bool(multi_target_cfg.get("require_unread_badge_for_dispatch", False)),
+                require_preview_signal_with_unread_badge=bool(multi_target_cfg.get("require_preview_signal_with_unread_badge", False)),
             )
         previous_active_names: set[str] = set()
 
@@ -707,11 +719,23 @@ def process_target(
         max_batch_messages=target.max_batch_messages,
         config=config,
     )
+    if selection.eligible_count <= 0:
+        scheduler_selection = select_scheduler_authoritative_batch_details(
+            payload,
+            target_state=target_state,
+            allow_self_for_test=target.allow_self_for_test,
+            max_batch_messages=target.max_batch_messages,
+            config=config,
+        )
+        if scheduler_selection.eligible_count > 0:
+            payload["_scheduler_authoritative_selection_used"] = True
+            selection = scheduler_selection
     write_workflow_phase(
         "batch_selection_done",
         target=target.name,
         eligible_count=selection.eligible_count,
         overflow_count=len(selection.overflow_messages),
+        scheduler_authoritative_selection_used=bool(payload.get("_scheduler_authoritative_selection_used")),
     )
     history_backfill_meta = payload.get("_history_backfill", {}) if isinstance(payload.get("_history_backfill"), dict) else {}
     if history_gap_risk_blocks_reply(history_backfill_meta, config) and selection.eligible_count > 0:
@@ -767,6 +791,7 @@ def process_target(
     semantic_batch_plan = plan_message_batch_semantics(routing_batch, config)
     combined = str(semantic_batch_plan.get("combined_text") or "\n".join(str(item.get("content") or "") for item in batch))
     update_conversation_preference_context(target_state, combined)
+    strategy_state = update_conversation_strategy_state(target_state, combined)
     message_ids = [str(item.get("id") or "") for item in batch]
     if send and should_defer_standalone_greeting(config, routing_batch, combined):
         mark_coalesced_messages(
@@ -790,6 +815,7 @@ def process_target(
                 "raw_capture": raw_capture,
                 "batch_selection": batch_selection_payload(selection),
                 "semantic_batch_plan": semantic_batch_plan,
+                "conversation_strategy_state": strategy_state_public_audit(strategy_state),
                 "reply_routing_normalization": batch_routing_normalization_payload(batch, routing_batch),
                 "dry_run": False,
             },
@@ -800,6 +826,11 @@ def process_target(
         target=target.name,
         message_count=len(batch),
         message_ids=message_ids,
+    )
+    write_workflow_phase(
+        "conversation_strategy_state_updated",
+        target=target.name,
+        **strategy_state_public_audit(strategy_state),
     )
     if send:
         backoff = get_rate_limit_backoff(target_state, message_ids)
@@ -918,7 +949,10 @@ def process_target(
             },
             "data_capture": data_capture,
             "raw_capture": raw_capture,
-            "batch_selection": batch_selection_payload(selection),
+            "batch_selection": {
+                **batch_selection_payload(selection),
+                "scheduler_authoritative_selection_used": bool(payload.get("_scheduler_authoritative_selection_used")),
+            },
             "semantic_batch_plan": semantic_batch_plan,
             "reply_routing_normalization": batch_routing_normalization_payload(batch, routing_batch),
             "history_backfill": payload.get("_history_backfill", {}),
@@ -991,7 +1025,7 @@ def process_target(
             and event["customer_service_brain"]["mode"] == "brain_first"
             and brain_settings.get("fallback_to_legacy_on_error", False) is False
         ):
-            event["customer_service_brain"] = build_brain_safe_fallback_payload(
+            event["customer_service_brain"] = build_brain_no_visible_reply_payload(
                 event["customer_service_brain"],
                 combined=combined,
                 reason="customer_service_brain_exception",
@@ -1014,18 +1048,23 @@ def process_target(
         product_knowledge=product_knowledge,
     )
     if customer_service_brain_controls_reply(event["customer_service_brain"]):
-        if not should_adopt_customer_service_brain(event["customer_service_brain"]):
-            event["customer_service_brain"] = build_brain_safe_fallback_payload(
-                event["customer_service_brain"],
-                combined=combined,
-                reason=customer_service_brain_failure_reason(event["customer_service_brain"]),
-            )
         config = config_with_legacy_reply_generators_disabled_for_brain(config)
         event["customer_service_brain_legacy_generators"] = {
             "disabled": True,
             "reason": "brain_first_authoritative_control",
             "disabled_modules": ["rag_response", "realtime_reply", "llm_reply_synthesis"],
         }
+        if not should_adopt_customer_service_brain(event["customer_service_brain"]):
+            return block_for_customer_service_brain_no_visible_reply(
+                event=event,
+                target=target,
+                target_state=target_state,
+                batch=batch,
+                combined=combined,
+                config=config,
+                brain_result=event["customer_service_brain"],
+                product_knowledge=product_knowledge,
+            )
     write_workflow_phase("rag_reply_start", target=target.name)
     rag_reply = maybe_build_rag_reply(
         config=config,
@@ -1274,12 +1313,15 @@ def process_target(
             reason=str(brain_result.get("reason") or "customer_service_brain_adopted"),
         )
         if decision.need_handoff and not decision.reply_text:
-            decision = ReplyDecision(
-                reply_text=handoff_acknowledgement_text(config),
-                rule_name=decision.rule_name,
-                matched=True,
-                need_handoff=True,
-                reason=decision.reason,
+            return block_for_customer_service_brain_no_visible_reply(
+                event=event,
+                target=target,
+                target_state=target_state,
+                batch=batch,
+                combined=combined,
+                config=config,
+                brain_result=brain_result,
+                product_knowledge=product_knowledge,
             )
         reply_text = format_reply(decision.reply_text, configured_reply_prefix(config))
         event["customer_service_brain_adopted"] = {
@@ -1295,14 +1337,17 @@ def process_target(
         }
         clear_no_relevant_handoff_after_safe_brain_reply(event["intent_assist"], brain_result)
     visible_reply_before_context = reply_text
-    reply_text = sanitize_customer_visible_reply_text(
-        reply_text,
-        config=config,
-        combined=combined,
-        reason=str(event.get("reason") or (event.get("decision") or {}).get("reason") or decision.reason or ""),
-        force_handoff_style=bool(decision.need_handoff),
-        recent_reply_texts=recent_reply_texts,
-    )
+    if customer_visible_reply_is_brain_owned(event=event, decision=decision):
+        reply_text = normalize_brain_owned_customer_visible_reply_text(reply_text, config=config)
+    else:
+        reply_text = sanitize_customer_visible_reply_text(
+            reply_text,
+            config=config,
+            combined=combined,
+            reason=str(event.get("reason") or (event.get("decision") or {}).get("reason") or decision.reason or ""),
+            force_handoff_style=bool(decision.need_handoff),
+            recent_reply_texts=recent_reply_texts,
+        )
     if reply_text != visible_reply_before_context:
         decision = ReplyDecision(
             reply_text=split_reply_prefix(reply_text, config)[1],
@@ -1406,6 +1451,11 @@ def process_target(
         combined=combined,
     )
     operator_handoff = handoff_enabled and operator_handoff_required
+    brain_owned_handoff_reply = (
+        bool(event.get("customer_service_brain_adopted"))
+        and str(decision.rule_name or "").startswith("customer_service_brain_")
+        and bool(str(reply_text or "").strip())
+    )
     prebuilt_handoff_reason = ""
     prebuilt_handoff_reply_text = ""
     if operator_handoff_required:
@@ -1448,6 +1498,10 @@ def process_target(
             event["reply_style_adapter_handoff"] = {"applied": False, "reason": "specific_boundary_refusal_preserved"}
             event["outbound_naturalness_handoff"] = {"applied": False, "reason": "specific_boundary_refusal_preserved"}
             event["final_visible_llm_polish_handoff"] = {"applied": False, "reason": "specific_boundary_refusal_preserved"}
+        elif brain_owned_handoff_reply:
+            event["reply_style_adapter_handoff"] = {"applied": False, "reason": "skipped_for_customer_service_brain_handoff"}
+            event["outbound_naturalness_handoff"] = {"applied": False, "reason": "skipped_for_customer_service_brain_handoff"}
+            event["final_visible_llm_polish_handoff"] = {"applied": False, "reason": "deferred_to_brain_owned_handoff_reply"}
         else:
             handoff_style_adaptation = adapt_reply_style(
                 config=config,
@@ -1519,6 +1573,43 @@ def process_target(
         event["empty_reply_guard_handoff"] = empty_reply_guard_handoff
         if empty_reply_guard_handoff.get("applied"):
             prebuilt_handoff_reply_text = str(empty_reply_guard_handoff.get("reply_text") or prebuilt_handoff_reply_text)
+        if brain_owned_handoff_reply:
+            prebuilt_handoff_reply_text = normalize_brain_owned_customer_visible_reply_text(reply_text, config=config)
+            write_workflow_phase(
+                "final_polish_start",
+                target=target.name,
+                source_channel="brain_handoff",
+                reply_chars=len(prebuilt_handoff_reply_text),
+            )
+            final_handoff_polish = finalize_customer_visible_reply_with_llm(
+                prebuilt_handoff_reply_text,
+                config=config,
+                combined=combined,
+                recent_reply_texts=recent_reply_texts,
+                source_channel="brain_handoff",
+                needs_handoff=True,
+            )
+            write_workflow_phase(
+                "final_polish_done",
+                target=target.name,
+                passed=bool(final_handoff_polish.get("passed")),
+                reason=final_handoff_polish.get("reason"),
+            )
+            event["final_visible_llm_polish_handoff"] = final_handoff_polish
+            if final_handoff_polish.get("passed"):
+                prebuilt_handoff_reply_text = str(final_handoff_polish.get("reply_text") or prebuilt_handoff_reply_text)
+                prebuilt_handoff_reply_text = normalize_brain_owned_customer_visible_reply_text(
+                    prebuilt_handoff_reply_text,
+                    config=config,
+                )
+            elif final_visible_polish_blocks_send(final_handoff_polish, config=config):
+                return block_for_final_visible_polish_failure(event, target, final_handoff_polish)
+            elif final_visible_polish_degraded(final_handoff_polish, config=config):
+                event["final_visible_llm_polish_handoff_degraded"] = True
+            event["operator_handoff_brain_reply_preserved"] = {
+                "applied": True,
+                "reason": "brain_first_visible_reply_authority",
+            }
         decision = ReplyDecision(
             reply_text=split_reply_prefix(prebuilt_handoff_reply_text, config)[1],
             rule_name=decision.rule_name,
@@ -1654,22 +1745,25 @@ def process_target(
     should_mark_after_data_write = bool(data_capture.get("write_result", {}).get("ok") and not send)
 
     if send:
-        reply_text = _apply_greeting(
-            reply_text,
-            profile,
-            config,
-            target_state=target_state,
-            combined=combined,
-            recent_reply_texts=recent_reply_texts,
-        )
-        reply_text = sanitize_customer_visible_reply_text(
-            reply_text,
-            config=config,
-            combined=combined,
-            reason=str(event.get("reason") or event["decision"].get("reason") or ""),
-            force_handoff_style=False,
-            recent_reply_texts=recent_reply_texts,
-        )
+        if brain_reply_adopted:
+            reply_text = normalize_brain_owned_customer_visible_reply_text(reply_text, config=config)
+        else:
+            reply_text = _apply_greeting(
+                reply_text,
+                profile,
+                config,
+                target_state=target_state,
+                combined=combined,
+                recent_reply_texts=recent_reply_texts,
+            )
+            reply_text = sanitize_customer_visible_reply_text(
+                reply_text,
+                config=config,
+                combined=combined,
+                reason=str(event.get("reason") or event["decision"].get("reason") or ""),
+                force_handoff_style=False,
+                recent_reply_texts=recent_reply_texts,
+            )
         if brain_reply_adopted:
             outbound_naturalness = {
                 "applied": False,
@@ -1703,14 +1797,17 @@ def process_target(
             return block_for_final_visible_polish_failure(event, target, final_polish)
         elif final_visible_polish_degraded(final_polish, config=config):
             event["final_visible_llm_polish_degraded"] = True
-        post_polish_reply = sanitize_customer_visible_reply_text(
-            reply_text,
-            config=config,
-            combined=combined,
-            reason=str(event.get("reason") or event["decision"].get("reason") or ""),
-            force_handoff_style=False,
-            recent_reply_texts=recent_reply_texts,
-        )
+        if brain_reply_adopted:
+            post_polish_reply = normalize_brain_owned_customer_visible_reply_text(reply_text, config=config)
+        else:
+            post_polish_reply = sanitize_customer_visible_reply_text(
+                reply_text,
+                config=config,
+                combined=combined,
+                reason=str(event.get("reason") or event["decision"].get("reason") or ""),
+                force_handoff_style=False,
+                recent_reply_texts=recent_reply_texts,
+            )
         if post_polish_reply != reply_text:
             event["post_final_visible_surface_cleanup"] = {
                 "applied": True,
@@ -1744,6 +1841,18 @@ def process_target(
         )
         event["empty_reply_guard"] = empty_reply_guard
         if empty_reply_guard.get("applied"):
+            if brain_reply_adopted:
+                event["empty_reply_guard"]["brain_first_blocked_local_fallback"] = True
+                return block_for_customer_service_brain_no_visible_reply(
+                    event=event,
+                    target=target,
+                    target_state=target_state,
+                    batch=batch,
+                    combined=combined,
+                    config=config,
+                    brain_result=event.get("customer_service_brain") if isinstance(event.get("customer_service_brain"), dict) else {},
+                    product_knowledge=product_knowledge,
+                )
             reply_text = str(empty_reply_guard.get("reply_text") or reply_text)
         event["decision"]["reply_text"] = reply_text
         event["reply_text"] = reply_text
@@ -1919,6 +2028,13 @@ def handle_rate_limit_block(
         "rate_limited",
         {"rate_limit": rate_check},
     )
+    if brain_first_requires_brain_owned_visible_reply(config):
+        event["rate_limit_notice"] = {
+            "suppressed": True,
+            "reason": "brain_first_no_local_customer_visible_notice",
+        }
+        event["customer_visible_reply_blocked"] = True
+        return event
     if suppress_rate_limit_notice_for_transport(connector, config):
         event["rate_limit_notice"] = {
             "suppressed": True,
@@ -2914,8 +3030,25 @@ def is_same_day_delivery_context(context: str) -> bool:
     return any(term in clean for term in SAME_DAY_DELIVERY_STRONG_TERMS)
 
 
+def current_handoff_decision_context(*, combined: str = "", reason: str = "") -> str:
+    """Use only the latest customer turn when choosing a concealed handoff note.
+
+    The full combined transcript can contain prior self replies with prices,
+    product names, or procedural wording. Letting those old self fragments drive
+    handoff wording turns the guard into a second answer engine and can override
+    Brain's current-turn understanding.
+    """
+
+    current = current_customer_text(combined).strip()
+    lines = [strip_leading_group_speaker_line(line.strip()) for line in current.splitlines() if line.strip()]
+    if len(lines) >= 2:
+        current = lines[-1]
+    context = f"{current} {reason}".strip()
+    return context or str(reason or combined or "").strip()
+
+
 def concealed_handoff_reply(*, combined: str = "", reason: str = "", recent_reply_texts: list[str] | None = None) -> str:
-    context = f"{combined} {reason}".strip()
+    context = current_handoff_decision_context(combined=combined, reason=reason)
     if is_location_contact_context(context):
         return choose_customer_visible_variant(
             [
@@ -2983,7 +3116,7 @@ def concealed_handoff_reply(*, combined: str = "", reason: str = "", recent_repl
         if any(term in context for term in ("少开", "低开", "金额")):
             return choose_customer_visible_variant(
                 [
-                    "我理解您是想把流程提前问清楚，合同和发票金额这块必须按实际交易和门店流程走，不能随口答应调整。我请负责人确认合同流程和开票要求，核清楚再回复您。",
+                    "我理解您是想把流程提前问清楚，合同和发票金额这块必须按实际交易和门店流程走，不能随口答应调整。我先确认合同流程和开票要求，核清楚再回复您。",
                     "这个我先帮您问清楚，发票金额和合同信息要按实际交易来确认，不能直接口头定。您稍等，我问下领导后再给您明确说法。",
                     "这块确实要提前确认好，免得后面来回改。合同签署和开票金额都要按流程核实，您稍等一下，我确认清楚后回您。",
                 ],
@@ -3003,9 +3136,9 @@ def concealed_handoff_reply(*, combined: str = "", reason: str = "", recent_repl
     if has_finance_boundary and has_price_boundary:
         return choose_customer_visible_variant(
             [
-                "贷款要看资方审核，价格也要按车源和门店审批核准；我先确认车型、付款方式和负责人意见，再给您准话。",
-                "金融审批和成交价都不能先口头定死，我先把车源、首付月供方向和价格审批核清楚，再回复您。",
-                "这类问题我会谨慎点：贷款看资方，价格看门店审批。我先核实付款方案和负责人意见，确认后再跟您说准。",
+                "贷款要看资方审核，成交价也要按门店流程核准；我先把付款方案和可确认的边界核清楚，再给您稳妥答复。",
+                "金融审批和最终成交条件不能先口头定死。我先按车源、付款方式和门店流程确认，核准后再回复您。",
+                "这类问题我会谨慎点：贷款看资方，价格看正式核准。我先确认付款方案和可谈范围，再跟您说准。",
             ],
             context=context,
             recent_reply_texts=recent_reply_texts,
@@ -3023,9 +3156,9 @@ def concealed_handoff_reply(*, combined: str = "", reason: str = "", recent_repl
     if has_price_boundary:
         return choose_customer_visible_variant(
             [
-                "价格和优惠我会帮您核，但超出公开规则的部分不能直接口头答应。我先把数量、库存和负责人意见确认好，再给您明确答复。",
-                "价格我肯定帮您争取，但最低价或破例优惠不能直接口头保证。我核实一下商品、数量和负责人意见，再回复您。",
-                "这个我先帮您往下问，争取归争取，但价格、库存和审批结果都要确认过才稳。我核清楚后再给您准话。",
+                "价格和优惠我会帮您核，但超出公开规则的部分不能直接口头答应。我先按门店流程确认，再给您明确答复。",
+                "价格我可以帮您确认和争取，但最低价或破例优惠不能直接口头保证。我核准后再回复您。",
+                "这个我先按正式流程核一下，可谈范围和最终成交条件确认后，再给您准话。",
             ],
             context=context,
             recent_reply_texts=recent_reply_texts,
@@ -3063,7 +3196,7 @@ def concealed_handoff_reply(*, combined: str = "", reason: str = "", recent_repl
     if any(term in context for term in TRADE_IN_TERMS):
         return choose_customer_visible_variant(
             [
-                "可以先做个大概区间。您这台2018年的朗逸、6万多公里、苏州牌我先记下，再补一下配置版本、有没有事故水泡火烧、外观内饰成色，最好加几张照片，我按行情先给您粗估。",
+                "可以先做个大概区间。旧车这边我先按车型、年份、公里数、上牌地和车况信息记录，您再补下配置、过户次数、保养和事故水泡火烧情况，估价会更准。",
                 "置换流程没问题，我先按年份、公里数、上牌地和车况给您看大概区间。您再发下配置、过户次数、保养和事故水泡火烧情况，我核实行情后判断会更准。",
                 "这台车信息已经有基础了，可以先估一版。您把配置版本、车况瑕疵、有没有出险水泡火烧，再加外观内饰照片发我，我按检测和行情给您看区间。",
             ],
@@ -3092,7 +3225,7 @@ def concealed_handoff_reply(*, combined: str = "", reason: str = "", recent_repl
         )
     return choose_customer_visible_variant(
             [
-                "这个问题我需要先核实一下，再请示负责人确认。您的需求我记下了，确认好就回您。",
+                "这个问题我需要先核实一下细节。您的需求我记下了，确认好就回您。",
                 "这点不能直接乱说，得把情况核实清楚再回复您。我记下，确认后回您。",
                 "这个我需要再确认一下细节，确认好了再回复您，避免给您说错。",
         ],
@@ -3668,7 +3801,13 @@ def brain_decision_clears_soft_evidence_handoff(
         return False
     safety = evidence_safety(intent_assist)
     reasons = {str(item) for item in safety.get("reasons", []) or [] if str(item)}
-    return bool(reasons) and reasons <= {"no_relevant_business_evidence", "auto_reply_disabled"}
+    soft_advisory_handoff_reasons = {
+        "matched_faq_requires_handoff",
+        "missing_authoritative_evidence",
+        "no_relevant_business_evidence",
+        "auto_reply_disabled",
+    }
+    return bool(reasons) and reasons <= soft_advisory_handoff_reasons
 
 
 def llm_synthesis_explicit_override(config: dict[str, Any]) -> bool:
@@ -3694,15 +3833,7 @@ def build_operator_handoff_reply_text(
             return format_reply(social_redirect, configured_reply_prefix(config))
         return current_reply_text
     if decision.rule_name in {"customer_service_brain_handoff", "customer_service_brain_reply"} and str(current_reply_text or "").strip():
-        if is_identity_or_internal_probe_request(combined) and is_identity_guard_denial_reply(current_reply_text):
-            return current_reply_text
-        specific_refusal = specific_boundary_refusal_for_request(combined)
-        if specific_refusal:
-            return format_reply(specific_refusal, configured_reply_prefix(config))
-        if str(decision.reason or "") == "risk_tag_requires_handoff" or is_specific_boundary_refusal_reply(current_reply_text):
-            return current_reply_text
-        if brain_handoff_reply_should_be_preserved(current_reply_text, combined=combined):
-            return current_reply_text
+        return current_reply_text
     if decision.rule_name == "llm_synthesis_reply" and llm_reply_already_handoff_style(current_reply_text):
         return current_reply_text
     if evidence_requires_handoff(intent_assist):
@@ -3817,7 +3948,7 @@ def handoff_acknowledgement_text(config: dict[str, Any], *, combined: str = "") 
     conceal_handoff = identity_guard_enabled_for_customer_reply(config)
     text = str(
         settings.get("acknowledgement_reply")
-        or "这个问题我当前无法直接确认，我把情况记下，问清楚负责人意见后再回复您。"
+        or "这个问题我当前无法直接确认，我把情况记下，核实清楚后再回复您。"
     )
     if handoff_acknowledgement_is_formulaic(text):
         if handoff_acknowledgement_is_low_information(text):
@@ -3826,10 +3957,10 @@ def handoff_acknowledgement_text(config: dict[str, Any], *, combined: str = "") 
             return concealed_handoff_reply(combined=combined, reason="")
         if "直接按" in str(combined or ""):
             if conceal_handoff:
-                return "这类价格我不能直接确认，我问下负责人再跟您说准。"
-            return "这类价格我不能直接确认，需要请示上级后才能给准话。"
+                return "这类价格我不能直接确认，需要按正式流程核准后再跟您说准。"
+            return "这类价格我不能直接确认，需要正式核准后才能给准话。"
         if conceal_handoff:
-            return "这点我不能直接替您定，我把问题记下，问清楚负责人意见后再回您。"
+            return "这点我不能直接替您定，我把问题记下，核实清楚后再回您。"
         return "这点我不能直接替您定，我把问题记下，让负责的同事核实后再回您。"
     return text
 
@@ -3965,8 +4096,8 @@ def customer_service_brain_failure_reason(brain_result: dict[str, Any] | None) -
         return ""
     reason = str(payload.get("reason") or "").strip()
     rule_name = str(payload.get("rule_name") or "").strip()
-    if rule_name == "customer_service_brain_safe_fallback":
-        return reason or "customer_service_brain_safe_fallback"
+    if rule_name in {"customer_service_brain_safe_fallback", "customer_service_brain_no_visible_reply"}:
+        return reason or rule_name
     if reason in BRAIN_FAILURE_ALERT_REASONS:
         return reason
     if payload.get("error"):
@@ -3974,6 +4105,78 @@ def customer_service_brain_failure_reason(brain_result: dict[str, Any] | None) -
     if not payload.get("applied") or not payload.get("adoptable"):
         return reason or "customer_service_brain_not_adopted"
     return ""
+
+
+def block_for_customer_service_brain_no_visible_reply(
+    *,
+    event: dict[str, Any],
+    target: TargetConfig,
+    target_state: dict[str, Any],
+    batch: list[dict[str, Any]],
+    combined: str,
+    config: dict[str, Any],
+    brain_result: dict[str, Any] | None,
+    product_knowledge: dict[str, Any] | None,
+) -> dict[str, Any]:
+    """Stop outbound sending when Brain First has no Brain-authored reply.
+
+    Guard, quality gates, and legacy routes may provide feedback or internal
+    operator context, but they must never become the customer-visible answer
+    engine.  Blocking here also prevents an already computed legacy/default
+    decision from leaking after Brain failure.
+    """
+
+    brain_payload = brain_result if isinstance(brain_result, dict) else {}
+    reason = customer_service_brain_failure_reason(brain_payload) or "customer_service_brain_not_adopted"
+    previous_decision = event.get("decision") if isinstance(event.get("decision"), dict) else {}
+    event["blocked_legacy_decision_before_brain"] = previous_decision
+    event["customer_service_brain_adopted"] = {
+        "applied": False,
+        "mode": brain_payload.get("mode"),
+        "rule_name": str(brain_payload.get("rule_name") or "customer_service_brain_no_visible_reply"),
+        "reason": reason,
+    }
+    event["decision"] = {
+        "reply_text": "",
+        "raw_reply_text": "",
+        "rule_name": "customer_service_brain_no_visible_reply",
+        "matched": False,
+        "need_handoff": True,
+        "reason": reason,
+    }
+    event["action"] = "blocked"
+    event["ok"] = False
+    event["reason"] = "customer_service_brain_no_visible_reply"
+    event["customer_visible_reply_blocked"] = True
+    event["brain_first_reply_audit"] = build_brain_first_reply_audit(event, reply_text="")
+    if not bool(event.get("dry_run")):
+        alert = record_operator_alert(
+            config=config,
+            target_state=target_state,
+            target=target,
+            batch=batch,
+            combined=combined,
+            reason=f"customer_service_brain_no_visible_reply:{reason}",
+            reply_text="",
+            product_knowledge=product_knowledge or {},
+        )
+        mark_handoff(
+            target_state,
+            batch,
+            reason=f"customer_service_brain_no_visible_reply:{reason}",
+            status="open",
+            operator_alert=alert,
+            reply_text="",
+        )
+        event["operator_alert"] = alert
+    write_runtime_status(
+        "idle",
+        f"「{target.name}」本轮未获得 Brain 生成的可发送回复，已暂停出站并保留人工处理记录。",
+        target=target.name,
+        last_action="blocked",
+        last_reason=reason,
+    )
+    return event
 
 
 def maybe_record_customer_service_brain_failure_alert(
@@ -4457,15 +4660,13 @@ def apply_local_customer_service_settings(config: dict[str, Any]) -> dict[str, A
     llm_synthesis.setdefault("fallback_to_existing_reply", True)
     merged["llm_reply_synthesis"] = llm_synthesis
 
-    brain_mode = str(settings.get("customer_service_brain_mode") or "off").strip()
-    if brain_mode not in {"off", "shadow", "brain_first", "hybrid_shadow"}:
-        brain_mode = "off"
+    brain_mode = normalize_customer_service_brain_mode(settings.get("customer_service_brain_mode"))
     customer_service_brain = normalize_llm_module_settings(
         merged.get("customer_service_brain", {}) or {},
-        enabled=use_llm and brain_mode != "off",
+        enabled=use_llm and brain_mode == "brain_first",
         default_tier="pro",
     )
-    customer_service_brain["enabled"] = use_llm and brain_mode != "off"
+    customer_service_brain["enabled"] = use_llm and brain_mode == "brain_first"
     customer_service_brain["mode"] = brain_mode
     customer_service_brain.setdefault("model_tier", "pro")
     customer_service_brain.setdefault("timeout_seconds", 18)
@@ -4853,7 +5054,7 @@ def brain_payload_allows_context_update(payload: dict[str, Any]) -> bool:
     if not isinstance(payload, dict):
         return False
     rule_name = str(payload.get("rule_name") or "").strip()
-    if rule_name == "customer_service_brain_safe_fallback":
+    if rule_name in {"customer_service_brain_safe_fallback", "customer_service_brain_no_visible_reply"}:
         return False
     if not bool(payload.get("applied")):
         return False
@@ -6153,16 +6354,16 @@ def clear_no_relevant_handoff_after_safe_brain_reply(
         return
     safety = evidence_safety(intent_assist)
     reasons = {str(item) for item in safety.get("reasons", []) or [] if str(item)}
-    if not reasons or not reasons <= {"no_relevant_business_evidence", "auto_reply_disabled"}:
+    soft_advisory_handoff_reasons = {
+        "matched_faq_requires_handoff",
+        "missing_authoritative_evidence",
+        "no_relevant_business_evidence",
+        "auto_reply_disabled",
+    }
+    if not reasons or not reasons <= soft_advisory_handoff_reasons:
         return
     rule_name = str(brain_result.get("rule_name") or "")
-    if rule_name == "customer_service_brain_safe_fallback" and str(brain_result.get("reply_text") or "").strip():
-        safety["must_handoff"] = False
-        safety["allowed_auto_reply"] = True
-        safety["reasons"] = []
-        safety["customer_service_brain_fallback_soft_evidence_override"] = True
-        intent_assist["needs_handoff"] = False
-        intent_assist["safe_to_auto_send"] = True
+    if rule_name in {"customer_service_brain_safe_fallback", "customer_service_brain_no_visible_reply"}:
         return
     guard = brain_result.get("guard", {}) or {}
     if guard.get("action") != "send_reply" or guard.get("reason") not in {"guard_passed", "llm_soft_handoff_downgraded"}:
@@ -6374,6 +6575,17 @@ def maybe_enrich_messages_with_history(
         anchor_found=recovered_anchor_index >= 0,
         selection=final_selection,
     )
+    overflow_batch_on_anchor_missing = bool(settings.get("overflow_batch_on_anchor_missing", True))
+    history_continuity = "anchored" if recovered_anchor_index >= 0 else ""
+    if (
+        gap_risk
+        and overflow_batch_on_anchor_missing
+        and final_selection.eligible_count > 0
+        and anchor_count > 0
+        and recovered_anchor_index < 0
+    ):
+        gap_risk = False
+        history_continuity = "overflow_unanchored"
     enriched = dict(loaded)
     enriched["messages"] = merged_messages
     enriched["_history_backfill"] = {
@@ -6394,6 +6606,8 @@ def maybe_enrich_messages_with_history(
         "anchor_index_initial": initial_anchor_index,
         "anchor_found_after_history_load": recovered_anchor_index >= 0,
         "anchor_index_after_history_load": recovered_anchor_index,
+        "history_continuity": history_continuity,
+        "overflow_batch": bool(history_continuity == "overflow_unanchored"),
         "gap_risk": gap_risk,
         "gap_reason": "anchor_missing_after_history_load" if gap_risk else "",
     }
@@ -6552,8 +6766,10 @@ def maybe_enrich_messages_with_anchor_history(
             "anchor_found_initial": False,
             "anchor_index_initial": -1,
             "search_profile": "low_volume_fast_path" if use_low_volume_profile else "default",
-            "gap_risk": bool(settings.get("block_on_anchor_not_found", settings.get("block_on_gap_risk", True))),
-            "gap_reason": "anchor_missing_history_search_disabled",
+            "gap_risk": False if bool(settings.get("overflow_batch_on_anchor_missing", True)) else bool(settings.get("block_on_anchor_not_found", settings.get("block_on_gap_risk", True))),
+            "gap_reason": "" if bool(settings.get("overflow_batch_on_anchor_missing", True)) else "anchor_missing_history_search_disabled",
+            "history_continuity": "overflow_unanchored" if bool(settings.get("overflow_batch_on_anchor_missing", True)) else "",
+            "overflow_batch": bool(settings.get("overflow_batch_on_anchor_missing", True)),
         }
         return enriched
 
@@ -6601,11 +6817,12 @@ def maybe_enrich_messages_with_anchor_history(
         )
     except Exception as exc:
         enriched = dict(payload)
+        overflow_fallback = bool(settings.get("overflow_batch_on_anchor_missing", True)) and initial_selection.eligible_count > 0
         enriched["_history_backfill"] = {
             "enabled": True,
             "mode": "anchor_until_found",
             "applied": False,
-            "reason": "anchor_history_load_exception",
+            "reason": "anchor_history_load_exception_overflow_fallback" if overflow_fallback else "anchor_history_load_exception",
             "error": repr(exc),
             "eligible_count": initial_selection.eligible_count,
             "anchor_count": anchor_count,
@@ -6619,19 +6836,22 @@ def maybe_enrich_messages_with_anchor_history(
                 "min_delay_ms": min_delay_ms,
                 "max_delay_ms": max_delay_ms,
             },
-            "gap_risk": True,
-            "gap_reason": "anchor_missing_history_load_exception",
+            "history_continuity": "overflow_unanchored" if overflow_fallback else "",
+            "overflow_batch": overflow_fallback,
+            "gap_risk": False if overflow_fallback else True,
+            "gap_reason": "" if overflow_fallback else "anchor_missing_history_load_exception",
         }
         return enriched
 
     sidecar_history_load = loaded.get("history_load") if isinstance(loaded.get("history_load"), dict) else {}
     if not loaded.get("ok") or (sidecar_history_load and sidecar_history_load.get("ok") is False):
         enriched = dict(payload)
+        overflow_fallback = bool(settings.get("overflow_batch_on_anchor_missing", True)) and initial_selection.eligible_count > 0
         enriched["_history_backfill"] = {
             "enabled": True,
             "mode": "anchor_until_found",
             "applied": False,
-            "reason": "anchor_history_load_failed",
+            "reason": "anchor_history_load_failed_overflow_fallback" if overflow_fallback else "anchor_history_load_failed",
             "result": loaded if not loaded.get("ok") else None,
             "sidecar_history_load": sidecar_history_load,
             "eligible_count": initial_selection.eligible_count,
@@ -6646,8 +6866,10 @@ def maybe_enrich_messages_with_anchor_history(
                 "min_delay_ms": min_delay_ms,
                 "max_delay_ms": max_delay_ms,
             },
-            "gap_risk": True,
-            "gap_reason": "anchor_missing_history_load_failed",
+            "history_continuity": "overflow_unanchored" if overflow_fallback else "",
+            "overflow_batch": overflow_fallback,
+            "gap_risk": False if overflow_fallback else True,
+            "gap_reason": "" if overflow_fallback else "anchor_missing_history_load_failed",
         }
         return enriched
 
@@ -6753,9 +6975,16 @@ def maybe_enrich_messages_with_anchor_history(
         config=config,
     )
     anchor_found = recovered_anchor_index >= 0 or bool(sidecar_history_load.get("anchor_found"))
-    gap_risk = final_selection.eligible_count > 0 and not anchor_found and bool(
-        settings.get("block_on_anchor_not_found", settings.get("block_on_gap_risk", True))
+    overflow_batch_on_anchor_missing = bool(settings.get("overflow_batch_on_anchor_missing", True))
+    gap_risk = (
+        final_selection.eligible_count > 0
+        and not anchor_found
+        and not overflow_batch_on_anchor_missing
+        and bool(settings.get("block_on_anchor_not_found", settings.get("block_on_gap_risk", True)))
     )
+    history_continuity = "anchored"
+    if not anchor_found and overflow_batch_on_anchor_missing and final_selection.eligible_count > 0:
+        history_continuity = "overflow_unanchored"
     enriched = dict(loaded)
     enriched["messages"] = messages_after_anchor
     enriched["_history_backfill"] = {
@@ -6786,6 +7015,8 @@ def maybe_enrich_messages_with_anchor_history(
             "max_delay_ms": max_delay_ms,
         },
         "history_window_contains_initial_batch": True,
+        "history_continuity": history_continuity,
+        "overflow_batch": bool(history_continuity == "overflow_unanchored"),
         "gap_risk": gap_risk,
         "gap_reason": "anchor_missing_after_bounded_history_search" if gap_risk else "",
     }
@@ -6831,6 +7062,7 @@ def history_backfill_settings(config: dict[str, Any] | None = None) -> dict[str,
     settings.setdefault("restore_to_latest", True)
     settings.setdefault("trigger_when_anchor_missing", True)
     settings.setdefault("block_on_anchor_not_found", settings.get("block_on_gap_risk", True))
+    settings.setdefault("overflow_batch_on_anchor_missing", True)
     settings.setdefault("trigger_visible_unprocessed_count", 6)
     settings.setdefault("trigger_visible_saturated_count", 5)
     settings.setdefault("max_messages_after_load", 80)
@@ -6938,6 +7170,63 @@ def bounded_nonnegative_int(value: Any, *, default: int, maximum: int) -> int:
     return max(0, min(maximum, parsed))
 
 
+BOOTSTRAP_PENDING_VISIBLE_MESSAGE = "当前不在可见会话列表里，待收到新消息时会自动识别"
+
+
+def truthy_setting(value: Any, *, default: bool = False) -> bool:
+    if value is None:
+        return default
+    if isinstance(value, bool):
+        return value
+    return str(value).strip().lower() not in {"0", "false", "no", "off", ""}
+
+
+def bootstrap_visible_only_target_confirmation_enabled(config: dict[str, Any] | None) -> bool:
+    cfg = config if isinstance(config, dict) else {}
+    bootstrap = cfg.get("bootstrap") if isinstance(cfg.get("bootstrap"), dict) else {}
+    guard = cfg.get("live_safety_guard") if isinstance(cfg.get("live_safety_guard"), dict) else {}
+    value = bootstrap.get("visible_only_target_confirmation")
+    if value is None:
+        value = guard.get("startup_bootstrap_visible_only")
+    return truthy_setting(value, default=True)
+
+
+def bootstrap_payload_can_wait_for_visible_target(payload: dict[str, Any] | None) -> bool:
+    data = payload if isinstance(payload, dict) else {}
+    if data.get("target_pending_visible") is True:
+        return True
+    state = str(data.get("state") or "")
+    if state not in {"target_not_confirmed_for_messages", "target_not_visible_for_messages"}:
+        return False
+    if data.get("opened") not in {False, None}:
+        return False
+    guard = data.get("guard") if isinstance(data.get("guard"), dict) else {}
+    guard_state = str(guard.get("state") or "")
+    guard_reason = str(guard.get("reason") or "")
+    hard_states = {"blank_render_detected", "login_window_detected", "auxiliary_shell_window_detected"}
+    if state in hard_states or guard_state in hard_states or guard_reason in {"blank_render", "login_or_qr", "auxiliary_shell_window"}:
+        return False
+    return True
+
+
+def mark_bootstrap_pending_visible(target: TargetConfig, target_state: dict[str, Any], payload: dict[str, Any]) -> dict[str, Any]:
+    marker = {
+        "created_at": datetime.now().isoformat(timespec="seconds"),
+        "reason": str(payload.get("reason") or payload.get("state") or "target_not_visible_waiting_for_unread"),
+        "message": BOOTSTRAP_PENDING_VISIBLE_MESSAGE,
+    }
+    target_state["bootstrap_pending_visible"] = marker
+    return base_event(
+        target,
+        "pending_visible",
+        {
+            "reason": marker["reason"],
+            "message": marker["message"],
+            "messages": payload,
+        },
+    )
+
+
 def bootstrap_target(
     connector: WeChatConnector,
     target: TargetConfig,
@@ -6955,11 +7244,21 @@ def bootstrap_target(
         },
     )
     load_times = bootstrap_history_load_times(config)
+    visible_only = bootstrap_visible_only_target_confirmation_enabled(config)
+    if visible_only:
+        load_times = 0
     try:
-        latest_payload = connector.get_messages(target.name, exact=target.exact, history_load_times=0)
+        latest_payload = connector.get_messages(
+            target.name,
+            exact=target.exact,
+            history_load_times=0,
+            visible_only_target=visible_only,
+        )
     except TypeError:
         latest_payload = connector.get_messages(target.name, exact=target.exact)
     if not latest_payload.get("ok"):
+        if visible_only and bootstrap_payload_can_wait_for_visible_target(latest_payload):
+            return mark_bootstrap_pending_visible(target, target_state, latest_payload)
         return base_event(target, "error", {"messages": latest_payload})
     payload = latest_payload
     if load_times > 0:
@@ -6997,6 +7296,7 @@ def bootstrap_target(
         added.append(message_id)
     target_state["processed_message_ids"] = processed[-MAX_STORED_IDS:]
     target_state["processed_content_keys"] = processed_content_keys[-MAX_STORED_IDS:]
+    target_state.pop("bootstrap_pending_visible", None)
     target_state.setdefault("bootstrap_events", []).append(
         {
             "message_ids": added,
@@ -7085,6 +7385,103 @@ def select_batch_details(
         eligible_count=len(batch) + len(overflow_messages),
         max_batch_messages=limit,
     )
+
+
+def select_scheduler_authoritative_batch_details(
+    payload: dict[str, Any],
+    *,
+    target_state: dict[str, Any],
+    allow_self_for_test: bool,
+    max_batch_messages: int,
+    config: dict[str, Any] | None = None,
+) -> BatchSelection:
+    """Use the scheduler-confirmed capture batch when legacy de-dupe is too strict.
+
+    Scheduler captures are created after unread/session monitoring has already
+    decided that a conversation needs a reply.  They are a stronger conversation
+    state signal than a raw OCR content-key match, but they still do not author
+    customer-visible text; the selected batch must continue through Brain.
+    """
+
+    try:
+        limit = max(1, int(max_batch_messages or DEFAULT_MAX_BATCH_MESSAGES))
+    except (TypeError, ValueError):
+        limit = DEFAULT_MAX_BATCH_MESSAGES
+    if not isinstance(payload, dict) or payload.get("_scheduler_capture_is_authoritative") is not True:
+        return BatchSelection(batch=[], overflow_messages=[], eligible_count=0, max_batch_messages=limit)
+    raw_id_list = [
+        str(item or "").strip()
+        for item in (payload.get("_scheduler_authoritative_batch_ids") or [])
+        if str(item or "").strip()
+    ]
+    raw_ids = set(raw_id_list)
+    raw_batch = [item for item in (payload.get("_scheduler_authoritative_batch") or []) if isinstance(item, dict)]
+    normalized_messages = [item for item in (payload.get("messages") or []) if isinstance(item, dict)]
+    by_id = {
+        str(item.get("id") or item.get("message_id") or "").strip(): item
+        for item in normalized_messages
+        if str(item.get("id") or item.get("message_id") or "").strip()
+    }
+    if raw_id_list:
+        authoritative_messages = [by_id.get(message_id) for message_id in raw_id_list if isinstance(by_id.get(message_id), dict)]
+        if len(authoritative_messages) < len(raw_ids):
+            for item in raw_batch:
+                message_id = str(item.get("id") or item.get("message_id") or "").strip()
+                if message_id and message_id in raw_ids and not any(str(existing.get("id") or existing.get("message_id") or "").strip() == message_id for existing in authoritative_messages if isinstance(existing, dict)):
+                    authoritative_messages.append(item)
+    else:
+        authoritative_messages = raw_batch
+    processed = set(target_state.get("processed_message_ids", []))
+    handoff = set(target_state.get("handoff_message_ids", []))
+    sent_reply_content_keys = recent_sent_reply_content_keys(target_state)
+    valid: list[dict[str, Any]] = []
+    for item in authoritative_messages:
+        if not isinstance(item, dict):
+            continue
+        if not scheduler_authoritative_message_is_reply_candidate(
+            item,
+            processed=processed,
+            handoff=handoff,
+            allow_self_for_test=allow_self_for_test,
+            config=config,
+            sent_reply_content_keys=sent_reply_content_keys,
+        ):
+            continue
+        valid.append(item)
+    overflow = valid[:-limit] if len(valid) > limit else []
+    batch = valid[-limit:]
+    return BatchSelection(
+        batch=batch,
+        overflow_messages=overflow,
+        eligible_count=len(valid),
+        max_batch_messages=limit,
+    )
+
+
+def scheduler_authoritative_message_is_reply_candidate(
+    message: dict[str, Any],
+    *,
+    processed: set[str],
+    handoff: set[str],
+    allow_self_for_test: bool,
+    config: dict[str, Any] | None = None,
+    sent_reply_content_keys: set[str] | None = None,
+) -> bool:
+    message_id = str(message.get("id") or message.get("message_id") or "")
+    content = str(message.get("content") or "").strip()
+    sender = str(message.get("sender") or "")
+    if not message_id or message_id in processed or message_id in handoff:
+        return False
+    if message.get("type") != "text" or not content:
+        return False
+    if is_bot_reply_content(content, config):
+        return False
+    if sender == "self" and not allow_self_for_test:
+        return False
+    if sender == "self" and allow_self_for_test and sent_reply_content_keys:
+        if normalize_reply_content_key(content) in sent_reply_content_keys:
+            return False
+    return True
 
 
 def message_is_reply_candidate(
@@ -7866,6 +8263,10 @@ def history_backfill_gap_risk(
 def history_gap_risk_blocks_reply(history_backfill: dict[str, Any], config: dict[str, Any] | None = None) -> bool:
     if not isinstance(history_backfill, dict) or not history_backfill.get("gap_risk"):
         return False
+    if str(history_backfill.get("history_continuity") or "") == "overflow_unanchored":
+        return False
+    if history_backfill.get("overflow_batch") is True:
+        return False
     settings = history_backfill_settings(config)
     return bool(settings.get("block_on_gap_risk", True))
 
@@ -7875,6 +8276,8 @@ def listener_runtime_status_after_result(result: dict[str, Any]) -> tuple[str, s
     last_event = events[-1] if events else {}
     if last_event.get("action") == "blocked" and last_event.get("reason") == "history_backfill_gap_risk":
         return "paused", "检测到微信消息窗口可能存在缺口，已暂停自动回复。"
+    if any(item.get("action") == "pending_visible" for item in events):
+        return "idle", BOOTSTRAP_PENDING_VISIBLE_MESSAGE
     return "idle", "本轮微信消息处理完成。"
 
 
@@ -8211,6 +8614,65 @@ def customer_service_brain_controls_reply(result: dict[str, Any] | None) -> bool
     return bool(payload.get("enabled")) and str(payload.get("mode") or "") == "brain_first"
 
 
+def brain_first_requires_brain_owned_visible_reply(config: dict[str, Any]) -> bool:
+    """Return whether every customer-visible outbound text must be Brain-owned."""
+
+    settings = effective_brain_settings(config)
+    return (
+        bool(settings.get("enabled", False))
+        and str(settings.get("mode") or "") == "brain_first"
+        and settings.get("fallback_to_legacy_on_error", False) is False
+    )
+
+
+def customer_visible_reply_is_brain_owned(
+    *,
+    event: dict[str, Any] | None = None,
+    decision: dict[str, Any] | ReplyDecision | None = None,
+) -> bool:
+    """Check whether a ready customer-visible reply is owned by customer_service_brain."""
+
+    event_payload = event if isinstance(event, dict) else {}
+    if event_payload.get("customer_visible_reply_blocked"):
+        return False
+    if isinstance(decision, ReplyDecision):
+        decision_payload = decision.__dict__
+    else:
+        decision_payload = decision if isinstance(decision, dict) else {}
+    adopted = event_payload.get("customer_service_brain_adopted")
+    adopted_payload = adopted if isinstance(adopted, dict) else {}
+    brain = event_payload.get("customer_service_brain")
+    brain_payload = brain if isinstance(brain, dict) else {}
+    rule_name = str(
+        decision_payload.get("rule_name")
+        or adopted_payload.get("rule_name")
+        or brain_payload.get("rule_name")
+        or ""
+    ).strip()
+    if rule_name in {"customer_service_brain_no_visible_reply", "customer_service_brain_safe_fallback"}:
+        return False
+    if not rule_name.startswith("customer_service_brain_"):
+        return False
+    if adopted_payload:
+        return bool(adopted_payload.get("applied"))
+    owner = str(brain_payload.get("visible_reply_owner") or decision_payload.get("visible_reply_owner") or "").strip()
+    if owner and owner.startswith(("none", "legacy", "guard", "quality_gate")):
+        return False
+    return True
+
+
+def normalize_brain_owned_customer_visible_reply_text(reply_text: str, *, config: dict[str, Any]) -> str:
+    """Only allow surface-noise cleanup on Brain-owned visible replies."""
+
+    prefix, body = split_reply_prefix(reply_text, config)
+    if not body:
+        return str(reply_text or "").strip()
+    cleaned_body = normalize_visible_reply_surface_noise(body, evidence_pack={})
+    if prefix:
+        return format_reply(cleaned_body, prefix)
+    return cleaned_body
+
+
 def config_with_legacy_reply_generators_disabled_for_brain(config: dict[str, Any]) -> dict[str, Any]:
     """Disable legacy reply generators while Brain First owns the visible reply."""
 
@@ -8244,8 +8706,6 @@ def build_brain_first_reply_audit(
     visible_owner = str(brain.get("visible_reply_owner") or "").strip()
     if visible_owner:
         owner = visible_owner
-    elif bool(adopted.get("applied")) and rule_name == "customer_service_brain_safe_fallback":
-        owner = "brain_safe_fallback"
     elif bool(adopted.get("applied")):
         owner = "brain"
     elif brain.get("enabled") and str(brain.get("mode") or "") == "brain_first":

@@ -36,14 +36,19 @@ import llm_reply_synthesis as synthesis_module  # noqa: E402
 import reply_style_adapter as reply_style_adapter_module  # noqa: E402
 from customer_intent_assist import IntentAssistResult, call_deepseek_advisory  # noqa: E402
 from customer_service_review_queue import build_review_queue  # noqa: E402
-from knowledge_loader import build_evidence_pack  # noqa: E402
+from evidence_resolver import build_evidence_item  # noqa: E402
+from knowledge_index import KnowledgeHit  # noqa: E402
+from knowledge_loader import build_evidence_pack, legacy_shared_risk_control_faq  # noqa: E402
 from listen_and_reply import (  # noqa: E402
     CustomerServiceBrainStartupError,
     ReplyDecision,
     TargetConfig,
+    apply_customer_service_brain_startup_guard,
     apply_local_customer_service_settings,
+    bootstrap_target,
     build_iteration_targets,
     build_operator_handoff_reply_text,
+    brain_first_requires_brain_owned_visible_reply,
     clear_no_relevant_handoff_after_safe_brain_reply,
     coalesce_active_targets,
     concealed_handoff_reply,
@@ -68,6 +73,7 @@ from listen_and_reply import (  # noqa: E402
     multi_target_change_warmup_delay_seconds,
     finalize_customer_visible_reply_with_llm,
     final_visible_polish_speed_settings,
+    handle_rate_limit_block,
     parse_targets,
     polish_customer_visible_reply_text,
     process_target,
@@ -77,6 +83,7 @@ from listen_and_reply import (  # noqa: E402
     select_batch,
     select_batch_details,
     split_reply_prefix,
+    normalize_brain_owned_customer_visible_reply_text,
     should_operator_handoff,
     should_defer_standalone_greeting,
     should_fast_skip_final_visible_polish,
@@ -87,6 +94,7 @@ from listen_and_reply import (  # noqa: E402
     _apply_greeting,
 )
 from apps.wechat_ai_customer_service.wechat_message_normalizer import normalize_wechat_message_record  # noqa: E402
+from apps.wechat_ai_customer_service.admin_backend.services.customer_service_scheduler import brain_first_ready_reply_ownership_failure  # noqa: E402
 from apps.wechat_ai_customer_service.admin_backend.services.customer_service_settings import CustomerServiceSettings  # noqa: E402
 from apps.wechat_ai_customer_service.llm_config import (  # noqa: E402
     DEFAULT_DEEPSEEK_CONTEXT_WINDOW_TOKENS,
@@ -304,7 +312,7 @@ def run_checks() -> dict[str, Any]:
         check_anchor_history_searches_until_anchor_found,
         check_anchor_history_uses_low_volume_fast_profile_when_single_visible_message,
         check_anchor_history_fallback_preserves_visible_batch_when_load_drops_current,
-        check_anchor_history_blocks_when_anchor_not_found,
+        check_anchor_history_overflows_when_anchor_not_found,
         check_semantic_batch_planner_groups_split_need,
         check_semantic_batch_planner_detects_mixed_risk_questions,
         check_customer_preference_context_preserves_spouse_parking_need,
@@ -315,11 +323,13 @@ def run_checks() -> dict[str, Any]:
         check_visit_preference_acknowledgement_is_not_duplicated_after_polish,
         check_rate_limit_notice_and_backoff,
         check_rate_limit_notice_suppressed_on_fallback_transport,
+        check_rate_limit_notice_suppressed_in_brain_first_mode,
         check_transport_send_rate_limit_defers_without_marking_processed,
         check_transport_send_input_not_ready_defers_without_marking_processed,
         check_auto_reply_disabled_blocks_runtime_send,
         check_customer_service_console_switches_take_effect,
         check_live_safety_guard_enforces_single_allowed_target,
+        check_bootstrap_target_records_pending_visible_without_error,
         check_live_safety_guard_multi_allowed_targets_do_not_starve_secondary_sessions,
         check_rpa_safety_allows_standalone_greeting_by_default,
         check_rpa_safety_defers_standalone_greeting_when_explicitly_enabled,
@@ -330,12 +340,15 @@ def run_checks() -> dict[str, Any]:
         check_reply_multi_bubble_can_verify_each_segment_when_enabled,
         check_identity_guard_setting_controls_ai_disclosure,
         check_identity_guard_controls_handoff_phrase_concealment,
+        check_brain_owned_visible_reply_skips_local_handoff_concealment,
         check_force_handoff_style_preserves_social_offtopic_redirect,
         check_social_offtopic_intent_assist_does_not_force_stale_handoff,
         check_contextual_greeting_avoids_repeated_file_transfer_honorific,
         check_contextual_greeting_does_not_surname_longrun_test_customer,
+        check_shared_risk_control_is_advisory_by_default,
         check_concealed_handoff_acknowledges_contact_appointment,
         check_customer_data_handoff_keeps_trade_in_context,
+        check_concealed_handoff_uses_latest_customer_turn_only,
         check_customer_data_visit_ack_does_not_force_handoff_on_customer_to_store_phrase,
         check_concealed_handoff_store_contact_preempts_prior_customer_data,
         check_concealed_handoff_denies_ai_identity_probe,
@@ -363,7 +376,7 @@ def run_checks() -> dict[str, Any]:
         check_final_visible_polish_semantic_guard_preserves_brain_decision,
         check_final_visible_polish_does_not_fast_skip_short_reply_by_default,
         check_safe_brain_reply_clears_soft_no_evidence_handoff,
-        check_brain_safe_fallback_does_not_become_soft_handoff,
+        check_brain_no_visible_reply_does_not_clear_soft_handoff,
         check_brain_handoff_preserves_specific_uncertain_reply,
         check_customer_data_write_allows_soft_handoff_only,
         check_multi_target_iteration_scans_whitelist_even_without_active_changes,
@@ -374,6 +387,7 @@ def run_checks() -> dict[str, Any]:
         check_provider_switch_ignores_stale_provider_scoped_overrides,
         check_local_customer_service_settings_follow_active_tenant_for_brain_mode,
         check_customer_service_brain_startup_guard_requires_brain_first,
+        check_scheduler_blocks_non_brain_owned_ready_reply_in_brain_first,
         check_customer_service_brain_failure_alert_threshold,
         check_local_customer_service_settings_follow_active_provider_for_llm_modules,
         check_llm_reply_application_guards,
@@ -931,7 +945,7 @@ def check_anchor_history_fallback_preserves_visible_batch_when_load_drops_curren
     assert_equal([item["id"] for item in enriched.get("messages", [])], ["current-1"], "current visible message should be preserved")
 
 
-def check_anchor_history_blocks_when_anchor_not_found() -> None:
+def check_anchor_history_overflows_when_anchor_not_found() -> None:
     config = load_smoke_config()
     config["history_backfill"] = {
         "enabled": True,
@@ -963,8 +977,9 @@ def check_anchor_history_blocks_when_anchor_not_found() -> None:
         target_state={"processed_message_ids": ["old-1"], "processed_content_keys": [], "handoff_message_ids": []},
     )
     meta = enriched.get("_history_backfill") or {}
-    assert_true(meta.get("gap_risk") is True, "missing anchor after bounded search should block reply")
-    assert_equal(meta.get("gap_reason"), "anchor_missing_after_bounded_history_search", "gap reason should be explicit")
+    assert_true(meta.get("gap_risk") is False, "missing anchor after bounded search should downgrade to overflow reply")
+    assert_equal(meta.get("history_continuity"), "overflow_unanchored", "overflow continuity should be explicit")
+    assert_true(meta.get("overflow_batch") is True, "overflow batch should be explicit")
 
 
 def check_semantic_batch_planner_groups_split_need() -> None:
@@ -1479,6 +1494,44 @@ def check_rate_limit_notice_suppressed_on_fallback_transport() -> None:
     assert_equal(connector.sent_texts, [], "suppressed fallback notice should not send another WeChat message")
 
 
+def check_rate_limit_notice_suppressed_in_brain_first_mode() -> None:
+    config = load_smoke_config()
+    config["customer_service_brain"] = {
+        "enabled": True,
+        "mode": "brain_first",
+        "fallback_to_legacy_on_error": False,
+    }
+    assert_true(brain_first_requires_brain_owned_visible_reply(config), "Brain First ownership guard should be active")
+    target = parse_targets(config)[0]
+    connector = FakeConnector([])
+    target_state: dict[str, Any] = {}
+    event: dict[str, Any] = {"decision": {"rule_name": "rate_limit"}}
+
+    result = handle_rate_limit_block(
+        connector=connector,  # type: ignore[arg-type]
+        target=target,
+        config=config,
+        target_state=target_state,
+        event=event,
+        message_ids=["brain-rate-1"],
+        rate_check={
+            "allowed": False,
+            "reason": "max_replies_per_10_minutes",
+            "retry_after_seconds": 60,
+            "retry_after_at": (datetime.now() + timedelta(minutes=1)).isoformat(timespec="seconds"),
+        },
+    )
+
+    assert_equal(result.get("action"), "blocked", "Brain First rate-limit path should block locally")
+    assert_true(result.get("customer_visible_reply_blocked") is True, "local rate-limit notice must not become customer-visible")
+    assert_equal(
+        result.get("rate_limit_notice", {}).get("reason"),
+        "brain_first_no_local_customer_visible_notice",
+        "Brain First should suppress local customer-facing rate-limit text",
+    )
+    assert_equal(connector.sent_texts, [], "Brain First rate-limit block must not send a local notice")
+
+
 def check_transport_send_rate_limit_defers_without_marking_processed() -> None:
     config = load_smoke_config()
     rules = load_rules(resolve_path(config.get("rules_path")))
@@ -1629,7 +1682,7 @@ def check_customer_service_console_switches_take_effect() -> None:
         )
         assert_equal(disabled_event.get("reason"), "customer_service_disabled", "master switch should stop replies")
 
-        settings_store.save(
+        legacy_settings = settings_store.save(
             {
                 "enabled": True,
                 "reply_mode": "record_only",
@@ -1644,6 +1697,13 @@ def check_customer_service_console_switches_take_effect() -> None:
                 "customer_service_brain_mode": "shadow",
             }
         )
+        assert_equal(
+            legacy_settings.get("customer_service_brain_mode"),
+            "brain_first",
+            "legacy console brain modes should be collapsed to Brain First",
+        )
+        summary_modes = [item.get("id") for item in settings_store.summary().get("customer_service_brain_modes", [])]
+        assert_equal(summary_modes, ["brain_first"], "console should hide legacy customer-service brain modes")
         record_only_config = apply_local_customer_service_settings(load_smoke_config())
         assert_true(record_only_config["intent_assist"]["llm_advisory"]["enabled"] is True, "LLM switch should enable LLM advisory")
         assert_equal(record_only_config["intent_assist"]["llm_advisory"]["provider"], "openai", "LLM advisory should follow the active model provider")
@@ -1652,8 +1712,8 @@ def check_customer_service_console_switches_take_effect() -> None:
         assert_true(record_only_config["reply_style_adapter"]["enabled"] is True, "style-adapter switch should enable reply adaptation")
         assert_true(record_only_config["final_visible_llm_polish"]["enabled"] is True, "LLM switch should enable final visible polish")
         assert_equal(record_only_config["final_visible_llm_polish"]["provider"], "openai", "final visible polish should follow the active model provider")
-        assert_true(record_only_config["customer_service_brain"]["enabled"] is True, "shadow brain should be enabled when LLM is on")
-        assert_equal(record_only_config["customer_service_brain"]["mode"], "shadow", "customer-service brain should keep console-selected shadow mode")
+        assert_true(record_only_config["customer_service_brain"]["enabled"] is True, "Brain should be enabled when LLM is on")
+        assert_equal(record_only_config["customer_service_brain"]["mode"], "brain_first", "customer-service brain should reject console-selected legacy mode")
         assert_equal(record_only_config["customer_service_brain"]["provider"], "openai", "customer-service brain should follow active model provider")
         record_only_event = process_target(
             connector=FakeConnector([{"id": "record-1", "type": "text", "content": "商用冰箱多少钱", "sender": "self"}]),  # type: ignore[arg-type]
@@ -1682,8 +1742,9 @@ def check_customer_service_console_switches_take_effect() -> None:
             }
         )
         no_handoff_config = apply_local_customer_service_settings(load_smoke_config())
+        no_handoff_connector = FakeConnector([{"id": "risk-1", "type": "text", "content": "买10台冰箱能按20台价格吗？", "sender": "self"}])
         no_handoff_event = process_target(
-            connector=FakeConnector([{"id": "risk-1", "type": "text", "content": "买10台冰箱能按20台价格吗？", "sender": "self"}]),  # type: ignore[arg-type]
+            connector=no_handoff_connector,  # type: ignore[arg-type]
             target=parse_targets(no_handoff_config)[0],
             config=no_handoff_config,
             rules=load_rules(resolve_path(no_handoff_config.get("rules_path"))),
@@ -1693,7 +1754,14 @@ def check_customer_service_console_switches_take_effect() -> None:
             allow_fallback_send=False,
             mark_dry_run=False,
         )
-        assert_equal(no_handoff_event.get("reason"), "operator_handoff_disabled", "handoff-off switch should block risky handoff replies")
+        assert_true(
+            no_handoff_event.get("reason") in {"operator_handoff_disabled", "customer_service_brain_no_visible_reply"},
+            f"handoff-off switch should block outbound send without legacy visible text: {no_handoff_event.get('reason')}",
+        )
+        assert_true(
+            not no_handoff_connector.sent_texts,
+            "handoff-off switch must not send a legacy customer-visible handoff text",
+        )
 
         settings_store.save(
             {
@@ -1842,12 +1910,86 @@ def check_live_safety_guard_enforces_single_allowed_target() -> None:
             now_ts=now.timestamp(),
         )
         assert_true(bootstrap_summary.get("ok") is True, "recent bootstrap should satisfy live startup guard")
+        pending_summary = assert_customer_service_recent_bootstrap_guard(
+            base_config,
+            state={
+                "targets": {
+                    "许聪": {
+                        "bootstrap_pending_visible": {
+                            "created_at": now.isoformat(timespec="seconds"),
+                            "reason": "target_not_visible_waiting_for_unread",
+                        }
+                    }
+                }
+            },
+            now_ts=now.timestamp(),
+        )
+        assert_true(pending_summary.get("ok") is True, "pending-visible bootstrap should allow startup without sidebar search")
+        assert_equal(
+            pending_summary.get("pending_visible_targets"),
+            {"许聪": now.isoformat(timespec="seconds")},
+            "pending-visible bootstrap should be reported separately from confirmed baseline",
+        )
     finally:
         remove_file(settings_store.settings_path)
         if old_tenant is None:
             os.environ.pop("WECHAT_KNOWLEDGE_TENANT", None)
         else:
             os.environ["WECHAT_KNOWLEDGE_TENANT"] = old_tenant
+
+
+def check_bootstrap_target_records_pending_visible_without_error() -> None:
+    class PendingVisibleConnector:
+        def __init__(self) -> None:
+            self.calls: list[dict[str, Any]] = []
+
+        def get_messages(self, target: str, exact: bool = True, history_load_times: int = 0, **kwargs: Any) -> dict[str, Any]:
+            self.calls.append(
+                {
+                    "target": target,
+                    "exact": exact,
+                    "history_load_times": history_load_times,
+                    "visible_only_target": kwargs.get("visible_only_target"),
+                }
+            )
+            return {
+                "ok": False,
+                "target": target,
+                "state": "target_not_confirmed_for_messages",
+                "opened": False,
+                "target_pending_visible": True,
+                "reason": "target_not_visible_waiting_for_unread",
+            }
+
+    target = TargetConfig(
+        name="许聪",
+        enabled=True,
+        exact=True,
+        allow_self_for_test=False,
+        max_batch_messages=2,
+    )
+    config = load_smoke_config()
+    config["bootstrap"] = {"visible_only_target_confirmation": True, "history_load_times": 2}
+    state: dict[str, Any] = {"targets": {}}
+    connector = PendingVisibleConnector()
+
+    event = bootstrap_target(connector, target, state, config)  # type: ignore[arg-type]
+    assert_true(event.get("ok") is True, f"pending-visible bootstrap should not fail startup: {event}")
+    assert_equal(event.get("action"), "pending_visible", "invisible target should be marked pending-visible")
+    assert_true(
+        bool(state.get("targets", {}).get("许聪", {}).get("bootstrap_pending_visible")),
+        "pending-visible marker should be stored on target state",
+    )
+    assert_equal(
+        connector.calls[0].get("visible_only_target"),
+        True,
+        "bootstrap should use visible-only target confirmation by default",
+    )
+    assert_equal(
+        connector.calls[0].get("history_load_times"),
+        0,
+        "visible-only bootstrap should avoid history backfill/scrolling",
+    )
 
 
 def check_live_safety_guard_multi_allowed_targets_do_not_starve_secondary_sessions() -> None:
@@ -1904,9 +2046,11 @@ def check_live_safety_guard_multi_allowed_targets_do_not_starve_secondary_sessio
             1,
             "multi-session guard should keep only a minimal anti-bounce switch interval",
         )
-        assert_true(not bool(multi_target.get("switch_human_delay_enabled")), "switch delay should be disabled so unread sessions are opened promptly")
-        assert_equal(float(multi_target.get("switch_human_delay_min_seconds") or 0.0), 0.0, "switch delay min should be 0")
-        assert_equal(float(multi_target.get("switch_human_delay_max_seconds") or 0.0), 0.0, "switch delay max should be 0")
+        assert_true(bool(multi_target.get("switch_human_delay_enabled")), "switch delay should be humanized rather than hard-disabled")
+        assert_equal(float(multi_target.get("switch_human_delay_min_seconds") or 0.0), 1.0, "switch delay min should be 1s")
+        assert_equal(float(multi_target.get("switch_human_delay_max_seconds") or 0.0), 3.0, "switch delay max should be 3s")
+        assert_true(multi_target.get("require_unread_badge_for_dispatch") is True, "multi-session guard should require visual unread badges")
+        assert_true(multi_target.get("require_preview_signal_with_unread_badge") is True, "multi-session guard should require badge plus preview/time signal")
         assert_true(not bool(multi_target.get("capture_one_target_per_round")), "capture should allow two unread targets while keeping sends serialized")
     finally:
         remove_file(settings_store.settings_path)
@@ -2226,6 +2370,24 @@ def check_identity_guard_controls_handoff_phrase_concealment() -> None:
     assert_equal(raw, base, "disabled identity guard should keep original wording")
 
 
+def check_brain_owned_visible_reply_skips_local_handoff_concealment() -> None:
+    config = load_smoke_config()
+    config.setdefault("llm_reply_synthesis", {})["identity_guard_enabled"] = True
+    brain_reply = "[客服] 这台奥迪A4L的车况我不能随口定，我先按检测报告核一下再回您。"
+    local_rewritten = sanitize_customer_visible_reply_text(
+        brain_reply,
+        config=config,
+        combined="这台奥迪A4L是不是全车原漆？",
+        reason="handoff_required",
+        force_handoff_style=True,
+        recent_reply_texts=[],
+    )
+    brain_owned = normalize_brain_owned_customer_visible_reply_text(brain_reply, config=config)
+
+    assert_true(local_rewritten != brain_reply, "legacy handoff sanitizer should demonstrate the old overwrite risk")
+    assert_equal(brain_owned, brain_reply, "Brain-owned reply must not be replaced by local handoff concealment")
+
+
 def check_force_handoff_style_preserves_social_offtopic_redirect() -> None:
     config = load_smoke_config()
     config.setdefault("llm_reply_synthesis", {})["identity_guard_enabled"] = True
@@ -2308,6 +2470,63 @@ def check_contextual_greeting_does_not_surname_longrun_test_customer() -> None:
         recent_reply_texts=[],
     )
     assert_true("长哥" not in reply, "long-run/test customer labels must not become surname honorifics")
+
+
+def check_shared_risk_control_is_advisory_by_default() -> None:
+    item = {
+        "data": {
+            "title": "风险提示",
+            "keywords": ["价格", "优惠"],
+            "guideline_text": "涉及价格优惠时要以正式规则为准。",
+        },
+        "runtime": {"risk_level": "normal"},
+    }
+    hit = KnowledgeHit(
+        category_id="risk_control",
+        item_id="risk_advisory_price",
+        title="风险提示",
+        matched_fields=("keywords",),
+        match_reason="keyword",
+        confidence=0.8,
+        category={},
+        schema={},
+        resolver={},
+        item=item,
+    )
+    evidence_item = build_evidence_item(hit, ["quote"])
+    assert_true(evidence_item.get("advisory_only") is True, "normal risk-control evidence should be advisory")
+    assert_true(evidence_item.get("requires_handoff") is False, "normal risk-control evidence must not force handoff")
+    assert_true(evidence_item.get("allow_auto_reply") is True, "normal risk-control evidence should not disable auto reply")
+
+    legacy_faq = legacy_shared_risk_control_faq(item, evidence_item)
+    assert_true(legacy_faq.get("advisory_only") is True, "legacy FAQ bridge should preserve advisory status")
+    assert_true(legacy_faq.get("needs_handoff") is False, "legacy FAQ bridge must not turn advisory risk into handoff")
+    assert_true(legacy_faq.get("auto_reply_allowed") is True, "legacy FAQ bridge should allow Brain auto reply")
+
+
+def check_concealed_handoff_uses_latest_customer_turn_only() -> None:
+    combined = (
+        "客服：预算12-15万可以先看宝马320Li 12.8万和奥迪A4L 14.5万。\n"
+        "客户：如果优先车况透明、油耗别高，你会建议我先看凯美瑞、雅阁还是SUV？"
+    )
+    reply = concealed_handoff_reply(
+        combined=combined,
+        reason="matched_faq_requires_handoff,shared_risk_control",
+    )
+    forbidden = ("价格、库存", "争取归争取", "付款方案", "成交价", "最低价", "优惠我会帮您核")
+    assert_true(
+        not any(marker in reply for marker in forbidden),
+        f"handoff wording must not be polluted by prior self price/product text: {reply}",
+    )
+
+    trade_reply = concealed_handoff_reply(
+        combined="客户：我有台旧车想置换，大概流程怎么走？",
+        reason="trade_in_boundary",
+    )
+    assert_true(
+        not any(marker in trade_reply for marker in ("2018年的朗逸", "6万多公里", "苏州牌")),
+        f"trade-in handoff should not contain hard-coded fixture car data: {trade_reply}",
+    )
 
 
 def check_concealed_handoff_acknowledges_contact_appointment() -> None:
@@ -3351,7 +3570,7 @@ def check_safe_brain_reply_clears_soft_no_evidence_handoff() -> None:
     assert_true(hard["evidence"]["safety"].get("must_handoff") is True, "hard risk handoff must stay blocked")
 
 
-def check_brain_safe_fallback_does_not_become_soft_handoff() -> None:
+def check_brain_no_visible_reply_does_not_clear_soft_handoff() -> None:
     intent_assist = {
         "needs_handoff": True,
         "safe_to_auto_send": False,
@@ -3364,29 +3583,29 @@ def check_brain_safe_fallback_does_not_become_soft_handoff() -> None:
         },
     }
     decision = ReplyDecision(
-        reply_text="我这边先确认一下，马上回复您。",
-        rule_name="customer_service_brain_safe_fallback",
-        matched=True,
-        need_handoff=False,
+        reply_text="",
+        rule_name="customer_service_brain_no_visible_reply",
+        matched=False,
+        need_handoff=True,
         reason="brain_quality_verification_failed",
     )
     assert_true(
         should_operator_handoff(decision, None, False, intent_assist=intent_assist, combined="你觉得今晚吃火锅还是烤肉？")
-        is False,
-        "Brain-owned non-handoff fallback must not be upgraded by soft no-evidence safety",
+        is True,
+        "Brain no-visible-reply failure should remain an internal handoff/block, not a customer-visible fallback",
     )
     clear_no_relevant_handoff_after_safe_brain_reply(
         intent_assist,
         {
-            "applied": True,
-            "rule_name": "customer_service_brain_safe_fallback",
-            "reply_text": "我这边先确认一下，马上回复您。",
-            "needs_handoff": False,
+            "applied": False,
+            "rule_name": "customer_service_brain_no_visible_reply",
+            "reply_text": "",
+            "needs_handoff": True,
         },
     )
     safety = intent_assist["evidence"]["safety"]
-    assert_true(safety.get("must_handoff") is False, f"soft evidence handoff should be cleared for Brain fallback: {intent_assist}")
-    assert_true(intent_assist.get("needs_handoff") is False, f"intent assist handoff flag should be cleared: {intent_assist}")
+    assert_true(safety.get("must_handoff") is True, f"non-reply must not clear soft evidence handoff: {intent_assist}")
+    assert_true(intent_assist.get("needs_handoff") is True, f"non-reply must not clear intent handoff flag: {intent_assist}")
 
     hard_intent_assist = {
         "evidence": {
@@ -3462,8 +3681,8 @@ def check_brain_handoff_preserves_specific_uncertain_reply() -> None:
         combined="我有两套灯架、背景架和三个箱子，第二排能不能放倒装东西？",
     )
     assert_true(
-        low_info != "这个问题我当前无法直接确认，我把情况记下，问清楚负责人意见后再回复您。",
-        f"generic low-info Brain handoff should still be rebuilt by normal handoff wording: {low_info}",
+        low_info == "这个问题我当前无法直接确认，我把情况记下，问清楚负责人意见后再回复您。",
+        f"Brain handoff text must not be rebuilt locally; low-info should be repaired before adoption: {low_info}",
     )
 
 
@@ -3689,23 +3908,38 @@ def check_customer_service_brain_startup_guard_requires_brain_first() -> None:
     os.environ["WECHAT_KNOWLEDGE_TENANT"] = tenant_id
     remove_file(settings_store.settings_path)
     try:
-        settings_store.save(
+        normalized_settings = settings_store.save(
             {
                 "use_llm": True,
                 "customer_service_brain_mode": "off",
                 "final_visible_llm_polish_enabled": True,
             }
         )
+        assert_equal(
+            normalized_settings.get("customer_service_brain_mode"),
+            "brain_first",
+            "saved legacy brain mode should be hidden and normalized",
+        )
         blocked_config = load_smoke_config()
+        blocked_config["customer_service_brain"] = {
+            "enabled": False,
+            "mode": "off",
+            "fallback_to_legacy_on_error": True,
+        }
+        blocked_config["final_visible_llm_polish"] = {
+            "enabled": False,
+            "required_for_send": False,
+        }
         blocked_config["_require_customer_service_brain_first_startup_guard"] = True
         try:
-            apply_local_customer_service_settings(blocked_config)
+            apply_customer_service_brain_startup_guard(blocked_config, settings={"use_llm": True})
         except CustomerServiceBrainStartupError as exc:
             summary = exc.summary
         else:
-            raise AssertionError("Brain startup guard should reject non-brain_first mode")
+            raise AssertionError("Brain startup guard should reject hand-built non-brain_first config")
         assert_true("brain_disabled" in summary.get("fail_reasons", []), f"expected brain_disabled: {summary}")
         assert_true("brain_mode_not_brain_first" in summary.get("fail_reasons", []), f"expected brain mode failure: {summary}")
+        assert_true("legacy_fallback_enabled" in summary.get("fail_reasons", []), f"expected legacy fallback failure: {summary}")
 
         settings_store.save(
             {
@@ -3725,6 +3959,49 @@ def check_customer_service_brain_startup_guard_requires_brain_first() -> None:
             os.environ.pop("WECHAT_KNOWLEDGE_TENANT", None)
         else:
             os.environ["WECHAT_KNOWLEDGE_TENANT"] = old_tenant
+
+
+def check_scheduler_blocks_non_brain_owned_ready_reply_in_brain_first() -> None:
+    allowed = {
+        "decision": {
+            "brain_first_visible_reply_required": True,
+            "rule_name": "customer_service_brain_reply",
+        }
+    }
+    blocked = {
+        "decision": {
+            "brain_first_visible_reply_required": True,
+            "rule_name": "realtime_catalog_price_fact",
+        }
+    }
+    no_visible = {
+        "decision": {
+            "brain_first_visible_reply_required": True,
+            "rule_name": "customer_service_brain_no_visible_reply",
+        }
+    }
+    legacy_mode = {
+        "decision": {
+            "rule_name": "realtime_catalog_price_fact",
+        }
+    }
+
+    assert_equal(brain_first_ready_reply_ownership_failure(allowed), "", "Brain-owned ready reply should be sendable")
+    assert_equal(
+        brain_first_ready_reply_ownership_failure(blocked),
+        "brain_first_non_brain_owned_ready_reply_blocked",
+        "non-Brain ready reply must be blocked in Brain First mode",
+    )
+    assert_equal(
+        brain_first_ready_reply_ownership_failure(no_visible),
+        "brain_first_non_brain_owned_ready_reply_blocked",
+        "no-visible Brain failure payload must not be sent",
+    )
+    assert_equal(
+        brain_first_ready_reply_ownership_failure(legacy_mode),
+        "",
+        "legacy scheduler modes should not be blocked by the Brain First marker guard",
+    )
 
 
 def check_customer_service_brain_failure_alert_threshold() -> None:
@@ -3776,9 +4053,9 @@ def check_customer_service_brain_failure_alert_threshold() -> None:
                 brain_result={
                     "enabled": True,
                     "mode": "brain_first",
-                    "applied": True,
-                    "adoptable": True,
-                    "rule_name": "customer_service_brain_safe_fallback",
+                    "applied": False,
+                    "adoptable": False,
+                    "rule_name": "customer_service_brain_no_visible_reply",
                     "reason": "customer_service_brain_llm_unavailable",
                 },
                 product_knowledge={},
@@ -3794,9 +4071,9 @@ def check_customer_service_brain_failure_alert_threshold() -> None:
             brain_result={
                 "enabled": True,
                 "mode": "brain_first",
-                "applied": True,
-                "adoptable": True,
-                "rule_name": "customer_service_brain_safe_fallback",
+                "applied": False,
+                "adoptable": False,
+                "rule_name": "customer_service_brain_no_visible_reply",
                 "reason": "customer_service_brain_llm_unavailable",
             },
             product_knowledge={},

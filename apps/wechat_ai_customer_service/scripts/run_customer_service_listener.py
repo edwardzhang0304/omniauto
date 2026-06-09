@@ -57,6 +57,7 @@ TRANSPORT_RISK_DEFAULTS = {
     "passive_logout_probe_interval_seconds": 45,
     "passive_logout_probe_fail_stop_threshold": 1,
     "passive_logout_probe_timeout_seconds": 12,
+    "interactive_calibration_timeout_seconds": 24,
     "interactive_calibration_enabled": True,
     "startup_interactive_calibration_enabled": True,
     "resume_interactive_calibration_enabled": True,
@@ -259,6 +260,13 @@ def load_transport_risk_settings(config_path: Path) -> dict[str, Any]:
             or TRANSPORT_RISK_DEFAULTS["passive_logout_probe_timeout_seconds"]
         ),
     )
+    settings["interactive_calibration_timeout_seconds"] = positive_int(
+        os.getenv("WECHAT_RPA_INTERACTIVE_CALIBRATION_TIMEOUT_SECONDS"),
+        int(
+            settings.get("interactive_calibration_timeout_seconds")
+            or TRANSPORT_RISK_DEFAULTS["interactive_calibration_timeout_seconds"]
+        ),
+    )
     settings["interactive_calibration_enabled"] = env_bool(
         "WECHAT_RPA_INTERACTIVE_CALIBRATION_ENABLED",
         default=bool(settings.get("interactive_calibration_enabled", True)),
@@ -438,6 +446,10 @@ def normalize_transport_risk_settings(settings: dict[str, Any] | None) -> dict[s
         "passive_logout_probe_timeout_seconds": positive_int(
             source.get("passive_logout_probe_timeout_seconds"),
             TRANSPORT_RISK_DEFAULTS["passive_logout_probe_timeout_seconds"],
+        ),
+        "interactive_calibration_timeout_seconds": positive_int(
+            source.get("interactive_calibration_timeout_seconds"),
+            TRANSPORT_RISK_DEFAULTS["interactive_calibration_timeout_seconds"],
         ),
         "interactive_calibration_enabled": bool(
             source.get("interactive_calibration_enabled", TRANSPORT_RISK_DEFAULTS["interactive_calibration_enabled"])
@@ -1732,6 +1744,61 @@ def run_interactive_rpa_calibration(
     }
 
 
+def status_payload_confirms_wechat_readable(payload: dict[str, Any], *, settings: dict[str, Any]) -> bool:
+    """Return True only when status is enough to keep startup alive safely.
+
+    Startup calibration can be slower than passive OCR. A readable main window is
+    enough to start idle listening, but not enough to bypass send-time focus checks.
+    """
+    if not isinstance(payload, dict) or not payload:
+        return False
+    signals = extract_transport_risk_signals(payload)
+    if signals.get("login_detected") or signals.get("hard_block_detected") or signals.get("abnormal_window_detected"):
+        return False
+    if payload.get("ok") is not True or payload.get("online") is not True:
+        return False
+    state = str(payload.get("state") or "").strip()
+    reason = str(payload.get("reason") or "").strip()
+    if state in TRANSPORT_LOGIN_STATES or state in TRANSPORT_ABNORMAL_WINDOW_STATES:
+        return False
+    if reason in {"login_or_qr", "blank_render", "auxiliary_shell_window"}:
+        return False
+    try:
+        ocr_count = int(payload.get("ocr_count") or 0)
+    except (TypeError, ValueError):
+        ocr_count = 0
+    min_ocr_count = int(normalize_transport_risk_settings(settings).get("passive_probe_empty_ocr_min_count") or 1)
+    return ocr_count >= min_ocr_count
+
+
+def startup_interactive_calibration_can_defer(
+    calibration: dict[str, Any],
+    *,
+    passive_probe: dict[str, Any] | None,
+    settings: dict[str, Any],
+) -> dict[str, Any]:
+    """Decide whether a startup-only interactive calibration failure can be deferred.
+
+    This avoids stopping the listener when WeChat is readable but foreground
+    activation/normalization was just slow. Dangerous states still hard-stop via
+    the passive probe and transport-risk verdict.
+    """
+    calibration_payload = calibration.get("status_payload") if isinstance(calibration.get("status_payload"), dict) else {}
+    if status_payload_confirms_wechat_readable(calibration_payload, settings=settings):
+        return {"ok": True, "reason": "interactive_status_readable"}
+    probe_payload = (
+        passive_probe.get("status_payload")
+        if isinstance(passive_probe, dict) and isinstance(passive_probe.get("status_payload"), dict)
+        else {}
+    )
+    if isinstance(passive_probe, dict) and passive_probe.get("ok") is True and status_payload_confirms_wechat_readable(
+        probe_payload,
+        settings=settings,
+    ):
+        return {"ok": True, "reason": "passive_probe_readable"}
+    return {"ok": False, "reason": "wechat_not_readable"}
+
+
 def evaluate_passive_logout_probe(
     probe: dict[str, Any],
     *,
@@ -2045,6 +2112,9 @@ def main() -> int:
     print(f"Managed listener for {tenant_id} starting with PID={os.getpid()}", file=sys.stderr)
 
     env = dict(os.environ)
+    # Bind the current listener process as well as child environments. Several
+    # workflow paths resolve tenant-scoped knowledge in-process.
+    os.environ["WECHAT_KNOWLEDGE_TENANT"] = tenant_id
     env["WECHAT_KNOWLEDGE_TENANT"] = tenant_id
     env["PYTHONUTF8"] = "1"
     env["PYTHONIOENCODING"] = "utf-8"
@@ -2276,6 +2346,13 @@ def main() -> int:
     passive_probe_enabled = bool(risk_settings.get("passive_logout_probe_enabled", True))
     passive_probe_interval_seconds = max(5.0, float(risk_settings.get("passive_logout_probe_interval_seconds") or 45.0))
     passive_probe_timeout_seconds = max(1.0, float(risk_settings.get("passive_logout_probe_timeout_seconds") or 12.0))
+    interactive_calibration_timeout_seconds = max(
+        passive_probe_timeout_seconds,
+        float(
+            risk_settings.get("interactive_calibration_timeout_seconds")
+            or TRANSPORT_RISK_DEFAULTS["interactive_calibration_timeout_seconds"]
+        ),
+    )
     passive_probe_last_at = float((risk_guard_state or {}).get("passive_logout_probe_last_at") or 0.0)
     last_passive_probe_verdict: dict[str, Any] = {}
 
@@ -2285,7 +2362,7 @@ def main() -> int:
             return None
         calibration = run_interactive_rpa_calibration(
             env=env,
-            timeout_seconds=passive_probe_timeout_seconds,
+            timeout_seconds=interactive_calibration_timeout_seconds,
             reason=reason,
         )
         now_for_calibration = time.time()
@@ -2328,17 +2405,80 @@ def main() -> int:
         )
         if calibration.get("ok"):
             return None
+        startup_passive_probe: dict[str, Any] = {}
+        startup_passive_verdict: dict[str, Any] = {}
+        if reason == "startup" and passive_probe_enabled:
+            startup_passive_probe = run_passive_logout_probe(
+                env=env,
+                timeout_seconds=passive_probe_timeout_seconds,
+            )
+            startup_passive_verdict = evaluate_passive_logout_probe(
+                startup_passive_probe,
+                guard_state=risk_guard_state,
+                settings=risk_settings,
+                now_ts=time.time(),
+            )
+            if isinstance(startup_passive_verdict.get("state"), dict):
+                risk_guard_state = startup_passive_verdict["state"]
+            defer_decision = startup_interactive_calibration_can_defer(
+                calibration,
+                passive_probe=startup_passive_probe,
+                settings=risk_settings,
+            )
+            append_log(
+                log_path,
+                {
+                    "event": "managed_listener_startup_interactive_calibration_defer_check",
+                    "tenant_id": tenant_id,
+                    "defer": bool(defer_decision.get("ok")) and not bool(startup_passive_verdict.get("stop")),
+                    "decision": defer_decision,
+                    "passive_probe": startup_passive_probe,
+                    "passive_transport_risk": {
+                        "stop": bool(startup_passive_verdict.get("stop")),
+                        "reason": startup_passive_verdict.get("reason"),
+                        "failures": startup_passive_verdict.get("failures"),
+                        "hits": startup_passive_verdict.get("hits"),
+                    },
+                },
+            )
+            if bool(defer_decision.get("ok")) and not bool(startup_passive_verdict.get("stop")):
+                risk_guard_state["last_interactive_calibration_deferred_at"] = time.time()
+                risk_guard_state["last_interactive_calibration_deferred_reason"] = str(defer_decision.get("reason") or "")
+                risk_guard_state["last_interactive_calibration_ok"] = False
+                write_transport_risk_guard_state(risk_state_file, risk_guard_state)
+                deferred_verdict = {
+                    "enabled": True,
+                    "stop": False,
+                    "reason": "startup_interactive_calibration_deferred",
+                    "message": "微信窗口可读，启动交互校准已延后，监听继续运行。",
+                    "calibration": calibration,
+                    "passive_probe": startup_passive_probe,
+                    "defer_decision": defer_decision,
+                    "trigger": trigger or {},
+                }
+                write_runtime_status(
+                    "idle",
+                    "微信窗口可读，启动交互校准已延后，监听继续运行。",
+                    tenant_id=tenant_id,
+                    transport_risk={"interactive_calibration": deferred_verdict},
+                )
+                return None
         stop_reason = str(risk_verdict.get("reason") or "wechat_interactive_calibration_failed")
         stop_message = str(
             risk_verdict.get("message")
             or "微信窗口校准失败，已停止监听。请确认微信主窗口未被遮挡、未白屏且已登录后再启动。"
         )
+        if bool(startup_passive_verdict.get("stop")):
+            stop_reason = str(startup_passive_verdict.get("reason") or stop_reason)
+            stop_message = str(startup_passive_verdict.get("message") or stop_message)
         stop_verdict = risk_verdict if risk_verdict.get("stop") else {
             "enabled": True,
             "stop": True,
             "reason": stop_reason,
             "message": stop_message,
             "calibration": calibration,
+            "passive_probe": startup_passive_probe,
+            "passive_transport_risk": startup_passive_verdict,
             "trigger": trigger or {},
         }
         runtime_handoff = create_runtime_transport_handoff_case(

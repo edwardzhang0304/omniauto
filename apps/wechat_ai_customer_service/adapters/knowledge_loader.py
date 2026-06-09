@@ -477,15 +477,31 @@ def legacy_style_example(item: dict[str, Any], evidence_item: dict[str, Any]) ->
 
 def legacy_shared_risk_control_faq(item: dict[str, Any], evidence_item: dict[str, Any]) -> dict[str, Any]:
     data = item.get("data", {}) or {}
+    runtime = item.get("runtime", {}) or {}
+    data_has_auto_reply = "allow_auto_reply" in data
+    data_has_handoff = "requires_handoff" in data
+    explicit_auto_reply = data.get("allow_auto_reply") if data_has_auto_reply else runtime.get("allow_auto_reply", True)
+    explicit_requires_handoff = data.get("requires_handoff") if data_has_handoff else runtime.get("requires_handoff", False)
+    runtime_requires_handoff = bool(runtime.get("requires_handoff", False)) and not data_has_handoff
+    risk_level = str(runtime.get("risk_level") or data.get("risk_level") or "normal").strip().lower()
+    auto_reply_allowed = bool(explicit_auto_reply is not False and runtime.get("allow_auto_reply", True) is not False)
+    needs_handoff = bool(
+        explicit_requires_handoff
+        or runtime_requires_handoff
+        or evidence_item.get("requires_handoff", False)
+        or risk_level == "high"
+        or explicit_auto_reply is False
+    )
     return {
         "intent": str(item.get("id") or data.get("title") or "shared_risk_control"),
-        "priority": 100,
+        "priority": 100 if needs_handoff else 30,
         "matched_keywords": list(data.get("keywords", []) or []),
         "answer": data.get("guideline_text") or data.get("answer") or data.get("content") or "",
-        "needs_handoff": True,
-        "auto_reply_allowed": False,
-        "operator_alert": True,
-        "reason": data.get("handoff_reason") or evidence_item.get("handoff_reason") or "shared_risk_control",
+        "needs_handoff": needs_handoff,
+        "auto_reply_allowed": auto_reply_allowed and not needs_handoff,
+        "operator_alert": bool(data.get("operator_alert", False) or runtime.get("operator_alert", False) or needs_handoff),
+        "reason": data.get("handoff_reason") or evidence_item.get("handoff_reason") or ("shared_risk_control" if needs_handoff else ""),
+        "advisory_only": not needs_handoff,
     }
 
 
