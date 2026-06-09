@@ -385,7 +385,7 @@ def build_product_reply(
         return {
             "reply_text": (
                 f"{name} 当前可执行的公开阶梯价是：{format_discount_policy(product)}。"
-                "您提到的价格/优惠超出了我能直接确认的范围，我把情况记下，问清楚负责人意见后再回复您。"
+                "您提到的价格/优惠超出了我能直接确认的范围，我把情况记下，按正式流程核准后再回复您。"
             ),
             "needs_handoff": True,
             "operator_alert": True,

@@ -1,5 +1,12 @@
 # Brain 主控纠偏审计
 
+## 客户可见回复所有权硬基线
+
+- 所有客户可见回复必须由 `customer_service_brain` 发出：只能是首个有效 BrainPlan、Brain repair 后的 BrainPlan，或 Brain 自己生成的硬边界/拒绝/转人工类说明。
+- Guard、质量门、语义审稿、RAG、实时路由、本地模板、旧合成器、最终润色和任何兜底模块都不能生成、替换、拼接客户可见回复；它们只能提供证据、风险、审稿意见、返修指令或轻量表达校验。
+- Brain 不可用、超时、不可采纳或返修失败时，不允许本地 safe fallback 代替 Brain 发客户可见话术；必须阻断发送、记录审计，并触发内部人工/告警接口。
+- 后续所有客服相关开发文档必须引用 [customer_visible_reply_ownership_baseline.md](../customer_visible_reply_ownership_baseline.md)。
+
 ## 1. 文档目的
 
 本文件用于防止微信智能客服在后续优化中重新滑回“结构化规则决定答案，LLM 只是补丁或润色”的旧路线。
@@ -60,28 +67,28 @@ Brain 主控不是让 Brain 绕过事实和安全，而是让 Brain 在硬约束
 - 语义审稿输出语义问题和风险判断。
 - 所有这些意见默认交回 Brain repair，修复结果仍是 BrainPlan。
 
-### 2.2.1 Brain 安全兜底被误解成旧模板复活
+### 2.2.1 本地安全兜底被误解成可见回复 owner
 
 表现：
 
 - Brain 超时、不可用或 repair 失败后，直接回到旧 realtime / RAG / 本地销售模板。
-- 兜底话术脱离本轮权威证据，只输出“我确认一下马上回复”等低信息空话。
+- 兜底话术脱离 Brain 决策，只输出“我确认一下马上回复”等低信息空话。
 - 为了让某条审计样本过关，在兜底里写车型、预算、账号专属话术分支。
 
 风险：
 
 - 旧结构化回复体系借异常路径重新接管客户可见回答。
-- Brain 审计看似通过，实际最后一句话不是 Brain 决策，也不是权威证据内最小答复。
+- Brain 审计看似通过，实际最后一句话不是 Brain 决策。
 - 兜底越写越像第二套客服大脑，和 Brain First 主线打架。
 
 正确方向：
 
-- Brain 安全兜底只用于 Brain 不可用、BrainPlan 校验失败、quality repair 失败或 guard repair 失败后的异常路径。
-- 正常业务回复不能主动走安全兜底，必须优先由 Brain 生成 BrainPlan。
-- 安全兜底不得调用旧 RAG/realtime/local 模板，不得新增账号、车型、价格、预算专属分支。
-- 如果本轮 evidence pack 已有 `product_master` / `catalog_candidates` 权威候选，安全兜底可以生成“最小证据锚定答复”，只引用候选名称和商品库价格等已授权字段，避免低信息空话。
-- 如果没有可用权威证据，只能使用短确认、边界说明或转人工接口，不得编造推荐。
-- 安全兜底输出也必须保留 `customer_service_brain_safe_fallback` 审计标识，方便和正常 Brain 回复区分。
+- 所有客户可见回复必须由 Brain 发出。
+- Brain 不可用、BrainPlan 校验失败、quality repair 失败或 guard repair 失败时，不再生成任何客户可见本地安全兜底。
+- 异常路径只能输出“无客户可见回复”的内部审计结果，并触发人工/告警接口。
+- 正常业务回复不能主动走兜底，必须优先由 Brain 生成 BrainPlan。
+- 兜底路径不得调用旧 RAG/realtime/local 模板，不得新增账号、车型、价格、预算专属分支。
+- 审计标识应清楚记录为 `customer_service_brain_no_visible_reply` 或同等“无客户可见回复”状态，方便和正常 Brain 回复区分。
 
 ### 2.2.2 guard 与 Brain 打架导致过度转人工
 
@@ -208,7 +215,7 @@ Brain 生成回复策略
 
 - 速度优化优先做并发、缓存、prompt 缩短、证据压缩、任务队列和唤醒策略。
 - 短回复也由 Brain 决策，最终检查可弱化但不应默认跳过。
-- 如果使用本地兜底，只能用于 Brain 不可用、安全兜底、系统错误或人工转接提示。
+- 不允许使用本地兜底生成客户可见回复；Brain 不可用、系统错误或人工转接只能产生内部审计/告警，不直接对客户发本地文案。
 
 ## 3. 当前框架的正向改进
 
@@ -218,7 +225,7 @@ Brain 生成回复策略
 - Brain Plan 权威校验失败时，会转成返修意见交给 Brain。
 - quality gate / semantic reviewer 失败时，会进入 Brain repair。
 - guard 拒绝时，会转成 guard repair 意见交给 Brain。
-- Brain 不可用或返修失败时，只允许 Brain 安全兜底或人工转接，不允许旧结构化模板接管。
+- Brain 不可用或返修失败时，只允许阻断发送并进入内部人工/告警，不允许任何本地客户可见回复接管。
 - 最终润色对 Brain 回复采用更弱的 micro verify，并保留回退 Brain 草稿机制。
 - 失败或未采纳 Brain 草稿不会更新会话上下文。
 - OCR/RPA speaker label 已被定义为 metadata，不应进入正文。

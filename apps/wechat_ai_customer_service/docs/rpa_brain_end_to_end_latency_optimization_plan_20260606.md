@@ -1,12 +1,19 @@
 # RPA + Brain First 端到端速度优化开发文档（2026-06-06）
 
+## 客户可见回复所有权硬基线
+
+- 所有客户可见回复必须由 `customer_service_brain` 发出：只能是首个有效 BrainPlan、Brain repair 后的 BrainPlan，或 Brain 自己生成的硬边界/拒绝/转人工类说明。
+- Guard、质量门、语义审稿、RAG、实时路由、本地模板、旧合成器、最终润色和任何兜底模块都不能生成、替换、拼接客户可见回复；它们只能提供证据、风险、审稿意见、返修指令或轻量表达校验。
+- Brain 不可用、超时、不可采纳或返修失败时，不允许本地 safe fallback 代替 Brain 发客户可见话术；必须阻断发送、记录审计，并触发内部人工/告警接口。
+- 后续所有客服相关开发文档必须引用 [customer_visible_reply_ownership_baseline.md](customer_visible_reply_ownership_baseline.md)。
+
 ## 0. 硬约束
 
 本方案只优化速度、调度、状态清理、并发和 RPA 执行效率，不改变微信自动客服的基本架构。
 
 必须遵守：
 
-- 不改变 Brain First 架构。客户可见回复的理解、策略、取舍、推荐、异议处理、闲聊边界和表达组织仍由 `customer_service_brain` 主导。
+- 不改变 Brain First 架构。所有客户可见回复必须由 `customer_service_brain` 发出；客户可见回复的理解、策略、取舍、推荐、异议处理、闲聊边界和表达组织仍由 Brain 主导。任何提速方案都不得用本地 fallback、旧模板或跳过 Brain 的方式发客户可见文本。
 - 不降低回复质量。任何提速都不能以跳过 Brain、跳过 guard、跳过最终可见润色、减少必要证据、削弱安全边界为代价。
 - 不允许让结构化模板、关键词分支、旧路由、本地话术或 final polish 接管 Brain 的最终回答。
 - guard、质量门、语义审稿、最终润色只能做审核、反馈、轻量自然化和安全约束；发现问题时应把意见反馈给 Brain 返修。

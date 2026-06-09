@@ -16,12 +16,17 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 
+from apps.wechat_ai_customer_service.admin_backend.services.customer_service_session_ledger import (
+    row_fingerprint_from_payload,
+    session_key_from_payload,
+)
 from apps.wechat_ai_customer_service.knowledge_paths import active_tenant_id, tenant_runtime_root
 
 
 @dataclass
 class SessionState:
     name: str
+    session_key: str = ""
     last_content_digest: str = ""
     last_message_time: str = ""
     last_unread_badge: str = ""
@@ -44,6 +49,7 @@ class SessionState:
 @dataclass
 class ActiveTarget:
     name: str
+    session_key: str = ""
     exact: bool = True
     priority_score: int = 0
     unread_detected: bool = False
@@ -71,6 +77,8 @@ class SessionMonitor:
         initial_preview_can_raise_unread: bool = True,
         preview_change_can_raise_unread: bool = True,
         short_preview_can_raise_unread: bool = True,
+        require_unread_badge_for_dispatch: bool = False,
+        require_preview_signal_with_unread_badge: bool = False,
         high_sensitivity_short_max_chars: int = 7,
         high_sensitivity_short_merge_window_seconds: float = 0.0,
         empty_capture_retry_seconds: float = 3.0,
@@ -94,6 +102,8 @@ class SessionMonitor:
         self.initial_preview_can_raise_unread = bool(initial_preview_can_raise_unread)
         self.preview_change_can_raise_unread = bool(preview_change_can_raise_unread)
         self.short_preview_can_raise_unread = bool(short_preview_can_raise_unread)
+        self.require_unread_badge_for_dispatch = bool(require_unread_badge_for_dispatch)
+        self.require_preview_signal_with_unread_badge = bool(require_preview_signal_with_unread_badge)
         self.high_sensitivity_short_max_chars = max(1, int(high_sensitivity_short_max_chars or 7))
         self.high_sensitivity_short_merge_window_seconds = max(0.0, float(high_sensitivity_short_merge_window_seconds or 0.0))
         self.empty_capture_retry_seconds = max(0.0, float(empty_capture_retry_seconds or 0.0))
@@ -126,6 +136,7 @@ class SessionMonitor:
         self._sessions = {
             str(name): SessionState(
                 name=str(name),
+                session_key=str(data.get("session_key") or ""),
                 last_content_digest=str(data.get("last_content_digest") or ""),
                 last_message_time=str(data.get("last_message_time") or ""),
                 last_unread_badge=str(data.get("last_unread_badge") or ""),
@@ -156,6 +167,7 @@ class SessionMonitor:
             "sessions": {
                 name: {
                     "last_content_digest": s.last_content_digest,
+                    "session_key": s.session_key,
                     "last_message_time": s.last_message_time,
                     "last_unread_badge": s.last_unread_badge,
                     "unread_detected": s.unread_detected,
@@ -208,15 +220,36 @@ class SessionMonitor:
             unread_badge = str(raw.get("unread_badge") or raw.get("unread") or "").strip()
             digest = _digest(content) if content else ""
             conversation_type = _infer_conversation_type(name, raw)
-            has_signal = bool(digest or msg_time or unread_badge)
+            session_key = session_key_from_payload(
+                {
+                    **raw,
+                    "name": name,
+                    "conversation_type": conversation_type,
+                    "row_fingerprint": row_fingerprint_from_payload(raw),
+                },
+                fallback_name=name,
+            )
+            has_preview_signal = bool(digest or msg_time)
+            has_signal = bool(has_preview_signal or unread_badge)
+            has_dispatch_badge = bool(unread_badge)
 
             existing = self._sessions.get(name)
             if existing is None:
                 # New session seen for the first time
                 short_preview_signal = self.short_preview_can_raise_unread and self._signal_kind(content) == "high_sensitivity_short"
-                initial_unread = bool(unread_badge or (self.initial_preview_can_raise_unread and has_signal) or short_preview_signal)
+                if self.require_unread_badge_for_dispatch:
+                    initial_unread = bool(
+                        has_dispatch_badge
+                        and (
+                            not self.require_preview_signal_with_unread_badge
+                            or has_preview_signal
+                        )
+                    )
+                else:
+                    initial_unread = bool(unread_badge or (self.initial_preview_can_raise_unread and has_signal) or short_preview_signal)
                 self._sessions[name] = SessionState(
                     name=name,
+                    session_key=session_key,
                     last_content_digest=digest,
                     last_message_time=msg_time,
                     last_unread_badge=unread_badge,
@@ -235,6 +268,7 @@ class SessionMonitor:
                 if initial_unread:
                     active.append(ActiveTarget(
                         name=name,
+                        session_key=session_key,
                         exact=True,
                         priority_score=60,
                         unread_detected=True,
@@ -246,6 +280,7 @@ class SessionMonitor:
                 changed_by_digest = bool(digest and digest != existing.last_content_digest)
                 changed_by_time = bool(msg_time and msg_time != existing.last_message_time)
                 changed_by_badge = bool(unread_badge and unread_badge != existing.last_unread_badge)
+                changed_preview_signal = bool(changed_by_digest or changed_by_time)
                 changed = bool(changed_by_digest or changed_by_time or changed_by_badge)
 
                 if changed:
@@ -258,12 +293,23 @@ class SessionMonitor:
                         pass
                     priority = min(100, 50 + age_seconds // 60)
                     existing.last_content_digest = digest
+                    existing.session_key = existing.session_key or session_key
                     existing.last_message_time = msg_time
                     existing.last_unread_badge = unread_badge
                     existing.conversation_type = conversation_type
                     existing.last_seen_at = now_iso
                     should_raise_unread = False
-                    if changed_by_badge and unread_badge:
+                    if self.require_unread_badge_for_dispatch:
+                        if has_dispatch_badge and (
+                            not self.require_preview_signal_with_unread_badge
+                            or changed_preview_signal
+                            or (not existing.unread_detected and has_preview_signal)
+                        ):
+                            should_raise_unread = True
+                            existing.preview_change_hits = 0
+                        elif not has_dispatch_badge:
+                            existing.preview_change_hits = 0
+                    elif changed_by_badge and unread_badge:
                         should_raise_unread = True
                         existing.preview_change_hits = 0
                     elif changed_by_digest or changed_by_time:
@@ -290,6 +336,7 @@ class SessionMonitor:
                         )
                         active.append(ActiveTarget(
                             name=name,
+                            session_key=existing.session_key or session_key,
                             exact=True,
                             priority_score=priority,
                             unread_detected=True,
@@ -308,6 +355,7 @@ class SessionMonitor:
                         # workflow explicitly calls reset_unread after processing.
                         active.append(ActiveTarget(
                             name=name,
+                            session_key=existing.session_key or session_key,
                             exact=True,
                             priority_score=max(1, existing.priority_score),
                             unread_detected=True,
@@ -432,6 +480,7 @@ class SessionMonitor:
         return [
             {
                 "name": s.name,
+                "session_key": s.session_key,
                 "last_content_digest": s.last_content_digest,
                 "last_message_time": s.last_message_time,
                 "unread_detected": s.unread_detected,
@@ -456,6 +505,7 @@ class SessionMonitor:
         active = [
             ActiveTarget(
                 name=s.name,
+                session_key=s.session_key,
                 exact=True,
                 priority_score=max(1, s.priority_score),
                 unread_detected=True,

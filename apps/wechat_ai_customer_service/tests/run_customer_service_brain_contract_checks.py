@@ -26,6 +26,7 @@ os.environ.setdefault("WECHAT_CLOUD_REQUIRED", "0")
 os.environ.setdefault("WECHAT_CLOUD_STRICT_ONLINE", "0")
 
 import customer_service_brain as brain_module  # noqa: E402
+import customer_service_conversation_strategy as strategy_module  # noqa: E402
 import customer_service_quality_reviewer as reviewer_module  # noqa: E402
 import listen_and_reply as workflow_module  # noqa: E402
 from apps.wechat_ai_customer_service.knowledge_paths import tenant_context  # noqa: E402
@@ -36,7 +37,12 @@ from listen_and_reply import (  # noqa: E402
     product_ids_from_synthesis_payload,
     should_adopt_customer_service_brain,
 )
-from reply_evidence_builder import build_reply_evidence_pack, catalog_product_candidates, compact_knowledge_pack  # noqa: E402
+from reply_evidence_builder import (  # noqa: E402
+    build_reply_evidence_pack,
+    catalog_product_candidates,
+    compact_knowledge_pack,
+    relax_soft_synthesis_safety,
+)
 from customer_service_brain_contract import (  # noqa: E402
     brain_plan_to_guard_candidate,
     extract_quality_budget_upper,
@@ -45,6 +51,7 @@ from customer_service_brain_contract import (  # noqa: E402
     normalize_brain_plan,
     normalize_reply_segments,
     validate_brain_plan,
+    validate_social_visible_reply_contract,
     verify_brain_reply_quality,
 )
 from llm_reply_guard import (  # noqa: E402
@@ -74,15 +81,25 @@ def main() -> int:
         check_current_conversation_can_authorize_product_reference_not_price(),
         check_common_sense_brain_plan_uses_guard_advisor_mode(),
         check_source_id_list_validation_accepts_multiple_product_ids(),
+        check_source_id_pipe_validation_accepts_multiple_product_ids(),
         check_formal_policy_source_id_prefixes_validate_against_evidence(),
         check_semantic_reviewer_authority_summary_reads_evidence_formal_ids(),
+        check_social_visible_contract_rejects_empty_or_handoff_plan(),
+        check_conversation_strategy_state_tracks_social_fatigue_and_resets_on_business(),
+        check_conversation_strategy_state_is_session_isolated(),
+        check_brain_input_includes_non_authoritative_conversation_strategy_hint(),
+        check_quality_gate_rejects_over_eager_business_redirect_after_social_fatigue(),
+        check_low_authority_fast_profile_compacts_social_turn_without_bypassing_brain(),
+        check_low_authority_fast_profile_rejects_authority_or_context_turns(),
         check_social_brain_plan_clears_soft_no_evidence_guard(),
-        check_brain_first_failure_uses_safe_fallback_without_legacy(),
+        check_brain_first_failure_blocks_visible_reply_without_legacy(),
         check_rejects_product_scoped_master_fact(),
         check_rejects_formal_policy_fact_without_source_id(),
         check_quality_gate_rejects_generic_stall_for_price(),
+        check_quality_gate_accepts_substantive_boundary_refusal(),
         check_quality_gate_rejects_social_info_collection(),
         check_quality_gate_requires_clear_recommendation(),
+        check_quality_gate_accepts_product_anchored_ranked_recommendation(),
         check_quality_gate_rejects_contextual_recommendation_stall(),
         check_quality_gate_rejects_relative_context_product_drift(),
         check_quality_gate_accepts_visible_history_recent_product_context(),
@@ -107,6 +124,7 @@ def main() -> int:
         check_quality_gate_rejects_dangling_decision_fragment(),
         check_quality_gate_rejects_missing_insurance_subtopic(),
         check_quality_gate_rejects_appointment_overcommit_without_confirmation(),
+        check_quality_gate_rejects_unnecessary_handoff_language_for_send_reply(),
         check_quality_gate_rejects_trade_in_process_overcommit(),
         check_quality_gate_rejects_trade_in_final_price_without_boundary(),
         check_quality_gate_allows_bounded_trade_in_process_reply(),
@@ -119,13 +137,14 @@ def main() -> int:
         check_semantic_reviewer_relaxes_bounded_resale_advisory_concern(),
         check_semantic_reviewer_shadow_does_not_block_brain_reply(),
         check_semantic_reviewer_handoff_suggest_preserves_brain_handoff_reply(),
+        check_semantic_reviewer_block_preserves_brain_handoff_reply(),
         check_semantic_reviewer_repair_blocks_when_repair_disabled(),
         check_semantic_reviewer_cannot_override_hard_authority_validation(),
         check_brain_prompt_separates_style_from_content_basis(),
         check_brain_prompt_includes_runtime_principles_without_authorizing_facts(),
         check_brain_prompt_marks_legacy_candidate_non_authoritative(),
         check_example_configs_keep_final_visible_micro_verify_required(),
-        check_brain_safe_fallback_uses_product_candidates_when_quality_repair_unavailable(),
+        check_brain_failure_does_not_use_local_product_candidate_fallback(),
         check_brain_input_keeps_referenced_context_auxiliary(),
         check_brain_prompt_compacts_large_context_under_timeout_budget(),
         check_brain_timeout_budget_scales_with_prompt_pressure(),
@@ -135,7 +154,12 @@ def main() -> int:
         check_brain_runner_records_stage_timings(),
         check_brain_runner_rejects_quality_failed_plan(),
         check_repaired_deterministic_quality_soft_pass_requires_missing_context_anchor(),
+        check_repaired_deterministic_quality_soft_pass_allows_soft_recommendation_doubts(),
+        check_brain_runner_soft_passes_repaired_deterministic_quality_doubts(),
+        check_brain_runner_soft_passes_repaired_appointment_schedule_boundary(),
         check_brain_runner_soft_passes_repaired_semantic_minor_nits(),
+        check_brain_runner_soft_passes_repaired_semantic_authority_false_positive(),
+        check_semantic_reviewer_relaxes_bounded_finance_boundary(),
         check_brain_runner_coerces_usable_fallback_existing_plan(),
         check_brain_candidate_allows_safe_uncertain_send(),
         check_guard_downgrades_safe_uncertain_handoff_plan(),
@@ -151,10 +175,15 @@ def main() -> int:
         check_guard_clears_soft_missing_authority_with_product_master(),
         check_guard_clears_soft_no_evidence_with_product_authority(),
         check_guard_clears_soft_finance_process_with_formal_knowledge(),
+        check_guard_allows_customer_data_ack_with_conversation_fact(),
+        check_guard_allows_customer_data_ack_with_message_id_conversation_fact(),
+        check_guard_allows_finance_lowest_down_payment_boundary_reply(),
+        check_guard_rejects_finance_lowest_down_payment_commitment(),
         check_guard_allows_soft_offtopic_customer_care_reply(),
         check_guard_illegal_request_uses_specific_refusal(),
-        check_guard_v2_approves_authoritative_brain_handoff(),
         check_guard_v2_soft_handoff_is_repair_not_visible_reply(),
+        check_guard_v2_soft_evidence_handoff_requires_brain_repair(),
+        check_guard_v2_approves_authoritative_brain_hard_boundary_reply(),
         check_guard_v2_product_conflict_requests_brain_repair(),
         check_guard_v2_identity_question_uses_brain_reply(),
         check_brain_runner_ignores_guard_visible_reply_source(),
@@ -166,6 +195,7 @@ def main() -> int:
         check_visible_reply_preference_marker_updates_primary_context(),
         check_identity_probe_detector_ignores_test_tokens(),
         check_context_need_catalog_candidates_prefer_recent_mpv_need(),
+        check_catalog_list_request_prioritizes_explicit_preference(),
         check_followup_preference_context_preserves_previous_budget(),
         check_context_budget_followup_catalog_candidates(),
         check_around_budget_catalog_candidates_prefer_near_budget(),
@@ -174,6 +204,9 @@ def main() -> int:
         check_finance_process_question_relaxes_soft_handoff_with_formal_boundary(),
         check_specific_finance_commitment_question_keeps_handoff(),
         check_appointment_schedule_question_relaxes_to_bounded_auto_reply(),
+        check_catalog_recommendation_with_product_master_relaxes_soft_price_advisory(),
+        check_catalog_recommendation_stock_signal_relaxes_after_product_master_evidence(),
+        check_catalog_recommendation_hard_boundary_stays_handoff(),
         check_finance_promise_and_lowest_price_combo_keeps_handoff(),
         check_intent_evidence_finance_process_safety_softened(),
         check_intent_evidence_specific_finance_commitment_stays_handoff(),
@@ -181,7 +214,7 @@ def main() -> int:
         check_compact_knowledge_prioritizes_recent_context_products(),
         check_brain_adoption_gate(),
         check_process_target_brain_first_adopts(),
-        check_process_target_brain_first_exception_uses_safe_fallback(),
+        check_process_target_brain_first_exception_blocks_visible_reply(),
         check_process_target_brain_first_nonadoptable_blocks_legacy_takeover(),
         check_process_target_brain_first_skips_legacy_expression_adapter(),
         check_process_target_shadow_does_not_adopt(),
@@ -464,6 +497,43 @@ def check_source_id_list_validation_accepts_multiple_product_ids() -> CaseResult
     return CaseResult("source_id_list_validation_accepts_multiple_product_ids", True, {"validation": validation})
 
 
+def check_source_id_pipe_validation_accepts_multiple_product_ids() -> CaseResult:
+    pack = fake_evidence_pack(include_product=True)
+    pack["knowledge"]["product_master"]["items"].append(
+        {
+            "id": "chejin_sienna_2021_hybrid",
+            "name": "2021款丰田赛那2.5L混动",
+            "price": 28.5,
+            "authority_level": "product_master",
+        }
+    )
+    pack["knowledge"]["evidence"]["products"] = list(pack["knowledge"]["product_master"]["items"])
+    pack["knowledge"]["evidence"]["catalog_candidates"] = list(pack["knowledge"]["product_master"]["items"])
+    plan = copy.deepcopy(base_plan())
+    plan.update(
+        {
+            "answer_mode": "recommend_from_catalog",
+            "evidence_used": {
+                "product_ids": ["chejin_qinplus_2022_dmi55", "chejin_sienna_2021_hybrid"],
+            },
+            "facts_claimed": [
+                {
+                    "fact_type": "product_name_price",
+                    "value": "秦PLUS 8.68万；赛那28.5万",
+                    "source_level": "product_master",
+                    "source_id": "chejin_qinplus_2022_dmi55|chejin_sienna_2021_hybrid",
+                }
+            ],
+            "reply_segments": ["有的，秦PLUS 8.68万，赛那28.5万。您想看省油代步还是MPV空间？"],
+        }
+    )
+    validation = brain_module.validate_plan_against_evidence(normalize_brain_plan(plan), pack)
+    assert_true(validation["ok"], f"pipe-separated product source ids should validate: {validation}")
+    ids = brain_module.split_fact_source_ids("chejin_qinplus_2022_dmi55|chejin_sienna_2021_hybrid")
+    assert_true(ids == ["chejin_qinplus_2022_dmi55", "chejin_sienna_2021_hybrid"], f"unexpected split ids: {ids}")
+    return CaseResult("source_id_pipe_validation_accepts_multiple_product_ids", True, {"validation": validation, "ids": ids})
+
+
 def check_formal_policy_source_id_prefixes_validate_against_evidence() -> CaseResult:
     pack = fake_evidence_pack(include_product=True)
     pack["knowledge"]["evidence"]["faq"] = [{"intent": "chejin_loan_policy", "question": "贷款政策"}]
@@ -595,7 +665,293 @@ def check_social_brain_plan_clears_soft_no_evidence_guard() -> CaseResult:
     return CaseResult("social_brain_plan_clears_soft_no_evidence_guard", True, {"reason": event.get("reason")})
 
 
-def check_brain_first_failure_uses_safe_fallback_without_legacy() -> CaseResult:
+def check_social_visible_contract_rejects_empty_or_handoff_plan() -> CaseResult:
+    empty_plan = copy.deepcopy(base_plan())
+    empty_plan.update(
+        {
+            "answer_mode": "soft_social_reply",
+            "facts_claimed": [],
+            "reply_segments": [],
+            "recommended_action": "send_reply",
+            "risk": {"risk_level": "low", "risk_tags": [], "needs_handoff": False},
+        }
+    )
+    empty_validation = validate_social_visible_reply_contract(empty_plan, current_message="好的，谢谢")
+    assert_true(not empty_validation.get("ok"), f"thanks/closing must not accept empty visible reply: {empty_validation}")
+    assert_true(
+        "social_message_requires_visible_brain_reply" in (empty_validation.get("errors") or []),
+        f"expected visible-reply contract error: {empty_validation}",
+    )
+
+    handoff_plan = copy.deepcopy(empty_plan)
+    handoff_plan.update(
+        {
+            "can_answer": False,
+            "recommended_action": "handoff",
+            "reply_segments": ["我转人工确认一下。"],
+            "risk": {"risk_level": "medium", "risk_tags": ["soft_unclear"], "needs_handoff": True},
+        }
+    )
+    handoff_validation = validate_social_visible_reply_contract(handoff_plan, current_message="人呢")
+    assert_true(not handoff_validation.get("ok"), f"human summons must be repaired by Brain, not soft-handoff: {handoff_validation}")
+    assert_true(
+        "social_message_must_not_handoff_without_hard_boundary" in (handoff_validation.get("errors") or []),
+        f"expected social handoff contract error: {handoff_validation}",
+    )
+
+    ok_plan = copy.deepcopy(base_plan())
+    ok_plan.update(
+        {
+            "answer_mode": "soft_social_reply",
+            "facts_claimed": [],
+            "reply_segments": ["在的，您说。"],
+            "recommended_action": "send_reply",
+            "risk": {"risk_level": "low", "risk_tags": [], "needs_handoff": False},
+        }
+    )
+    ok_validation = validate_social_visible_reply_contract(ok_plan, current_message="在不")
+    assert_true(ok_validation.get("ok"), f"Brain-authored short social reply should pass: {ok_validation}")
+    return CaseResult(
+        "social_visible_contract_rejects_empty_or_handoff_plan",
+        True,
+        {"empty": empty_validation, "handoff": handoff_validation, "accepted": ok_validation},
+    )
+
+
+def check_conversation_strategy_state_tracks_social_fatigue_and_resets_on_business() -> CaseResult:
+    target_state: dict[str, Any] = {"conversation_context": {"last_product_id": "chejin_qinplus_2022_dmi55"}}
+    first = strategy_module.update_conversation_strategy_state(target_state, "你今天吃啥", now="2026-06-09T10:00:00")
+    second = strategy_module.update_conversation_strategy_state(target_state, "你是不是AI", now="2026-06-09T10:00:05")
+    third = strategy_module.update_conversation_strategy_state(target_state, "别老聊车，我就随便问问", now="2026-06-09T10:00:10")
+    assert_true(first.get("suggested_engagement_mode") == "soft_bridge", f"first social turn should be soft bridge: {first}")
+    assert_true(second.get("redirect_fatigue_level") in {"fatigued", "suppress"}, f"second social/probe turn should fatigue: {second}")
+    assert_true(third.get("suggested_engagement_mode") == "social_companion", f"resistance should suppress business pullback: {third}")
+    assert_true(third.get("customer_resists_business_redirect") is True, f"resistance flag should persist: {third}")
+
+    business = strategy_module.update_conversation_strategy_state(target_state, "那刚才那台秦PLUS多少钱", now="2026-06-09T10:00:20")
+    assert_true(business.get("suggested_engagement_mode") == "resume_business", f"business turn should resume service: {business}")
+    assert_true(int(business.get("social_offtopic_streak") or 0) == 0, f"business turn should reset social streak: {business}")
+    assert_true(business.get("customer_resists_business_redirect") is False, f"business turn should clear redirect resistance: {business}")
+    return CaseResult(
+        "conversation_strategy_state_tracks_social_fatigue_and_resets_on_business",
+        True,
+        {"third": strategy_module.strategy_state_public_audit(third), "business": strategy_module.strategy_state_public_audit(business)},
+    )
+
+
+def check_conversation_strategy_state_is_session_isolated() -> CaseResult:
+    social_state: dict[str, Any] = {"conversation_context": {"last_product_id": "chejin_qinplus_2022_dmi55"}}
+    business_state: dict[str, Any] = {"conversation_context": {"last_product_id": "chejin_audi_a4l_2018_40tfsi"}}
+    strategy_module.update_conversation_strategy_state(social_state, "你是不是机器人", now="2026-06-09T10:10:00")
+    social = strategy_module.update_conversation_strategy_state(social_state, "别老套话，我就聊聊天", now="2026-06-09T10:10:05")
+    business = strategy_module.update_conversation_strategy_state(business_state, "奥迪A4L多少钱", now="2026-06-09T10:10:06")
+
+    assert_true(social.get("suggested_engagement_mode") == "social_companion", f"A session should suppress hard redirect: {social}")
+    assert_true(business.get("suggested_engagement_mode") == "resume_business", f"B session should keep business mode: {business}")
+    assert_true(int(business.get("social_offtopic_streak") or 0) == 0, f"B session must not inherit A social streak: {business}")
+    return CaseResult(
+        "conversation_strategy_state_is_session_isolated",
+        True,
+        {
+            "social": strategy_module.strategy_state_public_audit(social),
+            "business": strategy_module.strategy_state_public_audit(business),
+        },
+    )
+
+
+def check_brain_input_includes_non_authoritative_conversation_strategy_hint() -> CaseResult:
+    state = {
+        "conversation_context": {},
+        "conversation_strategy_state": {
+            "schema_version": 1,
+            "social_offtopic_streak": 3,
+            "identity_probe_streak": 1,
+            "customer_resists_business_redirect": True,
+            "redirect_fatigue_level": "suppress",
+            "suggested_engagement_mode": "social_companion",
+            "business_anchor_strength": "active",
+        },
+    }
+    evidence_pack = fake_evidence_pack(include_product=False)
+    brain_input = brain_module.build_brain_input(
+        settings=brain_module.effective_brain_settings(base_config(base_plan(), include_product=False)),
+        target_name="许聪",
+        target_state=state,
+        batch=[{"id": "msg-social-fatigue", "sender": "许聪", "content": "你别老聊车"}],
+        combined="你别老聊车",
+        raw_capture={"conversation": {"conversation_id": "conv-social-fatigue", "chat_type": "private"}},
+        evidence_pack=evidence_pack,
+    )
+    hint = (brain_input.get("runtime") or {}).get("conversation_strategy_state") or {}
+    assert_true(hint.get("authority") == "non_authoritative_strategy_hint", f"strategy hint must be non-authoritative: {hint}")
+    assert_true(hint.get("suggested_engagement_mode") == "social_companion", f"strategy mode should reach Brain: {hint}")
+    prompt_pack, _user_content, _estimate = brain_module.build_sized_brain_prompt(
+        settings=brain_module.effective_brain_settings(base_config(base_plan(), include_product=False)),
+        brain_input=brain_input,
+    )
+    prompt_hint = (((prompt_pack.get("user") or {}).get("brain_input") or {}).get("conversation_strategy_state") or {})
+    assert_true(prompt_hint.get("authority") == "non_authoritative_strategy_hint", f"prompt hint must stay non-authoritative: {prompt_hint}")
+    assert_true("visibility_rule" in prompt_hint, f"prompt hint must include visibility boundary: {prompt_hint}")
+    return CaseResult("brain_input_includes_non_authoritative_conversation_strategy_hint", True, {"hint": prompt_hint})
+
+
+def check_quality_gate_rejects_over_eager_business_redirect_after_social_fatigue() -> CaseResult:
+    fatigued_pack = fake_evidence_pack(include_product=False)
+    fatigued_pack["conversation_strategy_state"] = {
+        "authority": "non_authoritative_strategy_hint",
+        "social_offtopic_streak": 3,
+        "redirect_fatigue_level": "suppress",
+        "suggested_engagement_mode": "social_companion",
+        "customer_resists_business_redirect": True,
+    }
+    over_eager_plan = normalize_brain_plan(
+        {
+            **base_plan(),
+            "answer_mode": "soft_social_reply",
+            "evidence_used": {"common_sense_topics": ["small_talk_customer_care"]},
+            "facts_claimed": [],
+            "reply_segments": ["先不聊别的了，咱们还是回到预算和车源，您想看轿车还是SUV？"],
+            "recommended_action": "send_reply",
+            "risk": {"risk_level": "low", "risk_tags": ["small_talk"], "needs_handoff": False},
+        }
+    )
+    quality = verify_brain_reply_quality(
+        over_eager_plan,
+        current_message="我就随便聊两句，你别老聊车",
+        evidence_pack=fatigued_pack,
+        settings={},
+    )
+    assert_true(not quality.get("ok"), f"over-eager business redirect should be repaired: {quality}")
+    assert_true(
+        "over_eager_business_redirect_after_social_fatigue" in (quality.get("errors") or []),
+        f"expected social fatigue redirect error: {quality}",
+    )
+
+    natural_plan = copy.deepcopy(over_eager_plan)
+    natural_plan["reply_segments"] = ["可以，先放松聊两句也没事。您想聊什么我听着。"]
+    natural_quality = verify_brain_reply_quality(
+        natural_plan,
+        current_message="我就随便聊两句，你别老聊车",
+        evidence_pack=fatigued_pack,
+        settings={},
+    )
+    assert_true(natural_quality.get("ok"), f"natural social companion reply should pass: {natural_quality}")
+    return CaseResult("quality_gate_rejects_over_eager_business_redirect_after_social_fatigue", True, {"errors": quality.get("errors")})
+
+
+def check_low_authority_fast_profile_compacts_social_turn_without_bypassing_brain() -> CaseResult:
+    settings = brain_module.effective_brain_settings(
+        {
+            "customer_service_brain": {
+                "enabled": True,
+                "mode": "brain_first",
+                "provider": "manual_json",
+                "history_char_budget": 1200,
+                "summary_char_budget": 280,
+                "current_batch_char_budget": 420,
+                "max_prompt_product_items": 5,
+                "max_prompt_formal_items": 3,
+                "max_prompt_rag_hits": 1,
+            }
+        }
+    )
+    target_state = {"conversation_context": {"last_product_id": "chejin_qinplus_2022_dmi55"}}
+    batch = [{"id": "msg-social-fast", "sender": "许聪", "content": "你好"}]
+    decision = brain_module.low_authority_fast_profile_decision(
+        settings=settings,
+        combined="你好",
+        batch=batch,
+        target_state=target_state,
+    )
+    assert_true(decision.get("enabled"), f"pure greeting should use low-authority Brain profile: {decision}")
+    fast_settings = brain_module.apply_low_authority_fast_brain_settings(settings, decision)
+    evidence = brain_module.build_low_authority_fast_evidence_pack(
+        target_name="许聪",
+        target_state=target_state,
+        batch=batch,
+        combined="你好",
+        raw_capture={"conversation": {"conversation_id": "c1", "chat_type": "private"}},
+        profile=decision,
+    )
+    brain_input = brain_module.build_brain_input(
+        settings=fast_settings,
+        target_name="许聪",
+        target_state=target_state,
+        batch=batch,
+        combined="你好",
+        raw_capture={"conversation": {"conversation_id": "c1", "chat_type": "private"}},
+        evidence_pack=evidence,
+    )
+    prompt_pack, _user_content, estimate = brain_module.build_sized_brain_prompt(settings=fast_settings, brain_input=brain_input)
+    prompt_brain_input = prompt_pack["user"]["brain_input"]
+    product_items = (((prompt_brain_input.get("content_basis") or {}).get("product_master") or {}).get("items") or [])
+    formal_items = (((prompt_brain_input.get("content_basis") or {}).get("formal_knowledge") or {}).get("faq") or [])
+    assert_true(
+        str(estimate.get("profile") or "") == "low_authority_fast",
+        f"low-authority turn should force compact Brain profile: {estimate}",
+    )
+    assert_true(not product_items, f"low-authority greeting must not drag product master into Brain prompt: {product_items}")
+    assert_true(not formal_items, f"low-authority greeting must not drag formal FAQ into Brain prompt: {formal_items}")
+    assert_true(
+        prompt_brain_input.get("current_message", {}).get("clean_text") == "你好",
+        f"Brain still receives current customer text: {prompt_brain_input}",
+    )
+    return CaseResult(
+        "low_authority_fast_profile_compacts_social_turn_without_bypassing_brain",
+        True,
+        {"profile": estimate.get("profile"), "decision": decision, "prompt_chars": estimate.get("prompt_chars")},
+    )
+
+
+def check_low_authority_fast_profile_rejects_authority_or_context_turns() -> CaseResult:
+    settings = brain_module.effective_brain_settings({"customer_service_brain": {"enabled": True, "mode": "brain_first"}})
+    product_decision = brain_module.low_authority_fast_profile_decision(
+        settings=settings,
+        combined="秦PLUS多少钱",
+        batch=[{"id": "msg-price", "sender": "许聪", "content": "秦PLUS多少钱"}],
+        target_state={},
+    )
+    assert_true(not product_decision.get("enabled"), f"explicit product/price question must use full authority path: {product_decision}")
+    ambiguous_decision = brain_module.low_authority_fast_profile_decision(
+        settings=settings,
+        combined="要",
+        batch=[{"id": "msg-ack", "sender": "许聪", "content": "要"}],
+        target_state={"conversation_context": {"last_product_id": "chejin_qinplus_2022_dmi55"}},
+    )
+    assert_true(not ambiguous_decision.get("enabled"), f"ambiguous short business follow-up must keep context-rich path: {ambiguous_decision}")
+    casual_car_word_decision = brain_module.low_authority_fast_profile_decision(
+        settings=settings,
+        combined="今天路上堵车了",
+        batch=[{"id": "msg-casual-car-word", "sender": "许聪", "content": "今天路上堵车了"}],
+        target_state={},
+    )
+    assert_true(
+        casual_car_word_decision.get("enabled"),
+        f"casual small talk containing the character car should not be forced into full authority path: {casual_car_word_decision}",
+    )
+    generic_vehicle_intent_decision = brain_module.low_authority_fast_profile_decision(
+        settings=settings,
+        combined="有车吗",
+        batch=[{"id": "msg-vehicle-intent", "sender": "许聪", "content": "有车吗"}],
+        target_state={},
+    )
+    assert_true(
+        not generic_vehicle_intent_decision.get("enabled"),
+        f"generic product inventory intent should use full authority path: {generic_vehicle_intent_decision}",
+    )
+    return CaseResult(
+        "low_authority_fast_profile_rejects_authority_or_context_turns",
+        True,
+        {
+            "product": product_decision,
+            "ambiguous": ambiguous_decision,
+            "casual_car_word": casual_car_word_decision,
+            "generic_vehicle_intent": generic_vehicle_intent_decision,
+        },
+    )
+
+
+def check_brain_first_failure_blocks_visible_reply_without_legacy() -> CaseResult:
     config = base_config(base_plan())
     config["customer_service_brain"]["mode"] = "brain_first"
     config["customer_service_brain"]["provider"] = "openai"
@@ -626,13 +982,14 @@ def check_brain_first_failure_uses_safe_fallback_without_legacy() -> CaseResult:
             )
     finally:
         brain_module.run_brain_llm = original
-    assert_true(event.get("applied") is True and event.get("adoptable") is True, f"strict Brain fallback should be adoptable: {event}")
-    assert_true(event.get("rule_name") == "customer_service_brain_safe_fallback", f"expected safe fallback: {event}")
-    assert_true(event.get("reply_text") == "好的，我这边尽快给您回。", f"safe fallback should be contextual: {event}")
-    return CaseResult("brain_first_failure_uses_safe_fallback_without_legacy", True, {"reason": event.get("reason")})
+    assert_true(event.get("applied") is False and event.get("adoptable") is False, f"strict Brain failure must not be adoptable: {event}")
+    assert_true(event.get("rule_name") == "customer_service_brain_no_visible_reply", f"expected no-visible-reply block: {event}")
+    assert_true(not str(event.get("reply_text") or event.get("raw_reply_text") or "").strip(), f"Brain failure must not emit local visible text: {event}")
+    assert_true(event.get("customer_visible_reply_blocked") is True, f"Brain failure should block customer-visible reply: {event}")
+    return CaseResult("brain_first_failure_blocks_visible_reply_without_legacy", True, {"reason": event.get("reason")})
 
 
-def check_brain_safe_fallback_uses_product_candidates_when_quality_repair_unavailable() -> CaseResult:
+def check_brain_failure_does_not_use_local_product_candidate_fallback() -> CaseResult:
     plan = copy.deepcopy(base_plan())
     plan["answer_mode"] = "recommend_from_catalog"
     plan["evidence_used"] = {"product_ids": ["chejin_mazda3_2020_20l", "chejin_camry_2021_20g"]}
@@ -679,21 +1036,11 @@ def check_brain_safe_fallback_uses_product_candidates_when_quality_repair_unavai
             raw_capture={"conversation": {"conversation_id": "c1", "chat_type": "private"}},
             customer_profile=None,
         )
-    reply = str(event.get("reply_text") or "")
-    assert_true(event.get("rule_name") == "customer_service_brain_safe_fallback", f"expected safe fallback: {event}")
-    assert_true("马自达3" in reply and "凯美瑞" in reply, f"fallback should keep product candidate anchors: {event}")
-    assert_true("9.58" in reply and "8.98" in reply, f"fallback should keep product-master prices: {event}")
-    assert_true("马上回复" not in reply, f"fallback should not degrade to low-information stall when evidence exists: {event}")
-    detailed_need = "我开摄影工作室，想买台能拉灯架和相机箱的车，偶尔也接客户，预算16万以内。"
-    detailed_reply = brain_module.brain_safe_fallback_reply(
-        detailed_need,
-        evidence_pack=fake_two_candidate_recommendation_pack(detailed_need),
-    )
-    assert_true(
-        "马自达3" in detailed_reply and "凯美瑞" in detailed_reply,
-        f"detailed need fallback should also keep candidate anchors: {detailed_reply}",
-    )
-    return CaseResult("brain_safe_fallback_uses_product_candidates_when_quality_repair_unavailable", True, {"reply": reply})
+    reply = str(event.get("reply_text") or event.get("raw_reply_text") or "")
+    assert_true(event.get("rule_name") == "customer_service_brain_no_visible_reply", f"expected no-visible-reply block: {event}")
+    assert_true(not reply.strip(), f"quality repair failure must not use local product candidate fallback: {event}")
+    assert_true(event.get("customer_visible_reply_blocked") is True, f"failure should block visible reply: {event}")
+    return CaseResult("brain_failure_does_not_use_local_product_candidate_fallback", True, {"reason": event.get("reason")})
 
 
 def check_rejects_product_scoped_master_fact() -> CaseResult:
@@ -749,6 +1096,54 @@ def check_quality_gate_rejects_generic_stall_for_price() -> CaseResult:
     return CaseResult("quality_gate_rejects_generic_stall_for_price", True, {"errors": quality["errors"]})
 
 
+def check_quality_gate_accepts_substantive_boundary_refusal() -> CaseResult:
+    plan = copy.deepcopy(base_plan())
+    plan.update(
+        {
+            "answer_mode": "direct_answer",
+            "evidence_used": {
+                "conversation_fact_ids": ["sim_msg_1"],
+                "common_sense_topics": ["违规请求应明确拒绝并引导合规处理"],
+            },
+            "facts_claimed": [],
+            "reply_segments": [
+                "这个不能帮您做，车辆公里数要如实展示，不能调低。",
+                "您可以按真实车况来评估和出售，我继续帮您看看怎么更合适出手。",
+            ],
+            "risk": {"risk_level": "high", "risk_tags": ["illegal_request", "fraud_risk"], "needs_handoff": False},
+        }
+    )
+    quality = verify_brain_reply_quality(
+        normalize_brain_plan(plan),
+        current_message="我这车公里数有点高，你能不能帮我调低点再卖？",
+        evidence_pack=fake_evidence_pack(include_product=False),
+        settings={},
+    )
+    assert_true(quality["ok"], f"substantive boundary refusal should answer, not stall: {quality}")
+
+    vague_plan = copy.deepcopy(plan)
+    vague_plan["reply_segments"] = ["这个我不能随口定，我先让负责人核实后回您。"]
+    vague_quality = verify_brain_reply_quality(
+        normalize_brain_plan(vague_plan),
+        current_message="我这车公里数有点高，你能不能帮我调低点再卖？",
+        evidence_pack=fake_evidence_pack(include_product=False),
+        settings={},
+    )
+    assert_true(not vague_quality["ok"], f"vague handoff-style refusal should still be repaired: {vague_quality}")
+    assert_true(
+        any(
+            item in vague_quality["errors"]
+            for item in ("generic_stall_reply_for_concrete_question", "unnecessary_handoff_language_for_send_reply")
+        ),
+        f"expected vague refusal to be rejected by quality gate: {vague_quality}",
+    )
+    return CaseResult(
+        "quality_gate_accepts_substantive_boundary_refusal",
+        True,
+        {"safe": quality, "vague": vague_quality},
+    )
+
+
 def check_quality_gate_rejects_social_info_collection() -> CaseResult:
     plan = copy.deepcopy(base_plan())
     plan.update(
@@ -797,6 +1192,46 @@ def check_quality_gate_requires_clear_recommendation() -> CaseResult:
     assert_true(not quality["ok"], f"choice question should require a clear recommendation: {quality}")
     assert_true("missing_clear_recommendation_or_choice" in quality["errors"], f"expected recommendation error: {quality}")
     return CaseResult("quality_gate_requires_clear_recommendation", True, {"errors": quality["errors"]})
+
+
+def check_quality_gate_accepts_product_anchored_ranked_recommendation() -> CaseResult:
+    pack = fake_two_candidate_recommendation_pack("你别只问我需求，先按16万内给我两三个方向，后备厢要实用一点。")
+    plan = copy.deepcopy(base_plan())
+    plan.update(
+        {
+            "answer_mode": "recommend_from_catalog",
+            "evidence_used": {
+                "product_ids": ["chejin_mazda3_2020_20l", "chejin_camry_2021_20g"],
+                "conversation_fact_ids": ["last_customer_need_text"],
+            },
+            "facts_claimed": [
+                {
+                    "fact_type": "price",
+                    "value": "2020款马自达3昂克赛拉2.0L 自动质雅版 9.58万/台",
+                    "source_level": "product_master",
+                    "source_id": "chejin_mazda3_2020_20l",
+                },
+                {
+                    "fact_type": "price",
+                    "value": "2021款丰田凯美瑞2.0G豪华版 8.98万/台",
+                    "source_level": "product_master",
+                    "source_id": "chejin_camry_2021_20g",
+                },
+            ],
+            "reply_segments": [
+                "我先明确主推马自达3，9.58万，预算内更贴合通勤和好停车。",
+                "第二个方向看凯美瑞，8.98万，空间和舒适性更均衡。",
+            ],
+        }
+    )
+    quality = verify_brain_reply_quality(
+        normalize_brain_plan(plan),
+        current_message=pack["current_message"],
+        evidence_pack=pack,
+        settings={},
+    )
+    assert_true(quality["ok"], f"ranked product-anchored recommendation should pass: {quality}")
+    return CaseResult("quality_gate_accepts_product_anchored_ranked_recommendation", True, {"quality": quality})
 
 
 def check_quality_gate_rejects_contextual_recommendation_stall() -> CaseResult:
@@ -2045,6 +2480,52 @@ def check_quality_gate_rejects_appointment_overcommit_without_confirmation() -> 
     )
 
 
+def check_quality_gate_rejects_unnecessary_handoff_language_for_send_reply() -> CaseResult:
+    plan = copy.deepcopy(base_plan())
+    plan.update(
+        {
+            "answer_mode": "direct_answer",
+            "evidence_used": {"common_sense_topics": ["bounded_process_guidance"]},
+            "facts_claimed": [],
+            "reply_segments": [
+                "可以把车开到店里。",
+                "材料这块我先按门店手续核实清楚，确认后回您，避免您白跑。",
+                "您想提前确认更具体的材料清单的话，建议到店前先让人工帮您确认。",
+            ],
+            "recommended_action": "send_reply",
+            "risk": {"risk_level": "low", "risk_tags": [], "needs_handoff": False, "handoff_reason": ""},
+        }
+    )
+    quality = verify_brain_reply_quality(
+        normalize_brain_plan(plan),
+        current_message="那下次来店里看车时想估一下价，可以把车开过来，还需要带什么别的材料吗",
+        evidence_pack=fake_evidence_pack(include_product=False),
+        settings={},
+    )
+    assert_true(
+        "unnecessary_handoff_language_for_send_reply" in quality["errors"],
+        f"send_reply should repair visible artificial handoff language: {quality}",
+    )
+
+    safe_plan = copy.deepcopy(plan)
+    safe_plan["reply_segments"] = [
+        "可以把车开到店里。",
+        "材料这块我先按门店手续核实清楚，确认后回您，避免您白跑。",
+    ]
+    safe_quality = verify_brain_reply_quality(
+        normalize_brain_plan(safe_plan),
+        current_message="那下次来店里看车时想估一下价，可以把车开过来，还需要带什么别的材料吗",
+        evidence_pack=fake_evidence_pack(include_product=False),
+        settings={},
+    )
+    assert_true(safe_quality["ok"], f"safe non-handoff boundary wording should pass: {safe_quality}")
+    return CaseResult(
+        "quality_gate_rejects_unnecessary_handoff_language_for_send_reply",
+        True,
+        {"errors": quality["errors"], "safe": safe_quality},
+    )
+
+
 def check_quality_gate_rejects_trade_in_process_overcommit() -> CaseResult:
     plan = copy.deepcopy(base_plan())
     plan.update(
@@ -2594,6 +3075,93 @@ def check_semantic_reviewer_handoff_suggest_preserves_brain_handoff_reply() -> C
     )
 
 
+def check_semantic_reviewer_block_preserves_brain_handoff_reply() -> CaseResult:
+    plan = copy.deepcopy(base_plan())
+    plan.update(
+        {
+            "can_answer": False,
+            "answer_mode": "handoff",
+            "recommended_action": "handoff",
+            "evidence_used": {
+                "product_ids": ["chejin_qinplus_2022_dmi55"],
+                "formal_knowledge_ids": ["chejin_loan_policy"],
+                "style_ids": ["customer_service_style_guidelines"],
+            },
+            "facts_claimed": [
+                {
+                    "fact_type": "product_name",
+                    "value": "客户提到的秦PLUS可匹配到2022款比亚迪秦PLUS DM-i 55KM",
+                    "source_level": "product_master",
+                    "source_id": "chejin_qinplus_2022_dmi55",
+                },
+                {
+                    "fact_type": "loan",
+                    "value": "贷款审批以资方最终审核为准，不能承诺包过。",
+                    "source_level": "formal_knowledge",
+                    "source_id": "chejin_loan_policy",
+                },
+            ],
+            "reply_segments": [
+                "这个不能给您包过承诺，贷款还是要按资方审核结果来。",
+                "秦PLUS这台可以先按分期方向了解，但首付、利率和月供要结合资料评估。",
+                "您愿意的话，我把情况转给金融同事按正式流程看一下。",
+            ],
+            "risk": {"risk_level": "high", "risk_tags": ["finance_commitment"], "needs_handoff": True},
+            "confidence": 0.95,
+            "reason": "金融包过是硬边界，Brain 给出边界解释并选择人工承接。",
+        }
+    )
+    config = base_config(plan)
+    config["customer_service_brain"].update(
+        {
+            "mode": "brain_first",
+            "semantic_reviewer_mode": "always",
+            "semantic_reviewer_result": {
+                "verdict": "block",
+                "confidence": 0.98,
+                "semantic_errors": [],
+                "hard_boundary_concerns": ["must_handoff: 贷款包过需要人工/金融专员承接，不能作为普通自动回复直接解决"],
+                "repair_instruction": "应保持转人工承接，不应承诺审批结果。",
+                "customer_visible_risk": "high",
+                "reason": "reviewer 只确认 hard boundary 和 handoff 需求，没有指出事实冲突。",
+            },
+        }
+    )
+    evidence_pack = fake_evidence_pack(include_product=True)
+    formal_item = {"id": "chejin_loan_policy", "title": "贷款政策", "answer": "贷款审批以资方最终审核为准，不能承诺包过。"}
+    evidence_pack["knowledge"]["evidence"]["faq"] = [formal_item]
+    evidence_pack["knowledge"]["formal_knowledge"]["faq"] = [formal_item]
+    evidence_pack["knowledge"]["safety"] = {"must_handoff": True, "reasons": ["finance_details_need_human"], "allowed_auto_reply": False}
+    evidence_pack["safety"] = {"must_handoff": True, "reasons": ["finance_details_need_human"], "allowed_auto_reply": False}
+    evidence_pack["audit_summary"]["evidence_ids"].append("faq:chejin_loan_policy")
+    with patched_evidence_pack(evidence_pack):
+        event = brain_module.maybe_run_customer_service_brain(
+            config=config,
+            target_name="许聪",
+            target_state={"conversation_context": {}},
+            batch=[{"id": "msg1", "sender": "许聪", "content": "征信一般，你能保证贷款包过吗"}],
+            combined="征信一般，你能保证贷款包过吗",
+            decision=ReplyDecision("", "", False, False, ""),
+            reply_text="",
+            intent_assist={},
+            rag_reply={},
+            llm_reply={},
+            product_knowledge={},
+            data_capture={},
+            raw_capture={"conversation": {"conversation_id": "c1", "chat_type": "private"}},
+            customer_profile=None,
+        )
+    assert_true(event.get("rule_name") == "customer_service_brain_handoff", f"Brain-authored hard-boundary handoff should survive reviewer block: {event}")
+    assert_true(event.get("visible_reply_source") == "brain_plan.reply_segments", f"visible reply must remain Brain-authored: {event}")
+    assert_true("包过" in event.get("reply_text", ""), f"Brain boundary explanation should remain visible: {event}")
+    assert_true(event.get("quality_handoff_soft_pass", {}).get("semantic_verdict") == "block", f"block soft-pass must be audited: {event}")
+    return CaseResult(
+        "semantic_reviewer_block_preserves_brain_handoff_reply",
+        True,
+        {"rule": event.get("rule_name"), "reply": event.get("reply_text"), "soft_pass": event.get("quality_handoff_soft_pass")},
+    )
+
+
 def check_semantic_reviewer_repair_blocks_when_repair_disabled() -> CaseResult:
     config = base_config(base_plan())
     config["customer_service_brain"].update(
@@ -2631,7 +3199,8 @@ def check_semantic_reviewer_repair_blocks_when_repair_disabled() -> CaseResult:
         )
     review = event.get("quality_gate_v2") or {}
     repair = event.get("quality_repair") or {}
-    assert_true(event.get("rule_name") == "customer_service_brain_safe_fallback", f"semantic repair failure should safe fallback: {event}")
+    assert_true(event.get("rule_name") == "customer_service_brain_no_visible_reply", f"semantic repair failure should block visible reply: {event}")
+    assert_true(event.get("customer_visible_reply_blocked") is True, f"semantic repair failure must not emit local visible text: {event}")
     assert_true(review.get("verdict") == "repair" and review.get("enforced") is True, f"review should be enforced: {review}")
     assert_true(repair.get("error") == "quality_repair_disabled", f"repair should be skipped by config: {repair}")
     return CaseResult(
@@ -3088,6 +3657,237 @@ def check_repaired_deterministic_quality_soft_pass_requires_missing_context_anch
     )
 
 
+def check_repaired_deterministic_quality_soft_pass_allows_soft_recommendation_doubts() -> CaseResult:
+    plan = copy.deepcopy(base_plan())
+    plan.update(
+        {
+            "answer_mode": "recommend_from_catalog",
+            "understanding": {"intent": "客户想买差不多预算的电车", "gap": "当前商品库没有明确纯电库存"},
+            "evidence_used": {"product_ids": ["chejin_qinplus_2022_dmi55"], "conversation_fact_ids": []},
+            "facts_claimed": [
+                {
+                    "fact_type": "price",
+                    "value": "8.68万",
+                    "source_level": "product_master",
+                    "source_id": "chejin_qinplus_2022_dmi55",
+                }
+            ],
+            "reply_segments": [
+                "目前商品库里没有明确纯电车库存，我先按差不多预算给您看秦PLUS，报价8.68万。",
+                "如果您只考虑纯电，我可以继续帮您盯新增车源。",
+            ],
+            "risk": {"risk_level": "low", "needs_handoff": False, "risk_tags": []},
+        }
+    )
+    pack = fake_evidence_pack(include_product=True)
+    quality = {
+        "ok": False,
+        "errors": [
+            "missing_direct_price_response",
+            "missing_referenced_product_in_reply",
+            "asks_new_need_instead_of_answering_price",
+            "missing_clear_recommendation_or_choice",
+        ],
+        "warnings": [],
+        "repair_instruction": "Brain 已修复，但确定性质量门仍对直接性有软疑虑。",
+    }
+    soft = brain_module.repaired_deterministic_quality_soft_pass_decision(
+        settings={},
+        plan=plan,
+        quality=quality,
+        evidence_pack=pack,
+    )
+    assert_true(soft.get("ok"), f"soft post-repair quality doubts must not override Brain: {soft}")
+    assert_true(
+        soft.get("reason") == "post_repair_soft_quality_deferred_to_guard",
+        f"unexpected soft-pass reason: {soft}",
+    )
+
+    hard_quality = dict(quality)
+    hard_quality["errors"] = ["price_answer_without_product_evidence"]
+    hard_blocked = brain_module.repaired_deterministic_quality_soft_pass_decision(
+        settings={},
+        plan=plan,
+        quality=hard_quality,
+        evidence_pack=pack,
+    )
+    assert_true(not hard_blocked.get("ok"), f"hard authority quality risk must not soft-pass: {hard_blocked}")
+    assert_true(hard_blocked.get("reason") == "hard_quality_errors", f"unexpected hard block: {hard_blocked}")
+
+    unknown_quality = dict(quality)
+    unknown_quality["errors"] = ["new_unclassified_quality_error"]
+    unknown_blocked = brain_module.repaired_deterministic_quality_soft_pass_decision(
+        settings={},
+        plan=plan,
+        quality=unknown_quality,
+        evidence_pack=pack,
+    )
+    assert_true(not unknown_blocked.get("ok"), f"unknown quality errors should stay conservative: {unknown_blocked}")
+    assert_true(unknown_blocked.get("reason") == "unknown_quality_errors", f"unexpected unknown block: {unknown_blocked}")
+    return CaseResult(
+        "repaired_deterministic_quality_soft_pass_allows_soft_recommendation_doubts",
+        True,
+        {"soft": soft, "hard_blocked": hard_blocked, "unknown_blocked": unknown_blocked},
+    )
+
+
+def check_brain_runner_soft_passes_repaired_deterministic_quality_doubts() -> CaseResult:
+    plan = copy.deepcopy(base_plan())
+    plan.update(
+        {
+            "answer_mode": "fallback_existing",
+            "reply_segments": ["我先帮您看看，稍等。"],
+            "facts_claimed": [],
+            "evidence_used": {"product_ids": [], "conversation_fact_ids": []},
+        }
+    )
+    repaired_plan = copy.deepcopy(base_plan())
+    repaired_plan.update(
+        {
+            "answer_mode": "direct_answer",
+            "understanding": {"intent": "客户想给老婆找差不多预算的电车", "gap": "当前商品库没有明确纯电库存"},
+            "evidence_used": {"product_ids": ["chejin_qinplus_2022_dmi55"], "conversation_fact_ids": []},
+            "facts_claimed": [
+                {
+                    "fact_type": "price",
+                    "value": "8.68万",
+                    "source_level": "product_master",
+                    "source_id": "chejin_qinplus_2022_dmi55",
+                }
+            ],
+            "reply_segments": [
+                "目前商品库里没有明确纯电车库存。秦PLUS报价8.68万，预算比较接近；如果只考虑纯电，我继续帮您盯新增车源。"
+            ],
+            "risk": {"risk_level": "low", "needs_handoff": False, "risk_tags": []},
+        }
+    )
+    config = base_config(plan)
+    config["customer_service_brain"].update(
+        {
+            "semantic_reviewer_mode": "off",
+            "semantic_reviewer_cache_enabled": False,
+        }
+    )
+    with patched_evidence_pack(fake_evidence_pack(include_product=True)), patched_brain_repair(repaired_plan):
+        event = brain_module.maybe_run_customer_service_brain(
+            config=config,
+            target_name="新数据测试",
+            target_state={"conversation_context": {}},
+            batch=[
+                {
+                    "id": "msg1",
+                    "sender": "许聪",
+                    "content": "我老婆说想换个电车，你有没有差不多价格的，合适的能推荐",
+                }
+            ],
+            combined="我老婆说想换个电车，你有没有差不多价格的，合适的能推荐",
+            decision=ReplyDecision("", "", False, False, ""),
+            reply_text="",
+            intent_assist={},
+            rag_reply={},
+            llm_reply={},
+            product_knowledge={},
+            data_capture={},
+            raw_capture={"conversation": {"conversation_id": "c2", "chat_type": "group"}},
+            customer_profile=None,
+        )
+    assert_true(event.get("applied"), f"repaired Brain reply with soft quality doubts should apply: {event}")
+    assert_true(event.get("rule_name") == "customer_service_brain_reply", f"expected Brain-owned reply: {event}")
+    assert_true(event.get("visible_reply_owner") == "brain_repair", f"reply must be authored by Brain repair: {event}")
+    assert_true(event.get("repaired_quality_soft_pass", {}).get("ok"), f"expected deterministic soft-pass audit: {event}")
+    assert_true("秦PLUS" in event.get("reply_text", ""), f"reply should keep Brain repaired content: {event}")
+    assert_true(event.get("reason") != "brain_quality_verification_failed", f"quality gate must not hard-veto Brain: {event}")
+    return CaseResult(
+        "brain_runner_soft_passes_repaired_deterministic_quality_doubts",
+        True,
+        {"reason": event.get("reason"), "soft_pass": event.get("repaired_quality_soft_pass")},
+    )
+
+
+def check_brain_runner_soft_passes_repaired_appointment_schedule_boundary() -> CaseResult:
+    plan = copy.deepcopy(base_plan())
+    plan.update(
+        {
+            "answer_mode": "collect_customer_info",
+            "evidence_used": {"product_ids": ["chejin_sienna_2021_hybrid"], "conversation_fact_ids": []},
+            "facts_claimed": [],
+            "reply_segments": [
+                "可以约周三下午看车。",
+                "我先核实车源状态和门店排期，确认好回复您，避免您白跑。",
+            ],
+            "risk": {"risk_level": "low", "risk_tags": ["appointment_boundary"], "needs_handoff": False},
+        }
+    )
+    quality = {
+        "ok": False,
+        "errors": ["generic_stall_reply_for_concrete_question"],
+        "warnings": [],
+        "repair_instruction": "预约排期核实属于边界说明，不应被当成空泛拖延。",
+    }
+    soft = brain_module.repaired_deterministic_quality_soft_pass_decision(
+        settings={},
+        plan=plan,
+        quality=quality,
+        evidence_pack=fake_evidence_pack(include_product=True),
+    )
+    assert_true(soft.get("ok"), f"bounded appointment scheduling reply should soft-pass after repair: {soft}")
+    return CaseResult("brain_runner_soft_passes_repaired_appointment_schedule_boundary", True, {"soft": soft})
+
+
+def check_semantic_reviewer_relaxes_bounded_finance_boundary() -> CaseResult:
+    plan = copy.deepcopy(base_plan())
+    plan.update(
+        {
+            "answer_mode": "direct_answer",
+            "evidence_used": {
+                "product_ids": ["chejin_sienna_2021_hybrid"],
+                "formal_knowledge_ids": ["chejin_loan_policy"],
+                "common_sense_topics": ["客户想降低前期压力，可先说明分期边界"],
+            },
+            "facts_claimed": [
+                {
+                    "fact_type": "payment_policy",
+                    "value": "贷款审批以资方最终审核为准，不能承诺固定最低首付",
+                    "source_level": "formal_knowledge",
+                    "source_id": "chejin_loan_policy",
+                }
+            ],
+            "reply_segments": [
+                "这台车支持分期，首付要结合车价和征信做评估，最低比例现在不能直接定。",
+                "贷款审批以资方最终审核为准，您可以说下能接受的首付款范围，我按这个对接正式方案。",
+            ],
+            "risk": {"risk_level": "medium", "risk_tags": ["finance", "approval_required"], "needs_handoff": False},
+        }
+    )
+    review = {
+        "invoked": True,
+        "status": "ok",
+        "ok": False,
+        "verdict": "repair",
+        "semantic_errors": ["直接发送金融相关答复，不符合既定边界"],
+        "hard_boundary_concerns": ["authority_evidence_summary 标注 finance 场景 must_handoff=true、allowed_auto_reply=false、finance_details_need_human"],
+        "errors": ["semantic reviewer over strict"],
+        "warnings": [],
+        "repair_instruction": "建议转人工",
+        "customer_visible_risk": "medium",
+        "reason": "simulated_over_strict_finance_review",
+    }
+    brain_input = {"current_message": {"clean_text": "之前说的那个塞纳就不错。首付最低多少？我想尽量前期压力小点儿"}}
+    relaxed = reviewer_module.relax_bounded_finance_review(review=review, plan=plan, brain_input=brain_input)
+    assert_true(relaxed.get("ok"), f"bounded finance reviewer concern should relax: {relaxed}")
+    assert_true("bounded_finance_review_relaxed" in relaxed.get("warnings", []), f"relaxation warning missing: {relaxed}")
+
+    risky_plan = copy.deepcopy(plan)
+    risky_plan["reply_segments"] = ["最低首付可以做到两万，贷款审批也能办下来。"]
+    risky = reviewer_module.relax_bounded_finance_review(review=review, plan=risky_plan, brain_input=brain_input)
+    assert_true(not risky.get("ok"), f"finance commitment must not be relaxed: {risky}")
+    return CaseResult(
+        "semantic_reviewer_relaxes_bounded_finance_boundary",
+        True,
+        {"relaxed": relaxed, "risky": risky},
+    )
+
+
 def check_brain_runner_soft_passes_repaired_semantic_minor_nits() -> CaseResult:
     plan = copy.deepcopy(base_plan())
     plan.update(
@@ -3153,6 +3953,100 @@ def check_brain_runner_soft_passes_repaired_semantic_minor_nits() -> CaseResult:
         "brain_runner_soft_passes_repaired_semantic_minor_nits",
         True,
         {"reason": event.get("reason"), "soft_pass": event.get("repaired_quality_soft_pass")},
+    )
+
+
+def check_brain_runner_soft_passes_repaired_semantic_authority_false_positive() -> CaseResult:
+    plan = copy.deepcopy(base_plan())
+    plan.update(
+        {
+            "answer_mode": "fallback_existing",
+            "reply_segments": ["我先帮您看看，稍等。"],
+            "facts_claimed": [],
+            "evidence_used": {"product_ids": [], "conversation_fact_ids": []},
+        }
+    )
+    repaired_plan = copy.deepcopy(base_plan())
+    repaired_plan.update(
+        {
+            "answer_mode": "recommend_from_catalog",
+            "understanding": {"intent": "预算8万左右省心二手车推荐", "must": "预算贴近、省心"},
+            "evidence_used": {"product_ids": ["chejin_qinplus_2022_dmi55"], "conversation_fact_ids": []},
+            "facts_claimed": [
+                {
+                    "fact_type": "price",
+                    "value": "8.68万",
+                    "source_level": "product_master",
+                    "source_id": "chejin_qinplus_2022_dmi55",
+                }
+            ],
+            "reply_segments": [
+                "8万左右我会优先让您看秦PLUS这台，报价8.68万，通勤省油、省心度比较贴近。",
+                "预算如果要卡得更紧，我再帮您筛更低价的车源。",
+            ],
+            "risk": {"risk_level": "low", "needs_handoff": False, "risk_tags": []},
+        }
+    )
+    config = base_config(plan)
+    config["customer_service_brain"].update(
+        {
+            "semantic_reviewer_mode": "always",
+            "semantic_reviewer_cache_enabled": False,
+            "semantic_reviewer_result": {
+                "status": "ok",
+                "verdict": "repair",
+                "confidence": 0.66,
+                "semantic_errors": [
+                    "商品事实越权：秦PLUS报价8.68万疑似未在当前证据体现，需确认 facts_claimed/source_id。",
+                ],
+                "hard_boundary_concerns": [
+                    "候选回复中秦PLUS报价8.68万未在已提供 facts_claimed/source_id 中得到明确授权，存在商品事实越权疑虑。",
+                ],
+                "repair_instruction": "核对商品库证据后再输出，不要改写商品事实。",
+                "customer_visible_risk": "medium",
+                "reason": "authority_false_positive",
+            },
+        }
+    )
+    message = "预算8万左右想买个省心的二手车"
+    pack = fake_evidence_pack(include_product=True)
+    pack["current_message"] = message
+    pack["current_batch"] = [{"id": "msg1", "sender": "许聪", "content": message}]
+    if isinstance(pack.get("conversation"), dict):
+        pack["conversation"]["current_batch_text"] = f"[许聪] {message}"
+    with patched_evidence_pack(pack), patched_brain_repair(repaired_plan):
+        event = brain_module.maybe_run_customer_service_brain(
+            config=config,
+            target_name="许聪",
+            target_state={"conversation_context": {}},
+            batch=[{"id": "msg1", "sender": "许聪", "content": message}],
+            combined=message,
+            decision=ReplyDecision("", "", False, False, ""),
+            reply_text="",
+            intent_assist={},
+            rag_reply={},
+            llm_reply={},
+            product_knowledge={},
+            data_capture={},
+            raw_capture={"conversation": {"conversation_id": "c1", "chat_type": "private"}},
+            customer_profile=None,
+        )
+    soft_pass = event.get("repaired_quality_soft_pass") or {}
+    warnings = [str(item) for item in soft_pass.get("warnings", []) or []]
+    assert_true(event.get("applied"), f"contract-verified authority false positive should not block Brain: {event}")
+    assert_true(event.get("rule_name") == "customer_service_brain_reply", f"expected Brain-owned reply: {event}")
+    assert_true(event.get("visible_reply_owner") == "brain_repair", f"reply must remain Brain repair authored: {event}")
+    assert_true(soft_pass.get("ok"), f"expected semantic authority false-positive soft-pass audit: {event}")
+    assert_true(
+        any("semantic_authority_false_positive_soft_pass" in item for item in warnings),
+        f"soft-pass should audit semantic authority false positive: {soft_pass}",
+    )
+    assert_true("秦PLUS" in event.get("reply_text", ""), f"reply should keep product-master answer: {event}")
+    assert_true(event.get("reason") != "brain_quality_verification_failed", f"quality gate must not hard-veto Brain: {event}")
+    return CaseResult(
+        "brain_runner_soft_passes_repaired_semantic_authority_false_positive",
+        True,
+        {"reason": event.get("reason"), "soft_pass": soft_pass},
     )
 
 
@@ -3646,6 +4540,114 @@ def check_guard_clears_soft_finance_process_with_formal_knowledge() -> CaseResul
     return CaseResult("guard_clears_soft_finance_process_with_formal_knowledge", True, {"guard": guard})
 
 
+def check_guard_allows_customer_data_ack_with_conversation_fact() -> CaseResult:
+    pack = fake_evidence_pack(include_product=False)
+    pack["current_message"] = "可以，我叫王先生，电话13912345678，周六下午两点左右过去。"
+    pack["conversation"]["current_batch_text"] = "[许聪] 可以，我叫王先生，电话13912345678，周六下午两点左右过去。"
+    pack["intent_tags"] = ["customer_data"]
+    pack["knowledge"]["intent_tags"] = ["customer_data"]
+    candidate = {
+        "can_answer": True,
+        "reply": "好的王先生，您的电话和周六下午两点左右到店的信息我已经收到。我这边先为您登记。",
+        "confidence": 0.95,
+        "recommended_action": "send_reply",
+        "needs_handoff": False,
+        "used_evidence": ["conversation:sim_msg_1"],
+        "structured_used": True,
+        "risk_tags": ["customer_data"],
+    }
+    guard = guard_synthesized_reply(candidate=candidate, evidence_pack=pack, settings={"require_evidence": True})
+    assert_true(guard.get("allowed") and guard.get("action") == "send_reply", f"conversation fact should authorize customer-data acknowledgement: {guard}")
+
+    risky = dict(candidate)
+    risky["reply"] = "好的王先生，您周六下午两点直接过来就行，我给您安排好了。"
+    risky_guard = guard_synthesized_reply(candidate=risky, evidence_pack=pack, settings={"require_evidence": True})
+    assert_true(not risky_guard.get("allowed"), f"conversation fact must not authorize appointment overcommit: {risky_guard}")
+    return CaseResult(
+        "guard_allows_customer_data_ack_with_conversation_fact",
+        True,
+        {"guard": guard, "risky_guard": risky_guard},
+    )
+
+
+def check_guard_allows_customer_data_ack_with_message_id_conversation_fact() -> CaseResult:
+    pack = fake_evidence_pack(include_product=False)
+    pack["current_message"] = "可以，我叫王先生，电话13912345678，周六下午两点左右过去。"
+    pack["conversation"]["current_batch_text"] = "[许聪] 可以，我叫王先生，电话13912345678，周六下午两点左右过去。"
+    pack["intent_tags"] = ["customer_data"]
+    pack["knowledge"]["intent_tags"] = ["customer_data"]
+    candidate = {
+        "can_answer": True,
+        "reply": "好的王先生，您的姓名、电话和周六下午两点左右到店时间我这边先记下了。我先核实车源状态和门店接待安排，确认后尽快回复您。",
+        "confidence": 0.95,
+        "recommended_action": "send_reply",
+        "needs_handoff": False,
+        "used_evidence": ["sim_msg_1"],
+        "structured_used": True,
+        "risk_tags": ["customer_data", "appointment_boundary"],
+    }
+    guard = guard_synthesized_reply(candidate=candidate, evidence_pack=pack, settings={"require_evidence": True})
+    assert_true(guard.get("allowed") and guard.get("action") == "send_reply", f"message id should authorize current-turn customer-data acknowledgement: {guard}")
+
+    risky = dict(candidate)
+    risky["reply"] = "好的王先生，周六下午两点直接过来就行，我已经给您安排好了。"
+    risky_guard = guard_synthesized_reply(candidate=risky, evidence_pack=pack, settings={"require_evidence": True})
+    assert_true(not risky_guard.get("allowed"), f"message id conversation fact must not authorize appointment overcommit: {risky_guard}")
+    return CaseResult(
+        "guard_allows_customer_data_ack_with_message_id_conversation_fact",
+        True,
+        {"guard": guard, "risky_guard": risky_guard},
+    )
+
+
+def check_guard_allows_finance_lowest_down_payment_boundary_reply() -> CaseResult:
+    pack = fake_evidence_pack(include_product=True)
+    pack["current_message"] = "之前说的这台车就不错。首付最低多少？我想尽量前期压力小点儿"
+    pack["conversation"]["current_batch_text"] = "[许聪] 之前说的这台车就不错。首付最低多少？我想尽量前期压力小点儿"
+    pack["intent_tags"] = ["payment"]
+    pack["knowledge"]["evidence"]["faq"] = [{"intent": "chejin_loan_policy", "answer": "支持分期，审批以资方最终审核为准，不能承诺零首付或包过。"}]
+    pack["knowledge"]["formal_knowledge"]["faq"] = pack["knowledge"]["evidence"]["faq"]
+    pack["safety"] = {
+        "must_handoff": True,
+        "reasons": ["matched_faq_requires_handoff", "finance_details_need_human"],
+        "allowed_auto_reply": False,
+    }
+    candidate = {
+        "can_answer": True,
+        "reply": "这台车支持分期，首付要结合车价和征信做评估，最低比例现在不能直接定。贷款审批以资方最终审核为准。您可以告诉我想把首付款控制在大概多少，我按这台车帮您对接正式方案。",
+        "confidence": 0.96,
+        "recommended_action": "send_reply",
+        "needs_handoff": False,
+        "used_evidence": ["product:chejin_qinplus_2022_dmi55", "faq:chejin_loan_policy"],
+        "structured_used": True,
+        "risk_tags": ["finance", "approval_required"],
+    }
+    guard = guard_synthesized_reply(candidate=candidate, evidence_pack=pack, settings={"require_evidence": True, "brain_first_guard": True})
+    assert_true(guard.get("allowed") and guard.get("action") == "send_reply", f"qualified lowest-down-payment boundary reply should pass: {guard}")
+    return CaseResult("guard_allows_finance_lowest_down_payment_boundary_reply", True, {"guard": guard})
+
+
+def check_guard_rejects_finance_lowest_down_payment_commitment() -> CaseResult:
+    pack = fake_evidence_pack(include_product=True)
+    pack["current_message"] = "首付最低多少？能不能低点直接办？"
+    pack["intent_tags"] = ["payment"]
+    pack["knowledge"]["evidence"]["faq"] = [{"intent": "chejin_loan_policy", "answer": "支持分期，审批以资方最终审核为准，不能承诺零首付或包过。"}]
+    pack["knowledge"]["formal_knowledge"]["faq"] = pack["knowledge"]["evidence"]["faq"]
+    candidate = {
+        "can_answer": True,
+        "reply": "最低首付可以给您做到两万，审批也能办下来。",
+        "confidence": 0.9,
+        "recommended_action": "send_reply",
+        "needs_handoff": False,
+        "used_evidence": ["faq:chejin_loan_policy"],
+        "structured_used": True,
+        "risk_tags": ["finance"],
+    }
+    guard = guard_synthesized_reply(candidate=candidate, evidence_pack=pack, settings={"require_evidence": True, "brain_first_guard": True})
+    assert_true(not guard.get("allowed"), f"concrete lowest-down-payment commitment must be blocked: {guard}")
+    return CaseResult("guard_rejects_finance_lowest_down_payment_commitment", True, {"guard": guard})
+
+
 def check_guard_allows_soft_offtopic_customer_care_reply() -> CaseResult:
     pack = fake_evidence_pack(include_product=False)
     pack["current_message"] = "今天心情有点烦，随便聊两句行不行？"
@@ -3720,8 +4722,37 @@ def check_guard_v2_soft_handoff_is_repair_not_visible_reply() -> CaseResult:
     return CaseResult("guard_v2_soft_handoff_is_repair_not_visible_reply", True, {"guard": guard})
 
 
-def check_guard_v2_approves_authoritative_brain_handoff() -> CaseResult:
+def check_guard_v2_soft_evidence_handoff_requires_brain_repair() -> CaseResult:
     pack = fake_evidence_pack(include_product=True)
+    pack["safety"] = {
+        "must_handoff": True,
+        "reasons": ["matched_faq_requires_handoff", "missing_authoritative_evidence", "auto_reply_disabled"],
+        "allowed_auto_reply": False,
+    }
+    pack["knowledge"]["safety"] = dict(pack["safety"])
+    candidate = {
+        "can_answer": False,
+        "reply": "您这个问题我先核一下，稍后回复您。",
+        "confidence": 0.88,
+        "recommended_action": "handoff",
+        "needs_handoff": True,
+        "used_evidence": ["product:chejin_qinplus_2022_dmi55"],
+        "structured_used": True,
+        "risk_tags": [],
+    }
+    guard = guard_synthesized_reply(candidate=candidate, evidence_pack=pack, settings={"require_evidence": True, "brain_first_guard": True})
+    assert_true(not guard.get("allowed") and guard.get("action") == "repair", f"soft evidence handoff must go back to Brain: {guard}")
+    assert_true(guard.get("hard_boundary") is False, f"soft evidence should not become hard boundary: {guard}")
+    assert_true("软审稿意见" in str(guard.get("repair_instruction") or ""), f"repair should explain soft advisory handoff: {guard}")
+    return CaseResult("guard_v2_soft_evidence_handoff_requires_brain_repair", True, {"guard": guard})
+
+
+def check_guard_v2_approves_authoritative_brain_hard_boundary_reply() -> CaseResult:
+    pack = fake_evidence_pack(include_product=True)
+    pack["current_message"] = "你能保证贷款包过吗？"
+    pack["conversation"]["current_batch_text"] = "[许聪] 你能保证贷款包过吗？"
+    pack["intent_tags"] = ["payment"]
+    pack["knowledge"]["intent_tags"] = ["payment"]
     pack["safety"] = {
         "must_handoff": True,
         "reasons": ["matched_faq_requires_handoff", "finance_details_need_human"],
@@ -3730,7 +4761,7 @@ def check_guard_v2_approves_authoritative_brain_handoff() -> CaseResult:
     pack["knowledge"]["safety"] = dict(pack["safety"])
     candidate = {
         "can_answer": False,
-        "reply": "",
+        "reply": "这个不能保证包过，贷款要看资方审批和个人征信，最终以审批为准。我可以先帮您按正常流程看方案。",
         "confidence": 0.98,
         "recommended_action": "handoff",
         "needs_handoff": True,
@@ -3739,10 +4770,11 @@ def check_guard_v2_approves_authoritative_brain_handoff() -> CaseResult:
         "risk_tags": ["finance_boundary", "requires_handoff"],
     }
     guard = guard_synthesized_reply(candidate=candidate, evidence_pack=pack, settings={"require_evidence": True, "brain_first_guard": True})
-    assert_true(guard.get("allowed") is True and guard.get("action") == "handoff", f"authoritative Brain handoff should pass as handoff: {guard}")
-    assert_true(guard.get("hard_boundary") is True, f"authoritative no-auto-reply boundary should be audited as hard: {guard}")
+    assert_true(guard.get("allowed") is True and guard.get("action") == "handoff", f"Brain hard-boundary reply should pass as handoff: {guard}")
+    assert_true(guard.get("hard_boundary") is True, f"hard-boundary handoff should stay audited as hard: {guard}")
     assert_true(guard.get("customer_visible_reply_source") != "guard_handoff_ack", f"guard must not author visible handoff text: {guard}")
-    return CaseResult("guard_v2_approves_authoritative_brain_handoff", True, {"guard": guard})
+    assert_true("包过" in str(guard.get("candidate", {}).get("reply") or guard.get("reply") or ""), f"Brain visible reply should be preserved: {guard}")
+    return CaseResult("guard_v2_approves_authoritative_brain_hard_boundary_reply", True, {"guard": guard})
 
 
 def check_guard_v2_product_conflict_requests_brain_repair() -> CaseResult:
@@ -4049,6 +5081,26 @@ def check_context_need_catalog_candidates_prefer_recent_mpv_need() -> CaseResult
     )
 
 
+def check_catalog_list_request_prioritizes_explicit_preference() -> CaseResult:
+    question = "除了这些，还有在售的电车吗？预算高点也没事，我想要纯电的"
+    with tenant_context("chejin"):
+        candidates = catalog_product_candidates(question, limit=5, context={})
+    ids = [str(item.get("id") or "") for item in candidates]
+    assert_true(
+        any(item_id in {"chejin_hengyi_2019_es6", "chejin_model3_2021_srplus"} for item_id in ids[:3]),
+        f"list/catalog request with explicit EV preference should surface pure-electric candidates before generic price-list truncation: {[(item.get('id'), item.get('name'), item.get('matched_aliases'), item.get('match_reason')) for item in candidates]}",
+    )
+    assert_true(
+        any(str(item.get("match_reason") or "") in {"catalog_preference_match", "catalog_preference_price_list"} for item in candidates[:3]),
+        f"preference-aware list recall should be audited in match_reason: {candidates[:3]}",
+    )
+    return CaseResult(
+        "catalog_list_request_prioritizes_explicit_preference",
+        True,
+        {"candidates": [{"id": item.get("id"), "reason": item.get("match_reason"), "aliases": item.get("matched_aliases")} for item in candidates[:5]]},
+    )
+
+
 def check_followup_preference_context_preserves_previous_budget() -> CaseResult:
     target_state: dict[str, Any] = {"conversation_context": {}}
     first_update = workflow_module.update_conversation_preference_context(
@@ -4227,6 +5279,83 @@ def check_appointment_schedule_question_relaxes_to_bounded_auto_reply() -> CaseR
     return CaseResult("appointment_schedule_question_relaxes_to_bounded_auto_reply", True, {"safety": safety})
 
 
+def check_catalog_recommendation_with_product_master_relaxes_soft_price_advisory() -> CaseResult:
+    message = "给我老婆买个二手车，时尚些的，价格不贵的，有好的推荐吗"
+    pack = build_catalog_recommendation_probe_pack(message)
+    knowledge = pack.get("knowledge", {}) or {}
+    safety = knowledge.get("safety") or {}
+    evidence = knowledge.get("evidence") or {}
+    assert_true(safety.get("must_handoff") is False, f"broad catalog recommendation should stay answerable: {safety}")
+    assert_true(safety.get("allowed_auto_reply") is True, f"catalog recommendation should remain auto-replyable: {safety}")
+    assert_true(
+        safety.get("catalog_recommendation_soft_advisory_override") is True,
+        f"soft price/risk FAQ should be downgraded to Brain advisory: {safety}",
+    )
+    assert_true(evidence.get("catalog_candidates") or evidence.get("products"), f"product-master candidates required: {evidence}")
+    advisory_items = [
+        item
+        for item in evidence.get("faq", []) or []
+        if isinstance(item, dict) and item.get("soft_advisory_only")
+    ]
+    assert_true(advisory_items, f"matched broad risk FAQ should be marked advisory-only: {evidence.get('faq')}")
+    return CaseResult(
+        "catalog_recommendation_with_product_master_relaxes_soft_price_advisory",
+        True,
+        {"safety": safety, "catalog_ids": [item.get("id") for item in (evidence.get("catalog_candidates") or [])[:3]]},
+    )
+
+
+def check_catalog_recommendation_stock_signal_relaxes_after_product_master_evidence() -> CaseResult:
+    message = "接着前面的说，有没有价格差不多的，适合女性开的电车，混动也可以"
+    pack = build_catalog_recommendation_probe_pack(message)
+    knowledge = pack.get("knowledge", {}) or {}
+    safety = knowledge.get("safety") or {}
+    evidence = knowledge.get("evidence") or {}
+    assert_true(
+        {"stock", "product"} <= set(knowledge.get("intent_tags") or []),
+        f"probe should cover stock-tagged product shopping question: {knowledge.get('intent_tags')}",
+    )
+    assert_true(safety.get("must_handoff") is False, f"stock-tagged catalog recommendation should stay answerable: {safety}")
+    assert_true(safety.get("allowed_auto_reply") is True, f"stock-tagged catalog recommendation should remain auto-replyable: {safety}")
+    assert_true(
+        safety.get("catalog_recommendation_soft_advisory_override") is True
+        or safety.get("llm_synthesis_product_master_quote_override") is True,
+        f"product-master grounded shopping question should downgrade soft handoff to Brain advisory: {safety}",
+    )
+    assert_true(evidence.get("catalog_candidates") or evidence.get("products"), f"product-master candidates required: {evidence}")
+    return CaseResult(
+        "catalog_recommendation_stock_signal_relaxes_after_product_master_evidence",
+        True,
+        {"safety": safety, "intent_tags": knowledge.get("intent_tags"), "catalog_ids": [item.get("id") for item in (evidence.get("catalog_candidates") or [])[:3]]},
+    )
+
+
+def check_catalog_recommendation_hard_boundary_stays_handoff() -> CaseResult:
+    pack = {
+        "intent_tags": ["catalog", "product", "quote"],
+        "safety": {
+            "must_handoff": True,
+            "reasons": ["matched_faq_requires_handoff", "auto_reply_disabled"],
+            "allowed_auto_reply": False,
+        },
+        "evidence": {
+            "catalog_candidates": [
+                {"id": "chejin_audi_a4l_2018_40tfsi", "price": "14.58万", "stock": "在售"},
+            ],
+            "products": [],
+            "faq": [],
+        },
+    }
+    relax_soft_synthesis_safety(pack, text="这台车最低价还能再优惠多少，能保证无事故吗？")
+    safety = pack.get("safety") or {}
+    assert_true(safety.get("must_handoff") is True, f"hard commitment request must not be softened: {safety}")
+    assert_true(
+        safety.get("catalog_recommendation_soft_advisory_override") is not True,
+        f"hard commitment request must not get catalog soft override: {safety}",
+    )
+    return CaseResult("catalog_recommendation_hard_boundary_stays_handoff", True, {"safety": safety})
+
+
 def check_finance_promise_and_lowest_price_combo_keeps_handoff() -> CaseResult:
     message = "贷款你能不能保证包过？再给我最低价，我现在就定。"
     pack = build_finance_probe_pack(message)
@@ -4267,6 +5396,26 @@ def build_appointment_probe_pack(message: str) -> dict[str, Any]:
             data_capture={},
             customer_profile=None,
             raw_capture={"conversation": {"conversation_id": "appointment_probe", "chat_type": "private"}},
+        )
+
+
+def build_catalog_recommendation_probe_pack(message: str) -> dict[str, Any]:
+    with tenant_context("chejin"):
+        return build_reply_evidence_pack(
+            config={},
+            target_name="许聪",
+            target_state={},
+            batch=[{"id": "catalog_recommendation_probe_1", "sender": "许聪", "content": message}],
+            combined=message,
+            decision=None,
+            reply_text="",
+            intent_assist={},
+            rag_reply={},
+            llm_reply={},
+            product_knowledge={},
+            data_capture={},
+            customer_profile=None,
+            raw_capture={"conversation": {"conversation_id": "catalog_recommendation_probe", "chat_type": "private"}},
         )
 
 
@@ -4400,7 +5549,7 @@ def check_process_target_brain_first_adopts() -> CaseResult:
     return CaseResult("process_target_brain_first_adopts", True, {"action": event.get("action")})
 
 
-def check_process_target_brain_first_exception_uses_safe_fallback() -> CaseResult:
+def check_process_target_brain_first_exception_blocks_visible_reply() -> CaseResult:
     original = workflow_module.maybe_run_customer_service_brain
 
     def explode_brain(**_: Any) -> dict[str, Any]:
@@ -4423,18 +5572,15 @@ def check_process_target_brain_first_exception_uses_safe_fallback() -> CaseResul
         workflow_module.maybe_run_customer_service_brain = original
     decision = event.get("decision") or {}
     brain = event.get("customer_service_brain") or {}
-    runtime_route = event.get("runtime_route") if isinstance(event.get("runtime_route"), dict) else {}
-    rag_reply = event.get("rag_reply") if isinstance(event.get("rag_reply"), dict) else {}
-    realtime_reply = event.get("realtime_reply") if isinstance(event.get("realtime_reply"), dict) else {}
-    llm_synthesis = event.get("llm_reply_synthesis") if isinstance(event.get("llm_reply_synthesis"), dict) else {}
-    assert_true(brain.get("rule_name") == "customer_service_brain_safe_fallback", f"Brain exception should produce safe fallback: {event}")
-    assert_true(event.get("customer_service_brain_adopted", {}).get("applied") is True, f"safe fallback should be adopted: {event}")
-    assert_true(decision.get("raw_reply_text") == "在的，您说。", f"decision should not use legacy reply: {decision}")
-    assert_true(rag_reply.get("reason") == "rag_response_disabled", f"Brain safe fallback must not use RAG legacy reply: {event}")
-    assert_true(runtime_route.get("reason") == "realtime_reply_disabled", f"Brain safe fallback must not use realtime local templates: {event}")
-    assert_true(realtime_reply.get("applied") is False, f"Brain safe fallback must not apply local realtime reply: {event}")
-    assert_true(llm_synthesis.get("reason") == "llm_reply_synthesis_disabled", f"Brain safe fallback must not use legacy synthesis: {event}")
-    return CaseResult("process_target_brain_first_exception_uses_safe_fallback", True, {"rule": decision.get("rule_name")})
+    legacy = event.get("customer_service_brain_legacy_generators") if isinstance(event.get("customer_service_brain_legacy_generators"), dict) else {}
+    audit = event.get("brain_first_reply_audit") if isinstance(event.get("brain_first_reply_audit"), dict) else {}
+    assert_true(brain.get("rule_name") == "customer_service_brain_no_visible_reply", f"Brain exception should block visible reply: {event}")
+    assert_true(event.get("customer_service_brain_adopted", {}).get("applied") is False, f"blocked Brain reply must not be adopted: {event}")
+    assert_true(event.get("action") == "blocked", f"Brain exception should stop outbound flow: {event}")
+    assert_true(not str(decision.get("raw_reply_text") or decision.get("reply_text") or "").strip(), f"decision must not use legacy or local fallback reply: {decision}")
+    assert_true(legacy.get("disabled") is True, f"Brain First must disable legacy generators before blocking: {event}")
+    assert_true(audit.get("reply_owner") in {"none_brain_unavailable", "brain_not_adopted"}, f"audit should not mark fallback as owner: {audit}")
+    return CaseResult("process_target_brain_first_exception_blocks_visible_reply", True, {"rule": decision.get("rule_name")})
 
 
 def check_process_target_brain_first_nonadoptable_blocks_legacy_takeover() -> CaseResult:
@@ -4472,20 +5618,13 @@ def check_process_target_brain_first_nonadoptable_blocks_legacy_takeover() -> Ca
     decision = event.get("decision") or {}
     legacy = event.get("customer_service_brain_legacy_generators") if isinstance(event.get("customer_service_brain_legacy_generators"), dict) else {}
     audit = event.get("brain_first_reply_audit") if isinstance(event.get("brain_first_reply_audit"), dict) else {}
-    runtime_route = event.get("runtime_route") if isinstance(event.get("runtime_route"), dict) else {}
-    rag_reply = event.get("rag_reply") if isinstance(event.get("rag_reply"), dict) else {}
-    realtime_reply = event.get("realtime_reply") if isinstance(event.get("realtime_reply"), dict) else {}
-    llm_synthesis = event.get("llm_reply_synthesis") if isinstance(event.get("llm_reply_synthesis"), dict) else {}
     assert_true(legacy.get("disabled") is True, f"Brain First must disable legacy generators even when Brain needs fallback: {event}")
-    assert_true(event.get("customer_service_brain_adopted", {}).get("applied") is True, f"Brain safe fallback should be adopted: {event}")
-    assert_true(decision.get("rule_name") == "customer_service_brain_safe_fallback", f"legacy template must not take over: {decision}")
+    assert_true(event.get("customer_service_brain_adopted", {}).get("applied") is False, f"non-adoptable Brain must stay non-adopted: {event}")
+    assert_true(event.get("action") == "blocked", f"non-adoptable Brain should block outbound flow: {event}")
+    assert_true(decision.get("rule_name") == "customer_service_brain_no_visible_reply", f"legacy template must not take over: {decision}")
     assert_true("旧结构化模板" not in str(decision.get("reply_text") or decision.get("raw_reply_text") or ""), f"legacy reply leaked: {decision}")
-    assert_true(audit.get("reply_owner") == "brain_safe_fallback", f"audit should show Brain safe fallback owner: {audit}")
+    assert_true(audit.get("reply_owner") in {"none_brain_unavailable", "brain_not_adopted"}, f"audit should show no visible Brain reply owner: {audit}")
     assert_true(audit.get("legacy_generators_disabled") is True, f"Brain audit should record disabled legacy generators: {audit}")
-    assert_true(rag_reply.get("reason") == "rag_response_disabled", f"RAG must not revive legacy reply after Brain fallback: {event}")
-    assert_true(runtime_route.get("reason") == "realtime_reply_disabled", f"realtime route must not revive legacy reply after Brain fallback: {event}")
-    assert_true(realtime_reply.get("applied") is False, f"local realtime reply must stay unapplied: {event}")
-    assert_true(llm_synthesis.get("reason") == "llm_reply_synthesis_disabled", f"legacy LLM synthesis must stay disabled: {event}")
     return CaseResult(
         "process_target_brain_first_nonadoptable_blocks_legacy_takeover",
         True,

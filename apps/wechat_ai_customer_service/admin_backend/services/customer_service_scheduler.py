@@ -45,15 +45,21 @@ from apps.wechat_ai_customer_service.admin_backend.services.customer_service_sch
     mark_reply_sending,
     mark_reply_sent,
     mark_reply_stale,
+    message_content_digest,
     normalize_repeatable_probe_text,
     recover_orphaned_running_llm_tasks,
     recover_orphaned_running_polish_tasks,
     record_capture_result,
     record_session_signal,
+    requeue_capture_after_recoverable_llm_failure,
     select_capture_sessions,
     select_ready_replies,
     state_summary,
     stable_id,
+)
+from apps.wechat_ai_customer_service.admin_backend.services.customer_service_session_ledger import (
+    SessionLedgerStore,
+    stable_session_key,
 )
 from apps.wechat_ai_customer_service.wechat_message_normalizer import split_wechat_ocr_speaker_prefix
 
@@ -94,6 +100,48 @@ _RPA_HUMANIZED_SEND_ENV_MAPPING = {
 
 _SELF_MESSAGE_SENDERS = {"self", "assistant", "agent", "me", "outbound"}
 _SHORT_PENDING_SIGNAL_KIND = "high_sensitivity_short"
+_SHORT_PENDING_SIGNAL_MAX_AGE_SECONDS = 120.0
+
+
+def _parse_iso_datetime(value: Any) -> datetime | None:
+    text = str(value or "").strip()
+    if not text:
+        return None
+    if text.endswith("Z"):
+        text = text[:-1] + "+00:00"
+    try:
+        return datetime.fromisoformat(text)
+    except (TypeError, ValueError):
+        return None
+
+
+def _short_pending_signal_is_fresh(
+    detected_at: str,
+    *,
+    now: str | datetime | None = None,
+    max_age_seconds: float = _SHORT_PENDING_SIGNAL_MAX_AGE_SECONDS,
+) -> bool:
+    """Return whether a monitor-only short preview is recent enough to recover.
+
+    Short unread previews are intentionally high sensitivity, but they must not
+    survive across listener restarts or long manual pauses.  Otherwise an old
+    "谢谢/在吗" can be resurrected as a fresh customer turn.
+    """
+
+    detected = _parse_iso_datetime(detected_at)
+    if detected is None:
+        return False
+    if now is None:
+        return True
+    current = now if isinstance(now, datetime) else _parse_iso_datetime(now)
+    if current is None:
+        return True
+    if detected.tzinfo is None and current.tzinfo is not None:
+        current = current.replace(tzinfo=None)
+    elif detected.tzinfo is not None and current.tzinfo is None:
+        detected = detected.replace(tzinfo=None)
+    age = (current - detected).total_seconds()
+    return 0 <= age <= max(1.0, float(max_age_seconds or _SHORT_PENDING_SIGNAL_MAX_AGE_SECONDS))
 
 
 def _short_pending_semantic_text(raw_text: str, *, target_name: str = "") -> tuple[str, dict[str, Any]]:
@@ -124,6 +172,8 @@ def recover_high_sensitivity_short_pending_batch(
     target_name: str = "",
     allow_self_for_test: bool = False,
     max_batch_messages: int = 1,
+    now: str | datetime | None = None,
+    max_signal_age_seconds: float = _SHORT_PENDING_SIGNAL_MAX_AGE_SECONDS,
 ) -> list[dict[str, Any]]:
     """Recover a short unread probe when an anchor boundary misclassifies it as old history.
 
@@ -150,6 +200,12 @@ def recover_high_sensitivity_short_pending_batch(
         or pending_signal.get("last_message_time")
         or ""
     )
+    if not _short_pending_signal_is_fresh(
+        detected_at,
+        now=now,
+        max_age_seconds=max_signal_age_seconds,
+    ):
+        return []
     recovered: list[dict[str, Any]] = []
     for item in reversed(messages or []):
         if not isinstance(item, dict):
@@ -254,6 +310,66 @@ def _apply_rpa_humanized_send_runtime_env(config: dict[str, Any]) -> None:
 
 def default_freshness_ok(reply: dict[str, Any]) -> dict[str, Any]:
     return {"ok": True, "stale": False, "reply_id": reply.get("reply_id")}
+
+
+def brain_first_ready_reply_ownership_failure(reply: dict[str, Any]) -> str:
+    decision = reply.get("decision") if isinstance(reply.get("decision"), dict) else {}
+    if not bool(decision.get("brain_first_visible_reply_required")):
+        return ""
+    rule_name = str(decision.get("rule_name") or "").strip()
+    if rule_name.startswith("customer_service_brain_") and rule_name not in {
+        "customer_service_brain_no_visible_reply",
+        "customer_service_brain_safe_fallback",
+    }:
+        return ""
+    return "brain_first_non_brain_owned_ready_reply_blocked"
+
+
+def ready_reply_session_envelope_failure(reply: dict[str, Any], capture: dict[str, Any] | None) -> str:
+    """Validate that a ready reply still belongs to the captured session/input."""
+
+    if not isinstance(capture, dict):
+        return "capture_missing_before_send"
+    reply_target = str(reply.get("target_name") or "").strip()
+    capture_target = str(capture.get("target_name") or "").strip()
+    if not reply_target or not capture_target or reply_target != capture_target:
+        return "reply_target_capture_mismatch"
+    reply_session_key = str(reply.get("session_key") or "").strip()
+    capture_session_key = str(capture.get("session_key") or "").strip()
+    if reply_session_key and capture_session_key and reply_session_key != capture_session_key:
+        return "reply_session_key_capture_mismatch"
+    reply_type = str(reply.get("conversation_type") or "").strip()
+    capture_type = str(capture.get("conversation_type") or "").strip()
+    known_types = {"private", "group", "file_transfer", "system"}
+    if reply_type in known_types and capture_type in known_types and reply_type != capture_type:
+        return "reply_conversation_type_capture_mismatch"
+    reply_capture_ids = [str(item) for item in reply.get("capture_ids", []) if str(item)]
+    capture_id = str(capture.get("capture_id") or "").strip()
+    if reply_capture_ids and capture_id and reply_capture_ids[-1] != capture_id:
+        return "reply_capture_id_mismatch"
+    reply_context_version = int(reply.get("input_context_version") or 0)
+    capture_context_version = int(capture.get("context_version") or 0)
+    if reply_context_version and capture_context_version and reply_context_version != capture_context_version:
+        return "reply_context_version_capture_mismatch"
+    reply_ids = {str(item) for item in reply.get("input_message_ids", []) if str(item)}
+    capture_ids = {str(item) for item in capture.get("message_ids", []) if str(item)}
+    if reply_ids and capture_ids and not reply_ids <= capture_ids:
+        return "reply_message_ids_not_in_capture"
+    reply_keys = {str(item) for item in reply.get("input_content_keys", []) if str(item)}
+    capture_keys = {str(item) for item in capture.get("content_keys", []) if str(item)}
+    if reply_keys and capture_keys and not reply_keys <= capture_keys:
+        return "reply_content_keys_not_in_capture"
+    reply_digest = str(reply.get("message_content_digest") or "").strip()
+    capture_digest = str(capture.get("message_content_digest") or "").strip()
+    if not capture_digest:
+        capture_digest = message_content_digest(list(capture_ids), list(capture_keys))
+    if not reply_digest and (reply_ids or reply_keys):
+        reply_digest = message_content_digest(list(reply_ids), list(reply_keys))
+    if reply_digest and capture_digest and reply_digest != capture_digest:
+        return "reply_message_content_digest_mismatch"
+    if (reply_ids or reply_keys or reply_digest) and not (capture_ids or capture_keys or capture_digest):
+        return "reply_input_not_confirmed_by_capture"
+    return ""
 
 
 class CustomerServiceSchedulerRuntime:
@@ -430,6 +546,7 @@ class CustomerServiceSchedulerRuntime:
                 history_backfill=result.get("history_backfill") if isinstance(result.get("history_backfill"), dict) else {},
                 exact=bool(session.get("exact", True)),
                 conversation_type=str(session.get("conversation_type") or "unknown"),
+                session_key=str(result.get("session_key") or session.get("session_key") or ""),
                 now=now,
             )
             if self.capture_done_fn is not None:
@@ -495,23 +612,31 @@ class CustomerServiceSchedulerRuntime:
                         }
                     )
                     continue
-                task = fail_llm_task(state, task_id, reason=error, now=now)
+                task = self._fail_llm_task_with_recovery(state, task_id, reason=error, now=now, events=events)
                 task["traceback"] = trace
                 self._planner_task_snapshots.pop(task_id, None)
                 events.append({"event": "llm_task_failed", "task_id": task_id, "error": error, "traceback": trace})
                 continue
             if result.get("ok") is False:
+                failure_reason = str(result.get("reason") or result.get("error") or "planner_failed")
                 if not self._restore_missing_llm_task_from_snapshot(state, task_id):
                     events.append(
                         {
                             "event": "llm_task_failed",
                             "task_id": task_id,
                             "reason": "llm_task_missing_after_future",
-                            "error": str(result.get("reason") or result.get("error") or "planner_failed"),
+                            "error": failure_reason,
                         }
                     )
                     continue
-                fail_llm_task(state, task_id, reason=str(result.get("reason") or result.get("error") or "planner_failed"), now=now)
+                self._fail_llm_task_with_recovery(
+                    state,
+                    task_id,
+                    reason=failure_reason,
+                    now=now,
+                    events=events,
+                    result_payload=result if isinstance(result, dict) else None,
+                )
                 self._planner_task_snapshots.pop(task_id, None)
                 events.append({"event": "llm_task_failed", "task_id": task_id, "reason": result.get("reason")})
                 continue
@@ -520,7 +645,14 @@ class CustomerServiceSchedulerRuntime:
                 if not self._restore_missing_llm_task_from_snapshot(state, task_id):
                     events.append({"event": "llm_task_failed", "task_id": task_id, "reason": "llm_task_missing_after_future"})
                     continue
-                fail_llm_task(state, task_id, reason="empty_reply_text", now=now)
+                self._fail_llm_task_with_recovery(
+                    state,
+                    task_id,
+                    reason="empty_planned_reply",
+                    now=now,
+                    events=events,
+                    result_payload=result if isinstance(result, dict) else None,
+                )
                 self._planner_task_snapshots.pop(task_id, None)
                 events.append({"event": "llm_task_failed", "task_id": task_id, "reason": "empty_reply_text"})
                 continue
@@ -555,6 +687,30 @@ class CustomerServiceSchedulerRuntime:
             self._planner_task_snapshots.pop(task_id, None)
             events.append({"event": "llm_task_completed", "task_id": task_id, "status": completion.get("status")})
         return events
+
+    def _fail_llm_task_with_recovery(
+        self,
+        state: dict[str, Any],
+        task_id: str,
+        *,
+        reason: str,
+        now: str | None,
+        events: list[dict[str, Any]],
+        result_payload: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        task = fail_llm_task(state, task_id, reason=reason, now=now, result_payload=result_payload)
+        recovery = requeue_capture_after_recoverable_llm_failure(state, task_id, reason=reason, now=now)
+        if recovery.get("ok"):
+            events.append(
+                {
+                    "event": "llm_task_failed_requeued_capture",
+                    "task_id": task_id,
+                    "target_name": task.get("target_name"),
+                    "reason": reason,
+                    "recovery": recovery,
+                }
+            )
+        return task
 
     def _submit_polish_tasks(self, state: dict[str, Any], *, now: str | None = None) -> list[dict[str, Any]]:
         events: list[dict[str, Any]] = []
@@ -661,6 +817,38 @@ class CustomerServiceSchedulerRuntime:
         replies = select_ready_replies(state, limit=self.config.send_max_replies_per_round)
         for reply in replies:
             reply_id = str(reply.get("reply_id") or "")
+            ownership_failure = brain_first_ready_reply_ownership_failure(reply)
+            if ownership_failure:
+                mark_reply_failed(state, reply_id, reason=ownership_failure, now=now)
+                events.append(
+                    {
+                        "event": "send_blocked",
+                        "reply_id": reply_id,
+                        "target_name": reply.get("target_name"),
+                        "reason": ownership_failure,
+                    }
+                )
+                continue
+            envelope_failure = ready_reply_session_envelope_failure(reply, self._capture_for_reply(state, reply))
+            if envelope_failure:
+                mark_reply_stale(state, reply_id, reason=envelope_failure, now=now)
+                enqueue_pending_session(
+                    state,
+                    str(reply.get("target_name") or ""),
+                    exact=True,
+                    conversation_type=str(reply.get("conversation_type") or "unknown"),
+                    reason="reply_session_envelope_failed_before_send",
+                    now=now,
+                )
+                events.append(
+                    {
+                        "event": "reply_stale",
+                        "reply_id": reply_id,
+                        "target_name": reply.get("target_name"),
+                        "reason": envelope_failure,
+                    }
+                )
+                continue
             mark_reply_sending(state, reply_id, now=now)
             callback_reply = self._reply_for_callbacks(state, reply)
             freshness_started_at = datetime.now().isoformat(timespec="seconds")
@@ -697,7 +885,16 @@ class CustomerServiceSchedulerRuntime:
                 send_result = self.send_fn(copy.deepcopy(callback_reply))
             except Exception as exc:  # noqa: BLE001
                 mark_reply_failed(state, reply_id, reason=repr(exc), now=now)
-                events.append({"event": "send_failed", "reply_id": reply_id, "error": repr(exc)})
+                events.append(
+                    {
+                        "event": "send_failed",
+                        "reply_id": reply_id,
+                        "target_name": reply.get("target_name"),
+                        "session_key": reply.get("session_key"),
+                        "reason": repr(exc),
+                        "error": repr(exc),
+                    }
+                )
                 continue
             send_rpa_finished_at = datetime.now().isoformat(timespec="seconds")
             live_reply = (state.get("ready_replies", {}) or {}).get(reply_id)
@@ -706,8 +903,16 @@ class CustomerServiceSchedulerRuntime:
                 live_reply["latency_trace"] = {**trace, "send_rpa_finished_at": send_rpa_finished_at}
             send_observability = self._extract_send_observability(send_result)
             if send_result.get("ok") is False or send_result.get("verified") is False:
-                mark_reply_failed(state, reply_id, reason=str(send_result.get("reason") or send_result.get("error") or "send_failed"), send_result=send_result, now=now)
-                failed_event = {"event": "send_failed", "reply_id": reply_id, "send_result": send_result}
+                failure_reason = str(send_result.get("reason") or send_result.get("error") or "send_failed")
+                mark_reply_failed(state, reply_id, reason=failure_reason, send_result=send_result, now=now)
+                failed_event = {
+                    "event": "send_failed",
+                    "reply_id": reply_id,
+                    "target_name": reply.get("target_name"),
+                    "session_key": reply.get("session_key"),
+                    "reason": failure_reason,
+                    "send_result": send_result,
+                }
                 if send_observability:
                     failed_event["send_observability"] = send_observability
                 events.append(failed_event)
@@ -722,6 +927,19 @@ class CustomerServiceSchedulerRuntime:
                 completed_event["send_observability"] = send_observability
             events.append(completed_event)
         return events
+
+    def _brain_first_ready_reply_ownership_failure(self, reply: dict[str, Any]) -> str:
+        return brain_first_ready_reply_ownership_failure(reply)
+
+    def _capture_for_reply(self, state: dict[str, Any], reply: dict[str, Any]) -> dict[str, Any] | None:
+        inline_capture = reply.get("_capture")
+        if isinstance(inline_capture, dict):
+            return inline_capture
+        capture_ids = [str(item) for item in reply.get("capture_ids", []) if str(item)]
+        if not capture_ids:
+            return None
+        capture = (state.get("captures", {}) or {}).get(capture_ids[-1])
+        return capture if isinstance(capture, dict) else None
 
     def _reply_for_callbacks(self, state: dict[str, Any], reply: dict[str, Any]) -> dict[str, Any]:
         enriched = copy.deepcopy(reply)
@@ -856,12 +1074,18 @@ class CapturedMessagesConnector:
         **_kwargs: Any,
     ) -> dict[str, Any]:
         messages = self.capture.get("messages") or []
+        authoritative_batch = self.capture.get("batch") if isinstance(self.capture.get("batch"), list) else []
+        authoritative_batch_ids = [
+            str(item.get("id") or item.get("message_id") or "")
+            for item in authoritative_batch
+            if isinstance(item, dict) and str(item.get("id") or item.get("message_id") or "")
+        ]
         used_batch_fallback = False
-        if not messages and isinstance(self.capture.get("batch"), list):
+        if not messages and authoritative_batch:
             # Short high-sensitivity unread probes can be recovered after OCR
             # anchor matching, so the reply-eligible item may live only in the
             # scheduler batch. Keep the planner read-only, but do not starve it.
-            messages = self.capture.get("batch") or []
+            messages = authoritative_batch
             used_batch_fallback = bool(messages)
         history_meta = self.capture.get("history_backfill") if isinstance(self.capture.get("history_backfill"), dict) else {}
         return {
@@ -869,6 +1093,9 @@ class CapturedMessagesConnector:
             "target": target,
             "exact": exact,
             "messages": copy.deepcopy(messages),
+            "_scheduler_authoritative_batch": copy.deepcopy(authoritative_batch),
+            "_scheduler_authoritative_batch_ids": authoritative_batch_ids,
+            "_scheduler_capture_is_authoritative": bool(authoritative_batch_ids or authoritative_batch),
             "_history_backfill": history_meta,
             "scheduler_capture_id": self.capture.get("capture_id"),
             "scheduler_context_version": self.capture.get("context_version"),
@@ -909,7 +1136,10 @@ def plan_reply_with_listen_workflow(
     from apps.wechat_ai_customer_service.workflows.listen_and_reply import process_target
     from apps.wechat_ai_customer_service.workflows.listen_and_reply import (
         _apply_greeting,
+        brain_first_requires_brain_owned_visible_reply,
+        customer_visible_reply_is_brain_owned,
         final_visible_polish_blocks_send,
+        normalize_brain_owned_customer_visible_reply_text,
         polish_customer_visible_reply_text,
         recent_customer_visible_reply_texts,
         sanitize_customer_visible_reply_text,
@@ -943,6 +1173,14 @@ def plan_reply_with_listen_workflow(
     decision = event.get("decision") if isinstance(event.get("decision"), dict) else {}
     reply_text = str(decision.get("reply_text") or event.get("reply_text") or "").strip()
     combined = str(event.get("combined_content") or "")
+    brain_owned_reply = customer_visible_reply_is_brain_owned(event=event, decision=decision)
+    brain_first_visible_reply_required = brain_first_requires_brain_owned_visible_reply(config)
+    if reply_text and brain_first_visible_reply_required and not brain_owned_reply:
+        return {
+            "ok": False,
+            "reason": "brain_first_non_brain_owned_planner_reply_blocked",
+            "event": event,
+        }
     target_state = {}
     try:
         target_state = (workflow_state.get("targets", {}) or {}).get(str(target_config.name), {}) or {}
@@ -958,28 +1196,36 @@ def plan_reply_with_listen_workflow(
         "greeting_preference": {},
     }
     if reply_text and event.get("action") not in {"blocked", "error"}:
-        reply_text = _apply_greeting(
-            reply_text,
-            profile,
-            config,
-            target_state=target_state,
-            combined=combined,
-            recent_reply_texts=recent_reply_texts,
-        )
-        reply_text = sanitize_customer_visible_reply_text(
-            reply_text,
-            config=config,
-            combined=combined,
-            reason=str(event.get("reason") or decision.get("reason") or ""),
-            force_handoff_style=False,
-            recent_reply_texts=recent_reply_texts,
-        )
-        outbound_naturalness = polish_customer_visible_reply_text(
-            reply_text,
-            config=config,
-            combined=combined,
-            recent_reply_texts=recent_reply_texts,
-        )
+        if brain_owned_reply:
+            reply_text = normalize_brain_owned_customer_visible_reply_text(reply_text, config=config)
+            outbound_naturalness = {
+                "applied": False,
+                "reason": "skipped_for_customer_service_brain",
+                "reply_text": reply_text,
+            }
+        else:
+            reply_text = _apply_greeting(
+                reply_text,
+                profile,
+                config,
+                target_state=target_state,
+                combined=combined,
+                recent_reply_texts=recent_reply_texts,
+            )
+            reply_text = sanitize_customer_visible_reply_text(
+                reply_text,
+                config=config,
+                combined=combined,
+                reason=str(event.get("reason") or decision.get("reason") or ""),
+                force_handoff_style=False,
+                recent_reply_texts=recent_reply_texts,
+            )
+            outbound_naturalness = polish_customer_visible_reply_text(
+                reply_text,
+                config=config,
+                combined=combined,
+                recent_reply_texts=recent_reply_texts,
+            )
         event["outbound_naturalness"] = outbound_naturalness
         if outbound_naturalness.get("applied"):
             reply_text = str(outbound_naturalness.get("reply_text") or reply_text)
@@ -995,11 +1241,23 @@ def plan_reply_with_listen_workflow(
             event["final_visible_llm_polish"] = final_polish
             if final_polish.get("passed"):
                 reply_text = str(final_polish.get("reply_text") or reply_text)
+                if brain_owned_reply:
+                    reply_text = normalize_brain_owned_customer_visible_reply_text(reply_text, config=config)
             elif final_visible_polish_blocks_send(final_polish, config=config):
                 return {"ok": False, "reason": "final_visible_llm_polish_failed", "event": event}
             elif final_visible_polish_degraded(final_polish, config=config):
                 event["final_visible_llm_polish_degraded"] = True
-        decision = {**decision, "reply_text": reply_text}
+        decision = {
+            **decision,
+            "reply_text": reply_text,
+            "brain_first_visible_reply_required": bool(brain_first_visible_reply_required),
+        }
+        if brain_owned_reply:
+            decision["visible_reply_owner"] = str(
+                ((event.get("customer_service_brain") or {}) if isinstance(event.get("customer_service_brain"), dict) else {}).get("visible_reply_owner")
+                or decision.get("visible_reply_owner")
+                or "brain"
+            )
         event["decision"] = decision
     if event.get("action") in {"blocked", "error"}:
         return {"ok": False, "reason": str(event.get("reason") or event.get("action")), "event": event}
@@ -1040,9 +1298,12 @@ def polish_reply_with_listen_workflow(
         if str(path) not in sys.path:
             sys.path.insert(0, str(path))
     from apps.wechat_ai_customer_service.workflows.listen_and_reply import (
+        brain_first_requires_brain_owned_visible_reply,
+        customer_visible_reply_is_brain_owned,
         final_visible_polish_blocks_send,
         final_visible_polish_degraded,
         finalize_customer_visible_reply_with_llm,
+        normalize_brain_owned_customer_visible_reply_text,
         recent_customer_visible_reply_texts,
     )
 
@@ -1052,6 +1313,12 @@ def polish_reply_with_listen_workflow(
     reply_text = str(planner_result.get("reply_text") or decision.get("reply_text") or planner_task.get("reply_text") or "").strip()
     if not reply_text:
         return {"ok": False, "reason": "empty_planner_reply_for_polish"}
+    brain_owned_reply = customer_visible_reply_is_brain_owned(event=event, decision=decision)
+    brain_first_visible_reply_required = brain_first_requires_brain_owned_visible_reply(config)
+    if brain_first_visible_reply_required and not brain_owned_reply:
+        return {"ok": False, "reason": "brain_first_non_brain_owned_polish_reply_blocked", "event": event}
+    if brain_owned_reply:
+        reply_text = normalize_brain_owned_customer_visible_reply_text(reply_text, config=config)
     target_state = {}
     try:
         target_state = (workflow_state.get("targets", {}) or {}).get(str(target_config.name), {}) or {}
@@ -1072,12 +1339,17 @@ def polish_reply_with_listen_workflow(
     degraded = False
     if final_polish.get("passed"):
         reply_text = str(final_polish.get("reply_text") or reply_text)
+        if brain_owned_reply:
+            reply_text = normalize_brain_owned_customer_visible_reply_text(reply_text, config=config)
     elif final_visible_polish_blocks_send(final_polish, config=config):
         return {"ok": False, "reason": "final_visible_llm_polish_failed", "event": event}
     elif final_visible_polish_degraded(final_polish, config=config):
         degraded = True
         event["final_visible_llm_polish_degraded"] = True
     decision["reply_text"] = reply_text
+    decision["brain_first_visible_reply_required"] = bool(brain_first_visible_reply_required)
+    if brain_owned_reply:
+        decision["visible_reply_owner"] = str(decision.get("visible_reply_owner") or "brain")
     decision["final_visible_llm_polish"] = final_polish
     decision["final_visible_llm_polish_degraded"] = degraded
     return {
@@ -1121,6 +1393,7 @@ class ManagedListenerSchedulerBridge:
         self.audit_path: Path | None = None
         self.session_monitor: Any = None
         self.store = SchedulerStateStore(tenant_id=self.tenant_id)
+        self.ledger = SessionLedgerStore(tenant_id=self.tenant_id, root=self.store.ledger_root)
         self.runtime: CustomerServiceSchedulerRuntime | None = None
         self.connector: Any = None
         self._workflow: dict[str, Any] = {}
@@ -1260,6 +1533,8 @@ class ManagedListenerSchedulerBridge:
             normalized.setdefault("initial_preview_can_raise_unread", False)
             normalized.setdefault("preview_change_can_raise_unread", False)
             normalized.setdefault("short_preview_can_raise_unread", True)
+            normalized.setdefault("require_unread_badge_for_dispatch", True)
+            normalized.setdefault("require_preview_signal_with_unread_badge", True)
             normalized["scan_all_whitelist_each_iteration"] = False
             normalized["idle_whitelist_sweep_count"] = 0
             try:
@@ -1268,7 +1543,7 @@ class ManagedListenerSchedulerBridge:
                 target_batch = 0
             normalized["max_targets_per_iteration"] = max(2, min(2, target_batch or 2))
             normalized["max_scan_targets_per_iteration"] = 0
-        delay_enabled = bool(normalized.get("switch_human_delay_enabled", False))
+        delay_enabled = bool(normalized.get("switch_human_delay_enabled", normalized.get("rpa_low_risk_mode") is True))
         normalized["switch_human_delay_enabled"] = delay_enabled
         if delay_enabled:
             delay_min = self._safe_non_negative_float(
@@ -1399,6 +1674,8 @@ class ManagedListenerSchedulerBridge:
         initial_preview_can_raise_unread = bool(multi_target_cfg.get("initial_preview_can_raise_unread", True))
         preview_change_can_raise_unread = bool(multi_target_cfg.get("preview_change_can_raise_unread", True))
         short_preview_can_raise_unread = bool(multi_target_cfg.get("short_preview_can_raise_unread", True))
+        require_unread_badge_for_dispatch = bool(multi_target_cfg.get("require_unread_badge_for_dispatch", False))
+        require_preview_signal_with_unread_badge = bool(multi_target_cfg.get("require_preview_signal_with_unread_badge", False))
         short_signal_max_chars = int(multi_target_cfg.get("high_sensitivity_short_max_chars", 7) or 7)
         short_signal_merge_window = float(multi_target_cfg.get("high_sensitivity_short_merge_window_seconds", 2.5) or 0.0)
         empty_capture_retry_seconds = float(multi_target_cfg.get("high_sensitivity_short_empty_capture_retry_seconds", 3.0) or 0.0)
@@ -1418,6 +1695,8 @@ class ManagedListenerSchedulerBridge:
                 initial_preview_can_raise_unread=initial_preview_can_raise_unread,
                 preview_change_can_raise_unread=preview_change_can_raise_unread,
                 short_preview_can_raise_unread=short_preview_can_raise_unread,
+                require_unread_badge_for_dispatch=require_unread_badge_for_dispatch,
+                require_preview_signal_with_unread_badge=require_preview_signal_with_unread_badge,
                 high_sensitivity_short_max_chars=max(1, short_signal_max_chars),
                 high_sensitivity_short_merge_window_seconds=max(0.0, short_signal_merge_window),
                 empty_capture_retry_seconds=max(0.0, empty_capture_retry_seconds),
@@ -1436,6 +1715,8 @@ class ManagedListenerSchedulerBridge:
         self.session_monitor.initial_preview_can_raise_unread = initial_preview_can_raise_unread
         self.session_monitor.preview_change_can_raise_unread = preview_change_can_raise_unread
         self.session_monitor.short_preview_can_raise_unread = short_preview_can_raise_unread
+        self.session_monitor.require_unread_badge_for_dispatch = require_unread_badge_for_dispatch
+        self.session_monitor.require_preview_signal_with_unread_badge = require_preview_signal_with_unread_badge
         self.session_monitor.high_sensitivity_short_max_chars = max(1, short_signal_max_chars)
         self.session_monitor.high_sensitivity_short_merge_window_seconds = max(0.0, short_signal_merge_window)
         self.session_monitor.empty_capture_retry_seconds = max(0.0, empty_capture_retry_seconds)
@@ -1515,6 +1796,7 @@ class ManagedListenerSchedulerBridge:
             return [
                 {
                     "name": item.name,
+                    "session_key": getattr(item, "session_key", ""),
                     "exact": item.exact,
                     "unread_detected": item.unread_detected,
                     "conversation_type": item.conversation_type,
@@ -1525,6 +1807,7 @@ class ManagedListenerSchedulerBridge:
         return [
             {
                 "name": target.name,
+                "session_key": stable_session_key(target.name, conversation_type="configured"),
                 "exact": target.exact,
                 "unread_detected": True,
                 "conversation_type": "configured",
@@ -1565,13 +1848,60 @@ class ManagedListenerSchedulerBridge:
         for name, session in (scheduler_state.get("sessions", {}) or {}).items():
             if not isinstance(session, dict):
                 continue
+            session_key = str(session.get("session_key") or stable_session_key(
+                name,
+                conversation_type=session.get("conversation_type") or "unknown",
+            ))
+            target_state = targets.setdefault(str(name), {})
+            self._merge_session_ledger_summary(target_state, session_key)
             context = session.get("conversation_context") if isinstance(session.get("conversation_context"), dict) else {}
             if not context:
                 continue
-            target_state = targets.setdefault(str(name), {})
             existing = target_state.get("conversation_context") if isinstance(target_state.get("conversation_context"), dict) else {}
             target_state["conversation_context"] = {**existing, **context}
         return workflow_state
+
+    def _merge_session_ledger_summary(self, target_state: dict[str, Any], session_key: str) -> None:
+        summary = self.ledger.load_summary(session_key)
+        if not summary:
+            return
+        target_state["_session_key"] = session_key
+        processed_ids = list(target_state.get("processed_message_ids") or [])
+        for item in (
+            summary.get("last_processed_message_id"),
+            summary.get("last_replied_message_id"),
+        ):
+            value = str(item or "").strip()
+            if value and value not in processed_ids:
+                processed_ids.append(value)
+        target_state["processed_message_ids"] = processed_ids[-500:]
+        processed_keys = list(target_state.get("processed_content_keys") or [])
+        for item in summary.get("last_processed_content_keys") or []:
+            value = str(item or "").strip()
+            if value and value not in processed_keys:
+                processed_keys.append(value)
+        target_state["processed_content_keys"] = processed_keys[-500:]
+        anchor = summary.get("last_successful_reply_anchor")
+        if isinstance(anchor, dict) and anchor:
+            target_state["last_successful_reply_anchor"] = {
+                **(target_state.get("last_successful_reply_anchor") if isinstance(target_state.get("last_successful_reply_anchor"), dict) else {}),
+                **anchor,
+                "source": "session_ledger",
+            }
+        context_summary = str(summary.get("context_summary") or "").strip()
+        recent_messages = summary.get("recent_messages") if isinstance(summary.get("recent_messages"), list) else []
+        if context_summary:
+            context = target_state.get("conversation_context") if isinstance(target_state.get("conversation_context"), dict) else {}
+            target_state["conversation_context"] = {
+                **context,
+                "ledger_context_summary": context_summary,
+            }
+        if recent_messages:
+            context = target_state.get("conversation_context") if isinstance(target_state.get("conversation_context"), dict) else {}
+            target_state["conversation_context"] = {
+                **context,
+                "ledger_recent_messages": recent_messages[-20:],
+            }
 
     def _target_state(self, state: dict[str, Any], target_name: str) -> dict[str, Any]:
         return state.setdefault("targets", {}).setdefault(
@@ -1655,6 +1985,7 @@ class ManagedListenerSchedulerBridge:
                 target_name=target.name,
                 allow_self_for_test=target.allow_self_for_test,
                 max_batch_messages=min(2, max(1, int(target.max_batch_messages or 1))),
+                now=datetime.now().isoformat(timespec="seconds"),
             )
             if recovered_short_batch:
                 selection = replace(
@@ -1678,6 +2009,10 @@ class ManagedListenerSchedulerBridge:
             }
         return {
             "ok": True,
+            "session_key": str(session.get("session_key") or stable_session_key(
+                target.name,
+                conversation_type=session.get("conversation_type") or "unknown",
+            )),
             "target_name": target.name,
             "exact": target.exact,
             "messages": messages,
@@ -1951,6 +2286,77 @@ class ManagedListenerSchedulerBridge:
             return False
         return normalize_repeatable_probe_text(preview_text) == normalize_repeatable_probe_text(latest_content)
 
+    def _strict_freshness_observation_is_corroborated(
+        self,
+        *,
+        target_name: str,
+        reply: dict[str, Any],
+        freshness: dict[str, Any],
+    ) -> bool:
+        """Return whether strict OCR freshness has enough state support to stale.
+
+        Strict message scans are useful as a fallback, but raw OCR fragments alone
+        are weaker than scheduler/session-ledger state.  Require corroboration for
+        short/noisy observations so a one-character OCR artifact cannot discard a
+        Brain-authored ready reply.
+        """
+
+        if not isinstance(freshness, dict):
+            return False
+        if bool(freshness.get("gap_risk")):
+            return True
+        newer = [item for item in (freshness.get("newer_messages") or []) if isinstance(item, dict)]
+        if not newer:
+            return bool(freshness.get("has_newer_messages"))
+        preview = self._session_monitor_snapshot_for_target(target_name)
+        if not isinstance(preview, dict):
+            preview = self._session_list_preview_for_target(
+                target_name,
+                cache_seconds=float(self._scheduler_freshness_settings().get("preview_from_session_list_cache_seconds") or 0.0),
+            )
+        if isinstance(preview, dict) and bool(preview.get("unread_detected")):
+            return True
+        try:
+            scheduler_state = self.store.load()
+        except Exception:
+            scheduler_state = {}
+        session = (scheduler_state.get("sessions", {}) or {}).get(target_name, {}) if isinstance(scheduler_state, dict) else {}
+        if isinstance(session, dict) and bool(session.get("pending_capture")):
+            return True
+        capture = self._capture_for_reply(reply)
+        captured_texts = {
+            normalize_repeatable_probe_text(str(item.get("content") or ""))
+            for item in ((capture or {}).get("batch") or [])
+            if isinstance(item, dict) and str(item.get("content") or "").strip()
+        }
+        preview_text = ""
+        if isinstance(preview, dict):
+            preview_text = str(preview.get("pending_signal_text") or preview.get("preview_content") or "").strip()
+        compact_preview = normalize_repeatable_probe_text(preview_text)
+        for item in newer:
+            content = str(item.get("content") or "").strip()
+            compact = normalize_repeatable_probe_text(content)
+            if not compact:
+                continue
+            if compact_preview and (compact in compact_preview or compact_preview in compact):
+                return True
+            if compact in captured_texts:
+                return False
+            if len(compact) > 7:
+                return True
+        return False
+
+    def _soft_pass_unconfirmed_strict_freshness(self, freshness: dict[str, Any]) -> dict[str, Any]:
+        result = copy.deepcopy(freshness)
+        result["ok"] = bool(result.get("ok", True))
+        result["stale"] = False
+        result["has_newer_messages"] = False
+        result["gap_risk"] = False
+        result["freshness_mode"] = "strict_message_scan_ledger_guard"
+        result["reason"] = "strict_freshness_unconfirmed_ocr_observation"
+        result["strict_freshness_observation"] = copy.deepcopy(freshness)
+        return result
+
     def _reply_llm_elapsed_seconds(self, reply: dict[str, Any]) -> float:
         cached = reply.get("_llm_elapsed_seconds")
         if cached not in (None, ""):
@@ -2131,6 +2537,15 @@ class ManagedListenerSchedulerBridge:
         )
         self._freshness_last_strict_at_by_target[str(target.name)] = time.time()
         freshness["freshness_mode"] = "strict_message_scan"
+        if (
+            bool(freshness.get("has_newer_messages") or freshness.get("gap_risk"))
+            and not self._strict_freshness_observation_is_corroborated(
+                target_name=str(target.name),
+                reply=reply,
+                freshness=freshness,
+            )
+        ):
+            return self._soft_pass_unconfirmed_strict_freshness(freshness)
         freshness["stale"] = bool(freshness.get("has_newer_messages") or freshness.get("gap_risk"))
         return freshness
 
@@ -2138,21 +2553,29 @@ class ManagedListenerSchedulerBridge:
         capture = self._capture_for_reply(reply)
         if not capture:
             return {"ok": False, "verified": False, "reason": "capture_missing_before_send"}
+        envelope_failure = ready_reply_session_envelope_failure(reply, capture)
         reply_target_name = str(reply.get("target_name") or "").strip()
         capture_target_name = str(capture.get("target_name") or "").strip()
-        if not reply_target_name or not capture_target_name or reply_target_name != capture_target_name:
+        if envelope_failure:
             return {
                 "ok": False,
                 "verified": False,
-                "reason": "reply_target_capture_mismatch",
+                "reason": envelope_failure,
                 "target_name": reply_target_name,
                 "capture_target_name": capture_target_name,
+                "session_key": reply.get("session_key"),
+                "capture_session_key": capture.get("session_key"),
+                "message_content_digest": reply.get("message_content_digest"),
+                "capture_message_content_digest": capture.get("message_content_digest"),
                 "capture_ids": reply.get("capture_ids"),
             }
         target = self._target_for_name(reply_target_name, exact=bool(capture.get("exact", True)))
         reply_text = str(reply.get("reply_text") or "").strip()
         if not reply_text:
             return {"ok": False, "verified": False, "reason": "empty_reply_text"}
+        ownership_failure = brain_first_ready_reply_ownership_failure(reply)
+        if ownership_failure:
+            return {"ok": False, "verified": False, "reason": ownership_failure}
         verified = self._workflow["send_reply_with_optional_multi_bubble"](
             connector=self.connector,
             target=target,

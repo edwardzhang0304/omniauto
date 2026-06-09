@@ -1,5 +1,12 @@
 # Brain v2 通用自检与修复架构
 
+## 客户可见回复所有权硬基线
+
+- 所有客户可见回复必须由 `customer_service_brain` 发出：只能是首个有效 BrainPlan、Brain repair 后的 BrainPlan，或 Brain 自己生成的硬边界/拒绝/转人工类说明。
+- Guard、质量门、语义审稿、RAG、实时路由、本地模板、旧合成器、最终润色和任何兜底模块都不能生成、替换、拼接客户可见回复；它们只能提供证据、风险、审稿意见、返修指令或轻量表达校验。
+- Brain 不可用、超时、不可采纳或返修失败时，不允许本地 safe fallback 代替 Brain 发客户可见话术；必须阻断发送、记录审计，并触发内部人工/告警接口。
+- 后续所有客服相关开发文档必须引用 [customer_visible_reply_ownership_baseline.md](../customer_visible_reply_ownership_baseline.md)。
+
 ## 目标
 
 把客服回复质量问题从“局部硬规则修补”升级为“LLM 大脑输出前的通用质量合同”。
@@ -75,7 +82,7 @@ RPA/OCR 捕获
 
 继续负责事实来源、边界、风险、身份暴露等安全校验。质量门不能替代 guard。
 
-guard 也不是第二套客服回复引擎。guard 拒绝时，应把拒绝原因作为 Brain 返修意见；只有 Brain 不可用或返修后仍失败，才进入 Brain 安全兜底或人工转接。
+guard 也不是第二套客服回复引擎。guard 拒绝时，应把拒绝原因作为 Brain 返修意见；只有 Brain 不可用或返修后仍失败，才阻断客户可见发送并进入内部人工/告警接口，不生成本地可见兜底。
 
 ### Final Visible Polish
 

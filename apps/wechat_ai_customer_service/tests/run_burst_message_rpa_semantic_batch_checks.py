@@ -97,8 +97,8 @@ def main() -> int:
         check_internal_rag_experience_not_pasted_to_customer,
         check_history_backfill_merges_loaded_messages,
         check_history_backfill_recovers_missing_anchor_without_gap,
-        check_history_backfill_unresolved_anchor_flags_gap,
-        check_customer_service_gap_risk_blocks_reply,
+        check_history_backfill_unresolved_anchor_uses_overflow_batch,
+        check_customer_service_overflow_batch_does_not_block_reply,
         check_processed_fragment_keys_suppress_ocr_splits,
         check_file_transfer_self_reply_is_not_reprocessed,
         check_file_transfer_self_reply_ocr_punctuation_variant_is_not_reprocessed,
@@ -675,7 +675,7 @@ def check_history_backfill_recovers_missing_anchor_without_gap() -> dict[str, An
     return {"history_backfill": meta, "eligible_count": selection.eligible_count}
 
 
-def check_history_backfill_unresolved_anchor_flags_gap() -> dict[str, Any]:
+def check_history_backfill_unresolved_anchor_uses_overflow_batch() -> dict[str, Any]:
     visible = [message("m5", "第五条：最好自动挡"), message("m6", "第六条：预算十万")]
     loaded = [message("m4", "第四条：中间补充"), *visible]
     connector = FakeConnector(visible, loaded)
@@ -690,12 +690,13 @@ def check_history_backfill_unresolved_anchor_flags_gap() -> dict[str, Any]:
     meta = enriched.get("_history_backfill") or {}
     assert_equal(connector.history_load_calls, [3], "unresolved anchor should trigger history load")
     assert_true(meta.get("anchor_found_after_history_load") is False, "anchor should remain unresolved")
-    assert_true(meta.get("gap_risk") is True, "unresolved anchor should flag gap")
-    assert_equal(meta.get("gap_reason"), "anchor_missing_after_history_load", "gap reason")
+    assert_true(meta.get("gap_risk") is False, "unresolved anchor should downgrade to overflow batch")
+    assert_equal(meta.get("history_continuity"), "overflow_unanchored", "overflow continuity")
+    assert_true(meta.get("overflow_batch") is True, "overflow batch flag")
     return {"history_backfill": meta}
 
 
-def check_customer_service_gap_risk_blocks_reply() -> dict[str, Any]:
+def check_customer_service_overflow_batch_does_not_block_reply() -> dict[str, Any]:
     visible = [message("m5", "第五条：最好自动挡"), message("m6", "第六条：预算十万")]
     loaded = [message("m4", "第四条：中间补充"), *visible]
     connector = FakeConnector(visible, loaded)
@@ -722,10 +723,9 @@ def check_customer_service_gap_risk_blocks_reply() -> dict[str, Any]:
         allow_fallback_send=False,
         mark_dry_run=False,
     )
-    assert_equal(event.get("action"), "blocked", "gap risk should block send")
-    assert_equal(event.get("reason"), "history_backfill_gap_risk", "block reason")
-    assert_equal(connector.sent_texts, [], "gap risk must not send text")
-    assert_equal(state["targets"]["客户A"].get("processed_message_ids"), ["m1"], "gap risk must not mark processed")
+    assert_true(event.get("action") != "blocked", f"overflow batch should not block reply: {event}")
+    assert_true(bool(connector.sent_texts), "overflow batch should produce a reply instead of silence")
+    assert_true("m5" in state["targets"]["客户A"].get("processed_message_ids", []), "overflow reply should mark visible message processed after send")
     return {"event": event, "history_load_calls": connector.history_load_calls}
 
 
@@ -813,7 +813,7 @@ def check_bootstrap_marks_latest_visible_before_history_scroll() -> dict[str, An
         connector,  # type: ignore[arg-type]
         SimpleNamespace(name="文件传输助手", exact=True),
         state,
-        {"bootstrap": {"history_load_times": 2}, "reply": {"prefix": ""}},
+        {"bootstrap": {"history_load_times": 2, "visible_only_target_confirmation": False}, "reply": {"prefix": ""}},
     )
     assert_true(event.get("action") == "bootstrapped", "bootstrap should succeed")
     target_state = state["targets"]["文件传输助手"]

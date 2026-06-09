@@ -1,0 +1,55 @@
+{
+  "schema_version": 1,
+  "category_id": "policies",
+  "id": "chejin_trade_in_visit_materials",
+  "status": "active",
+  "source": {
+    "type": "test_fixture",
+    "batch_token": "CJCHK_20260609_visitor_materials"
+  },
+  "data": {
+    "title": "江苏车金置换估价到店材料",
+    "policy_type": "company",
+    "keywords": [
+      "置换",
+      "估价",
+      "旧车",
+      "材料",
+      "资料",
+      "证件",
+      "带什么",
+      "行驶证",
+      "登记证书",
+      "保单"
+    ],
+    "answer": "客户到店咨询旧车置换或估价时，可建议优先携带身份证、驾驶证、旧车行驶证、机动车登记证书、保险保单和车主相关证件；材料越完整，初估和手续核对越顺畅。旧车估价、收车价和最终成交价必须以实车检测、手续核验和门店人工复核结果为准。",
+    "allow_auto_reply": true,
+    "requires_handoff": false,
+    "operator_alert": false,
+    "risk_level": "normal"
+  },
+  "runtime": {
+    "allow_auto_reply": true,
+    "requires_handoff": false,
+    "risk_level": "normal"
+  },
+  "review_state": {
+    "is_new": true,
+    "new_reason": "newly_added_formal_knowledge",
+    "marked_at": "2026-06-09T05:08:00",
+    "updated_at": "2026-06-09T05:08:00",
+    "read_at": "",
+    "read_by": "",
+    "source": {
+      "source_module": "brain_code_mechanism_layer_test",
+      "target_category": "policies",
+      "item_id": "chejin_trade_in_visit_materials"
+    }
+  },
+  "metadata": {
+    "created_at": "2026-06-09T05:08:00",
+    "updated_at": "2026-06-09T05:08:00",
+    "created_by": "codex",
+    "updated_by": "codex"
+  }
+}

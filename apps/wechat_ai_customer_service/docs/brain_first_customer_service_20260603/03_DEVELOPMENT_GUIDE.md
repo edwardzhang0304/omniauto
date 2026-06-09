@@ -1,5 +1,12 @@
 # Brain First 客服大脑开发指南
 
+## 客户可见回复所有权硬基线
+
+- 所有客户可见回复必须由 `customer_service_brain` 发出：只能是首个有效 BrainPlan、Brain repair 后的 BrainPlan，或 Brain 自己生成的硬边界/拒绝/转人工类说明。
+- Guard、质量门、语义审稿、RAG、实时路由、本地模板、旧合成器、最终润色和任何兜底模块都不能生成、替换、拼接客户可见回复；它们只能提供证据、风险、审稿意见、返修指令或轻量表达校验。
+- Brain 不可用、超时、不可采纳或返修失败时，不允许本地 safe fallback 代替 Brain 发客户可见话术；必须阻断发送、记录审计，并触发内部人工/告警接口。
+- 后续所有客服相关开发文档必须引用 [customer_visible_reply_ownership_baseline.md](../customer_visible_reply_ownership_baseline.md)。
+
 ## 1. 开发策略
 
 本次开发采用“主脑上移、旧能力降级复用”的策略。
@@ -18,6 +25,10 @@
 - 把 LLM 综合回复从后置可选改为正常业务默认主路径。
 - 把 RAG、本地 route、实时回复模板降级为证据、风险和兜底。
 - 把最终润色保留为客户可见表达优化，而不是业务决策补丁。
+
+## 1.1 客户可见回复 Owner 禁止降级
+
+Brain First 模式下，旧链路只能作为证据、风险、审稿或系统错误处理，不允许在 Brain 不可用、超时、不可采纳或返修失败时生成客户可见 fallback。此时应阻断发送并进入内部人工/告警接口。
 
 ## 2. 阶段一：新增 Brain Orchestrator
 

@@ -63,12 +63,17 @@ def build_evidence_item(hit: KnowledgeHit, intent_tags: list[str]) -> dict[str, 
     requires_handoff = bool(
         runtime_requires_handoff
         or explicit_requires_handoff
-        or shared_risk_control
         or risk_level in HIGH_RISK_LEVELS
         or explicit_auto_reply is False
     )
     runtime_allows_auto_reply = runtime.get("allow_auto_reply", True) is not False or data_has_auto_reply
     allow_auto_reply = bool(explicit_auto_reply is not False and runtime_allows_auto_reply and not requires_handoff)
+    handoff_reason = str(
+        data.get("handoff_reason")
+        or ("auto_reply_disabled" if explicit_auto_reply is False else "")
+        or ("high_risk_item" if risk_level in HIGH_RISK_LEVELS else "")
+        or ("shared_risk_control" if shared_risk_control and requires_handoff else "")
+    )
     return {
         "category_id": hit.category_id,
         "item_id": hit.item_id,
@@ -82,7 +87,8 @@ def build_evidence_item(hit: KnowledgeHit, intent_tags: list[str]) -> dict[str, 
         "allow_auto_reply": allow_auto_reply,
         "requires_handoff": requires_handoff,
         "risk_level": risk_level,
-        "handoff_reason": str(data.get("handoff_reason") or ("shared_risk_control" if shared_risk_control else "") or ("auto_reply_disabled" if explicit_auto_reply is False else "") or ("high_risk_item" if risk_level in HIGH_RISK_LEVELS else "")),
+        "handoff_reason": handoff_reason,
+        "advisory_only": bool(shared_risk_control and not requires_handoff),
     }
 
 

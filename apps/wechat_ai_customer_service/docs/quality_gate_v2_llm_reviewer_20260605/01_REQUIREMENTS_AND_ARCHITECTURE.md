@@ -1,5 +1,12 @@
 # LLM 语义质量门 V2 需求与架构
 
+## 客户可见回复所有权硬基线
+
+- 所有客户可见回复必须由 `customer_service_brain` 发出：只能是首个有效 BrainPlan、Brain repair 后的 BrainPlan，或 Brain 自己生成的硬边界/拒绝/转人工类说明。
+- Guard、质量门、语义审稿、RAG、实时路由、本地模板、旧合成器、最终润色和任何兜底模块都不能生成、替换、拼接客户可见回复；它们只能提供证据、风险、审稿意见、返修指令或轻量表达校验。
+- Brain 不可用、超时、不可采纳或返修失败时，不允许本地 safe fallback 代替 Brain 发客户可见话术；必须阻断发送、记录审计，并触发内部人工/告警接口。
+- 后续所有客服相关开发文档必须引用 [customer_visible_reply_ownership_baseline.md](../customer_visible_reply_ownership_baseline.md)。
+
 ## 1. 问题定义
 
 ### 1.1 已确认的问题
@@ -247,7 +254,7 @@ Brain 输出的结构化计划继续作为主对象：
 
 - 硬 guard 未通过：不发送。
 - 硬 guard 通过且风险低：按配置 soft pass，并记录 `semantic_reviewer_unavailable_soft_pass`。
-- 硬 guard 通过但风险中高：触发 Brain safe fallback 或转人工。
+- 硬 guard 通过但风险中高：交回 Brain 生成边界/转人工类回复；Brain 不可采纳时阻断发送并触发内部人工/告警。
 
 ### 7.2 Brain 修复仍失败
 
@@ -255,11 +262,10 @@ Brain 输出的结构化计划继续作为主对象：
 
 - 不回退到机械模板。
 - 不强行发送低质量回复。
-- 优先进入 Brain 安全兜底或转人工接口。
-- Brain 安全兜底只能用于异常路径，不能成为正常业务回复捷径。
-- 如果本轮 evidence pack 已有 `product_master` / `catalog_candidates` 权威候选，安全兜底可以生成最小证据锚定答复，只引用候选名称、商品库价格等已授权字段，避免空泛“稍后确认”。
-- 如果没有权威证据，安全兜底只能使用短确认、边界说明或转人工接口，不得编造推荐。
-- 安全兜底不得调用旧 realtime / RAG / local 模板，也不得写账号、车型、预算专属分支。
+- 优先交回 Brain 重新生成可采纳回复。
+- 如果 Brain 不可用、超时或返修后仍不可采纳，必须阻断客户可见发送，并触发内部人工/告警接口。
+- 异常路径不得生成本地客户可见安全兜底；即使 evidence pack 已有 `product_master` / `catalog_candidates` 权威候选，也必须等待 Brain 生成可见回复。
+- 异常路径不得调用旧 realtime / RAG / local 模板，也不得写账号、车型、预算专属分支。
 - 记录完整审计事件，便于后续优化。
 
 ## 8. 与 AI 经验池的关系

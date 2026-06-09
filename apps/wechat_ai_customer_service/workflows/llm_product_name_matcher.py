@@ -83,6 +83,7 @@ def llm_match_product_name(
         temperature=float(payload.get("temperature") or 0),
         tier="flash",
         json_mode=True,
+        allow_fallback=False,
     )
     if not result_payload.get("ok"):
         result = {

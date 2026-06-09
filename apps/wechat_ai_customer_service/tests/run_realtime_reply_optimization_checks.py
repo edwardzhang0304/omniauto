@@ -69,6 +69,8 @@ from run_customer_service_listener import (  # noqa: E402
     passive_probe_recalibration_due,
     read_operator_control_state,
     run_once,
+    startup_interactive_calibration_can_defer,
+    status_payload_confirms_wechat_readable,
     sync_operator_mode,
     verify_operator_guard_bootstrap,
     write_operator_control_state,
@@ -225,6 +227,9 @@ def main() -> int:
         check_listener_passive_auxiliary_shell_probe_stop(),
         check_listener_passive_empty_ocr_triggers_recalibration(),
         check_listener_passive_recalibration_respects_cooldown(),
+        check_listener_interactive_calibration_timeout_is_independent(),
+        check_listener_startup_calibration_can_defer_when_passive_readable(),
+        check_listener_startup_calibration_defer_rejects_blank_window(),
         check_runtime_transport_logout_creates_handoff_stub(),
         check_listener_status_atomic_write_retries_transient_lock(),
         check_listener_status_atomic_write_recovers_missing_runtime_dir(),
@@ -4650,6 +4655,87 @@ def check_listener_passive_recalibration_respects_cooldown() -> dict[str, Any]:
     later = passive_probe_recalibration_due(verdict, settings=settings, now_ts=1060.0)
     ok = due.get("due") is False and due.get("reason") == "cooldown" and later.get("due") is True
     return {"name": "listener_passive_recalibration_respects_cooldown", "ok": ok, "due": due, "later": later}
+
+
+def check_listener_interactive_calibration_timeout_is_independent() -> dict[str, Any]:
+    settings = normalize_transport_risk_settings(
+        {
+            "enabled": True,
+            "passive_logout_probe_timeout_seconds": 12,
+            "interactive_calibration_timeout_seconds": 24,
+        }
+    )
+    ok = (
+        settings.get("passive_logout_probe_timeout_seconds") == 12
+        and settings.get("interactive_calibration_timeout_seconds") == 24
+    )
+    return {"name": "listener_interactive_calibration_timeout_is_independent", "ok": ok, "settings": settings}
+
+
+def check_listener_startup_calibration_can_defer_when_passive_readable() -> dict[str, Any]:
+    settings = normalize_transport_risk_settings(
+        {
+            "enabled": True,
+            "passive_probe_empty_ocr_min_count": 1,
+        }
+    )
+    calibration = {
+        "attempted": True,
+        "ok": False,
+        "timed_out": True,
+        "status_payload": {},
+    }
+    passive_probe = {
+        "attempted": True,
+        "ok": True,
+        "timed_out": False,
+        "status_payload": {"ok": True, "online": True, "state": "main_window_compat", "ocr_count": 12},
+    }
+    decision = startup_interactive_calibration_can_defer(
+        calibration,
+        passive_probe=passive_probe,
+        settings=settings,
+    )
+    readable = status_payload_confirms_wechat_readable(passive_probe["status_payload"], settings=settings)
+    ok = readable is True and decision.get("ok") is True and decision.get("reason") == "passive_probe_readable"
+    return {
+        "name": "listener_startup_calibration_can_defer_when_passive_readable",
+        "ok": ok,
+        "decision": decision,
+    }
+
+
+def check_listener_startup_calibration_defer_rejects_blank_window() -> dict[str, Any]:
+    settings = normalize_transport_risk_settings(
+        {
+            "enabled": True,
+            "passive_probe_empty_ocr_min_count": 1,
+        }
+    )
+    calibration = {
+        "attempted": True,
+        "ok": False,
+        "timed_out": True,
+        "status_payload": {},
+    }
+    passive_probe = {
+        "attempted": True,
+        "ok": True,
+        "timed_out": False,
+        "status_payload": {"ok": True, "online": False, "state": "blank_render_detected", "ocr_count": 0},
+    }
+    decision = startup_interactive_calibration_can_defer(
+        calibration,
+        passive_probe=passive_probe,
+        settings=settings,
+    )
+    readable = status_payload_confirms_wechat_readable(passive_probe["status_payload"], settings=settings)
+    ok = readable is False and decision.get("ok") is False
+    return {
+        "name": "listener_startup_calibration_defer_rejects_blank_window",
+        "ok": ok,
+        "decision": decision,
+    }
 
 
 def check_listener_status_atomic_write_retries_transient_lock() -> dict[str, Any]:

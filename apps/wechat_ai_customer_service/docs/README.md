@@ -1,5 +1,7 @@
 # 微信智能客服文档区
 
+当前客服开发硬基线：[customer_visible_reply_ownership_baseline.md](customer_visible_reply_ownership_baseline.md)。后续新增客服开发文档必须引用该基线。
+
 当前最新版说明请优先阅读应用 README：[`../README.md`](../README.md)。
 
 当前 RPA 控制层优化说明：
@@ -19,6 +21,11 @@
 
 当前知识与 RAG 架构说明：
 
+- [`brain_code_mechanism_layer_integration_design_20260609.md`](brain_code_mechanism_layer_integration_design_20260609.md)
+- [`brain_code_mechanism_layer_rule_inventory_20260609.md`](brain_code_mechanism_layer_rule_inventory_20260609.md)
+- [`brain_code_mechanism_layer_implementation_plan_20260609.md`](brain_code_mechanism_layer_implementation_plan_20260609.md)
+- [`brain_code_mechanism_layer_test_acceptance_plan_20260609.md`](brain_code_mechanism_layer_test_acceptance_plan_20260609.md)
+- [`conversation_strategy_state_design_20260609.md`](conversation_strategy_state_design_20260609.md)
 - [`brain_v2_customer_service_quality_gate_20260604/00_INDEX.md`](brain_v2_customer_service_quality_gate_20260604/00_INDEX.md)
 - [`brain_first_customer_service_20260603/00_INDEX.md`](brain_first_customer_service_20260603/00_INDEX.md)
 - [`product_master_formal_knowledge_common_sense_refactor_design.md`](product_master_formal_knowledge_common_sense_refactor_design.md)

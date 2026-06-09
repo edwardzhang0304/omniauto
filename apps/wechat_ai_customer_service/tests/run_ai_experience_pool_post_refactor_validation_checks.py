@@ -162,7 +162,10 @@ def check_ai_pool_fact_cannot_override_product_master() -> bool:
         and compact["product_master"]["items"][0]["authority_level"] == PRODUCT_MASTER
         and compact["ai_experience_pool"]["excluded_hit_count"] == 1
         and compact["rag_evidence"]["hits"] == []
-        and blocked.get("action") == "handoff"
+        and blocked.get("action") == "repair"
+        and blocked.get("hard_boundary") is True
+        and blocked.get("customer_visible_reply_source") == "none_guard_reviewer_only"
+        and "product_price_conflicts_with_product_master" in str(blocked.get("reason") or "")
         and allowed.get("action") == "send_reply"
     )
 

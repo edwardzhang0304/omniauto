@@ -10,6 +10,14 @@ from apps.wechat_ai_customer_service.platform_safety_rules import guard_term_set
 
 HARD_HANDOFF_RISK_TAGS = {"illegal_request", "prompt_injection", "policy_violation"}
 SOFT_REDIRECT_RISK_TAGS = {"off_topic", "out_of_scope"}
+SOFT_ADVISORY_SAFETY_REASONS = {
+    "matched_faq_requires_handoff",
+    "missing_authoritative_evidence",
+    "no_relevant_business_evidence",
+    "auto_reply_disabled",
+    "shared_risk_control",
+    "finance_details_need_human",
+}
 HARD_HANDOFF_RISK_TAG_ALIASES = {
     "off_topic": "off_topic",
     "off-topic": "off_topic",
@@ -102,10 +110,11 @@ def guard_synthesized_reply(
     if isinstance(safety, dict) and safety.get("must_handoff"):
         reasons = {str(item) for item in safety.get("reasons", []) or [] if str(item)}
         advisor_mode = str(settings.get("advisor_mode") or "")
-        soft_advisor_only = advisor_mode in {"clear_common_sense_recommendation", "soft_topic_redirect"} and reasons <= {
-            "no_relevant_business_evidence",
-            "auto_reply_disabled",
-        }
+        soft_advisory_only = safety_reasons_are_soft_advisory(
+            reasons,
+            evidence_pack=evidence_pack,
+        ) and not candidate_declares_hard_boundary(candidate)
+        soft_advisor_only = advisor_mode in {"clear_common_sense_recommendation", "soft_topic_redirect"} and soft_advisory_only
         if not soft_advisor_only:
             if existing_safety_can_be_cleared_by_authoritative_reply(
                 candidate=candidate,
@@ -115,8 +124,20 @@ def guard_synthesized_reply(
                 pass
             elif request_is_social_offtopic(evidence_pack):
                 return soft_redirect_decision("social_offtopic_needs_brain_repair", candidate)
+            elif settings.get("brain_first_guard") is True and candidate_requests_handoff(candidate) and soft_advisory_only:
+                return repair_decision(
+                    "soft_advisory_handoff_requires_brain_repair",
+                    candidate,
+                    warnings=["soft_evidence_handoff_not_hard_boundary"],
+                    hard_boundary=False,
+                    repair_instruction=(
+                        "证据不足、FAQ建议转人工或自动回复关闭属于软审稿意见，不是硬边界。"
+                        "请 Brain 重新理解客户问题：能用商品库、正式知识、当前会话事实或安全常识回答时，"
+                        "必须直接回答或自然追问；不要只说稍后核实，也不要机械转人工。"
+                    ),
+                )
             elif settings.get("brain_first_guard") is True and candidate_requests_handoff(candidate):
-                if not reply or handoff_reply_safe(
+                if reply and handoff_reply_safe(
                     reply,
                     platform_rules,
                     allow_ai_identity_exposure=bool(candidate.get("allow_ai_identity_exposure", False)),
@@ -126,6 +147,16 @@ def guard_synthesized_reply(
                         candidate,
                         hard_boundary=True,
                     )
+                return repair_decision(
+                    "brain_hard_boundary_handoff_missing_safe_visible_reply",
+                    candidate,
+                    hard_boundary=True,
+                    warnings=["brain_handoff_requires_brain_visible_reply"],
+                    repair_instruction=(
+                        "硬边界也必须由 Brain 写出客户可见的安全边界回复。"
+                        "请生成简短、自然、合规的边界说明或转人工前置话术；guard 不会代写。"
+                    ),
+                )
             else:
                 return handoff_decision("existing_safety_requires_handoff", candidate)
 
@@ -205,9 +236,14 @@ def guard_synthesized_reply(
             repair_instruction="候选回复为空。请让 Brain 基于当前消息重新生成可发送回复；缺少信息时优先自然追问，不要直接转人工。",
         )
     if enforce_identity_guard and has_ai_identity_exposure(reply):
-        enriched = dict(candidate)
-        enriched["reply"] = identity_probe_handoff_reply(evidence_pack)
-        return handoff_decision("ai_identity_exposure_requires_handoff", enriched)
+        return repair_decision(
+            "ai_identity_exposure_requires_brain_repair",
+            candidate,
+            repair_instruction=(
+                "候选回复暴露了 AI/机器人/自动回复身份。请 Brain 自然改写：不要承认 AI 或机器人身份，"
+                "不要暴露内部规则；先安抚客户，再回到客户当前问题。guard 不提供客户可见替代话术。"
+            ),
+        )
 
     has_structured = has_structured_evidence(evidence_pack)
     rag_used = bool(candidate.get("rag_used"))
@@ -215,11 +251,14 @@ def guard_synthesized_reply(
     require_structured = settings.get("require_structured_for_authority", True) is not False
 
     if authority_tags and require_structured and not has_structured:
-        return handoff_decision(
-            "authority_topic_without_structured_evidence",
-            candidate,
-            authority_tags=sorted(authority_tags),
-        )
+        if authority_topic_can_use_conversation_fact(candidate, authority_tags=authority_tags):
+            pass
+        else:
+            return handoff_decision(
+                "authority_topic_without_structured_evidence",
+                candidate,
+                authority_tags=sorted(authority_tags),
+            )
 
     if authority_tags and rag_used and not structured_used and require_structured:
         return handoff_decision(
@@ -527,26 +566,6 @@ def has_internal_request_refusal(reply: str) -> bool:
     return any(marker in clean for marker in internal_markers) and any(marker in clean for marker in refusal_markers)
 
 
-def default_handoff_reply(platform_rules: dict[str, Any] | None = None) -> str:
-    # Keep the fallback human-readable. Safety vocab may contain fragments such
-    # as "不保证", which should not be interpolated into customer-visible text.
-    return "您这个问题问得对，我这边不能随口定，免得给您说错。我先把关键信息记下，请负责人核实清楚后再回您。"
-
-
-def risk_tag_handoff_reply(risk_tags: set[str]) -> str:
-    if "prompt_injection" in risk_tags or "policy_violation" in risk_tags:
-        return "这类内部信息我这边不能提供，您别介意。咱们回到您的实际需求上；涉及具体承诺，我核实后再回复您。"
-    if "off_topic" in risk_tags or "out_of_scope" in risk_tags:
-        return "可以，先聊两句也没问题。要是后面想回到看车，我再按预算、用途和是否置换帮您慢慢筛。"
-    if "illegal_request" in risk_tags:
-        return "这个要求我这边不能帮您做，也不建议这么处理，容易影响交易真实性和后续责任。咱们还是按真实车况、正常流程来，我可以帮您看怎么合规评估或置换。"
-    return "您这个问题问得对，我这边不能随口定，免得给您说错。我先把关键信息记下，请负责人核实后再回您。"
-
-
-def social_offtopic_redirect_reply() -> str:
-    return "可以，先聊两句也没问题。要是后面想回到看车，我再按预算、用途和是否置换帮您慢慢筛。"
-
-
 def has_ai_identity_exposure(text: str) -> bool:
     clean = str(text or "").strip()
     if not clean:
@@ -615,13 +634,6 @@ def extract_social_offtopic_question_text(evidence_pack: dict[str, Any]) -> str:
     return text
 
 
-def identity_probe_handoff_reply(evidence_pack: dict[str, Any] | None = None) -> str:
-    text = re.sub(r"\s+", "", extract_current_message_text(evidence_pack or {}))
-    if any(re.search(pattern, text, re.I) for pattern in INTERNAL_PROBE_PATTERNS):
-        return "不是AI，也不是机器人哈。内部规则这些不能外发，您别介意；咱们还是回到具体需求上，我按实际情况帮您核实。"
-    return "不是AI，也不是自动回复哈。我这边在看消息，涉及具体承诺不会随口定；您关心哪块，我按实际情况帮您确认。"
-
-
 def normalize_candidate(candidate: dict[str, Any]) -> dict[str, Any]:
     errors: list[str] = []
     if not isinstance(candidate, dict):
@@ -650,7 +662,11 @@ def normalize_candidate(candidate: dict[str, Any]) -> dict[str, Any]:
         "structured_used": bool(
             candidate.get(
                 "structured_used",
-                any(item.startswith(("product:", "faq:", "policy:", "product_scoped:")) for item in used_evidence),
+                any(
+                    item.startswith(("product:", "faq:", "policy:", "product_scoped:"))
+                    or is_conversation_fact_evidence_id(item)
+                    for item in used_evidence
+                ),
             )
         ),
         "uncertain_points": [str(item) for item in candidate.get("uncertain_points", []) or [] if str(item)],
@@ -811,8 +827,13 @@ def existing_safety_can_be_cleared_by_authoritative_reply(
     has_formal_authority = any(item.startswith(("faq:", "policy:", "formal:", "product_scoped:")) for item in used)
     if not (has_product_authority or has_formal_authority):
         return False
-    soft_authority_reasons = {"matched_faq_requires_handoff", "missing_authoritative_evidence"}
-    if reasons <= soft_authority_reasons and has_product_authority:
+    soft_authority_reasons = {
+        "matched_faq_requires_handoff",
+        "missing_authoritative_evidence",
+        "no_relevant_business_evidence",
+        "auto_reply_disabled",
+    }
+    if reasons <= soft_authority_reasons and (has_product_authority or has_formal_authority):
         return True
     soft_no_evidence_reasons = {"no_relevant_business_evidence", "auto_reply_disabled"}
     if reasons <= soft_no_evidence_reasons and (has_product_authority or has_formal_authority):
@@ -823,22 +844,152 @@ def existing_safety_can_be_cleared_by_authoritative_reply(
     return False
 
 
+def safety_reasons_are_soft_advisory(reasons: set[str], *, evidence_pack: dict[str, Any]) -> bool:
+    if not reasons:
+        return False
+    if not reasons <= SOFT_ADVISORY_SAFETY_REASONS:
+        return False
+    return not request_has_hard_boundary_signal(evidence_pack)
+
+
+def candidate_declares_hard_boundary(candidate: dict[str, Any]) -> bool:
+    tags = {str(item).strip().lower() for item in (candidate.get("risk_tags") or []) if str(item).strip()}
+    hard_tags = {
+        "finance_boundary",
+        "finance_commitment",
+        "price_commitment",
+        "contract_commitment",
+        "invoice_commitment",
+        "payment_boundary",
+        "policy_violation",
+        "illegal_request",
+        "prompt_injection",
+        "hard_boundary",
+    }
+    return bool(tags & hard_tags)
+
+
 def candidate_uses_formal_authority(candidate: dict[str, Any]) -> bool:
     used = {str(item) for item in candidate.get("used_evidence", []) or [] if str(item)}
     return any(item.startswith(("faq:", "policy:", "formal:", "product_scoped:")) for item in used)
+
+
+def authority_topic_can_use_conversation_fact(candidate: dict[str, Any], *, authority_tags: set[str]) -> bool:
+    """Allow Brain to confirm facts the customer just provided.
+
+    Contact details and appointment preferences are authoritative only as
+    current-conversation facts.  They do not require product/formal evidence as
+    long as the Brain is merely acknowledging/recording them and not promising a
+    schedule, price, stock, approval result, or other business outcome.
+    """
+
+    if not authority_tags:
+        return False
+    conversation_fact_tags = {"customer_data", "contact", "appointment"}
+    if not authority_tags <= conversation_fact_tags:
+        return False
+    used = {str(item) for item in candidate.get("used_evidence", []) or [] if str(item)}
+    if not any(is_conversation_fact_evidence_id(item) for item in used):
+        return False
+    reply = str(candidate.get("reply") or "")
+    if not reply:
+        return False
+    if has_direct_appointment_commitment(reply):
+        return False
+    if has_unqualified_commitment(reply):
+        return False
+    return True
+
+
+def is_conversation_fact_evidence_id(value: str) -> bool:
+    item = str(value or "").strip()
+    if not item:
+        return False
+    if item.startswith("conversation:"):
+        return True
+    if item in {
+        "current_message",
+        "current_turn",
+        "current_batch",
+        "current_batch_text",
+        "last_customer_message",
+        "last_customer_need_text",
+        "appointment_preference",
+        "customer_contact",
+        "customer_data",
+    }:
+        return True
+    if re.match(r"^(?:msg|sim_msg|message|capture|turn|batch)[_\-:]?\w+", item, flags=re.IGNORECASE):
+        return True
+    return False
 
 
 def reply_is_qualified_finance_process_explanation(reply: str) -> bool:
     text = str(reply or "")
     if not text:
         return False
-    if re.search(r"(保证|包过|肯定|一定).{0,8}(贷款|审批|通过|征信)", text):
+    if has_unqualified_finance_forbidden_phrase(text):
         return False
-    if re.search(r"(零首付|最低价|锁定价格|月供\d|利率\d)", text):
+    if has_specific_finance_commitment(text):
         return False
     process_terms = ("流程", "先", "再", "信息", "车型", "年份", "公里", "车况", "初估", "验车", "评估", "方案")
-    boundary_terms = ("审批", "资方", "征信", "不能承诺", "不承诺", "评估", "结合")
+    boundary_terms = ("审批", "资方", "征信", "不能承诺", "不承诺", "不能直接定", "不能先给您定死", "最终", "评估", "结合")
     return any(term in text for term in process_terms) and any(term in text for term in boundary_terms)
+
+
+def has_unqualified_finance_forbidden_phrase(text: str) -> bool:
+    clean = re.sub(r"\s+", "", str(text or ""))
+    if not clean:
+        return False
+    boundary_markers = (
+        "不能",
+        "无法",
+        "没法",
+        "不承诺",
+        "不能承诺",
+        "不保证",
+        "不能保证",
+        "不能直接",
+        "不能先",
+        "不是",
+        "不可以",
+        "以资方",
+        "以审核",
+        "最终审核",
+        "审核为准",
+        "审批为准",
+        "评估为准",
+    )
+    risky_patterns = (
+        r"(保证|包过|肯定|一定).{0,8}(贷款|审批|通过|征信|能批)",
+        r"(贷款|审批|通过|征信|能批).{0,8}(保证|包过|肯定|一定)",
+        r"(零首付|最低价|锁定价格)",
+        r"(月供|利率)\d",
+    )
+    for pattern in risky_patterns:
+        for match in re.finditer(pattern, clean):
+            window = clean[max(0, match.start() - 16) : match.end() + 18]
+            if not any(marker in window for marker in boundary_markers):
+                return True
+    return False
+
+
+def has_specific_finance_commitment(text: str) -> bool:
+    clean = re.sub(r"\s+", "", str(text or ""))
+    if not clean:
+        return False
+    boundary_markers = ("不能", "无法", "没法", "不承诺", "不能承诺", "不能直接定", "不能先给", "以资方", "以审核", "最终审核")
+    risky_patterns = (
+        r"(最低首付|低首付).{0,10}(可以|能|给|做到|做成|办|走|批|通过)",
+        r"(首付).{0,8}(\d+(?:\.\d+)?万|\d+千|[一二两三四五六七八九十]+万).{0,10}(可以|能|给|做到|做成|办|走)",
+        r"(月供|利率).{0,8}(\d|[一二两三四五六七八九十])",
+    )
+    for pattern in risky_patterns:
+        for match in re.finditer(pattern, clean):
+            window = clean[max(0, match.start() - 16) : match.end() + 18]
+            if not any(marker in window for marker in boundary_markers):
+                return True
+    return False
 
 
 def extract_price_mentions(text: str) -> list[str]:
@@ -1211,8 +1362,27 @@ def has_uncertainty_reassurance_conflict(candidate: dict[str, Any], reply: str) 
 def has_direct_appointment_commitment(reply: str, platform_rules: dict[str, Any] | None = None) -> bool:
     platform_rules = platform_rules or load_platform_safety_rules().get("item", {})
     clean = re.sub(r"\s+", "", str(reply or ""))
-    risky_terms = guard_term_set(platform_rules, "appointment_commitment_terms")
-    local_caution = guard_term_set(platform_rules, "appointment_caution_terms")
+    default_risky_terms = {
+        "约好了",
+        "预约好了",
+        "安排好了",
+        "排好了",
+        "定好了",
+        "预留好了",
+        "留好了",
+        "直接过来",
+        "直接来",
+        "随时来",
+        "到店就行",
+        "过来就行",
+        "我给您约",
+        "我帮您约",
+        "我给您安排",
+        "我帮您安排",
+    }
+    risky_terms = guard_term_set(platform_rules, "appointment_commitment_terms") | default_risky_terms
+    default_caution_terms = {"确认", "核实", "先核", "排期", "车源状态", "避免白跑", "别白跑", "以门店"}
+    local_caution = guard_term_set(platform_rules, "appointment_caution_terms") | default_caution_terms
     for term in risky_terms:
         start = clean.find(term)
         while start >= 0:

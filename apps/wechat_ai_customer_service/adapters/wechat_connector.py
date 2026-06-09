@@ -92,6 +92,11 @@ class WeChatConnector:
                     primary.setdefault("transport_priority", "rpa_first")
                     attach_rpa_lock_meta(primary, lock_meta)
                     return primary
+                if rpa_render_fault_should_stop(primary):
+                    primary.setdefault("adapter", "win32_ocr")
+                    primary.setdefault("transport_priority", "rpa_first")
+                    attach_rpa_lock_meta(primary, lock_meta)
+                    return primary
                 reserve = self.call_reserve_sidecar(["status"], allow_failure=True, primary_payload=snapshot_payload(primary))
                 if reserve.get("ok") and reserve.get("online"):
                     reserve.setdefault("adapter", "wxauto4")
@@ -144,6 +149,13 @@ class WeChatConnector:
                     primary.setdefault("adapter", "win32_ocr")
                     primary.setdefault("scheme", str(primary.get("scheme") or "win32_ocr_unavailable"))
                     primary.setdefault("state", str(primary.get("state") or "rpa_primary_ready"))
+                    primary.setdefault("transport_priority", "rpa_first")
+                    attach_rpa_lock_meta(primary, lock_meta)
+                    return primary
+                if rpa_render_fault_should_stop(primary):
+                    primary.setdefault("adapter", "win32_ocr")
+                    primary.setdefault("receive", {"ok": False})
+                    primary.setdefault("send", {"ok": False})
                     primary.setdefault("transport_priority", "rpa_first")
                     attach_rpa_lock_meta(primary, lock_meta)
                     return primary
@@ -242,6 +254,11 @@ class WeChatConnector:
                     primary.setdefault("transport_priority", "rpa_first")
                     attach_rpa_lock_meta(primary, lock_meta)
                     return primary
+                if rpa_render_fault_should_stop(primary):
+                    primary.setdefault("adapter", "win32_ocr")
+                    primary.setdefault("transport_priority", "rpa_first")
+                    attach_rpa_lock_meta(primary, lock_meta)
+                    return primary
                 reserve = self.call_reserve_sidecar(args, allow_failure=True, primary_payload=snapshot_payload(primary))
                 if reserve.get("ok"):
                     reserve.setdefault("adapter", "wxauto4")
@@ -280,6 +297,7 @@ class WeChatConnector:
         min_delay_ms: int | None = None,
         max_delay_ms: int | None = None,
         restore_to_latest: bool | None = None,
+        visible_only_target: bool = False,
     ) -> dict[str, Any]:
         args = ["messages", "--target", target]
         if exact:
@@ -323,14 +341,28 @@ class WeChatConnector:
             if load_times:
                 args.extend(["--history-load-times", str(load_times)])
         lock_timeout = rpa_lock_timeout_seconds("messages", default=14.0)
+        env_overrides = visible_only_message_env() if visible_only_target else None
         try:
             with wechat_rpa_lock("messages", timeout_seconds=lock_timeout) as lock_meta:
-                primary = self.call_compat_sidecar(args, allow_failure=True)
+                primary = self.call_compat_sidecar(args, allow_failure=True, env_overrides=env_overrides)
                 if primary.get("ok"):
                     primary.setdefault("adapter", "win32_ocr")
                     primary.setdefault("transport_priority", "rpa_first")
                     attach_rpa_lock_meta(primary, lock_meta)
                     return inject_simulated_inbound_messages(primary, target=target)
+                if rpa_render_fault_should_stop(primary):
+                    primary.setdefault("adapter", "win32_ocr")
+                    primary.setdefault("transport_priority", "rpa_first")
+                    attach_rpa_lock_meta(primary, lock_meta)
+                    return primary
+                if visible_only_target and message_target_pending_visible(primary):
+                    primary.setdefault("adapter", "win32_ocr")
+                    primary.setdefault("transport_priority", "rpa_first")
+                    primary["target_pending_visible"] = True
+                    primary.setdefault("reason", "target_not_visible_waiting_for_unread")
+                    primary.setdefault("safe_user_message", "当前不在可见会话列表里，待收到新消息时会自动识别")
+                    attach_rpa_lock_meta(primary, lock_meta)
+                    return primary
                 if mode:
                     primary.setdefault("wxauto4_reserve_status", {"ok": False, "skipped": True, "reason": "history_mode_requires_win32_ocr"})
                     primary.setdefault("transport_priority", "rpa_first")
@@ -368,6 +400,7 @@ class WeChatConnector:
         exact: bool = True,
         *,
         skip_send_rate_guard: bool = False,
+        artifact_dir: str | None = None,
     ) -> dict[str, Any]:
         if not target:
             raise WeChatConnectorError("target is required")
@@ -378,10 +411,13 @@ class WeChatConnector:
             args.append("--exact")
         if skip_send_rate_guard:
             args.append("--skip-send-rate-guard")
+        compat_args_list = list(args)
+        if artifact_dir:
+            compat_args_list.extend(["--artifact-dir", str(artifact_dir)])
         lock_timeout = rpa_lock_timeout_seconds("send", default=18.0)
         try:
             with wechat_rpa_lock("send", timeout_seconds=lock_timeout) as lock_meta:
-                primary = self.call_compat_sidecar(args, allow_failure=True, env_overrides=send_rpa_env())
+                primary = self.call_compat_sidecar(compat_args_list, allow_failure=True, env_overrides=send_rpa_env())
                 if primary.get("ok"):
                     primary.setdefault("adapter", "win32_ocr")
                     primary.setdefault("transport_priority", "rpa_first")
@@ -400,6 +436,11 @@ class WeChatConnector:
                             "state": "wxauto4_reserve_skipped_due_to_rpa_hard_stop",
                         },
                     )
+                    primary.setdefault("transport_priority", "rpa_first")
+                    attach_rpa_lock_meta(primary, lock_meta)
+                    return primary
+                if rpa_render_fault_should_stop(primary):
+                    primary.setdefault("adapter", "win32_ocr")
                     primary.setdefault("transport_priority", "rpa_first")
                     attach_rpa_lock_meta(primary, lock_meta)
                     return primary
@@ -435,13 +476,19 @@ class WeChatConnector:
         *,
         simulate_inbound_file_transfer: bool = False,
         skip_send_rate_guard: bool = False,
+        artifact_dir: str | None = None,
     ) -> dict[str, Any]:
         loopback_inbound = bool(simulate_inbound_file_transfer and is_simulated_inbound_loopback_target(target))
+        send_kwargs: dict[str, Any] = {
+            "exact": exact,
+            "skip_send_rate_guard": bool(loopback_inbound or skip_send_rate_guard),
+        }
+        if artifact_dir:
+            send_kwargs["artifact_dir"] = artifact_dir
         send_result = self.send_text(
             target,
             text,
-            exact=exact,
-            skip_send_rate_guard=bool(loopback_inbound or skip_send_rate_guard),
+            **send_kwargs,
         )
         if not send_result.get("ok"):
             return {"ok": False, "send": send_result, "verified": False}
@@ -716,7 +763,16 @@ class WeChatConnector:
             return primary
         if not interactive:
             return primary
-        if rpa_payload_is_blank_render(primary):
+        if rpa_payload_needs_render_recovery(primary):
+            if not auto_render_recovery_enabled():
+                primary["rpa_recovery"] = {
+                    "ok": False,
+                    "action": action,
+                    "mode": "render_recovery_disabled_stop_and_report",
+                    "reason": "auto_render_recovery_disabled",
+                    "initial_status": snapshot_payload(primary),
+                }
+                return primary
             recovery = self.call_compat_sidecar(
                 ["recover-render"],
                 allow_failure=True,
@@ -1075,6 +1131,14 @@ def interactive_rpa_probe_env() -> dict[str, str]:
     }
 
 
+def visible_only_message_env() -> dict[str, str]:
+    """Disable sidebar search during safe startup/bootstrap target checks."""
+    return {
+        "WECHAT_WIN32_OCR_TARGET_SEARCH_FALLBACK": "0",
+        "WECHAT_WIN32_OCR_TARGET_SEARCH_ENTER_FALLBACK": "0",
+    }
+
+
 def send_rpa_env() -> dict[str, str]:
     env = interactive_rpa_probe_env()
     env["WECHAT_WIN32_OCR_STRICT_SEND_FOCUS_GUARD"] = "1"
@@ -1084,6 +1148,23 @@ def send_rpa_env() -> dict[str, str]:
     if not str(os.getenv("WECHAT_WIN32_OCR_SEND_INPUT_CONFIRM_ATTEMPTS") or "").strip():
         env["WECHAT_WIN32_OCR_SEND_INPUT_CONFIRM_ATTEMPTS"] = "1"
     return env
+
+
+def message_target_pending_visible(payload: dict[str, Any] | None) -> bool:
+    data = payload if isinstance(payload, dict) else {}
+    state = str(data.get("state") or "")
+    if state in {"target_not_visible_for_messages", "target_not_confirmed_for_messages"}:
+        return not bool(data.get("opened"))
+    reason = str(data.get("reason") or "")
+    if reason in {"target_not_visible_waiting_for_unread", "target_not_visible"}:
+        return True
+    guard = data.get("guard") if isinstance(data.get("guard"), dict) else {}
+    guard_state = str(guard.get("state") or "")
+    guard_reason = str(guard.get("reason") or "")
+    return guard_state in {"target_not_confirmed", "target_not_visible"} or guard_reason in {
+        "target_not_confirmed",
+        "target_not_visible",
+    }
 
 
 def _args_to_request(args: list[str]) -> dict[str, Any]:
@@ -1237,6 +1318,15 @@ def env_float(name: str, default: float) -> float:
         return float(default)
 
 
+def auto_render_recovery_enabled() -> bool:
+    """Explicit opt-in for invasive WeChat render recovery.
+
+    Blank-render recovery closes/reopens the WeChat shell and may create quick
+    login windows. Keep it disabled in normal live RPA; report instead.
+    """
+    return env_flag("WECHAT_WIN32_OCR_RENDER_RECOVERY_AUTO", default=False)
+
+
 def rpa_lock_timeout_seconds(action: str, *, default: float) -> float:
     """Resolve per-action RPA lock timeout with environment override.
 
@@ -1262,7 +1352,7 @@ def rpa_payload_needs_interactive_confirmation(payload: dict[str, Any]) -> bool:
         return False
     if payload.get("ok") and payload.get("online"):
         return False
-    if rpa_payload_is_blank_render(payload):
+    if rpa_payload_needs_render_recovery(payload):
         return True
 
     state = str(payload.get("state") or "").strip()
@@ -1308,6 +1398,38 @@ def rpa_payload_is_blank_render(payload: dict[str, Any]) -> bool:
     if primary:
         return rpa_payload_is_blank_render(primary)
     return False
+
+
+def rpa_payload_needs_render_recovery(payload: dict[str, Any]) -> bool:
+    if not isinstance(payload, dict):
+        return False
+    if rpa_payload_is_blank_render(payload):
+        return True
+    state = str(payload.get("state") or "").strip()
+    reason = str(payload.get("reason") or "").strip()
+    scheme = str(payload.get("scheme") or "").strip()
+    shell_probe = payload.get("shell_probe") if isinstance(payload.get("shell_probe"), dict) else {}
+    shell_reason = str(shell_probe.get("reason") or "").strip()
+    sparse_shell = (
+        state == "auxiliary_shell_window_detected"
+        or reason == "auxiliary_shell_window"
+        or scheme == "win32_ocr_auxiliary_shell"
+    )
+    if sparse_shell and shell_reason in {"sparse_auxiliary_shell", "title_only_shell"}:
+        return True
+    primary = payload.get("primary_status") if isinstance(payload.get("primary_status"), dict) else {}
+    if primary:
+        return rpa_payload_needs_render_recovery(primary)
+    return False
+
+
+def rpa_render_fault_should_stop(payload: dict[str, Any]) -> bool:
+    if not rpa_payload_needs_render_recovery(payload):
+        return False
+    recovery = payload.get("rpa_recovery") if isinstance(payload.get("rpa_recovery"), dict) else {}
+    if str(recovery.get("reason") or "") == "auto_render_recovery_disabled":
+        return True
+    return not auto_render_recovery_enabled()
 
 
 def rpa_payload_has_invalid_window_handle(payload: dict[str, Any]) -> bool:
@@ -1595,12 +1717,14 @@ def guarded_send_confirmation_fallback(send_result: dict[str, Any], messages: di
         return False
     if pre_guard.get("ok") is not True or str(pre_guard.get("reason") or "") != "target_confirmed":
         return False
+    if str(pre_guard.get("confirmation_confidence") or "") != "active_title_strict":
+        return False
     if pre_guard.get("blind_send"):
         return False
     post_guard = send_meta.get("post_send_guard")
     if not isinstance(post_guard, dict) or post_guard.get("ok") is not True:
         return False
-    if str(post_guard.get("reason") or "") != "target_confirmed":
+    if str(post_guard.get("reason") or "") not in {"target_confirmed", "send_window_readable_after_send"}:
         return False
     click_meta = send_meta.get("click")
     if not isinstance(click_meta, dict):

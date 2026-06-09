@@ -265,7 +265,7 @@ def _call_llm_intent_analysis(
         "联系方式、收货信息、个人资料。例如：\"我叫张三，电话13812345678\"、"
         "\"收货地址是xxx\"。\n"
         "- product_inquiry：客户询问产品/商品信息，包括价格、型号、配置、车况、"
-        "库存、规格等。例如：\"凯美瑞多少钱\"、\"这车油耗怎么样\"。\n"
+        "库存、规格等。例如：\"某款车多少钱\"、\"这车油耗怎么样\"。\n"
         "- handoff_request：客户明确要求转人工、找销售、找顾问。"
         "例如：\"找人工\"、\"我要真人客服\"。\n"
         "- greeting：客户打招呼、寒暄。例如：\"你好\"、\"在吗\"。\n"
@@ -301,6 +301,7 @@ def _call_llm_intent_analysis(
         temperature=0.1,
         tier="flash",
         json_mode=True,
+        allow_fallback=False,
     )
     if not result.get("ok"):
         return None

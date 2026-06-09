@@ -1,5 +1,12 @@
 # Brain First 实施检查清单
 
+## 客户可见回复所有权硬基线
+
+- 所有客户可见回复必须由 `customer_service_brain` 发出：只能是首个有效 BrainPlan、Brain repair 后的 BrainPlan，或 Brain 自己生成的硬边界/拒绝/转人工类说明。
+- Guard、质量门、语义审稿、RAG、实时路由、本地模板、旧合成器、最终润色和任何兜底模块都不能生成、替换、拼接客户可见回复；它们只能提供证据、风险、审稿意见、返修指令或轻量表达校验。
+- Brain 不可用、超时、不可采纳或返修失败时，不允许本地 safe fallback 代替 Brain 发客户可见话术；必须阻断发送、记录审计，并触发内部人工/告警接口。
+- 后续所有客服相关开发文档必须引用 [customer_visible_reply_ownership_baseline.md](../customer_visible_reply_ownership_baseline.md)。
+
 ## 1. 代码前检查
 
 - 已确认本轮只做客服回复链路，不改 RPA 底层。
@@ -7,6 +14,8 @@
 - 已确认正式知识库仍为政策流程最高权威。
 - 已确认 AI经验池不作为事实依据。
 - 已确认所有客户可见回复必须经过最终润色。
+- 已确认所有客户可见回复必须由 `customer_service_brain` 发出，任何 guard/质量门/本地兜底/旧模板不能成为客户可见回复 owner。
+- 已确认 Brain 不可用或不可采纳时阻断发送并触发内部人工/告警，不发送本地 fallback 文案。
 - 已确认多会话发送仍保持串行和发送前目标复核。
 - 已确认旧链路必须保留为可回滚 fallback。
 

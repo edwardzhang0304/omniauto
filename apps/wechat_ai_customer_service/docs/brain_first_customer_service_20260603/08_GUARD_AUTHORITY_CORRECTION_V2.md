@@ -1,5 +1,12 @@
 # Guard Authority Correction V2
 
+## 客户可见回复所有权硬基线
+
+- 所有客户可见回复必须由 `customer_service_brain` 发出：只能是首个有效 BrainPlan、Brain repair 后的 BrainPlan，或 Brain 自己生成的硬边界/拒绝/转人工类说明。
+- Guard、质量门、语义审稿、RAG、实时路由、本地模板、旧合成器、最终润色和任何兜底模块都不能生成、替换、拼接客户可见回复；它们只能提供证据、风险、审稿意见、返修指令或轻量表达校验。
+- Brain 不可用、超时、不可采纳或返修失败时，不允许本地 safe fallback 代替 Brain 发客户可见话术；必须阻断发送、记录审计，并触发内部人工/告警接口。
+- 后续所有客服相关开发文档必须引用 [customer_visible_reply_ownership_baseline.md](../customer_visible_reply_ownership_baseline.md)。
+
 ## 1. Purpose
 
 This document turns the Brain First correction principle into an executable runtime contract.
@@ -33,8 +40,9 @@ Root cause:
 Therefore previous tests that only checked `brain_adopted=true` were not sufficient. The correct acceptance signal is:
 
 ```text
-visible reply owner is Brain / Brain repair / Brain safe fallback,
-not guard / quality gate / route template / final polish strategy rewrite.
+visible reply owner is Brain / Brain repair / Brain-authored hard-boundary response,
+not guard / quality gate / route template / final polish strategy rewrite / local fallback.
+If Brain is unavailable or non-adoptable, there is no customer-visible reply.
 ```
 
 ## 3. Runtime Ownership Contract
@@ -45,8 +53,9 @@ Normal customer-visible replies may only originate from:
 
 - `brain`: the first valid BrainPlan.
 - `brain_repair`: a repaired BrainPlan after reviewer feedback.
-- `brain_safe_fallback`: exceptional fallback when Brain or repair is unavailable, with explicit audit marker.
 - `brain_hard_boundary_refusal`: a Brain-authored refusal or boundary answer for illegal/internal/high-risk requests.
+
+When Brain or Brain repair is unavailable, invalid, or non-adoptable, the allowed visible owner is `none`: block outbound send, record audit, and trigger internal handoff/alert. Do not send local fallback text.
 
 ### 3.2 Forbidden Customer-Visible Owners
 
@@ -152,13 +161,13 @@ The Brain runner must enforce:
 - If Guard supplies `reply`, Brain orchestration must ignore it unless it is explicitly marked as a Brain-owned hard-boundary refusal.
 - Final payload must expose visible ownership audit fields.
 - Quality gates may reject or request Brain repair, but they must not convert a low-risk Brain-owned reply into generic handoff/fallback wording.
-- `brain_safe_fallback` is still Brain-owned. If it is non-handoff and only soft evidence reasons such as `no_relevant_business_evidence` are present, downstream handoff arbitration and handoff style adapters must not reclassify it as operator handoff.
+- Local safe fallback is not a customer-visible owner. If Brain has no adoptable reply, downstream arbitration and style adapters must preserve the no-visible-reply block and trigger internal handoff/alert instead of producing customer-facing text.
 
 Required audit fields:
 
 ```json
 {
-  "visible_reply_owner": "brain|brain_repair|brain_safe_fallback|brain_hard_boundary_refusal",
+  "visible_reply_owner": "brain|brain_repair|brain_hard_boundary_refusal|none_brain_unavailable",
   "visible_reply_source": "brain_plan.reply_segments",
   "guard_verdict": "pass|warn|repair|block|handoff",
   "guard_hard_boundary": false,

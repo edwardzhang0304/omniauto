@@ -72,6 +72,8 @@ def run_checks() -> dict[str, Any]:
                     "kwargs": kwargs,
                 }
             )
+            if "openai.invalid" in str(request.full_url):
+                raise TimeoutError("simulated primary timeout")
             if str(request.full_url).endswith("/models"):
                 if "x-api-key" in headers:
                     return FakeResponse({"data": [{"id": "kimi-for-coding"}]})
@@ -86,11 +88,13 @@ def run_checks() -> dict[str, Any]:
             check_openai_compatible_roundtrip_and_probe(calls)
             check_fallback_roundtrip_and_anthropic_probe(calls)
             check_model_unavailable_primary_is_failoverable()
+            check_stage_can_disallow_fallback(calls)
+            check_failover_preserves_actual_fallback_route(calls)
             check_llm_config_permissions_allow_all_authenticated_users()
         finally:
             llm_config_module.urllib.request.urlopen = old_urlopen
             llm_config_module._LLM_CONFIG_PATH = old_path
-    return {"ok": True, "checks": 5}
+    return {"ok": True, "checks": 7}
 
 
 def check_legacy_deepseek_defaults() -> None:
@@ -217,6 +221,64 @@ def check_model_unavailable_primary_is_failoverable() -> None:
         not llm_config_module.is_failoverable_llm_failure(bad_request),
         "ordinary malformed 400 requests should not be treated as failoverable",
     )
+
+
+def check_stage_can_disallow_fallback(calls: list[dict[str, Any]]) -> None:
+    before = len(calls)
+    result = llm_config_module.call_llm_request_with_failover(
+        provider="openai",
+        api_key="sk-primary",
+        base_url="https://openai.invalid/v1",
+        model="gpt-5.4",
+        messages=[{"role": "user", "content": "ping"}],
+        timeout=1,
+        max_tokens=8,
+        allow_fallback=False,
+        config={
+            "LLM_FALLBACK_ENABLED": "1",
+            "LLM_FALLBACK_PROVIDER": "anthropic",
+            "LLM_FALLBACK_BASE_URL": "https://aiself.vip/v1",
+            "LLM_FALLBACK_FLASH_MODEL": "kimi-for-coding",
+            "LLM_FALLBACK_API_KEY": "sk-fallback-kimi",
+        },
+    )
+    assert_true(not result.get("ok"), "disallowed fallback primary failure should stay failed")
+    assert_equal(
+        (result.get("failover") or {}).get("reason"),
+        "fallback_disallowed_for_stage",
+        "disallowed fallback should record stage reason",
+    )
+    assert_equal(len(calls), before + 1, "disallowed fallback should only call primary route")
+    assert_true(calls[-1]["url"].endswith("/chat/completions"), "disallowed fallback should not call anthropic messages")
+
+
+def check_failover_preserves_actual_fallback_route(calls: list[dict[str, Any]]) -> None:
+    result = llm_config_module.call_llm_request_with_failover(
+        provider="openai",
+        api_key="sk-primary",
+        base_url="https://openai.invalid/v1",
+        model="gpt-5.4",
+        messages=[{"role": "user", "content": "ping"}],
+        timeout=1,
+        max_tokens=8,
+        fallback_timeout=60,
+        config={
+            "LLM_FALLBACK_ENABLED": "1",
+            "LLM_FALLBACK_PROVIDER": "anthropic",
+            "LLM_FALLBACK_BASE_URL": "https://aiself.vip/v1",
+            "LLM_FALLBACK_FLASH_MODEL": "kimi-for-coding",
+            "LLM_FALLBACK_API_KEY": "sk-fallback-kimi",
+        },
+    )
+    assert_true(result.get("ok"), "fallback should succeed through fake urlopen")
+    assert_equal(result.get("provider"), "anthropic", "fallback result should report actual provider")
+    assert_equal(result.get("model"), "kimi-for-coding", "fallback result should report actual fallback model")
+    assert_equal(
+        (result.get("failover") or {}).get("fallback_timeout_seconds"),
+        60,
+        "fallback should use independent fallback timeout",
+    )
+    assert_equal(calls[-1]["url"], "https://aiself.vip/v1/messages", "fallback route should call anthropic messages")
 
 
 def check_llm_config_permissions_allow_all_authenticated_users() -> None:

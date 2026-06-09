@@ -212,6 +212,7 @@ AMBIGUOUS_PRODUCT_FOLLOWUP_TERMS = (
 )
 GREETING_TERMS = ("你好", "您好", "在吗", "在不在", "早", "早上好", "下午好", "晚上好", "哈喽", "hello", "hi")
 GOODBYE_TERMS = ("再见", "拜拜", "回头聊", "下次聊", "谢谢", "谢了")
+SOCIAL_SUMMON_TERMS = ("人呢", "在不", "在么", "在嘛", "有人吗", "老板在吗", "还在吗", "忙吗")
 GENERIC_STALL_TERMS = (
     "我先看",
     "我看一下",
@@ -224,7 +225,64 @@ GENERIC_STALL_TERMS = (
     "马上回复",
     "我查一下",
 )
+CLEAR_BOUNDARY_REFUSAL_TERMS = (
+    "不能帮",
+    "没法帮",
+    "无法帮",
+    "不能做",
+    "不能操作",
+    "不能处理",
+    "不能配合",
+    "不能这么",
+    "不可以这么",
+    "不建议这么",
+    "不能调",
+    "不能改",
+    "不能篡改",
+    "不能承诺",
+    "不能保证",
+    "不能包过",
+)
+CLEAR_BOUNDARY_SUBSTANTIVE_TERMS = (
+    "真实",
+    "如实",
+    "正常流程",
+    "合规",
+    "交易真实性",
+    "违法",
+    "违规",
+    "诚信",
+    "风险",
+    "资方",
+    "审批",
+    "征信",
+    "保险公司",
+    "保单",
+    "审核",
+    "检测",
+    "车况",
+    "评估",
+    "实际",
+    "正式",
+)
 UNSUPPORTED_INFO_COLLECTION_TERMS = ("电话", "手机号", "联系方式", "预算", "轿车还是", "SUV", "suv", "资料", "补齐")
+BUSINESS_REDIRECT_TERMS = (
+    "预算",
+    "车型",
+    "车源",
+    "看车",
+    "试驾",
+    "报价",
+    "价格",
+    "贷款",
+    "置换",
+    "过户",
+    "车况",
+    "公里",
+    "库存",
+    "到店",
+)
+UNNECESSARY_HANDOFF_VISIBLE_TERMS = ("转人工", "人工客服", "人工帮", "负责人", "专员")
 INCOMPLETE_CONDITION_OPENERS = ("如果", "要是", "假如", "若", "但如果")
 INCOMPLETE_TRAILING_TERMS = ("如果", "要是", "假如", "因为", "所以", "但是", "不过", "另外", "比如", "包括", "或者", "以及", "然后", "的话")
 INSURANCE_TOPIC_TERMS = ("保险", "车损险", "理赔", "赔不赔", "赔吗", "报案", "定损", "保单", "剐蹭", "撞墙")
@@ -308,6 +366,8 @@ DEFAULT_QUALITY_SPLIT_REPLY_MAX_CHARS = 150
 DIRECT_RECOMMENDATION_TERMS = (
     "建议",
     "推荐",
+    "主推",
+    "首推",
     "优先",
     "先看",
     "更适合",
@@ -328,6 +388,28 @@ DIRECT_RECOMMENDATION_TERMS = (
     "第一顺位",
     "第二顺位",
     "放第二",
+)
+CLEAR_RECOMMENDATION_STRUCTURE_TERMS = (
+    "第一",
+    "第二",
+    "第三",
+    "第一台",
+    "第二台",
+    "第三台",
+    "第一款",
+    "第二款",
+    "第三款",
+    "备选",
+    "方向",
+    "排序",
+    "顺位",
+    "放前面",
+    "放后面",
+    "预算最轻松",
+    "性价比",
+    "更贴合",
+    "最贴合",
+    "更均衡",
 )
 UNCERTAIN_BUT_SAFE_TERMS = ("暂无", "还没", "需要核实", "以实际", "以门店", "我确认后")
 KNOWN_PRICE_UNCERTAINTY_TERMS = (
@@ -613,6 +695,38 @@ def validate_brain_plan(plan: dict[str, Any], *, require_fact_claims: bool = Fal
     return {"ok": not errors, "errors": errors}
 
 
+def validate_social_visible_reply_contract(plan: dict[str, Any], *, current_message: str) -> dict[str, Any]:
+    """Require Brain-authored visible acknowledgements for real social turns.
+
+    This is a reply-ownership contract, not a local answer template.  It keeps
+    guard/quality/scheduler layers from treating greetings, summons, thanks, or
+    goodbyes as "no visible reply" while still requiring the Brain to author the
+    actual customer-facing sentence.
+    """
+
+    if not social_message_requires_visible_brain_reply(current_message):
+        return {"ok": True, "errors": [], "warnings": []}
+    action = str(plan.get("recommended_action") or "send_reply").strip()
+    answer_mode = str(plan.get("answer_mode") or "").strip()
+    risk = plan.get("risk") if isinstance(plan.get("risk"), dict) else {}
+    reply = join_reply_segments(plan.get("reply_segments", []) or [])
+    errors: list[str] = []
+    warnings: list[str] = []
+    if action != "send_reply":
+        errors.append("social_message_requires_send_reply")
+    if not bool(plan.get("can_answer", True)):
+        errors.append("social_message_requires_can_answer")
+    if bool(risk.get("needs_handoff")):
+        errors.append("social_message_must_not_handoff_without_hard_boundary")
+    if not reply.strip():
+        errors.append("social_message_requires_visible_brain_reply")
+    if answer_mode and answer_mode not in {"soft_social_reply", "direct_answer", "soft_redirect_to_business"}:
+        warnings.append("social_message_answer_mode_should_be_social_or_direct")
+    if reply.strip() and visible_content_char_count(reply) > 80:
+        warnings.append("social_message_reply_too_long")
+    return {"ok": not errors, "errors": errors, "warnings": warnings}
+
+
 def verify_brain_reply_quality(
     plan: dict[str, Any],
     *,
@@ -665,8 +779,14 @@ def verify_brain_reply_quality(
         if len(clean_reply) > int(cfg.get("social_reply_soft_max_chars") or 80):
             warnings.append("social_reply_too_long")
 
+    redirect_check = check_over_eager_business_redirect_after_social_fatigue(question, clean_reply, evidence_pack or {})
+    if redirect_check.get("error"):
+        errors.append(str(redirect_check["error"]))
+
     if concrete_question and is_generic_stall_reply(clean_reply):
         errors.append("generic_stall_reply_for_concrete_question")
+    if contains_any(clean_reply, UNNECESSARY_HANDOFF_VISIBLE_TERMS):
+        errors.append("unnecessary_handoff_language_for_send_reply")
 
     if price_question:
         if has_product_evidence:
@@ -690,7 +810,7 @@ def verify_brain_reply_quality(
             errors.append(str(relative_context_check["error"]))
 
     if recommendation_question and has_product_evidence:
-        if not contains_any(clean_reply, DIRECT_RECOMMENDATION_TERMS):
+        if not reply_has_clear_recommendation_or_choice(clean_reply, plan, evidence_pack or {}):
             errors.append("missing_clear_recommendation_or_choice")
         if budget_upper is not None and budget_upper > 0:
             budget_check = check_budget_fit_recommendation(
@@ -1007,16 +1127,95 @@ def is_social_only_message(text: str) -> bool:
     clean = re.sub(r"[\s。！？!?，,、~～\.\-_:：；;]+", "", str(text or "").strip()).lower()
     if not clean:
         return False
-    terms = tuple(item.lower() for item in GREETING_TERMS + GOODBYE_TERMS)
+    terms = tuple(item.lower() for item in GREETING_TERMS + GOODBYE_TERMS + SOCIAL_SUMMON_TERMS)
     return clean in terms or (len(clean) <= 7 and any(term in clean for term in terms))
+
+
+def check_over_eager_business_redirect_after_social_fatigue(question: str, reply: str, evidence_pack: dict[str, Any]) -> dict[str, Any]:
+    """Flag repeated business pullback when strategy state says to soften it.
+
+    This is a reviewer check only.  It does not write replacement wording and it
+    does not weaken product/formal-knowledge authority rules.
+    """
+
+    state = extract_conversation_strategy_state(evidence_pack)
+    if not state:
+        return {}
+    mode = str(state.get("suggested_engagement_mode") or "")
+    fatigue = str(state.get("redirect_fatigue_level") or "")
+    resisted = bool(state.get("customer_resists_business_redirect"))
+    if mode not in {"social_companion", "soft_bridge"} and fatigue not in {"fatigued", "suppress"} and not resisted:
+        return {}
+    q = normalize_space(question)
+    r = normalize_space(reply)
+    if not q or not r:
+        return {}
+    if contains_any(q, BUSINESS_REDIRECT_TERMS + PRICE_QUESTION_TERMS + RECOMMENDATION_QUESTION_TERMS + COMPARISON_QUESTION_TERMS):
+        return {}
+    if not contains_any(r, BUSINESS_REDIRECT_TERMS):
+        return {}
+    if fatigue == "light" and not resisted:
+        return {}
+    return {"error": "over_eager_business_redirect_after_social_fatigue"}
+
+
+def extract_conversation_strategy_state(evidence_pack: dict[str, Any]) -> dict[str, Any]:
+    if not isinstance(evidence_pack, dict):
+        return {}
+    for key in ("conversation_strategy_state", "strategy_state"):
+        value = evidence_pack.get(key)
+        if isinstance(value, dict) and value:
+            return value
+    conversation = evidence_pack.get("conversation") if isinstance(evidence_pack.get("conversation"), dict) else {}
+    value = conversation.get("conversation_strategy_state")
+    if isinstance(value, dict) and value:
+        return value
+    knowledge = evidence_pack.get("knowledge") if isinstance(evidence_pack.get("knowledge"), dict) else {}
+    value = knowledge.get("conversation_strategy_state")
+    if isinstance(value, dict) and value:
+        return value
+    return {}
+
+
+def social_message_requires_visible_brain_reply(text: str) -> bool:
+    clean = re.sub(r"[\s。！？!?，,、~～\.\-_:：；;]+", "", str(text or "").strip()).lower()
+    if not clean:
+        return False
+    if is_social_only_message(text):
+        return True
+    terms = tuple(item.lower() for item in GREETING_TERMS + GOODBYE_TERMS + SOCIAL_SUMMON_TERMS)
+    return len(clean) <= 7 and any(term in clean for term in terms)
 
 
 def is_generic_stall_reply(text: str) -> bool:
     clean = normalize_space(text)
     if not contains_any(clean, GENERIC_STALL_TERMS):
         return False
+    if is_clear_boundary_refusal_reply(clean):
+        return False
     informative = PRICE_VALUE_RE.search(clean) or contains_any(clean, DIRECT_RECOMMENDATION_TERMS)
     return not informative and len(clean) <= 90
+
+
+def is_clear_boundary_refusal_reply(text: str) -> bool:
+    """Recognize Brain-authored refusals that answer a hard-boundary request.
+
+    This is not a local reply template. It only prevents the quality gate from
+    misclassifying a substantive refusal as a generic "I'll check" stall.
+    """
+
+    clean = normalize_space(text)
+    if not clean:
+        return False
+    compact = re.sub(r"\s+", "", clean)
+    if not contains_any(compact, CLEAR_BOUNDARY_REFUSAL_TERMS):
+        return False
+    if contains_any(compact, ("负责人", "专员", "人工客服", "马上回复", "稍后回复")) and not contains_any(
+        compact,
+        CLEAR_BOUNDARY_SUBSTANTIVE_TERMS,
+    ):
+        return False
+    return contains_any(compact, CLEAR_BOUNDARY_SUBSTANTIVE_TERMS)
 
 
 def check_appointment_confirmation_boundary(question: str, reply: str) -> dict[str, Any]:
@@ -1329,6 +1528,37 @@ def is_multi_product_recommendation_request(question: str) -> bool:
             "三个方向",
         ),
     ) and is_broad_product_recommendation_request(clean)
+
+
+def reply_has_clear_recommendation_or_choice(reply: str, plan: dict[str, Any], evidence_pack: dict[str, Any]) -> bool:
+    """Return whether the visible reply makes a concrete choice.
+
+    This is deliberately a quality-contract helper, not a business rule.  Brain
+    may express recommendations naturally ("主推/第一/备选/三个方向"), so the
+    gate should recognize clear, product-anchored choices without forcing a
+    narrow template.
+    """
+
+    clean = normalize_space(reply)
+    if not clean:
+        return False
+    if contains_any(clean, DIRECT_RECOMMENDATION_TERMS):
+        return True
+    if not reply_mentions_authoritative_product(clean, evidence_pack):
+        return False
+    if contains_any(clean, CLEAR_RECOMMENDATION_STRUCTURE_TERMS):
+        return True
+    answer_mode = str(plan.get("answer_mode") or "").strip()
+    if answer_mode in {"recommend_from_catalog", "compare_options"} and PRICE_VALUE_RE.search(clean):
+        return True
+    return False
+
+
+def reply_mentions_authoritative_product(reply: str, evidence_pack: dict[str, Any]) -> bool:
+    for item in iter_authoritative_product_items(evidence_pack):
+        if mentions_direct_product_entity(reply, item):
+            return True
+    return False
 
 
 def check_available_cargo_fit_candidate_for_broad_request(
@@ -1902,6 +2132,7 @@ def build_quality_repair_instruction(*, errors: list[str], warnings: list[str], 
         return ""
     return (
         "BrainPlan未通过通用质量自检。请重新理解当前客户消息并修复回复，必须先正面回答当前问题；"
+        "如果客户只是问候、催促、感谢或告别，也必须由Brain生成一句简短自然的客户可见回复，不能空回复、不能转人工、不能机械沉默；"
         "如果客户使用“刚才/前面/这两台/直接挑”等指代表达，必须结合conversation.context、history_text和product_master候选延续上一轮需求，不能只回复“确认/稍等”；"
         "如果失败项包含relative_context_product_drift或missing_relative_context_product_reference，必须只围绕recent_product_ids/上一轮可见推荐商品回答，不能换成新的商品候选；"
         "如果失败项包含ambiguous_followup_product_drift，说明客户在问“车况/油耗/保养/这台”等模糊追问，必须默认指向conversation.context里的last_product_id，不能切到备选商品；"

@@ -229,8 +229,8 @@ def rag_hit_looks_like_style(hit: dict[str, Any]) -> bool:
 def clean_style_reply(text: str) -> str:
     clean = extract_service_style_snippet(str(text or ""))
     clean = re.sub(r"^\[[^\]]{0,30}(?:客服|AI|OmniAuto)[^\]]*\]\s*", "", clean, flags=re.I)
-    clean = clean.replace("转人工客服", "请示负责人").replace("转人工", "请示负责人")
-    clean = clean.replace("人工客服", "负责人").replace("真人客服", "负责人")
+    clean = clean.replace("转人工客服", "核实确认").replace("转人工", "核实确认")
+    clean = clean.replace("人工客服", "负责同事").replace("真人客服", "负责同事")
     clean = re.sub(r"\s+", " ", clean).strip(" ：:，,。；;")
     if clean and not clean.endswith(("。", "？", "！", "…")):
         clean += "。"
