@@ -50,6 +50,11 @@ CLOUD_GATE_ALLOWED_PATHS = {
     "/api/recorder/runtime/start",
 }
 CLOUD_GATE_ALLOWED_PREFIXES = ()
+LOCAL_SAFETY_STOP_PATHS = {
+    "/api/customer-service/runtime/stop",
+    "/api/recorder/runtime/stop",
+}
+LOOPBACK_HOSTS = {"127.0.0.1", "::1", "::ffff:127.0.0.1", "localhost"}
 
 
 class AuthTenantMiddleware(BaseHTTPMiddleware):
@@ -63,6 +68,20 @@ class AuthTenantMiddleware(BaseHTTPMiddleware):
             return await call_next(request)
 
         tenant_header = request.headers.get("X-Tenant-ID") or request.query_params.get("tenant_id") or ""
+        if local_safety_stop_exempt(request, path):
+            tenant_id = active_tenant_id(tenant_header or None)
+            context = self.auth_service.implicit_admin_context(tenant_id=tenant_id)
+            token = set_active_tenant_id(context.tenant_id)
+            request.state.auth_context = context
+            try:
+                response = await call_next(request)
+            finally:
+                reset_active_tenant_id(token)
+            response.headers.setdefault("X-Tenant-ID", context.tenant_id)
+            response.headers.setdefault("X-Auth-Role", context.role.value)
+            response.headers.setdefault("X-Local-Safety-Stop", "1")
+            return response
+
         context = self.auth_service.resolve_context(
             authorization=request.headers.get("Authorization", ""),
             tenant_id=tenant_header or None,
@@ -99,6 +118,25 @@ def cloud_gate_exempt(path: str) -> bool:
     if path in CLOUD_GATE_ALLOWED_PATHS:
         return True
     return any(path.startswith(prefix) for prefix in CLOUD_GATE_ALLOWED_PREFIXES)
+
+
+def local_safety_stop_exempt(request: Request, path: str) -> bool:
+    """Allow local emergency stop even when the admin session is stale.
+
+    Starting or configuring the runtime still requires normal authentication.
+    Only POST stop from the loopback admin console is exempt so the operator can
+    always stop RPA keyboard/mouse hooks and background workers.
+    """
+
+    if request.method.upper() != "POST" or path not in LOCAL_SAFETY_STOP_PATHS:
+        return False
+    client_host = str(getattr(request.client, "host", "") or "").strip().lower()
+    host_header = str(request.headers.get("host") or "").split(":", 1)[0].strip().lower()
+    if client_host in LOOPBACK_HOSTS:
+        return True
+    if client_host and client_host != "testclient":
+        return False
+    return host_header in LOOPBACK_HOSTS
 
 
 def current_auth_context(request: Request) -> AuthContext:

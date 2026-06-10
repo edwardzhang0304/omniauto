@@ -256,6 +256,7 @@ class TargetConfig:
     exact: bool
     allow_self_for_test: bool
     max_batch_messages: int
+    session_key: str = ""
 
 
 @dataclass(frozen=True)
@@ -682,7 +683,11 @@ def process_target(
         },
     )
     write_workflow_phase("target_get_messages_start", target=target.name, send=bool(send))
-    payload = connector.get_messages(target.name, exact=target.exact)
+    payload = connector.get_messages(
+        target.name,
+        exact=target.exact,
+        session_key=str(getattr(target, "session_key", "") or ""),
+    )
     write_workflow_phase(
         "target_get_messages_done",
         target=target.name,
@@ -2061,7 +2066,12 @@ def handle_rate_limit_block(
         return block_for_final_visible_polish_failure(event, target, final_notice_polish)
     elif final_visible_polish_degraded(final_notice_polish, config=config):
         event["final_visible_llm_polish_rate_limit_degraded"] = True
-    verified = connector.send_text_and_verify(target.name, notice_text, exact=target.exact)
+    verified = connector.send_text_and_verify(
+        target.name,
+        notice_text,
+        exact=target.exact,
+        session_key=str(getattr(target, "session_key", "") or ""),
+    )
     event["rate_limit_notice"] = {
         "reply_text": notice_text,
         "send_result": verified,
@@ -2569,7 +2579,12 @@ def send_reply_with_optional_multi_bubble(
                 segment_attempt=attempts,
                 reply_chars=len(segments[0]),
             )
-            attempt_result = connector.send_text_and_verify(target.name, segments[0], exact=target.exact)
+            attempt_result = connector.send_text_and_verify(
+                target.name,
+                segments[0],
+                exact=target.exact,
+                session_key=str(getattr(target, "session_key", "") or ""),
+            )
             single = dict(attempt_result) if isinstance(attempt_result, dict) else {"ok": False, "verified": False}
             verified = bool(single.get("verified"))
             state = _send_result_state(single)
@@ -2638,6 +2653,7 @@ def send_reply_with_optional_multi_bubble(
                     segment,
                     exact=target.exact,
                     skip_send_rate_guard=skip_segment_rate_guard,
+                    session_key=str(getattr(target, "session_key", "") or ""),
                 )
             else:
                 send_only = connector.send_text(
@@ -2645,6 +2661,7 @@ def send_reply_with_optional_multi_bubble(
                     segment,
                     exact=target.exact,
                     skip_send_rate_guard=skip_segment_rate_guard,
+                    session_key=str(getattr(target, "session_key", "") or ""),
                 )  # type: ignore[attr-defined]
                 send_only_meta = send_only if isinstance(send_only, dict) else {}
                 result = {
@@ -6487,7 +6504,12 @@ def maybe_enrich_messages_with_history(
         return enriched
 
     try:
-        loaded = connector.get_messages(target.name, exact=target.exact, history_load_times=load_times)
+        loaded = connector.get_messages(
+            target.name,
+            exact=target.exact,
+            history_load_times=load_times,
+            session_key=str(getattr(target, "session_key", "") or ""),
+        )
     except Exception as exc:
         enriched = dict(payload)
         gap_risk = history_backfill_gap_risk(
@@ -6819,6 +6841,7 @@ def maybe_enrich_messages_with_anchor_history(
             min_delay_ms=min_delay_ms,
             max_delay_ms=max_delay_ms,
             restore_to_latest=bool(settings.get("restore_to_latest", True)),
+            session_key=str(getattr(target, "session_key", "") or ""),
         )
     except Exception as exc:
         enriched = dict(payload)
@@ -7252,14 +7275,18 @@ def bootstrap_target(
     visible_only = bootstrap_visible_only_target_confirmation_enabled(config)
     if visible_only:
         load_times = 0
+    clean_session_key = str(getattr(target, "session_key", "") or "")
     try:
         latest_payload = connector.get_messages(
             target.name,
             exact=target.exact,
             history_load_times=0,
             visible_only_target=visible_only,
+            session_key=clean_session_key,
         )
-    except TypeError:
+    except TypeError as exc:
+        if clean_session_key:
+            return base_event(target, "error", {"messages": {"ok": False, "reason": "connector_session_key_not_supported", "error": repr(exc)}})
         latest_payload = connector.get_messages(target.name, exact=target.exact)
     if not latest_payload.get("ok"):
         if visible_only and bootstrap_payload_can_wait_for_visible_target(latest_payload):
@@ -7268,8 +7295,15 @@ def bootstrap_target(
     payload = latest_payload
     if load_times > 0:
         try:
-            history_payload = connector.get_messages(target.name, exact=target.exact, history_load_times=load_times)
-        except TypeError:
+            history_payload = connector.get_messages(
+                target.name,
+                exact=target.exact,
+                history_load_times=load_times,
+                session_key=clean_session_key,
+            )
+        except TypeError as exc:
+            if clean_session_key:
+                return base_event(target, "error", {"messages": {"ok": False, "reason": "connector_session_key_not_supported", "error": repr(exc)}})
             history_payload = connector.get_messages(target.name, exact=target.exact)
         if not history_payload.get("ok"):
             return base_event(target, "error", {"messages": history_payload})
@@ -7835,7 +7869,11 @@ def detect_newer_messages_before_send(
         original_content_keys.update(message_original_match_keys(item))
     if not original_ids:
         return {"ok": True, "has_newer_messages": False, "reason": "empty_batch"}
-    payload = connector.get_messages(target.name, exact=target.exact)
+    payload = connector.get_messages(
+        target.name,
+        exact=target.exact,
+        session_key=str(getattr(target, "session_key", "") or ""),
+    )
     if not payload.get("ok"):
         return {"ok": False, "has_newer_messages": False, "reason": "latest_read_failed", "messages": payload}
     messages = payload.get("messages", []) or []
@@ -7859,6 +7897,7 @@ def detect_newer_messages_before_send(
                     loaded = connector.get_messages(
                         target.name,
                         exact=target.exact,
+                        session_key=str(getattr(target, "session_key", "") or ""),
                         history_mode="anchor_until_found",
                         anchor_ids=original_ids,
                         anchor_content_keys=sorted(original_content_keys),
@@ -7907,7 +7946,12 @@ def detect_newer_messages_before_send(
             )
             if settings.get("enabled") and load_times > 0:
                 try:
-                    loaded = connector.get_messages(target.name, exact=target.exact, history_load_times=load_times)
+                    loaded = connector.get_messages(
+                        target.name,
+                        exact=target.exact,
+                        history_load_times=load_times,
+                        session_key=str(getattr(target, "session_key", "") or ""),
+                    )
                 except Exception as exc:
                     loaded = {"ok": False, "error": repr(exc)}
                 history_meta = {

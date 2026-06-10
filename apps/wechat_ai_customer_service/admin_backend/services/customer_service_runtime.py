@@ -1070,6 +1070,7 @@ class CustomerServiceRuntime:
         if pid and self._pid_alive(pid):
             self._terminate_tree(pid)
         self._stop_worker()
+        self._stop_ocr_sidecars()
         self._shutdown_operator_guard()
         write_runtime_status("stopped", "已停止。", tenant_id=self.tenant_id)
         self._clear_pid_record()
@@ -1169,6 +1170,7 @@ class CustomerServiceRuntime:
 
     _LISTENER_SCRIPT_NAME = "run_customer_service_listener.py"
     _WORKER_SCRIPT_NAME = "background_worker.py"
+    _OCR_SIDECAR_SCRIPT_NAME = "wechat_win32_ocr_sidecar.py"
 
     @staticmethod
     def _cmdline_has_script(cmdline: list[str], script_name: str) -> bool:
@@ -1393,6 +1395,51 @@ class CustomerServiceRuntime:
                 continue
         return sorted(pids)
 
+    def _stop_ocr_sidecars(self) -> None:
+        stop_wechat_ocr_sidecars()
+
+    @staticmethod
+    def _scan_ocr_sidecar_daemon_pids() -> list[int]:
+        my_pid = os.getpid()
+        pids: set[int] = set()
+        for proc in psutil.process_iter(["pid", "cmdline", "name"]):
+            try:
+                pid = int(proc.info.get("pid") or 0)
+                cmdline = [str(item) for item in (proc.info.get("cmdline") or [])]
+                name = str(proc.info.get("name") or "").lower()
+                if pid <= 0 or pid == my_pid or "python" not in name:
+                    continue
+                if "--daemon" not in cmdline:
+                    continue
+                if not CustomerServiceRuntime._cmdline_has_script(cmdline, CustomerServiceRuntime._OCR_SIDECAR_SCRIPT_NAME):
+                    continue
+                if not CustomerServiceRuntime._sidecar_script_belongs_to_project(cmdline):
+                    continue
+                if CustomerServiceRuntime._pid_alive(pid):
+                    pids.add(pid)
+            except (psutil.NoSuchProcess, psutil.AccessDenied):
+                continue
+        return sorted(pids)
+
+    @staticmethod
+    def _sidecar_script_belongs_to_project(cmdline: list[str]) -> bool:
+        script_name = CustomerServiceRuntime._OCR_SIDECAR_SCRIPT_NAME
+        for arg in cmdline:
+            arg_path = Path(str(arg))
+            if arg_path.name != script_name:
+                continue
+            if not arg_path.is_absolute():
+                return True
+            try:
+                resolved = arg_path.resolve()
+            except OSError:
+                return False
+            if resolved == APP_ROOT / "adapters" / script_name:
+                return True
+            if APP_ROOT in resolved.parents:
+                return True
+        return False
+
     @staticmethod
     def _cmdline_option_equals(cmdline: list[str], option: str, expected: str) -> bool:
         expected = str(expected)
@@ -1406,3 +1453,25 @@ class CustomerServiceRuntime:
             if text.startswith(prefix) and text[len(prefix):] == expected:
                 return True
         return False
+
+
+def stop_customer_service_support_processes(
+    tenant_id: str | None = None,
+    *,
+    include_operator_guard: bool = True,
+) -> None:
+    """Best-effort cleanup used by both web stop and F8 emergency stop."""
+
+    runtime = CustomerServiceRuntime(tenant_id=tenant_id)
+    runtime._stop_worker()
+    runtime._stop_ocr_sidecars()
+    if include_operator_guard:
+        runtime._shutdown_operator_guard()
+
+
+def stop_wechat_ocr_sidecars() -> None:
+    """Stop project-owned OCR daemon processes left behind by RPA loops."""
+
+    for sidecar_pid in CustomerServiceRuntime._scan_ocr_sidecar_daemon_pids():
+        if sidecar_pid and CustomerServiceRuntime._pid_alive(sidecar_pid):
+            CustomerServiceRuntime._terminate_tree(sidecar_pid)

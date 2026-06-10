@@ -15,6 +15,9 @@ import json
 import math
 import os
 import time
+import urllib.error
+import urllib.parse
+import urllib.request
 from ctypes import wintypes
 from datetime import datetime
 from pathlib import Path
@@ -354,6 +357,23 @@ def write_runtime_status_hint(path: Path, *, tenant_id: str, state: str, message
         write_json(path, payload)
     except Exception:
         pass
+
+
+def request_local_safety_stop(*, tenant_id: str, timeout_seconds: float = 1.5) -> bool:
+    """Ask the local admin backend to run the same full stop path as the web UI."""
+
+    url = f"http://127.0.0.1:8765/api/customer-service/runtime/stop?tenant_id={urllib.parse.quote(tenant_id)}"
+    request = urllib.request.Request(
+        url,
+        data=b"{}",
+        headers={"Content-Type": "application/json", "X-Tenant-ID": tenant_id},
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=timeout_seconds):
+            return True
+    except (OSError, urllib.error.URLError, urllib.error.HTTPError, TimeoutError):
+        return False
 
 
 def indicator_state_snapshot(*, mode: str, runtime_state: str, locked: bool) -> tuple[str, str, dict[str, str]]:
@@ -1478,6 +1498,7 @@ def main() -> int:
                     message=f"double_{control_key_name}_stop_requested",
                 )
                 write_runtime_status_hint(status_path, tenant_id=tenant_id, state="stopped", message="已停止。")
+                request_local_safety_stop(tenant_id=tenant_id)
             elif action == "toggle_pause":
                 latest = load_control_payload(control_path, tenant_id=tenant_id)
                 current_mode = str(latest.get("mode") or "running").strip().lower()

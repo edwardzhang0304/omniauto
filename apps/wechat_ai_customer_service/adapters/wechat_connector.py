@@ -298,8 +298,12 @@ class WeChatConnector:
         max_delay_ms: int | None = None,
         restore_to_latest: bool | None = None,
         visible_only_target: bool = False,
+        session_key: str = "",
     ) -> dict[str, Any]:
         args = ["messages", "--target", target]
+        clean_session_key = str(session_key or "").strip()
+        if clean_session_key:
+            args.extend(["--session-key", clean_session_key])
         if exact:
             args.append("--exact")
         mode = str(history_mode or "").strip()
@@ -401,12 +405,16 @@ class WeChatConnector:
         *,
         skip_send_rate_guard: bool = False,
         artifact_dir: str | None = None,
+        session_key: str = "",
     ) -> dict[str, Any]:
         if not target:
             raise WeChatConnectorError("target is required")
         if not text:
             raise WeChatConnectorError("text is required")
         args = ["send", "--target", target, "--text", text]
+        clean_session_key = str(session_key or "").strip()
+        if clean_session_key:
+            args.extend(["--session-key", clean_session_key])
         if exact:
             args.append("--exact")
         if skip_send_rate_guard:
@@ -477,6 +485,7 @@ class WeChatConnector:
         simulate_inbound_file_transfer: bool = False,
         skip_send_rate_guard: bool = False,
         artifact_dir: str | None = None,
+        session_key: str = "",
     ) -> dict[str, Any]:
         loopback_inbound = bool(simulate_inbound_file_transfer and is_simulated_inbound_loopback_target(target))
         send_kwargs: dict[str, Any] = {
@@ -485,6 +494,9 @@ class WeChatConnector:
         }
         if artifact_dir:
             send_kwargs["artifact_dir"] = artifact_dir
+        clean_session_key = str(session_key or "").strip()
+        if clean_session_key:
+            send_kwargs["session_key"] = clean_session_key
         send_result = self.send_text(
             target,
             text,
@@ -511,7 +523,7 @@ class WeChatConnector:
         for attempt in range(6):
             if attempt:
                 time.sleep(1)
-            messages = self.get_messages(target, exact=exact)
+            messages = self.get_messages(target, exact=exact, session_key=clean_session_key)
             verified = verify_send_from_messages(messages, expected_text=text)
             if verified:
                 break
@@ -1183,6 +1195,8 @@ def _args_to_request(args: list[str]) -> dict[str, Any]:
         for i, arg in enumerate(args):
             if arg == "--target" and i + 1 < len(args):
                 request["target"] = args[i + 1]
+            elif arg == "--session-key" and i + 1 < len(args):
+                request["session_key"] = args[i + 1]
             elif arg == "--exact":
                 request["exact"] = True
             elif arg == "--history-load-times" and i + 1 < len(args):
@@ -1217,6 +1231,8 @@ def _args_to_request(args: list[str]) -> dict[str, Any]:
                 request["target"] = args[i + 1]
             elif arg == "--text" and i + 1 < len(args):
                 request["text"] = args[i + 1]
+            elif arg == "--session-key" and i + 1 < len(args):
+                request["session_key"] = args[i + 1]
             elif arg == "--exact":
                 request["exact"] = True
             elif arg == "--skip-send-rate-guard":
@@ -1249,6 +1265,7 @@ def compat_args(args: list[str]) -> list[str]:
         if arg in {
             "--target",
             "--text",
+            "--session-key",
             "--history-load-times",
             "--history-mode",
             "--anchor-id",

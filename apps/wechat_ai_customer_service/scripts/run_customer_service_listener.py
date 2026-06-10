@@ -34,6 +34,7 @@ from apps.wechat_ai_customer_service.admin_backend.services.customer_service_run
     runtime_operator_control_path,
     runtime_operator_guard_pid_path,
     runtime_operator_guard_state_path,
+    stop_customer_service_support_processes,
     summarize_listener_result,
     write_runtime_status,
 )
@@ -2561,6 +2562,7 @@ def main() -> int:
                     operator_control = apply_operator_command(operator_control, action="stop", message=message)
                     write_operator_control_state(operator_control_file, operator_control)
                     write_runtime_status("stopped", message, tenant_id=tenant_id)
+                    stop_customer_service_support_processes(tenant_id, include_operator_guard=False)
                     append_log(
                         log_path,
                         {

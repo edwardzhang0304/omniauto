@@ -2711,7 +2711,14 @@ def test_target_ready_defaults_to_single_attempt_and_hard_stops_blank_render() -
     try:
         os.environ.pop("WECHAT_WIN32_OCR_TARGET_READY_MAX_ATTEMPTS", None)
 
-        def fake_open_chat(hwnd: int, target: str, *, exact: bool, artifact_dir: str | None = None) -> bool:
+        def fake_open_chat(
+            hwnd: int,
+            target: str,
+            *,
+            exact: bool,
+            artifact_dir: str | None = None,
+            session_key: str = "",
+        ) -> bool:
             calls["open"] += 1
             return False
 
@@ -2754,7 +2761,14 @@ def test_target_ready_requires_guard_confirmation_even_when_open_chat_returns_tr
     try:
         os.environ["WECHAT_WIN32_OCR_TARGET_READY_MAX_ATTEMPTS"] = "1"
 
-        def fake_open_chat(hwnd: int, target: str, *, exact: bool, artifact_dir: str | None = None) -> bool:
+        def fake_open_chat(
+            hwnd: int,
+            target: str,
+            *,
+            exact: bool,
+            artifact_dir: str | None = None,
+            session_key: str = "",
+        ) -> bool:
             calls["open"] += 1
             return True
 
@@ -2824,7 +2838,14 @@ def test_target_ready_reopens_when_prevalidation_is_weak() -> None:
     try:
         os.environ["WECHAT_WIN32_OCR_TARGET_READY_MAX_ATTEMPTS"] = "1"
 
-        def fake_open_chat(hwnd: int, target: str, *, exact: bool, artifact_dir: str | None = None) -> bool:
+        def fake_open_chat(
+            hwnd: int,
+            target: str,
+            *,
+            exact: bool,
+            artifact_dir: str | None = None,
+            session_key: str = "",
+        ) -> bool:
             calls["open"] += 1
             return True
 

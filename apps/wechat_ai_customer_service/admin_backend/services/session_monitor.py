@@ -133,10 +133,22 @@ class SessionMonitor:
             self._sessions = {}
             return
         raw = payload.get("sessions", {})
-        self._sessions = {
-            str(name): SessionState(
-                name=str(name),
-                session_key=str(data.get("session_key") or ""),
+        restored: dict[str, SessionState] = {}
+        for state_key, data in raw.items():
+            if not isinstance(data, dict):
+                continue
+            session_key = str(data.get("session_key") or state_key or "").strip()
+            display_name = str(
+                data.get("name")
+                or data.get("display_name")
+                or data.get("target_name")
+                or state_key
+            ).strip()
+            if not display_name:
+                display_name = str(state_key)
+            restored[str(session_key or state_key)] = SessionState(
+                name=display_name,
+                session_key=session_key,
                 last_content_digest=str(data.get("last_content_digest") or ""),
                 last_message_time=str(data.get("last_message_time") or ""),
                 last_unread_badge=str(data.get("last_unread_badge") or ""),
@@ -155,9 +167,7 @@ class SessionMonitor:
                 retry_not_before=str(data.get("retry_not_before") or ""),
                 empty_capture_retries=int(data.get("empty_capture_retries", 0) or 0),
             )
-            for name, data in raw.items()
-            if isinstance(data, dict)
-        }
+        self._sessions = restored
 
     def _save_state(self) -> None:
         self.state_path.parent.mkdir(parents=True, exist_ok=True)
@@ -166,6 +176,8 @@ class SessionMonitor:
             "last_poll_at": datetime.now().isoformat(timespec="seconds"),
             "sessions": {
                 name: {
+                    "name": s.name,
+                    "display_name": s.name,
                     "last_content_digest": s.last_content_digest,
                     "session_key": s.session_key,
                     "last_message_time": s.last_message_time,
@@ -201,6 +213,7 @@ class SessionMonitor:
         sessions_data = result.get("sessions", []) or []
         now_iso = datetime.now().isoformat(timespec="seconds")
         active: list[ActiveTarget] = []
+        unsafe_duplicate_display_names = self._unsafe_duplicate_display_names(sessions_data)
 
         for raw in sessions_data:
             if not isinstance(raw, dict):
@@ -214,12 +227,12 @@ class SessionMonitor:
                 continue
             if self.blacklist and name in self.blacklist:
                 continue
-
             content = str(raw.get("content") or "").strip()
             msg_time = str(raw.get("time") or "").strip()
             unread_badge = str(raw.get("unread_badge") or raw.get("unread") or "").strip()
             digest = _digest(content) if content else ""
             conversation_type = _infer_conversation_type(name, raw)
+            explicit_session_key = str(raw.get("session_key") or "").strip()
             session_key = session_key_from_payload(
                 {
                     **raw,
@@ -229,11 +242,25 @@ class SessionMonitor:
                 },
                 fallback_name=name,
             )
+            # All runtime session state is keyed by session_key.  The display
+            # name is retained only for UI/whitelist/legacy migration.
+            state_key = session_key
+            if name in unsafe_duplicate_display_names:
+                self._block_ambiguous_display_name(name, now_iso=now_iso, session_key=state_key)
+                continue
             has_preview_signal = bool(digest or msg_time)
             has_signal = bool(has_preview_signal or unread_badge)
             has_dispatch_badge = bool(unread_badge)
 
-            existing = self._sessions.get(name)
+            existing = self._sessions.get(state_key)
+            if existing is None and state_key != name:
+                legacy = self._sessions.get(name)
+                if isinstance(legacy, SessionState) and (not legacy.session_key or legacy.session_key == session_key):
+                    existing = legacy
+                    existing.session_key = session_key
+                    existing.name = name
+                    self._sessions[state_key] = existing
+                    self._sessions.pop(name, None)
             if existing is None:
                 # New session seen for the first time
                 short_preview_signal = self.short_preview_can_raise_unread and self._signal_kind(content) == "high_sensitivity_short"
@@ -246,8 +273,12 @@ class SessionMonitor:
                         )
                     )
                 else:
-                    initial_unread = bool(unread_badge or (self.initial_preview_can_raise_unread and has_signal) or short_preview_signal)
-                self._sessions[name] = SessionState(
+                    initial_unread = bool(
+                        unread_badge
+                        or (self.initial_preview_can_raise_unread and has_signal)
+                        or short_preview_signal
+                    )
+                self._sessions[state_key] = SessionState(
                     name=name,
                     session_key=session_key,
                     last_content_digest=digest,
@@ -277,6 +308,8 @@ class SessionMonitor:
                         pending_signal_kind=self._signal_kind(content),
                     ))
             else:
+                existing.name = name
+                existing.session_key = session_key or existing.session_key
                 changed_by_digest = bool(digest and digest != existing.last_content_digest)
                 changed_by_time = bool(msg_time and msg_time != existing.last_message_time)
                 changed_by_badge = bool(unread_badge and unread_badge != existing.last_unread_badge)
@@ -306,6 +339,13 @@ class SessionMonitor:
                             or (not existing.unread_detected and has_preview_signal)
                         ):
                             should_raise_unread = True
+                            existing.preview_change_hits = 0
+                        elif changed_preview_signal and not has_dispatch_badge:
+                            # In live RPA low-risk mode, a badge-less preview
+                            # change is only a baseline update.  Let the
+                            # session ledger / in-session capture path handle
+                            # already-open chats; do not drive foreground
+                            # switching from list text drift alone.
                             existing.preview_change_hits = 0
                         elif not has_dispatch_badge:
                             existing.preview_change_hits = 0
@@ -392,37 +432,39 @@ class SessionMonitor:
                 return pending[: self.max_targets_per_iteration]
             return pending[: max(0, int(limit))]
         now_ts = time.time()
-        by_name = {item.name: item for item in pending}
+        by_key = {self._active_target_key(item): item for item in pending}
         selected: list[ActiveTarget] = []
 
         sticky = self._sticky_target
-        if sticky and sticky in by_name and now_ts <= self._sticky_until_ts:
+        if sticky and sticky in by_key and now_ts <= self._sticky_until_ts:
             should_rotate = False
             if self.sticky_max_dispatch_rounds > 0 and self._sticky_dispatch_rounds >= self.sticky_max_dispatch_rounds:
                 # Avoid starving other active sessions under continuous sticky traffic.
-                should_rotate = any(item.name != sticky for item in pending)
+                should_rotate = any(self._active_target_key(item) != sticky for item in pending)
             if should_rotate:
-                fallback = next((item for item in pending if item.name != sticky), None)
+                fallback = next((item for item in pending if self._active_target_key(item) != sticky), None)
                 if fallback is not None:
                     self._last_switch_at = now_ts
                     selected.append(fallback)
-                    self._last_dispatched_target = fallback.name
-                    self._sticky_target = fallback.name
+                    fallback_key = self._active_target_key(fallback)
+                    self._last_dispatched_target = fallback_key
+                    self._sticky_target = fallback_key
                     self._sticky_until_ts = now_ts + float(self.sticky_target_hold_seconds)
                     self._sticky_dispatch_rounds = 1
                 else:
-                    selected.append(by_name[sticky])
+                    selected.append(by_key[sticky])
             else:
-                selected.append(by_name[sticky])
+                selected.append(by_key[sticky])
                 self._sticky_dispatch_rounds = max(1, self._sticky_dispatch_rounds + 1)
         else:
             candidate = pending[0]
+            candidate_key = self._active_target_key(candidate)
             last_target = str(self._last_dispatched_target or "")
-            if last_target and candidate.name != last_target:
+            if last_target and candidate_key != last_target:
                 elapsed = now_ts - self._last_switch_at
                 if elapsed < self.min_switch_interval_seconds:
-                    if last_target in by_name:
-                        selected.append(by_name[last_target])
+                    if last_target in by_key:
+                        selected.append(by_key[last_target])
                     else:
                         # Previous target already drained/cleared: switch immediately.
                         self._last_switch_at = now_ts
@@ -435,7 +477,7 @@ class SessionMonitor:
                     self._last_switch_at = now_ts
                 selected.append(candidate)
             if selected:
-                current = selected[0].name
+                current = self._active_target_key(selected[0])
                 self._last_dispatched_target = current
                 self._sticky_target = current
                 self._sticky_until_ts = now_ts + float(self.sticky_target_hold_seconds)
@@ -454,12 +496,13 @@ class SessionMonitor:
         # Still avoid whitelist sweeps: only append sessions that already have
         # unread/pending signals. The caller serializes foreground captures and
         # applies humanized delays between real cross-chat switches.
-        seen = {item.name for item in selected}
+        seen = {self._active_target_key(item) for item in selected}
         for item in pending:
-            if item.name in seen:
+            item_key = self._active_target_key(item)
+            if item_key in seen:
                 continue
             selected.append(item)
-            seen.add(item.name)
+            seen.add(item_key)
             if len(selected) >= cap:
                 break
         return selected[:cap]
@@ -474,6 +517,9 @@ class SessionMonitor:
             return None
         self._last_switch_at = now_ts
         return active[0]
+
+    def _active_target_key(self, target: ActiveTarget) -> str:
+        return str(getattr(target, "session_key", "") or getattr(target, "name", "") or "").strip()
 
     def all_sessions(self) -> list[dict[str, Any]]:
         """Return all known sessions for admin UI."""
@@ -532,8 +578,8 @@ class SessionMonitor:
         retry_after_seconds: float | None = None,
     ) -> None:
         """Mark a session handled, or preserve its pending signal for retry."""
-        if name in self._sessions:
-            session = self._sessions[name]
+        session = self._session_by_identifier(name)
+        if session is not None:
             now = datetime.now()
             now_iso = now.isoformat(timespec="seconds")
             if preserve_pending:
@@ -563,10 +609,22 @@ class SessionMonitor:
             self._save_state()
 
     def should_preserve_pending_after_empty_capture(self, name: str) -> bool:
-        session = self._sessions.get(str(name or "").strip())
+        session = self._session_by_identifier(name)
         if not isinstance(session, SessionState):
             return False
         return session.unread_detected and session.pending_signal_kind == "high_sensitivity_short"
+
+    def _session_by_identifier(self, value: str) -> SessionState | None:
+        key = str(value or "").strip()
+        if not key:
+            return None
+        session = self._sessions.get(key)
+        if isinstance(session, SessionState):
+            return session
+        matches = [item for item in self._sessions.values() if item.name == key or item.session_key == key]
+        if len(matches) == 1:
+            return matches[0]
+        return None
 
     def _mark_pending_signal(
         self,
@@ -619,6 +677,97 @@ class SessionMonitor:
             if ready_ts is not None and ready_ts > now:
                 return False
         return True
+
+    def _read_preview_change_should_dispatch(self, session: SessionState, *, content: str, msg_time: str) -> bool:
+        """Return whether a badge-less preview change still deserves capture.
+
+        In RPA mode the program may click a conversation to read it before the
+        scheduler tick runs.  That clears the unread badge, but the preview text
+        or time can still be the only durable signal that this monitored session
+        has new customer content.  This method belongs to the code mechanism
+        layer: it only preserves a pending capture and never authors replies.
+        """
+
+        name = str(session.name or "").strip()
+        if self.whitelist and name not in self.whitelist:
+            return False
+        if self.blacklist and name in self.blacklist:
+            return False
+        if session.unread_detected:
+            return True
+        if str(session.pending_since or "").strip():
+            return True
+        if not (str(content or "").strip() or str(msg_time or "").strip()):
+            return False
+        if self._signal_kind(content) == "high_sensitivity_short":
+            return True
+        if not str(session.last_dispatched_at or "").strip():
+            return True
+        if msg_time and msg_time != session.last_message_time:
+            return True
+        return bool(content)
+
+    def _unsafe_duplicate_display_names(self, sessions_data: list[Any]) -> set[str]:
+        """Return duplicate display names whose row identities are not unique.
+
+        Duplicate names are safe only when every visible row has a distinct
+        session key.  If the keys collide, dispatch would fall back to a
+        name-like identity and can cross-send under same-name chats.
+        """
+
+        counts_by_name: dict[str, int] = {}
+        keys_by_name: dict[str, set[str]] = {}
+        for raw in sessions_data:
+            if not isinstance(raw, dict):
+                continue
+            name = str(raw.get("name") or "").strip()
+            if not name:
+                continue
+            if self.whitelist and name not in self.whitelist:
+                continue
+            if self.blacklist and name in self.blacklist:
+                continue
+            conversation_type = _infer_conversation_type(name, raw)
+            session_key = session_key_from_payload(
+                {
+                    **raw,
+                    "name": name,
+                    "conversation_type": conversation_type,
+                    "row_fingerprint": row_fingerprint_from_payload(raw),
+                },
+                fallback_name=name,
+            )
+            counts_by_name[name] = int(counts_by_name.get(name, 0)) + 1
+            keys_by_name.setdefault(name, set()).add(session_key)
+        return {
+            name
+            for name, count in counts_by_name.items()
+            if count > 1 and len({item for item in keys_by_name.get(name, set()) if item}) < count
+        }
+
+    def _block_ambiguous_display_name(self, name: str, *, now_iso: str, session_key: str = "") -> None:
+        key = str(session_key or name or "").strip()
+        session = self._sessions.get(key)
+        if session is None:
+            session = SessionState(
+                name=name,
+                session_key=session_key,
+                first_seen_at=now_iso,
+                last_seen_at=now_iso,
+                conversation_type="unknown",
+            )
+            self._sessions[key] = session
+        session.last_seen_at = now_iso
+        session.unread_detected = False
+        session.priority_score = 0
+        session.pending_since = ""
+        session.last_detected_at = ""
+        session.preview_change_hits = 0
+        session.pending_signal_text = ""
+        session.pending_signal_kind = "ambiguous_duplicate_name"
+        session.signal_ready_after = ""
+        session.retry_not_before = ""
+        session.empty_capture_retries = 0
 
     def _empty_capture_retry_delay(self, session: SessionState, *, retry_after_seconds: float | None = None) -> float:
         base = self.empty_capture_retry_seconds if retry_after_seconds is None else max(0.0, float(retry_after_seconds))

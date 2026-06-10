@@ -15,7 +15,7 @@ import psutil
 
 from apps.wechat_ai_customer_service.adapters.wechat_connector import reset_wxauto_sidecar_daemon
 from apps.wechat_ai_customer_service.adapters.wxauto_package_manager import WxautoPackageManager, wxauto4_module_update_enabled
-from apps.wechat_ai_customer_service.admin_backend.services.customer_service_runtime import atomic_write_json
+from apps.wechat_ai_customer_service.admin_backend.services.customer_service_runtime import atomic_write_json, stop_wechat_ocr_sidecars
 from apps.wechat_ai_customer_service.admin_backend.services.recorder_service import RecorderService
 from apps.wechat_ai_customer_service.admin_backend.services.wechat_startup_check import run_wechat_startup_self_check
 from apps.wechat_ai_customer_service.admin_backend.services.work_queue import WorkQueueService
@@ -526,6 +526,7 @@ class RecorderRuntime:
         for item in sorted(loop_pids):
             if item and self._pid_alive(item):
                 self._terminate_tree(item)
+        stop_wechat_ocr_sidecars()
 
         worker_pids = set()
         worker_record = self._read_worker_pid_record()

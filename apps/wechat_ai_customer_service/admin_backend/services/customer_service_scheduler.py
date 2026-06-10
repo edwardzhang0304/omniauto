@@ -37,6 +37,7 @@ from apps.wechat_ai_customer_service.admin_backend.services.customer_service_sch
     enqueue_polish_task,
     fail_llm_task,
     fail_polish_task,
+    get_session_by_identity,
     has_active_session_work,
     mark_capture_started,
     mark_llm_started,
@@ -61,6 +62,7 @@ from apps.wechat_ai_customer_service.admin_backend.services.customer_service_ses
     SessionLedgerStore,
     stable_session_key,
 )
+from apps.wechat_ai_customer_service.workflows.listen_and_reply import TargetConfig as WorkflowTargetConfig
 from apps.wechat_ai_customer_service.wechat_message_normalizer import split_wechat_ocr_speaker_prefix
 
 
@@ -523,15 +525,22 @@ class CustomerServiceSchedulerRuntime:
         sessions = select_capture_sessions(state, limit=self.config.capture_max_sessions_per_round)
         for session in sessions:
             target_name = str(session.get("target_name") or "")
-            mark_capture_started(state, target_name, now=now)
+            session_key = str(session.get("session_key") or "")
+            mark_capture_started(state, target_name, session_key=session_key, now=now)
             try:
                 result = self.capture_fn(copy.deepcopy(session))
             except Exception as exc:  # noqa: BLE001 - scheduler must keep other sessions moving
-                mark_session_capture_failed(state, target_name, repr(exc), now=now)
+                mark_session_capture_failed(state, target_name, repr(exc), session_key=session_key, now=now)
                 events.append({"event": "capture_failed", "target_name": target_name, "error": repr(exc)})
                 continue
             if result.get("ok") is False and result.get("blocked"):
-                mark_session_capture_failed(state, target_name, str(result.get("reason") or "capture_blocked"), now=now)
+                mark_session_capture_failed(
+                    state,
+                    target_name,
+                    str(result.get("reason") or "capture_blocked"),
+                    session_key=session_key,
+                    now=now,
+                )
                 events.append({"event": "capture_blocked", "target_name": target_name, "reason": result.get("reason")})
                 continue
             messages = list(result.get("messages") or [])
@@ -544,6 +553,7 @@ class CustomerServiceSchedulerRuntime:
                 batch=batch,
                 overflow_messages=overflow,
                 history_backfill=result.get("history_backfill") if isinstance(result.get("history_backfill"), dict) else {},
+                batch_selection=result.get("batch_selection") if isinstance(result.get("batch_selection"), dict) else {},
                 exact=bool(session.get("exact", True)),
                 conversation_type=str(session.get("conversation_type") or "unknown"),
                 session_key=str(result.get("session_key") or session.get("session_key") or ""),
@@ -661,8 +671,15 @@ class CustomerServiceSchedulerRuntime:
                 continue
             context_update = result.get("conversation_context_update") if isinstance(result.get("conversation_context_update"), dict) else {}
             if context_update:
-                target_name = str(result.get("target_name") or (state.get("llm_tasks", {}) or {}).get(task_id, {}).get("target_name") or "")
-                merge_scheduler_conversation_context(state, target_name, context_update, now=now)
+                source_task = (state.get("llm_tasks", {}) or {}).get(task_id, {})
+                target_name = str(result.get("target_name") or (source_task if isinstance(source_task, dict) else {}).get("target_name") or "")
+                merge_scheduler_conversation_context(
+                    state,
+                    target_name,
+                    context_update,
+                    session_key=str((source_task if isinstance(source_task, dict) else {}).get("session_key") or ""),
+                    now=now,
+                )
                 events.append({"event": "conversation_context_updated", "task_id": task_id, "target_name": target_name, "product_id": context_update.get("last_product_id")})
             completion = complete_llm_task(
                 state,
@@ -837,6 +854,7 @@ class CustomerServiceSchedulerRuntime:
                     str(reply.get("target_name") or ""),
                     exact=True,
                     conversation_type=str(reply.get("conversation_type") or "unknown"),
+                    session_key=str(reply.get("session_key") or ""),
                     reason="reply_session_envelope_failed_before_send",
                     now=now,
                 )
@@ -870,7 +888,8 @@ class CustomerServiceSchedulerRuntime:
                         state,
                         str(reply.get("target_name") or ""),
                         exact=True,
-                        conversation_type="unknown",
+                        conversation_type=str(reply.get("conversation_type") or "unknown"),
+                        session_key=str(reply.get("session_key") or ""),
                         reason="reply_stale_before_send",
                         now=now,
                     )
@@ -981,10 +1000,17 @@ class CustomerServiceSchedulerRuntime:
         return observability
 
 
-def mark_session_capture_failed(state: dict[str, Any], target_name: str, reason: str, *, now: str | None = None) -> None:
+def mark_session_capture_failed(
+    state: dict[str, Any],
+    target_name: str,
+    reason: str,
+    *,
+    session_key: str = "",
+    now: str | None = None,
+) -> None:
     from apps.wechat_ai_customer_service.admin_backend.services.customer_service_scheduler_state import append_event, ensure_session
 
-    session = ensure_session(state, target_name, now=now)
+    session = ensure_session(state, target_name, session_key=session_key, now=now)
     now_text = str(now or datetime.now().isoformat(timespec="seconds"))
     try:
         now_dt = datetime.fromisoformat(now_text)
@@ -1027,13 +1053,14 @@ def merge_scheduler_conversation_context(
     target_name: str,
     context_update: dict[str, Any],
     *,
+    session_key: str = "",
     now: str | None = None,
 ) -> None:
     from apps.wechat_ai_customer_service.admin_backend.services.customer_service_scheduler_state import ensure_session
 
     if not isinstance(context_update, dict) or not context_update:
         return
-    session = ensure_session(state, target_name, now=now)
+    session = ensure_session(state, target_name, session_key=session_key, now=now)
     existing = session.get("conversation_context") if isinstance(session.get("conversation_context"), dict) else {}
     clean_update = {
         key: value
@@ -1102,8 +1129,8 @@ class CapturedMessagesConnector:
             "scheduler_used_batch_fallback": used_batch_fallback,
         }
 
-    def send_text_and_verify(self, target: str, text: str, exact: bool = True) -> dict[str, Any]:
-        self.send_attempts.append({"target": target, "text": text, "exact": exact})
+    def send_text_and_verify(self, target: str, text: str, exact: bool = True, **kwargs: Any) -> dict[str, Any]:
+        self.send_attempts.append({"target": target, "text": text, "exact": exact, "kwargs": dict(kwargs)})
         return {
             "ok": False,
             "verified": False,
@@ -1769,7 +1796,11 @@ class ManagedListenerSchedulerBridge:
                     state = {}
                 expanded_pending = list(pending)
                 if all(
-                    has_active_session_work(state, str(getattr(item, "name", "") or ""))
+                    has_active_session_work(
+                        state,
+                        str(getattr(item, "name", "") or ""),
+                        session_key=str(getattr(item, "session_key", "") or ""),
+                    )
                     for item in pending
                     if str(getattr(item, "name", "") or "")
                 ):
@@ -1780,7 +1811,8 @@ class ManagedListenerSchedulerBridge:
                     name = str(getattr(item, "name", "") or "")
                     if not name or name in self.ignored_session_names:
                         continue
-                    if name and has_active_session_work(state, name):
+                    session_key = str(getattr(item, "session_key", "") or "")
+                    if name and has_active_session_work(state, name, session_key=session_key):
                         busy.append(item)
                     else:
                         non_busy.append(item)
@@ -1830,6 +1862,26 @@ class ManagedListenerSchedulerBridge:
             max_batch_messages=max(1, int(default_batch or 1)),
         )
 
+    def _target_for_session(self, session: dict[str, Any]) -> Any:
+        target = self._target_for_name(
+            str(session.get("target_name") or session.get("name") or ""),
+            exact=bool(session.get("exact", True)),
+        )
+        session_key = str(session.get("session_key") or "").strip()
+        if not session_key:
+            return target
+        try:
+            return replace(target, session_key=session_key)
+        except TypeError:
+            return WorkflowTargetConfig(
+                name=str(getattr(target, "name", "") or session.get("target_name") or session.get("name") or ""),
+                enabled=bool(getattr(target, "enabled", True)),
+                exact=bool(getattr(target, "exact", True)),
+                allow_self_for_test=bool(getattr(target, "allow_self_for_test", False)),
+                max_batch_messages=int(getattr(target, "max_batch_messages", 1) or 1),
+                session_key=session_key,
+            )
+
     def _workflow_state_snapshot(self) -> dict[str, Any]:
         if self.state_path is None:
             base = {"version": 1, "targets": {}}
@@ -1845,14 +1897,15 @@ class ManagedListenerSchedulerBridge:
         except Exception:
             return workflow_state
         targets = workflow_state.setdefault("targets", {})
-        for name, session in (scheduler_state.get("sessions", {}) or {}).items():
+        for _state_key, session in (scheduler_state.get("sessions", {}) or {}).items():
             if not isinstance(session, dict):
                 continue
+            target_name = str(session.get("target_name") or session.get("display_name") or _state_key)
             session_key = str(session.get("session_key") or stable_session_key(
-                name,
+                target_name,
                 conversation_type=session.get("conversation_type") or "unknown",
             ))
-            target_state = targets.setdefault(str(name), {})
+            target_state = self._target_state(workflow_state, target_name, session_key=session_key)
             self._merge_session_ledger_summary(target_state, session_key)
             context = session.get("conversation_context") if isinstance(session.get("conversation_context"), dict) else {}
             if not context:
@@ -1903,9 +1956,12 @@ class ManagedListenerSchedulerBridge:
                 "ledger_recent_messages": recent_messages[-20:],
             }
 
-    def _target_state(self, state: dict[str, Any], target_name: str) -> dict[str, Any]:
-        return state.setdefault("targets", {}).setdefault(
-            target_name,
+    def _target_state(self, state: dict[str, Any], target_name: str, *, session_key: str = "") -> dict[str, Any]:
+        clean_session_key = str(session_key or "").strip()
+        clean_target_name = str(target_name or "").strip()
+        state_key = clean_session_key or clean_target_name
+        target_state = state.setdefault("targets", {}).setdefault(
+            state_key,
             {
                 "processed_message_ids": [],
                 "processed_content_keys": [],
@@ -1914,12 +1970,13 @@ class ManagedListenerSchedulerBridge:
                 "reply_timestamps": [],
             },
         )
+        if clean_session_key:
+            target_state["_session_key"] = clean_session_key
+            target_state["_display_name"] = clean_target_name
+        return target_state
 
     def _capture_session(self, session: dict[str, Any]) -> dict[str, Any]:
-        target = self._target_for_name(
-            str(session.get("target_name") or session.get("name") or ""),
-            exact=bool(session.get("exact", True)),
-        )
+        target = self._target_for_session(session)
         if (
             self._switch_human_delay_enabled
             and target.name
@@ -1935,7 +1992,11 @@ class ManagedListenerSchedulerBridge:
                 self._last_capture_switch_delay_seconds = round(delay, 3)
         if target.name:
             self._last_actual_capture_target = target.name
-        payload = self.connector.get_messages(target.name, exact=target.exact)
+        payload = self.connector.get_messages(
+            target.name,
+            exact=target.exact,
+            session_key=str(getattr(target, "session_key", "") or session.get("session_key") or ""),
+        )
         if not payload.get("ok"):
             payload_state = str(payload.get("state") or "").strip().lower()
             if payload_state in {"messages_lock_timeout", "sessions_lock_timeout", "status_lock_timeout", "rpa_lock_timeout"}:
@@ -1956,7 +2017,11 @@ class ManagedListenerSchedulerBridge:
                 }
             raise RuntimeError(f"get_messages failed for {target.name}: {payload}")
         workflow_state = self._workflow_state_snapshot()
-        target_state = self._target_state(workflow_state, target.name)
+        target_state = self._target_state(
+            workflow_state,
+            target.name,
+            session_key=str(getattr(target, "session_key", "") or session.get("session_key") or ""),
+        )
         payload = self._workflow["maybe_enrich_messages_with_history"](
             connector=self.connector,
             target=target,
@@ -2028,15 +2093,16 @@ class ManagedListenerSchedulerBridge:
         if result.get("ok") is False and result.get("blocked"):
             return
         target_name = str(capture.get("target_name") or session.get("target_name") or "")
-        if target_name:
+        reset_key = str(capture.get("session_key") or session.get("session_key") or target_name)
+        if reset_key:
             if (
                 capture.get("status") == "empty"
                 and hasattr(self.session_monitor, "should_preserve_pending_after_empty_capture")
-                and self.session_monitor.should_preserve_pending_after_empty_capture(target_name)
+                and self.session_monitor.should_preserve_pending_after_empty_capture(reset_key)
             ):
-                self.session_monitor.reset_unread(target_name, preserve_pending=True)
+                self.session_monitor.reset_unread(reset_key, preserve_pending=True)
             else:
-                self.session_monitor.reset_unread(target_name)
+                self.session_monitor.reset_unread(reset_key)
 
     def _plan_reply(self, capture: dict[str, Any], task: dict[str, Any]) -> dict[str, Any]:
         target = self._target_for_name(str(capture.get("target_name") or ""), exact=bool(capture.get("exact", True)))
@@ -2063,7 +2129,13 @@ class ManagedListenerSchedulerBridge:
         return planned
 
     def _polish_reply(self, planner_task: dict[str, Any], task: dict[str, Any]) -> dict[str, Any]:
-        target = self._target_for_name(str(planner_task.get("target_name") or ""), exact=True)
+        target = self._target_for_session(
+            {
+                "target_name": str(planner_task.get("target_name") or ""),
+                "exact": True,
+                "session_key": str(planner_task.get("session_key") or task.get("session_key") or ""),
+            }
+        )
         with self._tenant_environment():
             polished = polish_reply_with_listen_workflow(
                 planner_task,
@@ -2303,8 +2375,32 @@ class ManagedListenerSchedulerBridge:
 
         if not isinstance(freshness, dict):
             return False
-        if bool(freshness.get("gap_risk")):
-            return True
+        reason = str(freshness.get("reason") or "").strip()
+        if reason in {"original_batch_not_visible_assume_stale", "original_batch_not_found_gap_risk"} or bool(freshness.get("gap_risk")):
+            preview = self._session_monitor_snapshot_for_target(target_name)
+            if not isinstance(preview, dict):
+                preview = self._session_list_preview_for_target(
+                    target_name,
+                    cache_seconds=float(self._scheduler_freshness_settings().get("preview_from_session_list_cache_seconds") or 0.0),
+                )
+            if isinstance(preview, dict) and bool(preview.get("unread_detected")):
+                if self._session_list_preview_matches_capture(reply, preview):
+                    return False
+                return True
+            try:
+                scheduler_state = self.store.load()
+            except Exception:
+                scheduler_state = {}
+            session = (
+                get_session_by_identity(scheduler_state, target_name, session_key=str(reply.get("session_key") or ""))
+                if isinstance(scheduler_state, dict)
+                else None
+            ) or {}
+            if isinstance(session, dict) and bool(session.get("pending_capture")):
+                if isinstance(preview, dict) and self._session_list_preview_matches_capture(reply, preview):
+                    return False
+                return True
+            return False
         newer = [item for item in (freshness.get("newer_messages") or []) if isinstance(item, dict)]
         if not newer:
             return bool(freshness.get("has_newer_messages"))
@@ -2320,7 +2416,11 @@ class ManagedListenerSchedulerBridge:
             scheduler_state = self.store.load()
         except Exception:
             scheduler_state = {}
-        session = (scheduler_state.get("sessions", {}) or {}).get(target_name, {}) if isinstance(scheduler_state, dict) else {}
+        session = (
+            get_session_by_identity(scheduler_state, target_name, session_key=str(reply.get("session_key") or ""))
+            if isinstance(scheduler_state, dict)
+            else None
+        ) or {}
         if isinstance(session, dict) and bool(session.get("pending_capture")):
             return True
         capture = self._capture_for_reply(reply)
@@ -2410,7 +2510,7 @@ class ManagedListenerSchedulerBridge:
             scheduler_state = self.store.load()
         except Exception:
             scheduler_state = {}
-        session = (scheduler_state.get("sessions", {}) or {}).get(target_name, {})
+        session = get_session_by_identity(scheduler_state, target_name, session_key=str(reply.get("session_key") or "")) or {}
         preview = self._session_monitor_snapshot_for_target(target_name)
         if (
             not isinstance(preview, dict)
@@ -2527,7 +2627,11 @@ class ManagedListenerSchedulerBridge:
                 "llm_elapsed_seconds": fastpath.get("llm_elapsed_seconds"),
             }
         workflow_state = self._workflow_state_snapshot()
-        target_state = self._target_state(workflow_state, target.name)
+        target_state = self._target_state(
+            workflow_state,
+            target.name,
+            session_key=str(reply.get("session_key") or capture.get("session_key") or getattr(target, "session_key", "") or ""),
+        )
         freshness = self._workflow["detect_newer_messages_before_send"](
             connector=self.connector,
             target=target,
@@ -2569,7 +2673,13 @@ class ManagedListenerSchedulerBridge:
                 "capture_message_content_digest": capture.get("message_content_digest"),
                 "capture_ids": reply.get("capture_ids"),
             }
-        target = self._target_for_name(reply_target_name, exact=bool(capture.get("exact", True)))
+        target = self._target_for_session(
+            {
+                "target_name": reply_target_name,
+                "exact": bool(capture.get("exact", True)),
+                "session_key": str(reply.get("session_key") or capture.get("session_key") or ""),
+            }
+        )
         reply_text = str(reply.get("reply_text") or "").strip()
         if not reply_text:
             return {"ok": False, "verified": False, "reason": "empty_reply_text"}
@@ -2597,7 +2707,11 @@ class ManagedListenerSchedulerBridge:
                     stale_seconds=int(lock_settings.get("stale_seconds", 900)),
                 ):
                     workflow_state = self._workflow["load_state"](self.state_path)
-                    target_state = self._target_state(workflow_state, target.name)
+                    target_state = self._target_state(
+                        workflow_state,
+                        target.name,
+                        session_key=str(reply.get("session_key") or capture.get("session_key") or getattr(target, "session_key", "") or ""),
+                    )
                     self._workflow["mark_processed"](
                         target_state,
                         batch,

@@ -22,6 +22,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("action", choices=["status", "sessions", "messages", "send", "smoke"])
     parser.add_argument("--target", default=FILE_TRANSFER_ASSISTANT)
+    parser.add_argument("--session-key", default="", help="Optional internal session key for row-level RPA targeting.")
     parser.add_argument("--text")
     parser.add_argument("--wait", type=int, default=60)
     parser.add_argument(
@@ -55,13 +56,13 @@ def main() -> int:
         result["sessions"] = connector.list_sessions()
         result["ok"] = bool(result["sessions"].get("ok"))
     elif args.action == "messages":
-        result["messages"] = connector.get_messages(args.target, exact=True)
+        result["messages"] = connector.get_messages(args.target, exact=True, session_key=str(args.session_key or ""))
         result["ok"] = bool(result["messages"].get("ok"))
     elif args.action == "send":
-        result["send"] = connector.send_text(args.target, args.text or "", exact=True)
+        result["send"] = connector.send_text(args.target, args.text or "", exact=True, session_key=str(args.session_key or ""))
         result["ok"] = bool(result["send"].get("ok"))
     elif args.action == "smoke":
-        verified = connector.send_text_and_verify(args.target, args.text or "", exact=True)
+        verified = connector.send_text_and_verify(args.target, args.text or "", exact=True, session_key=str(args.session_key or ""))
         result["send"] = verified.get("send")
         result["messages"] = verified.get("messages")
         result["sent_text"] = args.text
