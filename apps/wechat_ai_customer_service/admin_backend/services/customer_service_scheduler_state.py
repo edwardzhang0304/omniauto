@@ -32,6 +32,8 @@ DEFAULT_READY_REPLY_TTL_SECONDS = 900
 DEFAULT_READY_REPLY_HISTORY_RETENTION_SECONDS = 7 * 24 * 60 * 60
 DEFAULT_MAX_STORED_READY_REPLIES = 500
 MAX_STORED_EVENTS = 500
+SELF_MESSAGE_SENDERS = {"self", "assistant", "agent", "me", "outbound", "service", "bot"}
+FILE_TRANSFER_ASSISTANT_NAMES = {"文件传输助手", "file transfer assistant"}
 
 
 def utcnow_iso() -> str:
@@ -140,6 +142,41 @@ def message_identity(message: dict[str, Any]) -> str:
     if message_id:
         return message_id
     return message_content_key(message)
+
+
+def capture_allows_self_messages(*, target_name: Any = "", conversation_type: Any = "unknown") -> bool:
+    """Return whether self-authored bubbles may be treated as reply input.
+
+    Real customer sessions must never turn our own outbound text into a new
+    customer task. File Transfer Assistant is the explicit self-test exception.
+    """
+
+    normalized_type = str(conversation_type or "").strip().lower()
+    normalized_name = normalize_target_name(target_name).lower()
+    return normalized_type == "file_transfer" or normalized_name in FILE_TRANSFER_ASSISTANT_NAMES
+
+
+def message_is_reply_input_candidate(
+    message: dict[str, Any],
+    *,
+    target_name: Any = "",
+    conversation_type: Any = "unknown",
+) -> bool:
+    if not isinstance(message, dict):
+        return False
+    content = str(message.get("content") or "").strip()
+    msg_type = str(message.get("type") or "text").strip().lower() or "text"
+    if msg_type != "text":
+        return False
+    if not content:
+        return False
+    sender = str(message.get("sender") or message.get("role") or "").strip().lower()
+    if sender in SELF_MESSAGE_SENDERS and not capture_allows_self_messages(
+        target_name=target_name,
+        conversation_type=conversation_type,
+    ):
+        return False
+    return True
 
 
 @dataclass(frozen=True)
@@ -326,12 +363,39 @@ def ensure_session(
     session = sessions.get(name)
     now = now or utcnow_iso()
     fingerprint = row_fingerprint if isinstance(row_fingerprint, dict) else {}
+    explicit_session_key = str(session_key or "").strip()
     resolved_session_key = stable_session_key(
         name,
         conversation_type=conversation_type or "unknown",
         row_fingerprint=fingerprint,
-        explicit_key=session_key,
+        explicit_key=explicit_session_key,
     )
+    state_key = _session_lookup_key(
+        name,
+        session_key=explicit_session_key,
+        conversation_type=conversation_type or "unknown",
+        row_fingerprint=fingerprint,
+    )
+    session = sessions.get(state_key)
+    if not isinstance(session, dict) and not explicit_session_key:
+        same_name_sessions = [
+            (key, value)
+            for key, value in sessions.items()
+            if isinstance(value, dict)
+            and normalize_target_name(value.get("target_name") or value.get("display_name")) == name
+        ]
+        if len(same_name_sessions) == 1:
+            state_key, session = same_name_sessions[0]
+            resolved_session_key = str(session.get("session_key") or resolved_session_key)
+    if not isinstance(session, dict) and state_key != name:
+        legacy_session = sessions.get(name)
+        if (
+            isinstance(legacy_session, dict)
+            and str(legacy_session.get("session_key") or "").strip() == resolved_session_key
+        ):
+            session = legacy_session
+            sessions[state_key] = session
+            sessions.pop(name, None)
     if not isinstance(session, dict):
         session = {
             "session_id": resolved_session_key,
@@ -359,7 +423,7 @@ def ensure_session(
             "created_at": now,
             "updated_at": now,
         }
-        sessions[name] = session
+        sessions[state_key] = session
     if not str(session.get("session_key") or "").strip():
         session["session_key"] = resolved_session_key
     if not str(session.get("session_id") or "").strip() or str(session.get("session_id") or "").startswith("session_"):
@@ -367,7 +431,11 @@ def ensure_session(
     session["target_name"] = name
     session["display_name"] = name
     session["exact"] = bool(exact)
-    if conversation_type:
+    if conversation_type and (
+        str(conversation_type or "unknown") != "unknown"
+        or not str(session.get("conversation_type") or "").strip()
+        or str(session.get("conversation_type") or "").strip() == "unknown"
+    ):
         session["conversation_type"] = conversation_type
     if fingerprint:
         session["row_fingerprint"] = fingerprint
@@ -408,6 +476,68 @@ def cleanup_scheduler_state(
     """
 
     cfg = config or SchedulerConfig()
+    migrated_legacy_sessions = 0
+    cleared_stale_recoverable_recaptures = 0
+    sessions = state.setdefault("sessions", {})
+    if not isinstance(sessions, dict):
+        state["sessions"] = {}
+        sessions = state["sessions"]
+    for key, session in list(sessions.items()):
+        if not isinstance(session, dict):
+            continue
+        session_key = str(session.get("session_key") or "").strip()
+        if not session_key:
+            name = normalize_target_name(session.get("target_name") or session.get("display_name") or key)
+            same_name_keyed = [
+                (other_key, other)
+                for other_key, other in sessions.items()
+                if other_key != key
+                and isinstance(other, dict)
+                and str(other.get("session_key") or "").strip()
+                and normalize_target_name(other.get("target_name") or other.get("display_name")) == name
+            ]
+            if len(same_name_keyed) == 1:
+                session_key = str(same_name_keyed[0][1].get("session_key") or "").strip()
+                session["session_key"] = session_key
+        if not session_key or key == session_key or session_key not in sessions:
+            continue
+        canonical = sessions.get(session_key)
+        if not isinstance(canonical, dict):
+            continue
+        for field in ("processed_message_ids", "processed_content_keys", "ready_reply_ids"):
+            merged: list[Any] = []
+            for source in (canonical.get(field), session.get(field)):
+                if not isinstance(source, list):
+                    continue
+                for item in source:
+                    if item not in merged:
+                        merged.append(item)
+            if merged:
+                canonical[field] = merged[-500:] if field != "ready_reply_ids" else merged[-20:]
+        for field in (
+            "pending_capture",
+            "pending_since",
+            "last_detected_at",
+            "last_dispatched_at",
+            "last_capture_at",
+            "oldest_unreplied_at",
+            "pending_message_count",
+            "priority_score",
+            "context_version",
+        ):
+            value = session.get(field)
+            if field == "pending_capture":
+                canonical[field] = bool(canonical.get(field) or value)
+            elif field in {"pending_message_count", "priority_score", "context_version"}:
+                try:
+                    canonical[field] = max(int(canonical.get(field) or 0), int(value or 0))
+                except (TypeError, ValueError):
+                    pass
+            elif value and not canonical.get(field):
+                canonical[field] = value
+        sessions.pop(key, None)
+        migrated_legacy_sessions += 1
+
     replies = state.setdefault("ready_replies", {})
     if not isinstance(replies, dict):
         state["ready_replies"] = {}
@@ -416,6 +546,17 @@ def cleanup_scheduler_state(
     for session in (state.get("sessions", {}) or {}).values():
         if not isinstance(session, dict):
             continue
+        pending_reason = str(session.get("pending_reason") or "").strip()
+        pending_recapture_kind = str(session.get("pending_recapture_kind") or "").strip()
+        if pending_reason == "recoverable_llm_failure" and pending_recapture_kind != "monitor_only_short_pending":
+            session["pending_capture"] = False
+            session["pending_reason"] = ""
+            session["pending_recapture_kind"] = ""
+            session["pending_signal_has_unread_evidence"] = False
+            session["pending_message_count"] = 0
+            session["oldest_unreplied_at"] = ""
+            session["status"] = "idle"
+            cleared_stale_recoverable_recaptures += 1
         ids = [str(item) for item in (session.get("ready_reply_ids") or []) if str(item)]
         active_ids = [
             reply_id
@@ -470,20 +611,82 @@ def cleanup_scheduler_state(
             "scheduler_state_cleanup",
             removed_ready_reply_count=len(removed_ids),
             removed_ready_reply_ids=removed_ids[:20],
+            migrated_legacy_sessions=migrated_legacy_sessions,
+            cleared_stale_recoverable_recaptures=cleared_stale_recoverable_recaptures,
+        )
+    elif migrated_legacy_sessions or cleared_stale_recoverable_recaptures:
+        append_event(
+            state,
+            "scheduler_state_cleanup",
+            removed_ready_reply_count=0,
+            migrated_legacy_sessions=migrated_legacy_sessions,
+            cleared_stale_recoverable_recaptures=cleared_stale_recoverable_recaptures,
         )
     return {
         "removed_ready_reply_count": len(removed_ids),
+        "migrated_legacy_sessions": migrated_legacy_sessions,
+        "cleared_stale_recoverable_recaptures": cleared_stale_recoverable_recaptures,
         "session_ready_reply_refs_cleaned": True,
     }
 
 
-def has_active_session_work(state: dict[str, Any], target_name: str) -> bool:
+def _session_lookup_key(
+    target_name: Any,
+    *,
+    session_key: str = "",
+    conversation_type: str = "unknown",
+    row_fingerprint: dict[str, Any] | None = None,
+) -> str:
+    explicit = str(session_key or "").strip()
+    if explicit:
+        return explicit
+    return stable_session_key(
+        normalize_target_name(target_name),
+        conversation_type=conversation_type or "unknown",
+        row_fingerprint=row_fingerprint,
+    )
+
+
+def get_session_by_identity(state: dict[str, Any], target_name: Any = "", *, session_key: str = "") -> dict[str, Any] | None:
+    """Return a session by key first, then by unique display name.
+
+    The scheduler stores sessions by session_key.  Name lookup is only a legacy
+    compatibility path and is allowed only when it resolves to exactly one
+    session, otherwise same-name chats could cross-contaminate state.
+    """
+
+    sessions = state.get("sessions", {}) if isinstance(state, dict) else {}
+    if not isinstance(sessions, dict):
+        return None
+    clean_key = str(session_key or "").strip()
+    if clean_key:
+        session = sessions.get(clean_key)
+        return session if isinstance(session, dict) else None
+    clean_name = normalize_target_name(target_name)
+    if not clean_name:
+        return None
+    direct = sessions.get(clean_name)
+    if isinstance(direct, dict):
+        return direct
+    matches = [
+        session
+        for session in sessions.values()
+        if isinstance(session, dict)
+        and normalize_target_name(session.get("target_name") or session.get("display_name")) == clean_name
+    ]
+    if len(matches) == 1:
+        return matches[0]
+    return None
+
+
+def has_active_session_work(state: dict[str, Any], target_name: str, *, session_key: str = "") -> bool:
     """Return True when a target already has unsent/in-flight scheduler work."""
 
     name = normalize_target_name(target_name)
-    if not name:
+    key = _session_lookup_key(name, session_key=session_key)
+    if not key and not name:
         return False
-    session = (state.get("sessions", {}) or {}).get(name)
+    session = get_session_by_identity(state, name, session_key=session_key)
     if isinstance(session, dict):
         inflight = str(session.get("llm_inflight_task_id") or "")
         if inflight:
@@ -498,41 +701,57 @@ def has_active_session_work(state: dict[str, Any], target_name: str) -> bool:
         if str(session.get("status") or "") in {"capturing", "sending"}:
             return True
     for task in (state.get("llm_tasks", {}) or {}).values():
+        task_session_key = str(task.get("session_key") or "")
         if (
             isinstance(task, dict)
-            and str(task.get("target_name") or "") == name
+            and (
+                (session_key and task_session_key == session_key)
+                or (not session_key and not task_session_key and str(task.get("target_name") or "") == name)
+            )
             and task.get("status") in {"queued", "running"}
         ):
             return True
     for task in (state.get("polish_tasks", {}) or {}).values():
+        task_session_key = str(task.get("session_key") or "")
         if (
             isinstance(task, dict)
-            and str(task.get("target_name") or "") == name
+            and (
+                (session_key and task_session_key == session_key)
+                or (not session_key and not task_session_key and str(task.get("target_name") or "") == name)
+            )
             and task.get("status") in {"queued", "running"}
         ):
             return True
     for reply in (state.get("ready_replies", {}) or {}).values():
+        reply_session_key = str(reply.get("session_key") or "")
         if (
             isinstance(reply, dict)
-            and str(reply.get("target_name") or "") == name
+            and (
+                (session_key and reply_session_key == session_key)
+                or (not session_key and not reply_session_key and str(reply.get("target_name") or "") == name)
+            )
             and reply.get("status") in {"ready", "sending"}
         ):
             return True
     return False
 
 
-def active_input_identity_sets(state: dict[str, Any], target_name: str) -> tuple[set[str], set[str]]:
+def active_input_identity_sets(state: dict[str, Any], target_name: str, *, session_key: str = "") -> tuple[set[str], set[str]]:
     """Message ids/content keys already owned by in-flight tasks or ready replies."""
 
     name = normalize_target_name(target_name)
+    key = str(session_key or "").strip()
     ids: set[str] = set()
     keys: set[str] = set()
-    if not name:
+    if not name and not key:
         return ids, keys
     for task in (state.get("llm_tasks", {}) or {}).values():
         if (
             isinstance(task, dict)
-            and str(task.get("target_name") or "") == name
+            and (
+                (key and str(task.get("session_key") or "") == key)
+                or (not key and not str(task.get("session_key") or "") and str(task.get("target_name") or "") == name)
+            )
             and task.get("status") in {"queued", "running"}
         ):
             ids.update(str(item) for item in task.get("input_message_ids", []) if str(item))
@@ -540,7 +759,10 @@ def active_input_identity_sets(state: dict[str, Any], target_name: str) -> tuple
     for task in (state.get("polish_tasks", {}) or {}).values():
         if (
             isinstance(task, dict)
-            and str(task.get("target_name") or "") == name
+            and (
+                (key and str(task.get("session_key") or "") == key)
+                or (not key and not str(task.get("session_key") or "") and str(task.get("target_name") or "") == name)
+            )
             and task.get("status") in {"queued", "running"}
         ):
             ids.update(str(item) for item in task.get("input_message_ids", []) if str(item))
@@ -548,7 +770,10 @@ def active_input_identity_sets(state: dict[str, Any], target_name: str) -> tuple
     for reply in (state.get("ready_replies", {}) or {}).values():
         if (
             isinstance(reply, dict)
-            and str(reply.get("target_name") or "") == name
+            and (
+                (key and str(reply.get("session_key") or "") == key)
+                or (not key and not str(reply.get("session_key") or "") and str(reply.get("target_name") or "") == name)
+            )
             and reply.get("status") in {"ready", "sending"}
         ):
             ids.update(str(item) for item in reply.get("input_message_ids", []) if str(item))
@@ -562,14 +787,25 @@ def enqueue_pending_session(
     *,
     exact: bool = True,
     conversation_type: str = "unknown",
+    session_key: str = "",
+    row_fingerprint: dict[str, Any] | None = None,
     reason: str = "manual",
     now: str | None = None,
 ) -> dict[str, Any]:
     now = now or utcnow_iso()
-    session = ensure_session(state, target_name, exact=exact, conversation_type=conversation_type, now=now)
+    session = ensure_session(
+        state,
+        target_name,
+        exact=exact,
+        conversation_type=conversation_type,
+        session_key=session_key,
+        row_fingerprint=row_fingerprint,
+        now=now,
+    )
     if not session.get("pending_capture"):
         session["pending_since"] = now
     session["pending_capture"] = True
+    session["pending_reason"] = reason
     session["last_detected_at"] = now
     session["status"] = "capture_pending"
     session["priority_score"] = int(session.get("priority_score") or 50)
@@ -628,9 +864,11 @@ def record_session_signal(
     previous_badge = str(session.get("last_unread_badge") or "")
     digest = hashlib.sha256(content.encode("utf-8")).hexdigest()[:32] if content else ""
     unread_detected = bool(session_payload.get("unread_detected") or session_payload.get("pending"))
+    has_unread_badge = bool(unread_badge)
+    has_active_work = has_active_session_work(state, name, session_key=session_key)
     has_signal = bool(digest or msg_time or unread_badge or unread_detected)
     unread_only_signal = bool(unread_detected and not digest and not msg_time and not unread_badge)
-    if unread_only_signal and has_active_session_work(state, name):
+    if unread_only_signal and has_active_work:
         session["last_detected_at"] = now
         return session
     changed = bool(
@@ -643,14 +881,22 @@ def record_session_signal(
         session["last_content_digest"] = digest
         session["last_message_time"] = msg_time
         session["last_unread_badge"] = unread_badge
-        enqueue_pending_session(
-            state,
-            name,
-            exact=bool(session_payload.get("exact", True)),
-            conversation_type=conversation_type,
-            reason="session_signal_changed",
-            now=now,
-        )
+        if unread_detected or has_unread_badge or has_active_work:
+            queued = enqueue_pending_session(
+                state,
+                name,
+                exact=bool(session_payload.get("exact", True)),
+                conversation_type=conversation_type,
+                session_key=session_key,
+                row_fingerprint=row_fingerprint,
+                reason="session_signal_changed",
+                now=now,
+            )
+            queued["pending_signal_has_unread_evidence"] = bool(unread_detected or has_unread_badge)
+        else:
+            session["status"] = "idle"
+            session["pending_signal_has_unread_evidence"] = False
+            append_event(state, "scheduler_session_signal_baseline_only", target_name=session["target_name"])
     elif session.get("pending_capture"):
         # No change does not imply handled. Pending survives until capture/send.
         session["status"] = "capture_pending"
@@ -667,6 +913,65 @@ def select_capture_sessions(
     blocked_names: set[str] | None = None,
 ) -> list[dict[str, Any]]:
     blocked_names = blocked_names or set()
+
+    def dispatchable(session: dict[str, Any]) -> bool:
+        pending_reason = str(session.get("pending_reason") or "").strip()
+        if pending_reason == "recoverable_llm_failure":
+            recapture_kind = str(session.get("pending_recapture_kind") or "").strip()
+            if recapture_kind != "monitor_only_short_pending":
+                append_event(
+                    state,
+                    "scheduler_capture_skipped_recoverable_llm_gate",
+                    target_name=str(session.get("target_name") or ""),
+                    session_key=str(session.get("session_key") or ""),
+                    reason=pending_reason,
+                    recapture_kind=recapture_kind,
+                )
+                session["pending_capture"] = False
+                session["pending_reason"] = ""
+                session["pending_recapture_kind"] = ""
+                session["pending_signal_has_unread_evidence"] = False
+                session["pending_message_count"] = 0
+                session["oldest_unreplied_at"] = ""
+                session["status"] = "idle"
+                return False
+        if (
+            pending_reason == "session_signal_changed"
+            and not bool(session.get("pending_signal_has_unread_evidence"))
+            and int(session.get("pending_message_count") or 0) <= 0
+            and not str(session.get("oldest_unreplied_at") or "").strip()
+        ):
+            append_event(
+                state,
+                "scheduler_capture_skipped_low_disturbance_gate",
+                target_name=str(session.get("target_name") or ""),
+                session_key=str(session.get("session_key") or ""),
+                reason=pending_reason,
+            )
+            session["pending_capture"] = False
+            session["pending_reason"] = ""
+            session["status"] = "idle"
+            return False
+        risk_state = session.get("risk_state") if isinstance(session.get("risk_state"), dict) else {}
+        if risk_state and str(risk_state.get("last_error") or "").strip():
+            return True
+        if int(session.get("pending_message_count") or 0) > 0:
+            return True
+        if str(session.get("oldest_unreplied_at") or "").strip():
+            return True
+        if str(session.get("llm_inflight_task_id") or "").strip() or str(session.get("polish_inflight_task_id") or "").strip():
+            return False
+        for reply in (state.get("ready_replies", {}) or {}).values():
+            if not isinstance(reply, dict) or str(reply.get("status") or "") not in {"ready", "sending"}:
+                continue
+            reply_session_key = str(reply.get("session_key") or "")
+            if reply_session_key and reply_session_key == str(session.get("session_key") or ""):
+                return True
+            if not reply_session_key and str(reply.get("target_name") or "") == str(session.get("target_name") or ""):
+                return True
+        trace = session.get("latency_trace") if isinstance(session.get("latency_trace"), dict) else {}
+        return bool(trace.get("unread_detected_at") and session.get("pending_capture"))
+
     candidates = [
         session
         for session in (state.get("sessions", {}) or {}).values()
@@ -674,7 +979,12 @@ def select_capture_sessions(
         and session.get("pending_capture")
         and str(session.get("target_name") or "") not in blocked_names
         and str(session.get("status") or "") not in {"paused", "capturing", "sending"}
-        and not has_active_session_work(state, str(session.get("target_name") or ""))
+        and not has_active_session_work(
+            state,
+            str(session.get("target_name") or ""),
+            session_key=str(session.get("session_key") or ""),
+        )
+        and dispatchable(session)
     ]
 
     def sort_key(session: dict[str, Any]) -> tuple[str, int, str]:
@@ -770,12 +1080,12 @@ def requeue_capture_after_recoverable_llm_failure(
         recapture_kind = "repeatable_short_probe"
         retry_scope = "ocr"
     target_name = str(task.get("target_name") or (capture or {}).get("target_name") or "")
-    session = ensure_session(state, target_name, now=now)
+    session = ensure_session(state, target_name, session_key=str(task.get("session_key") or ""), now=now)
     risk_state = session.setdefault("risk_state", {})
     retry_key = stable_id(
         "recoverable_llm_retry",
         target_name,
-        capture_ids[-1] if capture_ids else "",
+        str(task.get("session_key") or capture.get("session_key") or ""),
         task.get("message_content_digest"),
         normalized_reason,
         retry_scope,
@@ -796,13 +1106,8 @@ def requeue_capture_after_recoverable_llm_failure(
             attempts=attempts,
         )
         return {"ok": False, "reason": "retry_exhausted", "attempts": attempts}
-    attempts_by_key[retry_key] = attempts + 1
     if session.get("llm_inflight_task_id") == task_id:
         session["llm_inflight_task_id"] = ""
-    session["pending_capture"] = True
-    session["status"] = "capture_pending"
-    session["pending_since"] = str(session.get("pending_since") or now)
-    session["last_detected_at"] = now
     batch = [item for item in (capture.get("batch") or []) if isinstance(item, dict)]
     visible_customer_count = 0
     for item in batch:
@@ -810,6 +1115,58 @@ def requeue_capture_after_recoverable_llm_failure(
         if sender in {"self", "assistant", "agent", "me", "outbound"}:
             continue
         visible_customer_count += 1
+    if visible_customer_count <= 0 and not is_monitor_only_short:
+        session["pending_capture"] = False
+        session["pending_reason"] = ""
+        session["pending_recapture_kind"] = ""
+        session["pending_signal_has_unread_evidence"] = False
+        session["pending_message_count"] = 0
+        session["oldest_unreplied_at"] = ""
+        session["status"] = "failed"
+        risk_state["last_error"] = normalized_reason
+        risk_state["last_llm_failure_at"] = now
+        append_event(
+            state,
+            "scheduler_llm_failure_recapture_skipped",
+            target_name=session["target_name"],
+            task_id=task_id,
+            reason=normalized_reason,
+            recapture_kind=recapture_kind,
+            skip_reason="no_customer_messages_in_capture",
+        )
+        return {"ok": False, "reason": "no_customer_messages_in_capture", "attempts": attempts}
+    if not is_monitor_only_short:
+        session["pending_capture"] = False
+        session["pending_reason"] = ""
+        session["pending_recapture_kind"] = ""
+        session["pending_signal_has_unread_evidence"] = False
+        session["pending_message_count"] = 0
+        session["oldest_unreplied_at"] = ""
+        session["status"] = "failed"
+        risk_state["last_error"] = normalized_reason
+        risk_state["last_llm_failure_at"] = now
+        append_event(
+            state,
+            "scheduler_llm_failure_recapture_skipped",
+            target_name=session["target_name"],
+            task_id=task_id,
+            reason=normalized_reason,
+            recapture_kind=recapture_kind,
+            skip_reason="captured_messages_should_not_trigger_rpa_recapture",
+        )
+        return {
+            "ok": False,
+            "reason": "captured_messages_should_not_trigger_rpa_recapture",
+            "attempts": attempts,
+        }
+    attempts_by_key[retry_key] = attempts + 1
+    session["pending_capture"] = True
+    session["pending_reason"] = "recoverable_llm_failure"
+    session["pending_recapture_kind"] = recapture_kind
+    session["pending_signal_has_unread_evidence"] = False
+    session["status"] = "capture_pending"
+    session["pending_since"] = str(session.get("pending_since") or now)
+    session["last_detected_at"] = now
     session["pending_message_count"] = max(1, visible_customer_count, int(session.get("pending_message_count") or 0))
     session["oldest_unreplied_at"] = str(session.get("oldest_unreplied_at") or capture.get("created_at") or now)
     risk_state["last_error"] = normalized_reason
@@ -830,9 +1187,9 @@ def requeue_capture_after_recoverable_llm_failure(
     }
 
 
-def mark_capture_started(state: dict[str, Any], target_name: str, *, now: str | None = None) -> dict[str, Any]:
+def mark_capture_started(state: dict[str, Any], target_name: str, *, session_key: str = "", now: str | None = None) -> dict[str, Any]:
     now = now or utcnow_iso()
-    session = ensure_session(state, target_name, now=now)
+    session = ensure_session(state, target_name, session_key=session_key, now=now)
     session["status"] = "capturing"
     session["last_dispatched_at"] = now
     trace = session.get("latency_trace") if isinstance(session.get("latency_trace"), dict) else {}
@@ -853,6 +1210,7 @@ def record_capture_result(
     batch: list[dict[str, Any]] | None = None,
     overflow_messages: list[dict[str, Any]] | None = None,
     history_backfill: dict[str, Any] | None = None,
+    batch_selection: dict[str, Any] | None = None,
     exact: bool = True,
     conversation_type: str = "unknown",
     session_key: str = "",
@@ -868,9 +1226,26 @@ def record_capture_result(
         now=now,
     )
     risk_state = session.get("risk_state") if isinstance(session.get("risk_state"), dict) else {}
-    batch = list(batch if batch is not None else messages)
-    overflow_messages = list(overflow_messages or [])
+    raw_batch = list(batch if batch is not None else messages)
+    raw_overflow_messages = list(overflow_messages or [])
+    batch = [
+        item
+        for item in raw_batch
+        if message_is_reply_input_candidate(item, target_name=target_name, conversation_type=conversation_type)
+    ]
+    overflow_messages = [
+        item
+        for item in raw_overflow_messages
+        if message_is_reply_input_candidate(item, target_name=target_name, conversation_type=conversation_type)
+    ]
+    filtered_non_customer_batch = [
+        item
+        for item in raw_batch
+        if isinstance(item, dict)
+        and not message_is_reply_input_candidate(item, target_name=target_name, conversation_type=conversation_type)
+    ]
     history_backfill = history_backfill or {}
+    batch_selection = batch_selection if isinstance(batch_selection, dict) else {}
     continuity = str(history_backfill.get("history_continuity") or "").strip()
     existing_ids = set(session.get("processed_message_ids", []) or [])
     existing_keys = set(session.get("processed_content_keys", []) or [])
@@ -901,7 +1276,11 @@ def record_capture_result(
                 value = str(item or "").strip()
                 if value:
                     existing_keys.add(value)
-    active_ids, active_keys = active_input_identity_sets(state, session["target_name"])
+    active_ids, active_keys = active_input_identity_sets(
+        state,
+        session["target_name"],
+        session_key=str(session.get("session_key") or ""),
+    )
     existing_ids.update(active_ids)
     existing_keys.update(active_keys)
     new_messages = [
@@ -917,6 +1296,8 @@ def record_capture_result(
         session["oldest_unreplied_at"] = str(new_messages[0].get("time") or now)
         session["status"] = "captured"
         session["pending_capture"] = False
+        session["pending_reason"] = ""
+        session["pending_signal_has_unread_evidence"] = False
         if risk_state:
             risk_state.pop("capture_fail_count", None)
             risk_state.pop("capture_retry_not_before", None)
@@ -924,6 +1305,8 @@ def record_capture_result(
     else:
         session["pending_message_count"] = 0
         session["pending_capture"] = False
+        session["pending_reason"] = ""
+        session["pending_signal_has_unread_evidence"] = False
         session["status"] = "idle"
     session["last_capture_at"] = now
     capture_id = stable_id("capture", target_name, session.get("context_version"), [message_identity(item) for item in batch], now)
@@ -953,7 +1336,12 @@ def record_capture_result(
         "messages": copy.deepcopy(messages),
         "batch": copy.deepcopy(batch),
         "overflow_messages": copy.deepcopy(overflow_messages),
+        "raw_batch_message_count": len(raw_batch),
+        "reply_input_message_count": len(batch),
+        "filtered_non_customer_message_count": len(filtered_non_customer_batch),
+        "filtered_non_customer_batch": copy.deepcopy(filtered_non_customer_batch[-20:]),
         "history_backfill": history_backfill,
+        "batch_selection": copy.deepcopy(batch_selection),
         "status": "captured" if new_messages else "empty",
         "latency_trace": {
             **(session.get("latency_trace") if isinstance(session.get("latency_trace"), dict) else {}),
@@ -969,6 +1357,8 @@ def record_capture_result(
         capture_id=capture_id,
         context_version=capture["context_version"],
         message_count=len(batch),
+        raw_message_count=len(raw_batch),
+        filtered_non_customer_message_count=len(filtered_non_customer_batch),
         history_continuity=continuity,
     )
     try:
@@ -1006,7 +1396,14 @@ def enqueue_llm_task(
     if not isinstance(capture, dict):
         raise KeyError(f"capture not found: {capture_id}")
     target_name = str(capture.get("target_name") or "")
-    session = ensure_session(state, target_name, exact=bool(capture.get("exact", True)), conversation_type=str(capture.get("conversation_type") or "unknown"), now=now)
+    session = ensure_session(
+        state,
+        target_name,
+        exact=bool(capture.get("exact", True)),
+        conversation_type=str(capture.get("conversation_type") or "unknown"),
+        session_key=str(capture.get("session_key") or ""),
+        now=now,
+    )
     inflight = str(session.get("llm_inflight_task_id") or "")
     if inflight:
         task = state.setdefault("llm_tasks", {}).get(inflight)
@@ -1053,7 +1450,7 @@ def mark_llm_started(state: dict[str, Any], task_id: str, *, now: str | None = N
     task["started_at"] = now
     trace = task.get("latency_trace") if isinstance(task.get("latency_trace"), dict) else {}
     task["latency_trace"] = {**trace, "brain_started_at": now}
-    session = ensure_session(state, str(task.get("target_name") or ""), now=now)
+    session = ensure_session(state, str(task.get("target_name") or ""), session_key=str(task.get("session_key") or ""), now=now)
     session["status"] = "llm_running"
     session["llm_inflight_task_id"] = task_id
     append_event(state, "scheduler_llm_task_started", target_name=session["target_name"], task_id=task_id)
@@ -1086,7 +1483,7 @@ def recover_orphaned_running_llm_tasks(
         task["requeued_at"] = now
         task["orphan_recovery_count"] = int(task.get("orphan_recovery_count") or 0) + 1
         target_name = str(task.get("target_name") or "")
-        session = ensure_session(state, target_name, now=now)
+        session = ensure_session(state, target_name, session_key=str(task.get("session_key") or ""), now=now)
         session["status"] = "llm_queued"
         session["llm_inflight_task_id"] = normalized_task_id
         append_event(
@@ -1115,7 +1512,7 @@ def complete_llm_task(
     if not isinstance(task, dict):
         raise KeyError(f"llm task not found: {task_id}")
     target_name = str(task.get("target_name") or "")
-    session = ensure_session(state, target_name, now=now)
+    session = ensure_session(state, target_name, session_key=str(task.get("session_key") or ""), now=now)
     input_version = int(task.get("input_context_version") or 0)
     current_version = int(session.get("context_version") or 0)
     task["finished_at"] = now
@@ -1165,7 +1562,7 @@ def fail_llm_task(
         payload.setdefault("ok", False)
         payload.setdefault("reason", reason)
         task["result"] = payload
-    session = ensure_session(state, str(task.get("target_name") or ""), now=now)
+    session = ensure_session(state, str(task.get("target_name") or ""), session_key=str(task.get("session_key") or ""), now=now)
     if session.get("llm_inflight_task_id") == task_id:
         session["llm_inflight_task_id"] = ""
     session["status"] = "failed"
@@ -1185,7 +1582,7 @@ def enqueue_polish_task(
     if not isinstance(planner_task, dict):
         raise KeyError(f"llm task not found: {planner_task_id}")
     target_name = str(planner_task.get("target_name") or "")
-    session = ensure_session(state, target_name, now=now)
+    session = ensure_session(state, target_name, session_key=str(planner_task.get("session_key") or ""), now=now)
     inflight = str(session.get("polish_inflight_task_id") or "")
     if inflight:
         task = state.setdefault("polish_tasks", {}).get(inflight)
@@ -1247,7 +1644,7 @@ def mark_polish_started(state: dict[str, Any], task_id: str, *, now: str | None 
     task["started_at"] = now
     trace = task.get("latency_trace") if isinstance(task.get("latency_trace"), dict) else {}
     task["latency_trace"] = {**trace, "final_polish_started_at": now}
-    session = ensure_session(state, str(task.get("target_name") or ""), now=now)
+    session = ensure_session(state, str(task.get("target_name") or ""), session_key=str(task.get("session_key") or ""), now=now)
     session["status"] = "polish_running"
     session["polish_inflight_task_id"] = task_id
     append_event(state, "scheduler_polish_task_started", target_name=session["target_name"], task_id=task_id)
@@ -1272,7 +1669,7 @@ def recover_orphaned_running_polish_tasks(
         task["requeued_at"] = now
         task["orphan_recovery_count"] = int(task.get("orphan_recovery_count") or 0) + 1
         target_name = str(task.get("target_name") or "")
-        session = ensure_session(state, target_name, now=now)
+        session = ensure_session(state, target_name, session_key=str(task.get("session_key") or ""), now=now)
         session["status"] = "polish_queued"
         session["polish_inflight_task_id"] = normalized_task_id
         append_event(
@@ -1301,7 +1698,7 @@ def complete_polish_task(
     if not isinstance(task, dict):
         raise KeyError(f"polish task not found: {task_id}")
     target_name = str(task.get("target_name") or "")
-    session = ensure_session(state, target_name, now=now)
+    session = ensure_session(state, target_name, session_key=str(task.get("session_key") or ""), now=now)
     input_version = int(task.get("input_context_version") or 0)
     current_version = int(session.get("context_version") or 0)
     task["finished_at"] = now
@@ -1362,7 +1759,7 @@ def fail_polish_task(state: dict[str, Any], task_id: str, *, reason: str, now: s
     task["status"] = "failed"
     task["finished_at"] = now
     task["error"] = reason
-    session = ensure_session(state, str(task.get("target_name") or ""), now=now)
+    session = ensure_session(state, str(task.get("target_name") or ""), session_key=str(task.get("session_key") or ""), now=now)
     if session.get("polish_inflight_task_id") == task_id:
         session["polish_inflight_task_id"] = ""
     session["status"] = "failed"
@@ -1388,65 +1785,29 @@ def _enqueue_ready_reply_from_payload(
     sequence = int(state.get("send_sequence") or 0) + 1
     state["send_sequence"] = sequence
     reply_id = stable_id("reply", target_name, source_task_id, sequence)
+    source_task = (
+        state.get("polish_tasks", {}).get(source_task_id, {})
+        if source_task_kind == "polish"
+        else state.get("llm_tasks", {}).get(source_task_id, {})
+    )
+    if not isinstance(source_task, dict):
+        source_task = {}
     reply = {
         "reply_id": reply_id,
         "task_id": source_task_id,
         "task_kind": source_task_kind,
-        "session_key": str(
-            (
-                state.get("polish_tasks", {}).get(source_task_id, {})
-                if source_task_kind == "polish"
-                else state.get("llm_tasks", {}).get(source_task_id, {})
-            ).get("session_key", "")
-            if isinstance(
-                state.get("polish_tasks", {}).get(source_task_id, {})
-                if source_task_kind == "polish"
-                else state.get("llm_tasks", {}).get(source_task_id, {}),
-                dict,
-            )
-            else ""
-        ),
+        "session_key": str(source_task.get("session_key") or ""),
         "target_name": target_name,
-        "conversation_type": str(
-            (
-                state.get("polish_tasks", {}).get(source_task_id, {})
-                if source_task_kind == "polish"
-                else state.get("llm_tasks", {}).get(source_task_id, {})
-            ).get("conversation_type", "unknown")
-            if isinstance(
-                state.get("polish_tasks", {}).get(source_task_id, {})
-                if source_task_kind == "polish"
-                else state.get("llm_tasks", {}).get(source_task_id, {}),
-                dict,
-            )
-            else "unknown"
-        ),
+        "conversation_type": str(source_task.get("conversation_type") or "unknown"),
         "input_context_version": int(input_context_version or 0),
         "capture_ids": list(capture_ids or []),
         "input_message_ids": list(input_message_ids or []),
         "input_content_keys": list(input_content_keys or []),
         "message_content_digest": str(
-            (
-                state.get("polish_tasks", {}).get(source_task_id, {})
-                if source_task_kind == "polish"
-                else state.get("llm_tasks", {}).get(source_task_id, {})
-            ).get("message_content_digest")
+            source_task.get("message_content_digest")
             or message_content_digest(input_message_ids, input_content_keys)
         ),
-        "last_visible_anchor": copy.deepcopy(
-            (
-                state.get("polish_tasks", {}).get(source_task_id, {})
-                if source_task_kind == "polish"
-                else state.get("llm_tasks", {}).get(source_task_id, {})
-            ).get("last_visible_anchor", {})
-            if isinstance(
-                state.get("polish_tasks", {}).get(source_task_id, {})
-                if source_task_kind == "polish"
-                else state.get("llm_tasks", {}).get(source_task_id, {}),
-                dict,
-            )
-            else {}
-        ),
+        "last_visible_anchor": copy.deepcopy(source_task.get("last_visible_anchor", {}) if isinstance(source_task.get("last_visible_anchor"), dict) else {}),
         "reply_text": reply_text,
         "decision": decision or {},
         "status": "ready",
@@ -1457,24 +1818,21 @@ def _enqueue_ready_reply_from_payload(
         "priority": {"ready_sequence": sequence},
         "latency_trace": {
             **(
-                (
-                    state.get("polish_tasks", {}).get(source_task_id, {})
-                    if source_task_kind == "polish"
-                    else state.get("llm_tasks", {}).get(source_task_id, {})
-                ).get("latency_trace", {})
-                if isinstance(
-                    state.get("polish_tasks", {}).get(source_task_id, {})
-                    if source_task_kind == "polish"
-                    else state.get("llm_tasks", {}).get(source_task_id, {}),
-                    dict,
-                )
+                source_task.get("latency_trace", {})
+                if isinstance(source_task.get("latency_trace"), dict)
                 else {}
             ),
             "ready_at": now,
         },
     }
     state.setdefault("ready_replies", {})[reply_id] = reply
-    session = ensure_session(state, target_name, now=now)
+    session = ensure_session(
+        state,
+        target_name,
+        session_key=str(reply.get("session_key") or ""),
+        conversation_type=str(reply.get("conversation_type") or "unknown"),
+        now=now,
+    )
     ids = list(session.get("ready_reply_ids") or [])
     if reply_id not in ids:
         ids.append(reply_id)
@@ -1530,15 +1888,16 @@ def select_ready_replies(state: dict[str, Any], *, limit: int) -> list[dict[str,
     seen_sessions: set[str] = set()
     for reply in replies:
         target = str(reply.get("target_name") or "")
-        session = (state.get("sessions", {}) or {}).get(target, {})
+        session_key = str(reply.get("session_key") or "")
+        session = get_session_by_identity(state, target, session_key=session_key) or {}
         if int(reply.get("input_context_version") or 0) < int((session or {}).get("context_version") or 0):
             mark_reply_stale(state, str(reply.get("reply_id") or ""), reason="context_version_advanced_before_send")
             continue
-        session_key = str(reply.get("session_key") or (session or {}).get("session_key") or target)
-        if session_key in seen_sessions:
+        resolved_session_key = str(reply.get("session_key") or (session or {}).get("session_key") or target)
+        if resolved_session_key in seen_sessions:
             continue
         selected.append(copy.deepcopy(reply))
-        seen_sessions.add(session_key)
+        seen_sessions.add(resolved_session_key)
         if len(selected) >= max(1, int(limit or 1)):
             break
     return selected
@@ -1554,7 +1913,12 @@ def mark_reply_sending(state: dict[str, Any], reply_id: str, *, now: str | None 
     trace = reply.get("latency_trace") if isinstance(reply.get("latency_trace"), dict) else {}
     reply["latency_trace"] = {**trace, "send_started_at": now}
     reply["send_attempts"] = int(reply.get("send_attempts") or 0) + 1
-    session = ensure_session(state, str(reply.get("target_name") or ""), now=now)
+    session = ensure_session(
+        state,
+        str(reply.get("target_name") or ""),
+        session_key=str(reply.get("session_key") or ""),
+        now=now,
+    )
     session["status"] = "sending"
     append_event(state, "scheduler_send_started", target_name=session["target_name"], reply_id=reply_id)
     return reply
@@ -1571,7 +1935,7 @@ def mark_reply_sent(state: dict[str, Any], reply_id: str, *, send_result: dict[s
     reply["latency_trace"] = {**trace, "send_finished_at": now}
     reply["send_result"] = send_result or {}
     target_name = str(reply.get("target_name") or "")
-    session = ensure_session(state, target_name, now=now)
+    session = ensure_session(state, target_name, session_key=str(reply.get("session_key") or ""), now=now)
     pending_after_send = bool(session.get("pending_capture"))
     if pending_after_send:
         # Preserve queued follow-up signals that arrived while this reply was in flight.
@@ -1639,7 +2003,12 @@ def mark_reply_stale(state: dict[str, Any], reply_id: str, *, reason: str, now: 
     trace = reply.get("latency_trace") if isinstance(reply.get("latency_trace"), dict) else {}
     reply["latency_trace"] = {**trace, "stale_at": now}
     reply["stale_reason"] = reason
-    session = ensure_session(state, str(reply.get("target_name") or ""), now=now)
+    session = ensure_session(
+        state,
+        str(reply.get("target_name") or ""),
+        session_key=str(reply.get("session_key") or ""),
+        now=now,
+    )
     session["status"] = "captured" if session.get("pending_message_count") else "idle"
     append_event(state, "scheduler_send_freshness_stale", target_name=session["target_name"], reply_id=reply_id, reason=reason)
     return reply
@@ -1653,7 +2022,12 @@ def mark_reply_failed(state: dict[str, Any], reply_id: str, *, reason: str, send
     reply["status"] = "send_failed"
     reply["last_send_error"] = reason
     reply["send_result"] = send_result or {}
-    session = ensure_session(state, str(reply.get("target_name") or ""), now=now)
+    session = ensure_session(
+        state,
+        str(reply.get("target_name") or ""),
+        session_key=str(reply.get("session_key") or ""),
+        now=now,
+    )
     session["status"] = "failed"
     append_event(state, "scheduler_send_failed", target_name=session["target_name"], reply_id=reply_id, reason=reason)
     return reply

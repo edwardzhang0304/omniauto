@@ -1838,7 +1838,7 @@ function renderCustomerServiceRuntime() {
           </div>
           <div class="float-actions">
             <button class="primary-button iconish-button customer-runtime-start" title="启动微信自动客服" ${!state.authToken || customerRuntime.running || state.customerServiceRuntimeBusy ? "disabled" : ""}>开</button>
-            <button class="secondary-button iconish-button customer-runtime-stop" title="停止微信自动客服" ${!state.authToken || !customerRuntime.running || state.customerServiceRuntimeBusy ? "disabled" : ""}>停</button>
+            <button class="secondary-button iconish-button customer-runtime-stop" title="停止微信自动客服" ${!customerRuntime.running || state.customerServiceRuntimeBusy ? "disabled" : ""}>停</button>
           </div>
         </div>
         <div class="float-runtime-row">
@@ -1848,7 +1848,7 @@ function renderCustomerServiceRuntime() {
           </div>
           <div class="float-actions">
             <button class="primary-button iconish-button recorder-runtime-start" title="启动AI智能记录员监听" ${!state.authToken || !recorderEnabled || recorderRunning || state.recorderRuntimeBusy ? "disabled" : ""}>开</button>
-            <button class="secondary-button iconish-button recorder-runtime-stop" title="停止AI智能记录员监听" ${!state.authToken || !recorderRunning || state.recorderRuntimeBusy ? "disabled" : ""}>停</button>
+            <button class="secondary-button iconish-button recorder-runtime-stop" title="停止AI智能记录员监听" ${!recorderRunning || state.recorderRuntimeBusy ? "disabled" : ""}>停</button>
           </div>
         </div>
       </div>

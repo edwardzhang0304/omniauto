@@ -41,6 +41,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--config", type=Path, default=CONFIG_PATH)
     parser.add_argument("--target", required=True)
+    parser.add_argument("--session-key", default="", help="Optional internal session key for row-level RPA targeting.")
     parser.add_argument("--text", required=True)
     parser.add_argument("--send", action="store_true", help="Actually send the outbound message.")
     parser.add_argument("--reason", default="manual_test")
@@ -115,7 +116,12 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
             return event
 
         connector = WeChatConnector()
-        send_result = connector.send_text_and_verify(target.name, args.text, exact=target.exact)
+        send_result = connector.send_text_and_verify(
+            target.name,
+            args.text,
+            exact=target.exact,
+            session_key=str(args.session_key or getattr(target, "session_key", "") or ""),
+        )
         event["send_result"] = send_result
         event["verified"] = bool(send_result.get("verified"))
         if not event["verified"]:

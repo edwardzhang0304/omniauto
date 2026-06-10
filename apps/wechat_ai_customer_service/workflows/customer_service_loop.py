@@ -51,6 +51,7 @@ class ReplyDecision:
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--target", default=FILE_TRANSFER_ASSISTANT)
+    parser.add_argument("--session-key", default="", help="Optional internal session key for row-level RPA targeting.")
     parser.add_argument("--rules", type=Path, default=RULES_PATH)
     parser.add_argument("--state", type=Path, default=STATE_PATH)
     parser.add_argument("--send", action="store_true", help="Actually send the reply.")
@@ -94,7 +95,7 @@ def run_once(args: argparse.Namespace) -> dict[str, Any]:
     rules = load_rules(args.rules)
     state = load_state(args.state)
 
-    messages_payload = connector.get_messages(args.target, exact=True)
+    messages_payload = connector.get_messages(args.target, exact=True, session_key=str(getattr(args, "session_key", "") or ""))
     if not messages_payload.get("ok"):
         return {"ok": False, "status": status, "messages": messages_payload}
 
@@ -140,7 +141,12 @@ def run_once(args: argparse.Namespace) -> dict[str, Any]:
         return result
 
     if send_allowed:
-        verified = connector.send_text_and_verify(args.target, reply_text, exact=True)
+        verified = connector.send_text_and_verify(
+            args.target,
+            reply_text,
+            exact=True,
+            session_key=str(getattr(args, "session_key", "") or ""),
+        )
         result["send_result"] = verified
         result["verified"] = bool(verified.get("verified"))
         if not result["verified"]:

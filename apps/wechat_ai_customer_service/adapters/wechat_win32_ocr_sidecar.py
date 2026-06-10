@@ -222,6 +222,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("action", choices=["status", "capabilities", "sessions", "messages", "send", "recover-render"], nargs="?")
     parser.add_argument("--target", help="Chat name for messages/send.")
+    parser.add_argument("--session-key", default="", help="Internal session key for row-level RPA targeting.")
     parser.add_argument("--text", help="Message text for send.")
     parser.add_argument("--exact", action="store_true", help="Use exact chat name matching.")
     parser.add_argument(
@@ -341,15 +342,26 @@ def run_action(args: argparse.Namespace) -> dict[str, Any]:
         return sessions_payload(hwnd, probe, artifact_dir=args.artifact_dir)
     if action == "messages":
         if args.target:
-            validation = validate_active_send_target(
-                hwnd,
-                args.target,
-                exact=bool(args.exact),
-                artifact_dir=args.artifact_dir,
+            clean_session_key = str(args.session_key or "").strip()
+            validation = (
+                {"ok": False, "reason": "session_key_requires_row_activation"}
+                if clean_session_key
+                else validate_active_send_target(
+                    hwnd,
+                    args.target,
+                    exact=bool(args.exact),
+                    artifact_dir=args.artifact_dir,
+                )
             )
             opened = False
             if not validation.get("ok"):
-                opened = open_chat(hwnd, args.target, exact=bool(args.exact), artifact_dir=args.artifact_dir)
+                opened = open_chat(
+                    hwnd,
+                    args.target,
+                    exact=bool(args.exact),
+                    artifact_dir=args.artifact_dir,
+                    session_key=clean_session_key,
+                )
                 humanized_action_sleep(380, 620)
                 validation = validate_active_send_target(
                     hwnd,
@@ -399,6 +411,7 @@ def run_action(args: argparse.Namespace) -> dict[str, Any]:
             args.target,
             exact=bool(args.exact),
             artifact_dir=args.artifact_dir,
+            session_key=str(args.session_key or ""),
         )
         if not target_ready.get("ok"):
             validation = target_ready.get("validation") or validate_active_send_target(
@@ -3632,6 +3645,24 @@ def activate_session_candidate(
     return False
 
 
+def session_matches_key(session: dict[str, Any], session_key: str) -> bool:
+    expected = str(session_key or "").strip()
+    if not expected:
+        return False
+    actual = str(session.get("session_key") or "").strip()
+    return bool(actual and actual == expected)
+
+
+def find_session_candidate_by_key(sessions: list[dict[str, Any]], session_key: str) -> dict[str, Any] | None:
+    expected = str(session_key or "").strip()
+    if not expected:
+        return None
+    for item in sessions:
+        if isinstance(item, dict) and session_matches_key(item, expected):
+            return item
+    return None
+
+
 def detect_session_subview_back_target(
     ocr_items: list[dict[str, Any]],
     image_size: tuple[int, int],
@@ -3851,7 +3882,14 @@ def type_sidebar_search_query(hwnd: int, target: str) -> dict[str, Any]:
     )
 
 
-def open_chat(hwnd: int, target: str, *, exact: bool, artifact_dir: str | None = None) -> bool:
+def open_chat(
+    hwnd: int,
+    target: str,
+    *,
+    exact: bool,
+    artifact_dir: str | None = None,
+    session_key: str = "",
+) -> bool:
     screenshot, ocr_items = ensure_main_session_list(hwnd, artifact_dir=artifact_dir)
     geometry = get_window_geometry(hwnd)
     session_click_x = session_click_x_for_geometry(geometry)
@@ -3863,9 +3901,33 @@ def open_chat(hwnd: int, target: str, *, exact: bool, artifact_dir: str | None =
         # OCR unavailable is not permission to probe the UI. Searching/clicking
         # blindly after an unreadable screenshot is a high-risk RPA pattern.
         return False
-    if active_chat_matches(ocr_items, screenshot.size, target=target, exact=exact):
+    clean_session_key = str(session_key or "").strip()
+    if not clean_session_key and active_chat_matches(ocr_items, screenshot.size, target=target, exact=exact):
+        return True
+    if (
+        clean_session_key
+        and str(_LAST_RPA_ACTION_STATE.get("active_session_key") or "") == clean_session_key
+        and active_chat_matches(ocr_items, screenshot.size, target=target, exact=exact)
+    ):
         return True
     sessions = parse_sessions_from_ocr(ocr_items, screenshot.size, screenshot=screenshot)
+    if clean_session_key:
+        keyed = find_session_candidate_by_key(sessions, clean_session_key)
+        if keyed is None:
+            return False
+        opened = activate_session_candidate(
+            hwnd,
+            keyed,
+            target=target,
+            exact=exact,
+            geometry=geometry,
+            default_click_x=session_click_x,
+            artifact_dir=artifact_dir,
+        )
+        if opened:
+            _LAST_RPA_ACTION_STATE["active_session_key"] = clean_session_key
+            _LAST_RPA_ACTION_STATE["active_target"] = target
+        return opened
     for item in sessions:
         if not session_name_matches(str(item.get("name") or ""), target, exact=exact):
             continue
@@ -3952,22 +4014,24 @@ def ensure_target_ready_for_send(
     exact: bool,
     artifact_dir: str | None = None,
     max_attempts: int | None = None,
+    session_key: str = "",
 ) -> dict[str, Any]:
     attempts = target_ready_attempt_count(max_attempts)
     last_validation: dict[str, Any] = {}
+    clean_session_key = str(session_key or "").strip()
     for attempt in range(1, attempts + 1):
         # Fast path: when we are already on the correct chat, avoid the extra
         # open-chat traversal and send immediately after a strong title guard.
         # Weak/sidebar/body matches are not enough to authorize typing because
         # multi-session/group chats may show the target name inside the body.
         pre_validation = validate_active_send_target(hwnd, target, exact=exact, artifact_dir=artifact_dir)
-        if pre_validation.get("ok") and active_send_guard_is_strong(pre_validation):
+        if not clean_session_key and pre_validation.get("ok") and active_send_guard_is_strong(pre_validation):
             return {"ok": True, "attempts": attempt, "validation": pre_validation, "opened": False}
         last_validation = pre_validation
         if target_switch_validation_is_hard_stop(pre_validation):
             return {"ok": False, "attempts": attempt, "validation": pre_validation, "hard_stop": True}
 
-        opened = open_chat(hwnd, target, exact=exact, artifact_dir=artifact_dir)
+        opened = open_chat(hwnd, target, exact=exact, artifact_dir=artifact_dir, session_key=clean_session_key)
         humanized_action_sleep(280 + attempt * 90, 440 + attempt * 150)
         validation = validate_active_send_target(hwnd, target, exact=exact, artifact_dir=artifact_dir)
         if validation.get("ok") and active_send_guard_is_strong(validation):
@@ -6507,6 +6571,9 @@ def args_for_daemon_request(request: dict[str, Any]) -> list[str]:
     target = str(request.get("target") or "").strip()
     if target:
         argv.extend(["--target", target])
+    session_key = str(request.get("session_key") or "").strip()
+    if session_key:
+        argv.extend(["--session-key", session_key])
     text = str(request.get("text") or "")
     if action == "send" and text:
         argv.extend(["--text", text])
@@ -6600,6 +6667,7 @@ def run_sidecar_cli(argv: list[str] | None = None) -> dict[str, Any]:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("action", choices=["status", "capabilities", "sessions", "messages", "send", "recover-render"], nargs="?")
     parser.add_argument("--target", help="Chat name for messages/send.")
+    parser.add_argument("--session-key", default="", help="Internal session key for row-level RPA targeting.")
     parser.add_argument("--text", help="Message text for send.")
     parser.add_argument("--exact", action="store_true", help="Use exact chat name matching.")
     parser.add_argument(

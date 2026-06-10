@@ -130,6 +130,7 @@ class FakeConnector:
         self.history_messages = history_messages
         self.history_load = history_load
         self.sent_texts: list[str] = []
+        self.sent_session_keys: list[str] = []
         self.history_load_calls: list[int] = []
         self.history_mode_calls: list[dict[str, Any]] = []
 
@@ -169,14 +170,16 @@ class FakeConnector:
             "messages": messages,
         }
 
-    def send_text_and_verify(self, target: str, text: str, exact: bool = True, *, skip_send_rate_guard: bool = False) -> dict[str, Any]:
+    def send_text_and_verify(self, target: str, text: str, exact: bool = True, *, skip_send_rate_guard: bool = False, **kwargs: Any) -> dict[str, Any]:
         self.sent_texts.append(text)
-        return {"ok": True, "verified": True, "target": target, "exact": exact, "text": text}
+        self.sent_session_keys.append(str(kwargs.get("session_key") or ""))
+        return {"ok": True, "verified": True, "target": target, "exact": exact, "text": text, "session_key": kwargs.get("session_key", "")}
 
 
 class RateLimitedTransportConnector(FakeConnector):
-    def send_text_and_verify(self, target: str, text: str, exact: bool = True, *, skip_send_rate_guard: bool = False) -> dict[str, Any]:
+    def send_text_and_verify(self, target: str, text: str, exact: bool = True, *, skip_send_rate_guard: bool = False, **kwargs: Any) -> dict[str, Any]:
         self.sent_texts.append(text)
+        self.sent_session_keys.append(str(kwargs.get("session_key") or ""))
         return {
             "ok": False,
             "verified": False,
@@ -194,8 +197,9 @@ class RateLimitedTransportConnector(FakeConnector):
 
 
 class InputNotReadyTransportConnector(FakeConnector):
-    def send_text_and_verify(self, target: str, text: str, exact: bool = True, *, skip_send_rate_guard: bool = False) -> dict[str, Any]:
+    def send_text_and_verify(self, target: str, text: str, exact: bool = True, *, skip_send_rate_guard: bool = False, **kwargs: Any) -> dict[str, Any]:
         self.sent_texts.append(text)
+        self.sent_session_keys.append(str(kwargs.get("session_key") or ""))
         return {
             "ok": False,
             "verified": False,
@@ -216,9 +220,10 @@ class RetryThenSuccessTransportConnector(FakeConnector):
         super().__init__(messages)
         self.send_calls = 0
 
-    def send_text_and_verify(self, target: str, text: str, exact: bool = True, *, skip_send_rate_guard: bool = False) -> dict[str, Any]:
+    def send_text_and_verify(self, target: str, text: str, exact: bool = True, *, skip_send_rate_guard: bool = False, **kwargs: Any) -> dict[str, Any]:
         self.send_calls += 1
         self.sent_texts.append(text)
+        self.sent_session_keys.append(str(kwargs.get("session_key") or ""))
         if self.send_calls == 1:
             return {
                 "ok": False,
@@ -253,9 +258,10 @@ class FinalSegmentVerifyConnector(FakeConnector):
         self.verify_calls = 0
         self.send_rate_guard_skips: list[bool] = []
 
-    def send_text(self, target: str, text: str, exact: bool = True, *, skip_send_rate_guard: bool = False) -> dict[str, Any]:
+    def send_text(self, target: str, text: str, exact: bool = True, *, skip_send_rate_guard: bool = False, **kwargs: Any) -> dict[str, Any]:
         self.send_calls += 1
         self.sent_texts.append(text)
+        self.sent_session_keys.append(str(kwargs.get("session_key") or ""))
         self.send_rate_guard_skips.append(bool(skip_send_rate_guard))
         return {
             "ok": True,
@@ -264,9 +270,10 @@ class FinalSegmentVerifyConnector(FakeConnector):
             "skip_send_rate_guard": bool(skip_send_rate_guard),
         }
 
-    def send_text_and_verify(self, target: str, text: str, exact: bool = True, *, skip_send_rate_guard: bool = False) -> dict[str, Any]:
+    def send_text_and_verify(self, target: str, text: str, exact: bool = True, *, skip_send_rate_guard: bool = False, **kwargs: Any) -> dict[str, Any]:
         self.verify_calls += 1
         self.sent_texts.append(text)
+        self.sent_session_keys.append(str(kwargs.get("session_key") or ""))
         self.send_rate_guard_skips.append(bool(skip_send_rate_guard))
         return {
             "ok": True,
@@ -731,7 +738,13 @@ def check_history_backfill_uses_connector_rpa_load_more() -> None:
         *visible,
     ]
     connector = FakeConnector(visible, history_messages=loaded)
-    target = SimpleNamespace(name="客户A", exact=True, allow_self_for_test=False, max_batch_messages=8)
+    target = SimpleNamespace(
+        name="客户A",
+        exact=True,
+        allow_self_for_test=False,
+        max_batch_messages=8,
+        session_key="wx:rpa:v1:anchor-history-customer-a",
+    )
     enriched = maybe_enrich_messages_with_history(
         connector=connector,  # type: ignore[arg-type]
         target=target,  # type: ignore[arg-type]
@@ -761,7 +774,13 @@ def check_anchor_history_does_not_scroll_when_anchor_visible() -> None:
         {"id": "new-1", "type": "text", "content": "这次新的问题", "sender": "customer"},
     ]
     connector = FakeConnector(visible)
-    target = SimpleNamespace(name="客户A", exact=True, allow_self_for_test=False, max_batch_messages=8)
+    target = SimpleNamespace(
+        name="客户A",
+        exact=True,
+        allow_self_for_test=False,
+        max_batch_messages=8,
+        session_key="wx:rpa:v1:anchor-history-customer-a",
+    )
     enriched = maybe_enrich_messages_with_history(
         connector=connector,  # type: ignore[arg-type]
         target=target,  # type: ignore[arg-type]
@@ -788,7 +807,13 @@ def check_anchor_history_does_not_scroll_when_anchor_visible_but_sender_drifted(
         {"id": "new-1", "type": "text", "content": "这次新的问题", "sender": "customer"},
     ]
     connector = FakeConnector(visible)
-    target = SimpleNamespace(name="客户A", exact=True, allow_self_for_test=False, max_batch_messages=8)
+    target = SimpleNamespace(
+        name="客户A",
+        exact=True,
+        allow_self_for_test=False,
+        max_batch_messages=8,
+        session_key="wx:rpa:v1:anchor-history-customer-a",
+    )
     enriched = maybe_enrich_messages_with_history(
         connector=connector,  # type: ignore[arg-type]
         target=target,  # type: ignore[arg-type]
@@ -834,7 +859,13 @@ def check_anchor_history_searches_until_anchor_found() -> None:
             "stopped_reason": "anchor_found",
         },
     )
-    target = SimpleNamespace(name="客户A", exact=True, allow_self_for_test=False, max_batch_messages=8)
+    target = SimpleNamespace(
+        name="客户A",
+        exact=True,
+        allow_self_for_test=False,
+        max_batch_messages=8,
+        session_key="wx:rpa:v1:anchor-history-customer-a",
+    )
     enriched = maybe_enrich_messages_with_history(
         connector=connector,  # type: ignore[arg-type]
         target=target,  # type: ignore[arg-type]
@@ -845,6 +876,11 @@ def check_anchor_history_searches_until_anchor_found() -> None:
     meta = enriched.get("_history_backfill") or {}
     assert_equal(len(connector.history_mode_calls), 1, "missing anchor should trigger one bounded anchor search")
     assert_equal(connector.history_mode_calls[0].get("history_mode"), "anchor_until_found", "connector should receive anchor mode")
+    assert_equal(
+        connector.history_mode_calls[0].get("session_key"),
+        "wx:rpa:v1:anchor-history-customer-a",
+        "anchor history search must stay bound to the target session_key",
+    )
     assert_true(meta.get("anchor_found_after_history_load") is True, "history search should recover the anchor")
     assert_true(meta.get("gap_risk") is False, "recovered anchor should clear gap risk")
     assert_equal([item["id"] for item in enriched.get("messages", [])], ["new-1", "new-2"], "anchor mode should expose only messages after the recovered anchor")

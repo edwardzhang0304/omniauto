@@ -5762,7 +5762,7 @@ class FakeConnector:
     def __init__(self, messages: list[dict[str, Any]]) -> None:
         self.messages = messages
 
-    def get_messages(self, target: str, exact: bool = True) -> dict[str, Any]:
+    def get_messages(self, target: str, exact: bool = True, **kwargs: Any) -> dict[str, Any]:
         return {"ok": True, "target": target, "exact": exact, "messages": list(self.messages)}
 
 

@@ -254,8 +254,13 @@ class RecorderService:
         settings: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         target_name = str(conversation.get("target_name") or conversation.get("display_name") or "")
+        session_key = str(conversation.get("session_key") or conversation.get("session_id") or "")
         active_settings = settings if isinstance(settings, dict) else self.settings()
-        payload = self.connector.get_messages(target_name, exact=conversation.get("exact", True) is not False)
+        payload = self.connector.get_messages(
+            target_name,
+            exact=conversation.get("exact", True) is not False,
+            session_key=session_key,
+        )
         if not payload.get("ok"):
             return {"ok": False, "conversation_id": conversation.get("conversation_id"), "messages": payload}
         payload = normalize_recorder_capture_payload(payload, conversation)
@@ -278,6 +283,7 @@ class RecorderService:
                 target_name,
                 f"已自动记录 {result['inserted_count']} 条新消息，后续可在后台导出或复核。",
                 exact=conversation.get("exact", True) is not False,
+                session_key=session_key,
             )
         return result
 
@@ -332,11 +338,13 @@ class RecorderService:
             }
 
         target_name = str(conversation.get("target_name") or conversation.get("display_name") or "")
+        session_key = str(conversation.get("session_key") or conversation.get("session_id") or "")
         try:
             loaded_payload = self.connector.get_messages(
                 target_name,
                 exact=conversation.get("exact", True) is not False,
                 history_load_times=load_times,
+                session_key=session_key,
             )
         except Exception as exc:
             return {
