@@ -3798,6 +3798,10 @@ def check_listener_humanized_send_env_mapping() -> dict[str, Any]:
             "send_pre_delay_max_ms": 200,
             "send_post_input_delay_min_ms": 350,
             "send_post_input_delay_max_ms": 80,
+            "send_trigger_delay_min_ms": 1200,
+            "send_trigger_delay_max_ms": 300,
+            "send_after_trigger_delay_min_ms": 880,
+            "send_after_trigger_delay_max_ms": 240,
             "send_trigger_mode": "click_only",
             "send_input_confirm_attempts": 1,
             "send_rate_min_interval_seconds": 90,
@@ -3815,6 +3819,8 @@ def check_listener_humanized_send_env_mapping() -> dict[str, Any]:
         and mapped.get("WECHAT_WIN32_OCR_HUMANIZED_TYPING_CHAR_DELAY_MAX_MS") == "120"
         and mapped.get("WECHAT_WIN32_OCR_HUMANIZED_SEND_PRE_DELAY_MAX_MS") == "900"
         and mapped.get("WECHAT_WIN32_OCR_HUMANIZED_SEND_POST_INPUT_DELAY_MAX_MS") == "350"
+        and mapped.get("WECHAT_WIN32_OCR_HUMANIZED_SEND_TRIGGER_DELAY_MAX_MS") == "1200"
+        and mapped.get("WECHAT_WIN32_OCR_HUMANIZED_SEND_AFTER_TRIGGER_DELAY_MAX_MS") == "880"
         and mapped.get("WECHAT_WIN32_OCR_SEND_TRIGGER_MODE") == "enter_only"
         and mapped.get("WECHAT_WIN32_OCR_SEND_INPUT_CONFIRM_ATTEMPTS") == "1"
         and mapped.get("WECHAT_WIN32_OCR_SEND_MIN_INTERVAL_SECONDS") == "90"
@@ -4849,6 +4855,8 @@ def check_listener_rpa_watchdog_covers_long_humanized_typing() -> dict[str, Any]
             "typing_micro_pause_max_ms": 650,
             "send_pre_delay_max_ms": 1300,
             "send_post_input_delay_max_ms": 460,
+            "send_trigger_delay_max_ms": 1350,
+            "send_after_trigger_delay_max_ms": 760,
             "typing_typo_max": 1,
         },
         "semantic_batch_planner": {"enabled": True},

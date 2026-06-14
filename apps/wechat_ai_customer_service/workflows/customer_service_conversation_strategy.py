@@ -89,9 +89,18 @@ RESIST_REDIRECT_TERMS = (
     "别聊车",
     "不想聊车",
     "别推销",
+    "别老推车",
+    "别一直推车",
+    "推车太急",
+    "一直推车",
     "别套话",
     "怎么又聊车",
     "怎么又转回",
+    "怎么老往车上绕",
+    "怎么一直往车上绕",
+    "每句都往车上绕",
+    "老往车上绕",
+    "往车上绕",
     "只想随便聊",
     "就随便问问",
     "不要问预算",
@@ -148,15 +157,222 @@ def default_conversation_strategy_state() -> dict[str, Any]:
     }
 
 
+def default_conversation_interaction_state() -> dict[str, Any]:
+    return {
+        "schema_version": SCHEMA_VERSION,
+        "last_customer_message_at": "",
+        "last_customer_text_sample": "",
+        "last_reply_started_at": "",
+        "last_reply_sent_at": "",
+        "last_reply_text_sample": "",
+        "last_unanswered_customer_text": "",
+        "last_unanswered_message_ids": [],
+        "unanswered_exists": False,
+        "customer_chase_up_detected": False,
+        "chase_up_streak": 0,
+        "delay_context": "none",
+        "suggested_reply_posture": "normal",
+        "policy_note": "",
+        "updated_at": "",
+    }
+
+
 def normalize_strategy_text(text: Any) -> str:
     value = str(text or "")
     value = re.sub(r"\s+", "", value)
     return value.strip()
 
 
+def parse_strategy_datetime(value: Any) -> datetime | None:
+    text = str(value or "").strip()
+    if not text:
+        return None
+    try:
+        return datetime.fromisoformat(text)
+    except (TypeError, ValueError):
+        return None
+
+
+def seconds_between(start: Any, end: Any) -> float:
+    start_dt = parse_strategy_datetime(start)
+    end_dt = parse_strategy_datetime(end)
+    if not start_dt or not end_dt:
+        return 0.0
+    return max(0.0, (end_dt - start_dt).total_seconds())
+
+
 def contains_any(text: str, terms: tuple[str, ...]) -> bool:
     lower = str(text or "").lower()
     return any(str(term).lower() in lower for term in terms)
+
+
+CHASE_UP_TERMS = (
+    "人呢",
+    "还在吗",
+    "在吗",
+    "在不",
+    "在么",
+    "怎么没回",
+    "咋不回",
+    "不回",
+    "等半天",
+    "还没好吗",
+    "还没回",
+    "看到没",
+    "收到没",
+    "老板在吗",
+)
+
+
+def message_looks_like_chase_up(text: Any) -> bool:
+    clean = normalize_strategy_text(text)
+    if not clean:
+        return False
+    if contains_any(clean, CHASE_UP_TERMS):
+        return True
+    return len(clean) <= 6 and clean.endswith(("呢", "吗", "嘛")) and contains_any(clean, ("在", "人", "回"))
+
+
+def delay_context_for_elapsed(elapsed_seconds: float) -> str:
+    if elapsed_seconds >= 90:
+        return "customer_waited_long"
+    if elapsed_seconds >= 25:
+        return "customer_waited_noticeably"
+    if elapsed_seconds > 0:
+        return "customer_waited_briefly"
+    return "unknown_elapsed"
+
+
+def update_conversation_interaction_state_on_capture(
+    target_state: dict[str, Any],
+    current_text: Any,
+    *,
+    message_ids: list[str] | None = None,
+    now: str | None = None,
+) -> dict[str, Any]:
+    """Track non-authoritative runtime interaction state for Brain.
+
+    This layer records conversational timing and open reply obligations only.
+    It never writes customer-visible wording and never authorizes facts.
+    """
+
+    tick = now or datetime.now().isoformat(timespec="seconds")
+    existing = target_state.get("conversation_interaction_state")
+    state = {**default_conversation_interaction_state(), **(existing if isinstance(existing, dict) else {})}
+    clean_text = " ".join(str(current_text or "").split()).strip()
+    ids = [str(item).strip() for item in (message_ids or []) if str(item).strip()]
+    previous_unanswered_text = str(state.get("last_unanswered_customer_text") or "").strip()
+    previous_unanswered_ids = [str(item).strip() for item in state.get("last_unanswered_message_ids") or [] if str(item).strip()]
+    has_unanswered_before_capture = bool(state.get("unanswered_exists") or state.get("last_unanswered_message_ids"))
+    elapsed_since_reply = seconds_between(state.get("last_reply_started_at") or state.get("last_reply_sent_at"), tick)
+    elapsed_since_customer = seconds_between(state.get("last_customer_message_at"), tick)
+    chase_up = message_looks_like_chase_up(clean_text)
+    if chase_up and (has_unanswered_before_capture or elapsed_since_reply >= 15 or elapsed_since_customer >= 15):
+        posture = "acknowledge_delay_then_continue"
+        delay_context = delay_context_for_elapsed(max(elapsed_since_reply, elapsed_since_customer))
+        chase_streak = int(state.get("chase_up_streak") or 0) + 1
+        policy_note = (
+            "客户本轮更像是在催促上一轮等待/未闭环内容，不是新开场。"
+            "Brain应先自然承认等待或说明正在核资料/打字，再接回上一轮未闭环话题；"
+            "不要要求客户重复已经说过的信息。"
+        )
+    elif chase_up:
+        posture = "natural_social_ack"
+        delay_context = "summon_without_known_delay"
+        chase_streak = int(state.get("chase_up_streak") or 0) + 1
+        policy_note = "客户本轮是短召唤/问候。Brain应自然回应，若上下文有业务线索可轻接上文。"
+    else:
+        posture = "normal"
+        delay_context = "none"
+        chase_streak = 0
+        policy_note = ""
+    state.update(
+        {
+            "schema_version": SCHEMA_VERSION,
+            "last_customer_message_at": tick,
+            "last_customer_text_sample": clean_text[:180],
+            "last_unanswered_customer_text": (
+                previous_unanswered_text[:220]
+                if chase_up and previous_unanswered_text
+                else (clean_text[:220] if clean_text else previous_unanswered_text[:220])
+            ),
+            "last_unanswered_message_ids": ((previous_unanswered_ids + ids)[-20:] if ids else previous_unanswered_ids[-20:]),
+            "unanswered_exists": bool(clean_text or ids),
+            "customer_chase_up_detected": bool(chase_up),
+            "chase_up_streak": max(0, chase_streak),
+            "delay_context": delay_context,
+            "suggested_reply_posture": posture,
+            "policy_note": policy_note,
+            "updated_at": tick,
+        }
+    )
+    target_state["conversation_interaction_state"] = state
+    return state
+
+
+def update_conversation_interaction_state_on_reply_started(
+    target_state: dict[str, Any],
+    *,
+    now: str | None = None,
+) -> dict[str, Any]:
+    tick = now or datetime.now().isoformat(timespec="seconds")
+    existing = target_state.get("conversation_interaction_state")
+    state = {**default_conversation_interaction_state(), **(existing if isinstance(existing, dict) else {})}
+    state.update({"schema_version": SCHEMA_VERSION, "last_reply_started_at": tick, "updated_at": tick})
+    target_state["conversation_interaction_state"] = state
+    return state
+
+
+def update_conversation_interaction_state_on_reply_sent(
+    target_state: dict[str, Any],
+    reply_text: Any,
+    *,
+    input_message_ids: list[str] | None = None,
+    now: str | None = None,
+) -> dict[str, Any]:
+    tick = now or datetime.now().isoformat(timespec="seconds")
+    existing = target_state.get("conversation_interaction_state")
+    state = {**default_conversation_interaction_state(), **(existing if isinstance(existing, dict) else {})}
+    state.update(
+        {
+            "schema_version": SCHEMA_VERSION,
+            "last_reply_sent_at": tick,
+            "last_reply_text_sample": " ".join(str(reply_text or "").split()).strip()[:180],
+            "last_unanswered_customer_text": "",
+            "last_unanswered_message_ids": [],
+            "unanswered_exists": False,
+            "customer_chase_up_detected": False,
+            "delay_context": "none",
+            "suggested_reply_posture": "normal",
+            "policy_note": "",
+            "updated_at": tick,
+        }
+    )
+    if input_message_ids:
+        state["last_replied_message_ids"] = [str(item).strip() for item in input_message_ids if str(item).strip()][-20:]
+    target_state["conversation_interaction_state"] = state
+    return state
+
+
+def build_conversation_interaction_brain_hint(state: dict[str, Any] | None) -> dict[str, Any]:
+    if not isinstance(state, dict) or not state:
+        return {}
+    posture = str(state.get("suggested_reply_posture") or "normal")
+    if posture == "normal" and not state.get("customer_chase_up_detected") and not state.get("unanswered_exists"):
+        return {}
+    return {
+        "schema_version": int(state.get("schema_version") or SCHEMA_VERSION),
+        "authority": "non_authoritative_interaction_hint",
+        "customer_chase_up_detected": bool(state.get("customer_chase_up_detected")),
+        "unanswered_exists": bool(state.get("unanswered_exists")),
+        "delay_context": str(state.get("delay_context") or "none"),
+        "suggested_reply_posture": posture,
+        "last_unanswered_customer_text": str(state.get("last_unanswered_customer_text") or "")[:180],
+        "last_customer_text_sample": str(state.get("last_customer_text_sample") or "")[:120],
+        "last_reply_text_sample": str(state.get("last_reply_text_sample") or "")[:120],
+        "policy_note": str(state.get("policy_note") or "")[:220],
+        "visibility_rule": "不得把本状态字段名、内部原因或机制说明写进客户可见回复。",
+    }
 
 
 def classify_conversation_strategy_signal(text: Any, *, context: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -195,10 +411,10 @@ def classify_conversation_strategy_signal(text: Any, *, context: dict[str, Any] 
         signal = "hard_boundary"
     elif resists_redirect:
         signal = "resist_redirect"
-    elif has_business:
-        signal = "business"
     elif has_identity_probe:
         signal = "identity_probe"
+    elif has_business:
+        signal = "business"
     elif has_social or short_low_business:
         signal = "social_offtopic"
     else:
@@ -259,6 +475,10 @@ def engagement_mode_for(*, signal: str, social_streak: int, resisted: bool, hard
     if signal == "business":
         return "resume_business"
     fatigue = fatigue_for_streak(social_streak, resisted=resisted)
+    if resisted and signal in {"resist_redirect", "identity_probe", "social_offtopic", "unknown_low_business"}:
+        return "social_companion"
+    if signal == "identity_probe" and social_streak >= 1:
+        return "social_companion"
     if fatigue == "suppress" or fatigue == "fatigued":
         return "social_companion"
     if fatigue == "light":
@@ -350,7 +570,7 @@ def build_conversation_strategy_brain_hint(state: dict[str, Any] | None) -> dict
     if mode == "soft_bridge":
         policy_note = "客户当前偏闲聊或轻度离题。先自然回应当前问题，只能轻柔带一句业务，不要急着推车或追问预算。"
     elif mode == "social_companion":
-        policy_note = "客户已连续闲聊/试探或抗拒业务牵引。本轮先自然回应当前问题，不要机械拉回上一台车或未完成车源；客户重新提出业务需求时再恢复业务模式。"
+        policy_note = "客户已闲聊/试探或抗拒业务牵引。本轮优先自然回应客户感受和当前问题；不要追问预算、车型、充电条件，也不要机械拉回上一台车或未完成车源。客户重新提出业务需求时再恢复业务模式。"
     elif mode == "resume_business":
         policy_note = "客户已重新提出业务意图。恢复正常业务客服模式，按商品库/正式知识/当前会话事实回答。"
     elif mode == "boundary_only":

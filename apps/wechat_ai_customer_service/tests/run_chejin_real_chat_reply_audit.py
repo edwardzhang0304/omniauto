@@ -910,13 +910,37 @@ def extract_budget(text: str) -> tuple[float, float] | None:
 
 
 def extract_prices(text: str) -> list[float]:
+    haystack = str(text or "")
     prices: list[float] = []
-    for match in re.finditer(r"(\d+(?:\.\d+)?)\s*万", str(text or "")):
+    for match in re.finditer(r"(\d+(?:\.\d+)?)\s*万", haystack):
+        window = haystack[max(0, match.start() - 8) : min(len(haystack), match.end() + 8)]
+        if looks_like_non_price_amount_window(window):
+            continue
         try:
             prices.append(float(match.group(1)))
         except (TypeError, ValueError):
             continue
     return prices
+
+
+def looks_like_non_price_amount_window(window: str) -> bool:
+    clean = re.sub(r"\s+", "", str(window or ""))
+    if not clean:
+        return False
+    non_price_units = (
+        "万公里",
+        "万km",
+        "万KM",
+        "万千米",
+        "万里",
+        "公里",
+        "km",
+        "KM",
+        "里程",
+        "表显",
+        "行驶",
+    )
+    return any(unit in clean for unit in non_price_units)
 
 
 def looks_high_risk(question: str) -> bool:

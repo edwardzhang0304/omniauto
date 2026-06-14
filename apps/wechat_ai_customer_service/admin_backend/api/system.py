@@ -17,6 +17,7 @@ from apps.wechat_ai_customer_service.llm_config import (
     llm_provider_options,
     llm_provider_preset,
     llm_provider_request_style,
+    llm_route_display_label,
     llm_urlopen,
     load_llm_config,
     llm_fallback_enabled,
@@ -32,6 +33,7 @@ from apps.wechat_ai_customer_service.llm_config import (
     resolve_llm_tier_model,
     save_llm_config,
 )
+from apps.wechat_ai_customer_service.workflows.llm_output_adapter import llm_adapter_profile
 from apps.wechat_ai_customer_service.platform_safety_rules import load_platform_safety_rules, save_platform_safety_rules
 from apps.wechat_ai_customer_service.platform_understanding_rules import load_platform_understanding_rules, save_platform_understanding_rules
 from ..auth_context import current_auth_context
@@ -325,6 +327,11 @@ def test_llm_config(request: Request, payload: dict[str, Any] | None = None) -> 
             "target": target,
             "provider": provider,
             "provider_label": str(llm_provider_preset(provider).get("label") or provider),
+            "route_display_label": llm_route_display_label(
+                provider=provider,
+                model=model,
+                request_style=response.get("request_style", llm_provider_request_style(provider)),
+            ),
             "base_url": base_url,
             "model": model,
             "route": tier,
@@ -444,10 +451,14 @@ def _route_probe_payload(
         timeout=4,
     )
     available_models = model_probe.get("models") if isinstance(model_probe.get("models"), list) else []
+    request_style = llm_provider_request_style(provider)
+    route_display_label = llm_route_display_label(provider=provider, model=flash_model or pro_model, request_style=request_style)
+    adapter = llm_adapter_profile(provider=provider, model=flash_model or pro_model, request_style=request_style)
     return {
         "enabled": enabled if enabled is not None else True,
         "provider": provider,
         "provider_label": provider_label,
+        "route_display_label": route_display_label,
         "base_url": base_url,
         "flash_model": flash_model,
         "pro_model": pro_model,
@@ -458,7 +469,10 @@ def _route_probe_payload(
         "allow_insecure_tls": allow_insecure_tls,
         "api_key_configured": bool(api_key),
         "api_key_masked": _mask_key(api_key),
-        "request_style": llm_provider_request_style(provider),
+        "request_style": request_style,
+        "adapter_profile": adapter.get("id"),
+        "adapter_label": adapter.get("label"),
+        "adapter_notes": adapter.get("notes", []),
     }
 
 
@@ -511,6 +525,9 @@ def _llm_config_payload(*, context: Any, config: dict[str, str], provider: str) 
         "api_key_configured": False,
         "api_key_masked": "",
         "request_style": "",
+        "adapter_profile": "",
+        "adapter_label": "",
+        "adapter_notes": [],
     }
     return {
         "ok": True,
@@ -529,6 +546,9 @@ def _llm_config_payload(*, context: Any, config: dict[str, str], provider: str) 
         "api_key_configured": primary_route["api_key_configured"],
         "api_key_masked": primary_route["api_key_masked"],
         "request_style": primary_route["request_style"],
+        "adapter_profile": primary_route["adapter_profile"],
+        "adapter_label": primary_route["adapter_label"],
+        "adapter_notes": primary_route["adapter_notes"],
         "fallback": fallback_route,
         "editable": True,
     }

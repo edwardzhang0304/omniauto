@@ -1,52 +1,45 @@
 {
   "enabled": true,
   "reply_mode": "full_auto",
-  "record_messages": true,
+  "record_messages": false,
   "auto_learn": false,
   "use_llm": true,
   "rag_enabled": true,
-  "data_capture_enabled": true,
+  "data_capture_enabled": false,
   "handoff_enabled": true,
-  "operator_alert_enabled": true,
+  "operator_alert_enabled": false,
   "identity_guard_enabled": true,
-  "respond_all_unread_sessions": true,
+  "style_adapter_enabled": true,
+  "final_visible_llm_polish_enabled": true,
+  "customer_service_brain_mode": "brain_first",
+  "respond_all_unread_sessions": false,
   "session_targets_managed": true,
   "session_targets": [
+    {
+      "name": "新数据测试",
+      "display_name": "新数据测试",
+      "enabled": true,
+      "exact": true,
+      "archived": false,
+      "archived_at": "",
+      "archived_reason": "",
+      "last_discovered_at": "",
+      "conversation_type": "group",
+      "source": "live_acceptance",
+      "updated_at": "2026-06-13T02:42:55"
+    },
     {
       "name": "许聪",
       "display_name": "许聪",
       "enabled": true,
       "exact": true,
+      "archived": false,
+      "archived_at": "",
+      "archived_reason": "",
+      "last_discovered_at": "",
       "conversation_type": "private",
-      "source": "discovered",
-      "updated_at": "2026-05-15T17:00:00"
-    },
-    {
-      "name": "文件传输助手",
-      "display_name": "文件传输助手",
-      "enabled": false,
-      "exact": true,
-      "conversation_type": "file_transfer",
-      "source": "discovered",
-      "updated_at": "2026-05-15T16:55:02"
-    },
-    {
-      "name": "数据测试",
-      "display_name": "数据测试",
-      "enabled": false,
-      "exact": true,
-      "conversation_type": "private",
-      "source": "discovered",
-      "updated_at": "2026-05-15T16:55:02"
-    },
-    {
-      "name": "服务号",
-      "display_name": "服务号",
-      "enabled": false,
-      "exact": true,
-      "conversation_type": "private",
-      "source": "discovered",
-      "updated_at": "2026-05-15T16:55:02"
+      "source": "live_acceptance",
+      "updated_at": "2026-06-13T02:42:55"
     }
   ]
 }

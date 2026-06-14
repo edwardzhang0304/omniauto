@@ -142,6 +142,10 @@ DEFAULT_HUMANIZED_SEND_PRE_DELAY_MIN_MS = 280
 DEFAULT_HUMANIZED_SEND_PRE_DELAY_MAX_MS = 1300
 DEFAULT_HUMANIZED_SEND_POST_INPUT_DELAY_MIN_MS = 120
 DEFAULT_HUMANIZED_SEND_POST_INPUT_DELAY_MAX_MS = 460
+DEFAULT_HUMANIZED_SEND_TRIGGER_DELAY_MIN_MS = 420
+DEFAULT_HUMANIZED_SEND_TRIGGER_DELAY_MAX_MS = 1350
+DEFAULT_HUMANIZED_SEND_AFTER_TRIGGER_DELAY_MIN_MS = 220
+DEFAULT_HUMANIZED_SEND_AFTER_TRIGGER_DELAY_MAX_MS = 760
 DEFAULT_HUMANIZED_ADAPTIVE_SPEED_ENABLED = True
 DEFAULT_HUMANIZED_SHORT_TEXT_CHARS = 90
 DEFAULT_HUMANIZED_LONG_TEXT_CHARS = 240
@@ -160,16 +164,18 @@ HUMANIZED_TYPO_CANDIDATES = "asdfjkl;,.?/[]"
 SENDINPUT_INPUT_KEYBOARD = 1
 SENDINPUT_KEYEVENTF_KEYUP = 0x0002
 SENDINPUT_KEYEVENTF_UNICODE = 0x0004
-BLOCKING_SCREEN_TOKENS = (
-    "选择文件",
+HARD_BLOCKING_SCREEN_TOKENS = (
     "文件名无效",
+    "存储空间已满",
+    "无法继续使用微信",
+    "清理出足够存储空间",
+)
+SOFT_BLOCKING_SCREEN_TOKENS = (
+    "选择文件",
     "安全验证",
     "账号安全",
     "登录环境异常",
     "操作频繁",
-    "存储空间已满",
-    "无法继续使用微信",
-    "清理出足够存储空间",
     "拖拽",
 )
 FOREIGN_CAPTURE_TOKENS = (
@@ -273,6 +279,20 @@ def run_action(args: argparse.Namespace) -> dict[str, Any]:
     passive_probe = use_passive_probe_mode(action)
     probe = ensure_visible_wechat_window(interactive=not passive_probe)
     if not probe.get("visible_main_windows"):
+        if wechat_main_window_is_tray_hidden(probe):
+            return {
+                "ok": False,
+                "online": False,
+                "adapter": "win32_ocr",
+                "scheme": "win32_ocr_window_in_tray",
+                "state": "main_window_in_tray",
+                "reason": "wechat_window_in_tray",
+                "window_probe": probe,
+                "receive": {"ok": False},
+                "send": {"ok": False},
+                "manual_action_required": "open_wechat_main_window",
+                "error": "WeChat is running but its main window is hidden in tray. Open the main window manually before automation.",
+            }
         return {
             "ok": False,
             "online": False,
@@ -1802,6 +1822,30 @@ def humanized_input_settings() -> dict[str, Any]:
         minimum=post_delay_min_ms,
         maximum=6000,
     )
+    trigger_delay_min_ms = bounded_int(
+        os.getenv("WECHAT_WIN32_OCR_HUMANIZED_SEND_TRIGGER_DELAY_MIN_MS"),
+        default=DEFAULT_HUMANIZED_SEND_TRIGGER_DELAY_MIN_MS,
+        minimum=0,
+        maximum=6000,
+    )
+    trigger_delay_max_ms = bounded_int(
+        os.getenv("WECHAT_WIN32_OCR_HUMANIZED_SEND_TRIGGER_DELAY_MAX_MS"),
+        default=DEFAULT_HUMANIZED_SEND_TRIGGER_DELAY_MAX_MS,
+        minimum=trigger_delay_min_ms,
+        maximum=8000,
+    )
+    after_trigger_delay_min_ms = bounded_int(
+        os.getenv("WECHAT_WIN32_OCR_HUMANIZED_SEND_AFTER_TRIGGER_DELAY_MIN_MS"),
+        default=DEFAULT_HUMANIZED_SEND_AFTER_TRIGGER_DELAY_MIN_MS,
+        minimum=0,
+        maximum=4000,
+    )
+    after_trigger_delay_max_ms = bounded_int(
+        os.getenv("WECHAT_WIN32_OCR_HUMANIZED_SEND_AFTER_TRIGGER_DELAY_MAX_MS"),
+        default=DEFAULT_HUMANIZED_SEND_AFTER_TRIGGER_DELAY_MAX_MS,
+        minimum=after_trigger_delay_min_ms,
+        maximum=6000,
+    )
     inter_chunk_delay_scale = max(
         0.35,
         min(
@@ -1825,6 +1869,10 @@ def humanized_input_settings() -> dict[str, Any]:
         "send_pre_delay_max_ms": pre_delay_max_ms,
         "send_post_input_delay_min_ms": post_delay_min_ms,
         "send_post_input_delay_max_ms": post_delay_max_ms,
+        "send_trigger_delay_min_ms": trigger_delay_min_ms,
+        "send_trigger_delay_max_ms": trigger_delay_max_ms,
+        "send_after_trigger_delay_min_ms": after_trigger_delay_min_ms,
+        "send_after_trigger_delay_max_ms": after_trigger_delay_max_ms,
         "inter_chunk_delay_scale": inter_chunk_delay_scale,
         "adaptive_speed_enabled": env_flag(
             "WECHAT_WIN32_OCR_HUMANIZED_ADAPTIVE_SPEED_ENABLED",
@@ -1855,6 +1903,10 @@ def adapt_humanized_input_settings(settings: dict[str, Any], text: str) -> dict[
             "send_pre_delay_max_ms": 360,
             "send_post_input_delay_min_ms": 180,
             "send_post_input_delay_max_ms": 360,
+            "send_trigger_delay_min_ms": 520,
+            "send_trigger_delay_max_ms": 1500,
+            "send_after_trigger_delay_min_ms": 260,
+            "send_after_trigger_delay_max_ms": 820,
             "inter_chunk_delay_scale": 0.58,
         }
     elif text_len <= DEFAULT_HUMANIZED_LONG_TEXT_CHARS:
@@ -1873,6 +1925,10 @@ def adapt_humanized_input_settings(settings: dict[str, Any], text: str) -> dict[
             "send_pre_delay_max_ms": 320,
             "send_post_input_delay_min_ms": 160,
             "send_post_input_delay_max_ms": 340,
+            "send_trigger_delay_min_ms": 560,
+            "send_trigger_delay_max_ms": 1650,
+            "send_after_trigger_delay_min_ms": 280,
+            "send_after_trigger_delay_max_ms": 880,
             "inter_chunk_delay_scale": 0.62,
         }
     else:
@@ -1891,6 +1947,10 @@ def adapt_humanized_input_settings(settings: dict[str, Any], text: str) -> dict[
             "send_pre_delay_max_ms": 280,
             "send_post_input_delay_min_ms": 150,
             "send_post_input_delay_max_ms": 320,
+            "send_trigger_delay_min_ms": 680,
+            "send_trigger_delay_max_ms": 2200,
+            "send_after_trigger_delay_min_ms": 320,
+            "send_after_trigger_delay_max_ms": 1100,
             "inter_chunk_delay_scale": 0.68,
         }
     active["speed_profile"] = profile["speed_profile"]
@@ -1903,10 +1963,17 @@ def adapt_humanized_input_settings(settings: dict[str, Any], text: str) -> dict[
         "send_pre_delay_max_ms",
         "send_post_input_delay_min_ms",
         "send_post_input_delay_max_ms",
+        "send_trigger_delay_min_ms",
+        "send_trigger_delay_max_ms",
+        "send_after_trigger_delay_min_ms",
+        "send_after_trigger_delay_max_ms",
     ):
         current = int(active.get(key) or 0)
         target = int(profile[key])
-        active[key] = 0 if current <= 0 else min(current, target)
+        if key.startswith("send_trigger") or key.startswith("send_after_trigger"):
+            active[key] = max(current, target)
+        else:
+            active[key] = 0 if current <= 0 else min(current, target)
     active["chunk_min_chars"] = max(int(active.get("chunk_min_chars") or 1), int(profile["chunk_min_chars"]))
     active["chunk_max_chars"] = max(int(active.get("chunk_max_chars") or 1), int(profile["chunk_max_chars"]))
     current_micro_every = int(active.get("micro_pause_every_chars") or 0)
@@ -1919,6 +1986,10 @@ def adapt_humanized_input_settings(settings: dict[str, Any], text: str) -> dict[
         active["char_delay_max_ms"] = active["char_delay_min_ms"]
     if int(active.get("micro_pause_max_ms") or 0) < int(active.get("micro_pause_min_ms") or 0):
         active["micro_pause_max_ms"] = active["micro_pause_min_ms"]
+    if int(active.get("send_trigger_delay_max_ms") or 0) < int(active.get("send_trigger_delay_min_ms") or 0):
+        active["send_trigger_delay_max_ms"] = active["send_trigger_delay_min_ms"]
+    if int(active.get("send_after_trigger_delay_max_ms") or 0) < int(active.get("send_after_trigger_delay_min_ms") or 0):
+        active["send_after_trigger_delay_max_ms"] = active["send_after_trigger_delay_min_ms"]
     active["typo_probability"] = min(float(active.get("typo_probability") or 0.0), float(profile["typo_probability"]))
     active["typo_max"] = min(int(active.get("typo_max") or 0), int(profile["typo_max"]))
     try:
@@ -3097,6 +3168,67 @@ def confirm_input_token_via_clipboard(probe_tokens: list[str] | str) -> dict[str
     }
 
 
+def safe_send_trigger(
+    hwnd: int,
+    *,
+    trigger_mode: str,
+    send_point: tuple[int, int] | None = None,
+    settings: dict[str, Any] | None = None,
+    focus_guard_func: Any | None = None,
+) -> dict[str, Any]:
+    active_settings = settings or {}
+    if active_settings.get("enabled"):
+        humanized_sleep_ms(
+            int(active_settings.get("send_trigger_delay_min_ms") or DEFAULT_HUMANIZED_SEND_TRIGGER_DELAY_MIN_MS),
+            int(active_settings.get("send_trigger_delay_max_ms") or DEFAULT_HUMANIZED_SEND_TRIGGER_DELAY_MAX_MS),
+        )
+    guard = focus_guard_func() if focus_guard_func is not None else recover_send_window_guard(hwnd, max_attempts=1)
+    if not guard.get("ok"):
+        return {
+            "ok": False,
+            "reason": "send_focus_guard_failed_before_trigger",
+            "error": "WeChat lost foreground focus before send trigger; abort without retrying.",
+            "window_guard": guard,
+            "send_trigger_mode": trigger_mode,
+        }
+    mode = normalize_send_trigger_mode(trigger_mode)
+    if mode in {"enter_only", "enter_then_click"}:
+        ensure_left_button_released()
+        coordinate_rpa_action(
+            "send_trigger_enter",
+            metadata={"hwnd": int(hwnd or 0), "key": int(win32con.VK_RETURN), "trigger_mode": mode},
+        )
+        win32api.keybd_event(win32con.VK_RETURN, 0, 0, 0)
+        humanized_action_sleep(54, 145)
+        win32api.keybd_event(win32con.VK_RETURN, 0, win32con.KEYEVENTF_KEYUP, 0)
+        if active_settings.get("enabled"):
+            humanized_sleep_ms(
+                int(active_settings.get("send_after_trigger_delay_min_ms") or DEFAULT_HUMANIZED_SEND_AFTER_TRIGGER_DELAY_MIN_MS),
+                int(active_settings.get("send_after_trigger_delay_max_ms") or DEFAULT_HUMANIZED_SEND_AFTER_TRIGGER_DELAY_MAX_MS),
+            )
+        return {"ok": True, "method": "keyboard_enter", "send_trigger_mode": mode, "window_guard": guard}
+    if mode == "click_only":
+        if send_point is None:
+            return {"ok": False, "reason": "send_click_point_missing", "send_trigger_mode": mode, "window_guard": guard}
+        click_guard = focus_guard_func() if focus_guard_func is not None else recover_send_window_guard(hwnd, max_attempts=1)
+        if not click_guard.get("ok"):
+            return {
+                "ok": False,
+                "reason": "send_focus_guard_failed_before_click_trigger",
+                "error": "WeChat lost foreground focus before clicking send; abort without retrying.",
+                "window_guard": click_guard,
+                "send_trigger_mode": mode,
+            }
+        human_client_click(hwnd, int(send_point[0]), int(send_point[1]))
+        if active_settings.get("enabled"):
+            humanized_sleep_ms(
+                int(active_settings.get("send_after_trigger_delay_min_ms") or DEFAULT_HUMANIZED_SEND_AFTER_TRIGGER_DELAY_MIN_MS),
+                int(active_settings.get("send_after_trigger_delay_max_ms") or DEFAULT_HUMANIZED_SEND_AFTER_TRIGGER_DELAY_MAX_MS),
+            )
+        return {"ok": True, "method": "human_click_send", "send_trigger_mode": mode, "window_guard": click_guard}
+    return {"ok": False, "reason": "unsupported_send_trigger_mode", "send_trigger_mode": mode, "window_guard": guard}
+
+
 def send_with_guarded_clicks(
     hwnd: int,
     text: str,
@@ -3156,20 +3288,22 @@ def send_with_guarded_clicks(
             "window_guard": focus_guard,
         }
     trigger_mode = normalize_send_trigger_mode(os.getenv("WECHAT_WIN32_OCR_SEND_TRIGGER_MODE"))
-    if trigger_mode in {"enter_only", "enter_then_click"}:
-        key_press(win32con.VK_RETURN)
-        time.sleep(random.uniform(0.08, 0.16))
-    if trigger_mode in {"click_only", "enter_then_click"}:
-        focus_guard = recover_send_window_guard(hwnd, max_attempts=1)
-        if not focus_guard.get("ok"):
-            return {
-                "ok": False,
-                "reason": "send_focus_guard_failed_before_click_trigger",
-                "error": "WeChat lost foreground focus before clicking send; abort without retrying.",
-                "paste": paste_result,
-                "window_guard": focus_guard,
-            }
-        human_client_click(hwnd, send_click_x, send_click_y)
+    trigger_result = safe_send_trigger(
+        hwnd,
+        trigger_mode=trigger_mode,
+        send_point=(send_click_x, send_click_y),
+        settings=settings,
+        focus_guard_func=lambda hwnd=hwnd: recover_send_window_guard(hwnd, max_attempts=1),
+    )
+    if not trigger_result.get("ok"):
+        return {
+            "ok": False,
+            "reason": str(trigger_result.get("reason") or "send_trigger_failed"),
+            "error": str(trigger_result.get("error") or "Could not safely trigger WeChat send."),
+            "paste": paste_result,
+            "window_guard": trigger_result.get("window_guard") if isinstance(trigger_result.get("window_guard"), dict) else focus_guard,
+            "trigger": trigger_result,
+        }
     paste_method = str(paste_result.get("input_mode") or paste_result.get("method") or "clipboard_once")
     return {
         "ok": True,
@@ -3178,6 +3312,7 @@ def send_with_guarded_clicks(
         "send_point": [send_click_x, send_click_y],
         "paste": paste_result,
         "send_trigger_mode": trigger_mode,
+        "send_trigger": trigger_result,
         "degraded": bool(paste_result.get("degraded")),
         "humanized_input": settings,
     }
@@ -3221,6 +3356,7 @@ def send_with_uia_controls(
                 int(settings.get("send_post_input_delay_min_ms") or DEFAULT_HUMANIZED_SEND_POST_INPUT_DELAY_MIN_MS),
                 int(settings.get("send_post_input_delay_max_ms") or DEFAULT_HUMANIZED_SEND_POST_INPUT_DELAY_MAX_MS),
             )
+        humanized_action_sleep(260, 760)
         humanized_action_sleep(120, 230)
         invoke_result = invoke_uia_button(auto, send_button)
         if not invoke_result.get("ok"):
@@ -3495,6 +3631,7 @@ def strip_session_time_suffix(name: str) -> str:
         return ""
     patterns = (
         r"(?:今天|昨天|前天)?\d{1,2}:\d{2}$",
+        r"(?:今天|昨天|前天)$",
         r"(?:星期|周)[一二三四五六日天]$",
         r"\d{4}[/-]\d{1,2}[/-]\d{1,2}$",
         r"\d{1,2}[/-]\d{1,2}$",
@@ -3661,6 +3798,20 @@ def find_session_candidate_by_key(sessions: list[dict[str, Any]], session_key: s
         if isinstance(item, dict) and session_matches_key(item, expected):
             return item
     return None
+
+
+def visible_session_name_is_unambiguous(
+    sessions: list[dict[str, Any]],
+    target: str,
+    *,
+    exact: bool,
+) -> bool:
+    matches = [
+        item
+        for item in sessions
+        if isinstance(item, dict) and session_name_matches(str(item.get("name") or ""), target, exact=exact)
+    ]
+    return len(matches) == 1
 
 
 def detect_session_subview_back_target(
@@ -3911,6 +4062,12 @@ def open_chat(
     ):
         return True
     sessions = parse_sessions_from_ocr(ocr_items, screenshot.size, screenshot=screenshot)
+    if clean_session_key and active_chat_matches(ocr_items, screenshot.size, target=target, exact=exact):
+        if visible_session_name_is_unambiguous(sessions, target, exact=exact):
+            _LAST_RPA_ACTION_STATE["active_session_key"] = clean_session_key
+            _LAST_RPA_ACTION_STATE["active_target"] = target
+            return True
+        return False
     if clean_session_key:
         keyed = find_session_candidate_by_key(sessions, clean_session_key)
         if keyed is None:
@@ -4025,8 +4182,29 @@ def ensure_target_ready_for_send(
         # Weak/sidebar/body matches are not enough to authorize typing because
         # multi-session/group chats may show the target name inside the body.
         pre_validation = validate_active_send_target(hwnd, target, exact=exact, artifact_dir=artifact_dir)
-        if not clean_session_key and pre_validation.get("ok") and active_send_guard_is_strong(pre_validation):
-            return {"ok": True, "attempts": attempt, "validation": pre_validation, "opened": False}
+        if pre_validation.get("ok") and active_send_guard_is_strong(pre_validation):
+            opened_by_session_confirm = False
+            if clean_session_key:
+                cached_session_match = str(_LAST_RPA_ACTION_STATE.get("active_session_key") or "") == clean_session_key
+                if not cached_session_match:
+                    opened = open_chat(hwnd, target, exact=exact, artifact_dir=artifact_dir, session_key=clean_session_key)
+                    if not opened:
+                        return {
+                            "ok": False,
+                            "attempts": attempt,
+                            "validation": pre_validation,
+                            "opened": False,
+                            "reason": "session_key_not_confirmed_by_active_cache",
+                        }
+                    opened_by_session_confirm = bool(opened)
+                    humanized_action_sleep(180, 320)
+                    validation = validate_active_send_target(hwnd, target, exact=exact, artifact_dir=artifact_dir)
+                    if not validation.get("ok") or not active_send_guard_is_strong(validation):
+                        return {"ok": False, "attempts": attempt, "validation": validation, "opened": True}
+                    pre_validation = validation
+                _LAST_RPA_ACTION_STATE["active_session_key"] = clean_session_key
+                _LAST_RPA_ACTION_STATE["active_target"] = target
+            return {"ok": True, "attempts": attempt, "validation": pre_validation, "opened": opened_by_session_confirm}
         last_validation = pre_validation
         if target_switch_validation_is_hard_stop(pre_validation):
             return {"ok": False, "attempts": attempt, "validation": pre_validation, "hard_stop": True}
@@ -4307,7 +4485,73 @@ def calculate_send_points(geometry: dict[str, Any]) -> dict[str, Any]:
             "geometry": geometry,
             "error": "Calculated send points overlap the session list.",
         }
-    return {"ok": True, "input_point": [input_x, input_y], "send_point": [send_x, send_y], "geometry": geometry}
+    input_candidates = input_click_candidate_points(geometry, min_points=10)
+    send_candidates = send_click_candidate_points(geometry, min_points=10)
+    return {
+        "ok": True,
+        "input_point": [input_x, input_y],
+        "send_point": [send_x, send_y],
+        "input_candidate_points": [list(point) for point in input_candidates],
+        "send_candidate_points": [list(point) for point in send_candidates],
+        "geometry": geometry,
+    }
+
+
+def _spread_points_in_rect(
+    left: int,
+    top: int,
+    right: int,
+    bottom: int,
+    *,
+    min_points: int = 10,
+) -> list[tuple[int, int]]:
+    if right <= left or bottom <= top:
+        return []
+    x_fracs = (0.12, 0.24, 0.38, 0.52, 0.66, 0.80, 0.90, 0.30, 0.46, 0.72)
+    y_fracs = (0.22, 0.48, 0.74, 0.34, 0.62, 0.82, 0.42, 0.68, 0.18, 0.56)
+    points: list[tuple[int, int]] = []
+    for x_frac, y_frac in zip(x_fracs, y_fracs):
+        point = (
+            bounded_int(int(left + (right - left) * x_frac), default=left, minimum=left, maximum=right),
+            bounded_int(int(top + (bottom - top) * y_frac), default=top, minimum=top, maximum=bottom),
+        )
+        if point not in points:
+            points.append(point)
+    while len(points) < max(1, int(min_points or 1)):
+        point = (random.randint(left, right), random.randint(top, bottom))
+        if point not in points:
+            points.append(point)
+    random.shuffle(points)
+    return points
+
+
+def input_click_candidate_points(geometry: dict[str, Any], *, min_points: int = 10) -> list[tuple[int, int]]:
+    width = int(geometry.get("width") or 0)
+    height = int(geometry.get("height") or 0)
+    if width <= 0 or height <= 0:
+        return []
+    split_x = session_split_x(width)
+    # Keep randomized focus clicks safely inside the input pane.  A wider
+    # candidate pool is useful for anti-repeat behavior, but the left edge must
+    # not drift into the message area or session list on compact WeChat windows.
+    left = max(split_x + 64, int(width * 0.55) + 1)
+    right = min(width - 96, max(left + 120, int(width * 0.88)))
+    top = max(int(height * 0.74), height - 218)
+    bottom = min(height - 86, max(top + 36, height - 116))
+    return _spread_points_in_rect(left, top, right, bottom, min_points=min_points)
+
+
+def send_click_candidate_points(geometry: dict[str, Any], *, min_points: int = 10) -> list[tuple[int, int]]:
+    width = int(geometry.get("width") or 0)
+    height = int(geometry.get("height") or 0)
+    if width <= 0 or height <= 0:
+        return []
+    split_x = session_split_x(width)
+    left = max(split_x + 80, width - 132)
+    right = max(left + 24, width - 24)
+    top = max(int(height * 0.80), height - 88)
+    bottom = max(top + 18, height - 18)
+    return _spread_points_in_rect(left, top, right, bottom, min_points=min_points)
 
 
 def jitter_input_click_point(x: int, y: int, geometry: dict[str, Any]) -> tuple[int, int]:
@@ -4315,6 +4559,9 @@ def jitter_input_click_point(x: int, y: int, geometry: dict[str, Any]) -> tuple[
     height = int(geometry.get("height") or 0)
     if width <= 0 or height <= 0:
         return int(x), int(y)
+    candidates = input_click_candidate_points(geometry, min_points=10)
+    if candidates:
+        x, y = random.choice(candidates)
     jitter_x = bounded_int(
         os.getenv("WECHAT_WIN32_OCR_INPUT_POINT_JITTER_X"),
         default=24,
@@ -4328,7 +4575,7 @@ def jitter_input_click_point(x: int, y: int, geometry: dict[str, Any]) -> tuple[
         maximum=36,
     )
     split_x = session_split_x(width)
-    safe_min_x = max(split_x + 30, int(width * 0.52))
+    safe_min_x = max(split_x + 64, int(width * 0.55) + 1)
     safe_max_x = max(safe_min_x, width - 88)
     safe_min_y = max(int(height * 0.74), height - 220)
     safe_max_y = max(safe_min_y, height - 82)
@@ -4531,17 +4778,20 @@ def jitter_send_click_point(x: int, y: int, geometry: dict[str, Any]) -> tuple[i
     height = int(geometry.get("height") or 0)
     if width <= 0 or height <= 0:
         return int(x), int(y)
+    candidates = send_click_candidate_points(geometry, min_points=10)
+    if candidates:
+        x, y = random.choice(candidates)
     jitter_x = bounded_int(
         os.getenv("WECHAT_WIN32_OCR_SEND_POINT_JITTER_X"),
-        default=4,
+        default=6,
         minimum=0,
-        maximum=12,
+        maximum=16,
     )
     jitter_y = bounded_int(
         os.getenv("WECHAT_WIN32_OCR_SEND_POINT_JITTER_Y"),
-        default=3,
+        default=5,
         minimum=0,
-        maximum=10,
+        maximum=14,
     )
     split_x = session_split_x(width)
     safe_min_x = max(split_x + 80, width - 132)
@@ -4582,9 +4832,42 @@ def blocking_screen_reason(ocr_items: list[dict[str, Any]]) -> str:
         return "login_or_qr"
     if any(token in joined for token in qr_login_tokens):
         return "login_or_qr"
-    for token in BLOCKING_SCREEN_TOKENS:
+    for token in HARD_BLOCKING_SCREEN_TOKENS:
         if token in joined:
             return f"blocking_text:{token}"
+    chat_surface_tokens = (
+        "搜索",
+        "文件传输助手",
+        "发送",
+        "聊天",
+        "通讯录",
+        "订阅号",
+        "朋友圈",
+        "小程序",
+        "视频号",
+    )
+    has_chat_surface = any(token in text for text in texts for token in chat_surface_tokens)
+    compact_text_count = len([text for text in texts if text])
+    token_items = [
+        item
+        for item in ocr_items
+        if any(token in normalize_ocr_text(item.get("text")) for token in SOFT_BLOCKING_SCREEN_TOKENS)
+    ]
+    # Soft safety words can appear in normal chat bubbles. Only treat them as
+    # global blockers when the capture looks like a sparse/login/dialog page,
+    # not when the normal WeChat chat surface is visible behind the text.
+    soft_page_like = (
+        bool(token_items)
+        and not has_chat_surface
+        and (
+            compact_text_count <= 8
+            or any(180 <= float(item.get("center_y") or 0) <= 720 for item in token_items)
+        )
+    )
+    if soft_page_like:
+        for token in SOFT_BLOCKING_SCREEN_TOKENS:
+            if token in joined:
+                return f"blocking_text:{token}"
     return ""
 
 
@@ -5320,7 +5603,8 @@ def parse_sessions_from_ocr(
             continue
         name = normalize_session_name(str(item.get("text") or ""))
         # OCR occasionally glues sidebar timestamps into the session title
-        # (e.g. "新数据测试昨天19:23"), which breaks session-target matching.
+        # (e.g. "新数据测试昨天" or "新数据测试昨天19:23"),
+        # which breaks session-target matching.
         name = strip_session_time_suffix(name)
         if is_file_transfer_session_alias(name):
             name = "文件传输助手"
@@ -5779,6 +6063,11 @@ def ensure_visible_wechat_window(*, interactive: bool = True) -> dict[str, Any]:
         return probe
     if not interactive:
         return probe
+    if wechat_main_window_is_tray_hidden(probe):
+        probe["main_window_in_tray"] = True
+        probe["manual_action_required"] = "open_wechat_main_window"
+        probe["restore_skipped_reason"] = "manual_tray_restore_required"
+        return probe
     restored = restore_wechat_window(probe)
     if restored:
         humanized_action_sleep(650, 980)
@@ -5790,6 +6079,21 @@ def ensure_visible_wechat_window(*, interactive: bool = True) -> dict[str, Any]:
             probe = probe_wechat_windows()
             probe["focused_window"] = focused
     return probe
+
+
+def wechat_main_window_is_tray_hidden(probe: dict[str, Any]) -> bool:
+    """Detect WeChat running with only hidden/tray main windows.
+
+    In this state, automatic ShowWindow/foreground recovery can surface a
+    half-rendered shell and trigger blank-screen RPA failures. Prefer an
+    explicit manual open by the operator before automation starts.
+    """
+    try:
+        main_count = int(probe.get("main_count") or 0)
+        visible_main_count = int(probe.get("visible_main_count") or 0)
+    except Exception:
+        return False
+    return bool(main_count > 0 and visible_main_count <= 0)
 
 
 def probe_has_usable_visible_main_window(probe: dict[str, Any]) -> bool:

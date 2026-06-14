@@ -1,8 +1,14 @@
 {
+  "enabled": true,
   "private_recording_enabled": true,
   "group_recording_enabled": true,
   "file_transfer_recording_enabled": true,
   "notify_on_collect": false,
   "auto_learn": true,
-  "use_llm": true
+  "use_llm": true,
+  "capture_interval_seconds": 5,
+  "history_backfill_enabled": true,
+  "history_backfill_load_times": 3,
+  "history_backfill_max_load_times": 5,
+  "capture_anchor_recent_limit": 80
 }

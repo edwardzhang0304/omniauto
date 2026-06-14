@@ -17,6 +17,10 @@ from pathlib import Path
 from typing import Any
 
 from apps.wechat_ai_customer_service.knowledge_paths import active_tenant_id, tenant_runtime_root
+from apps.wechat_ai_customer_service.message_identity import (
+    canonical_input_message_id,
+    canonical_visual_message_id,
+)
 
 MAX_LEDGER_RECENT_MESSAGES = 80
 MAX_LEDGER_EVENT_MESSAGES = 30
@@ -126,12 +130,18 @@ def sanitize_ledger_message(message: dict[str, Any] | None) -> dict[str, Any] | 
     if len(content) > MAX_LEDGER_MESSAGE_CHARS:
         content = content[:MAX_LEDGER_MESSAGE_CHARS].rstrip() + "..."
     sender = str(message.get("sender") or message.get("role") or "").strip()
-    message_id = str(message.get("id") or message.get("message_id") or "").strip()
+    legacy_message_id = str(message.get("legacy_message_id") or message.get("id") or message.get("message_id") or "").strip()
+    canonical_id = canonical_input_message_id(message)
+    visual_id = canonical_visual_message_id(message)
+    message_id = canonical_id or legacy_message_id
     time_value = str(message.get("time") or message.get("created_at") or "").strip()
-    identity = message_id or stable_hash(sender, msg_type, content, time_value, length=24)
+    identity = canonical_id or message_id or stable_hash(sender, msg_type, content, time_value, length=24)
     content_key = ledger_message_content_key({"sender": sender, "type": msg_type, "content": content})
     return {
         "id": message_id,
+        "legacy_message_id": legacy_message_id,
+        "canonical_input_id": canonical_id,
+        "canonical_visual_id": visual_id,
         "identity": identity,
         "sender": sender,
         "type": msg_type,
@@ -248,9 +258,13 @@ class SessionLedgerStore:
     ) -> None:
         if not session_key:
             return
-        message_ids = [str(item.get("id") or "") for item in batch if isinstance(item, dict) and str(item.get("id") or "")]
         sanitized_messages = [item for item in (sanitize_ledger_message(raw) for raw in messages) if item]
         sanitized_batch = [item for item in (sanitize_ledger_message(raw) for raw in batch) if item]
+        message_ids = [
+            str(item.get("identity") or item.get("canonical_input_id") or item.get("id") or "")
+            for item in sanitized_batch
+            if str(item.get("identity") or item.get("canonical_input_id") or item.get("id") or "")
+        ]
         self.append_event(
             session_key,
             "capture_recorded",

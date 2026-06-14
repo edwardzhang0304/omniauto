@@ -35,6 +35,13 @@ def evaluate_wechat_capability(
         failure = rpa_failure_detail_payload(capability)
         state = str(failure.get("state") or "")
         reason = str(failure.get("reason") or "")
+        if state == "main_window_in_tray" or reason == "wechat_window_in_tray":
+            return {
+                "ok": False,
+                "detail": "wechat_window_in_tray",
+                "scheme": scheme or "wechat_window_in_tray",
+                "message": f"{module_name}启动前自检未通过：已检测到微信正在运行，但主窗口收在托盘里。请手动点开微信主窗口，确认聊天页面正常显示后再启动。",
+            }
         if state == "main_window_geometry_invalid" and reason == "window_offscreen_or_minimized":
             return {
                 "ok": False,
@@ -87,7 +94,7 @@ def rpa_failure_detail_payload(capability: dict[str, Any]) -> dict[str, Any]:
     if primary:
         state = str(primary.get("state") or "")
         reason = str(primary.get("reason") or "")
-        if state in {"main_window_geometry_invalid", "blank_render_detected", "login_window_detected"} or reason:
+        if state in {"main_window_in_tray", "main_window_geometry_invalid", "blank_render_detected", "login_window_detected"} or reason:
             return primary
     return capability
 

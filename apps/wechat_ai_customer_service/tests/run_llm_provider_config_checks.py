@@ -6,6 +6,7 @@ import json
 import os
 import sys
 import tempfile
+import time
 from pathlib import Path
 from typing import Any
 
@@ -74,11 +75,16 @@ def run_checks() -> dict[str, Any]:
             )
             if "openai.invalid" in str(request.full_url):
                 raise TimeoutError("simulated primary timeout")
-            if str(request.full_url).endswith("/models"):
+            request_url = str(request.full_url)
+            if request_url.endswith("/models"):
                 if "x-api-key" in headers:
                     return FakeResponse({"data": [{"id": "kimi-for-coding"}]})
+                if "aiself.vip" in request_url or "deepseek" in request_url:
+                    return FakeResponse(
+                        {"data": [{"id": "deepseek-v4-flash"}, {"id": "deepseek-v4-pro"}, {"id": "gpt-5.4"}]}
+                    )
                 return FakeResponse({"data": [{"id": "gpt-4o-mini"}, {"id": "gpt-4.1"}]})
-            if str(request.full_url).endswith("/messages"):
+            if request_url.endswith("/messages"):
                 return FakeResponse({"content": [{"type": "text", "text": "OK"}]})
             return FakeResponse()
 
@@ -86,15 +92,18 @@ def run_checks() -> dict[str, Any]:
         try:
             check_legacy_deepseek_defaults()
             check_openai_compatible_roundtrip_and_probe(calls)
+            check_deepseek_gateway_roundtrip_and_probe(calls)
             check_fallback_roundtrip_and_anthropic_probe(calls)
+            check_kimi_primary_deepseek_flash_fallback_payload_and_failover(calls)
             check_model_unavailable_primary_is_failoverable()
             check_stage_can_disallow_fallback(calls)
             check_failover_preserves_actual_fallback_route(calls)
+            check_wall_timeout_primary_activates_fallback()
             check_llm_config_permissions_allow_all_authenticated_users()
         finally:
             llm_config_module.urllib.request.urlopen = old_urlopen
             llm_config_module._LLM_CONFIG_PATH = old_path
-    return {"ok": True, "checks": 7}
+    return {"ok": True, "checks": 10}
 
 
 def check_legacy_deepseek_defaults() -> None:
@@ -167,6 +176,66 @@ def check_openai_compatible_roundtrip_and_probe(calls: list[dict[str, Any]]) -> 
     assert_equal(calls[-1]["body"]["reasoning_effort"], "high", "pro probe should send pro reasoning effort")
 
 
+def check_deepseek_gateway_roundtrip_and_probe(calls: list[dict[str, Any]]) -> None:
+    client = TestClient(create_app())
+    response = client.put(
+        "/api/system/llm-config",
+        json={
+            "provider": "deepseek",
+            "base_url": "https://aiself.vip/v1/chat/completions",
+            "flash_model": "deepseek-v4-flash",
+            "pro_model": "deepseek-v4-pro",
+            "flash_reasoning_effort": "",
+            "pro_reasoning_effort": "",
+            "allow_insecure_tls": False,
+            "api_key": "sk-deepseek-gateway",
+        },
+    )
+    assert_equal(response.status_code, 200, "DeepSeek gateway save status")
+    saved = response.json()
+    assert_true(saved.get("ok"), "DeepSeek gateway save should succeed")
+    assert_equal(saved.get("provider"), "deepseek", "DeepSeek provider should be saved")
+    assert_equal(saved.get("base_url"), "https://aiself.vip/v1", "DeepSeek gateway base URL should be normalized")
+    assert_equal(saved.get("flash_model"), "deepseek-v4-flash", "DeepSeek flash model should roundtrip")
+    assert_equal(saved.get("pro_model"), "deepseek-v4-pro", "DeepSeek pro model should roundtrip")
+    assert_equal(
+        saved.get("available_models"),
+        ["deepseek-v4-flash", "deepseek-v4-pro", "gpt-5.4"],
+        "DeepSeek gateway live model options should be exposed",
+    )
+    assert_true(saved.get("api_key_configured"), "DeepSeek API key should be recorded as configured")
+    assert_true("sk-deepseek-gateway" not in json.dumps(saved), "DeepSeek save payload must not leak raw API key")
+
+    assert_equal(llm_config_module.active_llm_provider(), "deepseek", "active provider should switch to DeepSeek")
+    assert_equal(llm_config_module.resolve_deepseek_base_url(), "https://aiself.vip/v1", "legacy DeepSeek base URL should map to gateway")
+    assert_equal(
+        llm_config_module.resolve_deepseek_tier_model(tier="flash"),
+        "deepseek-v4-flash",
+        "legacy DeepSeek flash model should map to configured flash route",
+    )
+    assert_equal(
+        llm_config_module.resolve_deepseek_tier_model(tier="pro"),
+        "deepseek-v4-pro",
+        "legacy DeepSeek pro model should map to configured pro route",
+    )
+
+    probe = client.post("/api/system/llm-config/test", json={})
+    assert_equal(probe.status_code, 200, "DeepSeek flash probe status")
+    payload = probe.json()
+    assert_true(payload.get("ok"), "DeepSeek flash probe should succeed through fake urlopen")
+    assert_equal(payload.get("provider"), "deepseek", "DeepSeek flash probe should use active provider")
+    assert_equal(calls[-1]["url"], "https://aiself.vip/v1/chat/completions", "DeepSeek flash probe should call gateway chat completions")
+    assert_equal(calls[-1]["body"]["model"], "deepseek-v4-flash", "DeepSeek flash probe should use flash model")
+    assert_equal(calls[-1]["headers"].get("authorization"), "Bearer sk-deepseek-gateway", "DeepSeek flash probe should send bearer key")
+
+    pro_probe = client.post("/api/system/llm-config/test", json={"route": "pro"})
+    assert_equal(pro_probe.status_code, 200, "DeepSeek pro probe status")
+    pro_payload = pro_probe.json()
+    assert_true(pro_payload.get("ok"), "DeepSeek pro probe should succeed through fake urlopen")
+    assert_equal(calls[-1]["url"], "https://aiself.vip/v1/chat/completions", "DeepSeek pro probe should call gateway chat completions")
+    assert_equal(calls[-1]["body"]["model"], "deepseek-v4-pro", "DeepSeek pro probe should use pro model")
+
+
 def check_fallback_roundtrip_and_anthropic_probe(calls: list[dict[str, Any]]) -> None:
     client = TestClient(create_app())
     response = client.put(
@@ -200,6 +269,65 @@ def check_fallback_roundtrip_and_anthropic_probe(calls: list[dict[str, Any]]) ->
     assert_equal(calls[-1]["body"]["model"], "kimi-for-coding", "fallback probe should use fallback flash model")
     assert_equal(calls[-1]["headers"].get("x-api-key"), "sk-fallback-kimi", "fallback probe should send anthropic API key header")
     assert_equal(calls[-1]["headers"].get("anthropic-version"), "2023-06-01", "fallback probe should send anthropic version header")
+
+
+def check_kimi_primary_deepseek_flash_fallback_payload_and_failover(calls: list[dict[str, Any]]) -> None:
+    client = TestClient(create_app())
+    response = client.put(
+        "/api/system/llm-config",
+        json={
+            "provider": "anthropic",
+            "base_url": "https://aiself.vip/v1/messages",
+            "flash_model": "kimi-for-coding",
+            "pro_model": "kimi-for-coding",
+            "api_key": "sk-primary-kimi",
+            "fallback_enabled": True,
+            "fallback_provider": "deepseek",
+            "fallback_base_url": "https://aiself.vip/v1/chat/completions",
+            "fallback_flash_model": "deepseek-v4-flash",
+            "fallback_pro_model": "deepseek-v4-flash",
+            "fallback_api_key": "sk-fallback-deepseek",
+        },
+    )
+    assert_equal(response.status_code, 200, "Kimi primary / DeepSeek fallback save status")
+    saved = response.json()
+    fallback = saved.get("fallback") if isinstance(saved.get("fallback"), dict) else {}
+    assert_equal(saved.get("provider"), "anthropic", "primary provider should be Kimi-compatible Anthropic")
+    assert_equal(saved.get("flash_model"), "kimi-for-coding", "primary flash model should be Kimi")
+    assert_equal(saved.get("adapter_profile"), "kimi_anthropic_messages", "primary adapter should identify Kimi")
+    assert_equal(fallback.get("provider"), "deepseek", "fallback provider should be DeepSeek")
+    assert_equal(fallback.get("flash_model"), "deepseek-v4-flash", "fallback flash model should be DeepSeek v4 Flash")
+    assert_equal(fallback.get("pro_model"), "deepseek-v4-flash", "fallback pro model should also be DeepSeek v4 Flash")
+    assert_equal(fallback.get("adapter_profile"), "deepseek_v4_flash_fallback", "fallback adapter should identify DeepSeek Flash")
+    assert_true("sk-primary-kimi" not in json.dumps(saved), "primary raw key must not leak")
+    assert_true("sk-fallback-deepseek" not in json.dumps(saved), "fallback raw key must not leak")
+
+    before = len(calls)
+    result = llm_config_module.call_llm_request_with_failover(
+        provider="openai",
+        api_key="sk-primary",
+        base_url="https://openai.invalid/v1",
+        model="gpt-5.4",
+        messages=[{"role": "user", "content": "ping"}],
+        timeout=1,
+        max_tokens=8,
+        fallback_timeout=30,
+        config={
+            "LLM_FALLBACK_ENABLED": "1",
+            "LLM_FALLBACK_PROVIDER": "deepseek",
+            "LLM_FALLBACK_BASE_URL": "https://aiself.vip/v1",
+            "LLM_FALLBACK_FLASH_MODEL": "deepseek-v4-flash",
+            "LLM_FALLBACK_PRO_MODEL": "deepseek-v4-flash",
+            "LLM_FALLBACK_API_KEY": "sk-fallback-deepseek",
+        },
+    )
+    assert_true(result.get("ok"), "DeepSeek Flash fallback should succeed through fake urlopen")
+    assert_equal(result.get("provider"), "deepseek", "fallback result should report DeepSeek provider")
+    assert_equal(result.get("model"), "deepseek-v4-flash", "fallback result should report DeepSeek Flash model")
+    assert_true(len(calls) >= before + 2, "failover should call primary and fallback")
+    assert_equal(calls[-1]["url"], "https://aiself.vip/v1/chat/completions", "DeepSeek fallback should call chat completions")
+    assert_equal(calls[-1]["body"]["model"], "deepseek-v4-flash", "DeepSeek fallback request should use flash model")
+    assert_equal(calls[-1]["headers"].get("authorization"), "Bearer sk-fallback-deepseek", "DeepSeek fallback should send bearer key")
 
 
 def check_model_unavailable_primary_is_failoverable() -> None:
@@ -279,6 +407,57 @@ def check_failover_preserves_actual_fallback_route(calls: list[dict[str, Any]]) 
         "fallback should use independent fallback timeout",
     )
     assert_equal(calls[-1]["url"], "https://aiself.vip/v1/messages", "fallback route should call anthropic messages")
+
+
+def check_wall_timeout_primary_activates_fallback() -> None:
+    old_urlopen = llm_config_module.urllib.request.urlopen
+    calls: list[dict[str, Any]] = []
+
+    def fake_urlopen(request: Any, timeout: int = 0, **kwargs: Any) -> FakeResponse:
+        headers = {str(key).lower(): value for key, value in request.header_items()}
+        calls.append(
+            {
+                "url": request.full_url,
+                "headers": headers,
+                "body": json.loads(request.data.decode("utf-8")) if request.data else None,
+                "timeout": timeout,
+                "kwargs": kwargs,
+            }
+        )
+        if "slow-primary.invalid" in str(request.full_url):
+            time.sleep(2.0)
+            return FakeResponse()
+        return FakeResponse()
+
+    llm_config_module.urllib.request.urlopen = fake_urlopen
+    started = time.time()
+    try:
+        result = llm_config_module.call_llm_request_with_failover(
+            provider="openai",
+            api_key="sk-primary",
+            base_url="https://slow-primary.invalid/v1",
+            model="gpt-5.4",
+            messages=[{"role": "user", "content": "ping"}],
+            timeout=30,
+            wall_timeout=0.2,
+            max_tokens=8,
+            fallback_timeout=30,
+            fallback_wall_timeout=1,
+            config={
+                "LLM_FALLBACK_ENABLED": "1",
+                "LLM_FALLBACK_PROVIDER": "deepseek",
+                "LLM_FALLBACK_BASE_URL": "https://aiself.vip/v1",
+                "LLM_FALLBACK_FLASH_MODEL": "deepseek-v4-flash",
+                "LLM_FALLBACK_API_KEY": "sk-fallback-deepseek",
+            },
+        )
+    finally:
+        llm_config_module.urllib.request.urlopen = old_urlopen
+    elapsed = time.time() - started
+    assert_true(result.get("ok"), f"fallback should recover wall-timeout primary: {result}")
+    assert_equal(result.get("provider"), "deepseek", "fallback result should report DeepSeek after wall timeout")
+    assert_true(elapsed < 1.5, f"wall timeout should not wait for slow primary to finish, elapsed={elapsed:.3f}")
+    assert_true(len(calls) >= 2, f"primary and fallback calls should both be attempted: {calls}")
 
 
 def check_llm_config_permissions_allow_all_authenticated_users() -> None:

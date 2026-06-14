@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import ssl
+import threading
 import urllib.error
 import urllib.request
 from collections.abc import Callable
@@ -346,12 +347,34 @@ def llm_provider_preset(provider: Any) -> dict[str, Any]:
     return LLM_PROVIDER_PRESETS.get(provider_id, LLM_PROVIDER_PRESETS[DEFAULT_LLM_PROVIDER])
 
 
+def llm_route_display_label(*, provider: Any, model: Any = "", request_style: Any = "") -> str:
+    """Return an operator-facing route label that reflects gateway/model reality."""
+
+    provider_id = normalize_llm_provider(provider)
+    preset_label = str(llm_provider_preset(provider_id).get("label") or provider_id)
+    model_text = str(model or "").strip()
+    style_text = str(request_style or llm_provider_request_style(provider_id) or "").strip()
+    lower = f"{provider_id} {model_text} {style_text}".lower()
+    if "kimi" in lower or "moonshot" in lower:
+        return "Kimi (Anthropic-compatible)" if style_text == "anthropic_messages" else "Kimi"
+    if provider_id == "anthropic":
+        return "Kimi / Anthropic-compatible"
+    if provider_id == "deepseek" or model_text.lower().startswith("deepseek"):
+        return "DeepSeek"
+    return preset_label
+
+
 def explicit_model_matches_provider(provider: Any, model: Any) -> bool:
     """Guard against stale provider-scoped model names after provider switches."""
     provider_id = normalize_llm_provider(provider)
-    if provider_id in {"openai_compatible", "anthropic"}:
+    if provider_id == "openai_compatible":
         return True
     detected = detect_provider_from_model_name(model)
+    if provider_id == "anthropic":
+        # Anthropic-compatible routes may serve Claude or Kimi/Moonshot-style
+        # models, but should not inherit stale OpenAI/DeepSeek/Qwen/etc. model
+        # names after the operator switches the global route.
+        return not detected or detected == "moonshot"
     return not detected or detected == provider_id
 
 
@@ -821,6 +844,7 @@ def call_llm_request_once(
             return {
                 "ok": True,
                 "provider": provider_id,
+                "provider_label": llm_route_display_label(provider=provider_id, model=model, request_style=request_style),
                 "model": model,
                 "base_url": normalize_llm_base_url(base_url),
                 "status": int(getattr(response, "status", 200) or 200),
@@ -833,6 +857,7 @@ def call_llm_request_once(
         return {
             "ok": False,
             "provider": provider_id,
+            "provider_label": llm_route_display_label(provider=provider_id, model=model, request_style=request_style),
             "model": model,
             "base_url": normalize_llm_base_url(base_url),
             "status": int(getattr(exc, "code", 0) or 0),
@@ -843,12 +868,45 @@ def call_llm_request_once(
         return {
             "ok": False,
             "provider": provider_id,
+            "provider_label": llm_route_display_label(provider=provider_id, model=model, request_style=request_style),
             "model": model,
             "base_url": normalize_llm_base_url(base_url),
             "status": 0,
             "error": repr(exc),
             "request_style": request_style,
         }
+
+
+def call_llm_request_once_with_wall_timeout(
+    *,
+    wall_timeout: int | float | None = None,
+    **kwargs: Any,
+) -> dict[str, Any]:
+    if wall_timeout is None or float(wall_timeout) <= 0:
+        return call_llm_request_once(**kwargs)
+    result_holder: dict[str, Any] = {}
+    finished = threading.Event()
+
+    def worker() -> None:
+        try:
+            result_holder["result"] = call_llm_request_once(**kwargs)
+        except Exception as exc:  # noqa: BLE001 - convert late worker errors to diagnostics
+            result_holder["result"] = {"ok": False, "status": 0, "error": repr(exc)}
+        finally:
+            finished.set()
+
+    thread = threading.Thread(target=worker, name="llm-wall-timeout", daemon=True)
+    thread.start()
+    if finished.wait(max(1, float(wall_timeout))):
+        result = result_holder.get("result")
+        return result if isinstance(result, dict) else {"ok": False, "status": 0, "error": "llm_wall_timeout_missing_result"}
+    return {
+        "ok": False,
+        "status": 0,
+        "error": f"llm_wall_timeout_after_{max(1, float(wall_timeout)):.1f}s",
+        "wall_timeout": True,
+        "wall_timeout_seconds": max(1, float(wall_timeout)),
+    }
 
 
 def call_llm_request_with_failover(
@@ -867,9 +925,11 @@ def call_llm_request_with_failover(
     explicit_reasoning_effort: Any | None = None,
     allow_insecure_tls: Any | None = None,
     allow_fallback: bool = True,
+    wall_timeout: int | float | None = None,
+    fallback_wall_timeout: int | float | None = None,
     config: dict[str, str] | None = None,
 ) -> dict[str, Any]:
-    primary = call_llm_request_once(
+    primary = call_llm_request_once_with_wall_timeout(
         provider=provider,
         api_key=api_key,
         base_url=base_url,
@@ -882,6 +942,7 @@ def call_llm_request_with_failover(
         json_mode=json_mode,
         explicit_reasoning_effort=explicit_reasoning_effort,
         allow_insecure_tls=allow_insecure_tls,
+        wall_timeout=wall_timeout,
     )
     if primary.get("ok"):
         primary["failover"] = {"attempted": False, "activated": False, "reason": "primary_ok"}
@@ -911,7 +972,7 @@ def call_llm_request_with_failover(
     ):
         primary["failover"] = {"attempted": False, "activated": False, "reason": "fallback_same_as_primary"}
         return primary
-    fallback_result = call_llm_request_once(
+    fallback_result = call_llm_request_once_with_wall_timeout(
         provider=fallback_provider,
         api_key=fallback_api_key,
         base_url=fallback_base_url,
@@ -928,6 +989,7 @@ def call_llm_request_with_failover(
             else fallback.get("flash_reasoning_effort")
         ),
         allow_insecure_tls=fallback.get("allow_insecure_tls"),
+        wall_timeout=fallback_wall_timeout if fallback_wall_timeout is not None else fallback_timeout,
     )
     if fallback_result.get("ok"):
         fallback_result["failover"] = {
@@ -935,9 +997,19 @@ def call_llm_request_with_failover(
             "activated": True,
             "reason": "fallback_success",
             "primary_provider": normalize_llm_provider(provider),
+            "primary_provider_label": str(primary.get("provider_label") or llm_route_display_label(
+                provider=provider,
+                model=primary.get("model") or model,
+                request_style=primary.get("request_style"),
+            )),
             "primary_status": primary.get("status", 0),
             "primary_error": str(primary.get("error") or ""),
             "fallback_provider": fallback_provider,
+            "fallback_provider_label": str(fallback_result.get("provider_label") or llm_route_display_label(
+                provider=fallback_provider,
+                model=fallback_result.get("model") or fallback_model,
+                request_style=fallback_result.get("request_style"),
+            )),
             "fallback_timeout_seconds": max(1, fallback_timeout if fallback_timeout is not None else timeout),
         }
         return fallback_result
@@ -946,9 +1018,19 @@ def call_llm_request_with_failover(
         "activated": False,
         "reason": "fallback_failed",
         "primary_provider": normalize_llm_provider(provider),
+        "primary_provider_label": str(primary.get("provider_label") or llm_route_display_label(
+            provider=provider,
+            model=primary.get("model") or model,
+            request_style=primary.get("request_style"),
+        )),
         "primary_status": primary.get("status", 0),
         "primary_error": str(primary.get("error") or ""),
         "fallback_provider": fallback_provider,
+        "fallback_provider_label": str(fallback_result.get("provider_label") or llm_route_display_label(
+            provider=fallback_provider,
+            model=fallback_result.get("model") or fallback_model,
+            request_style=fallback_result.get("request_style"),
+        )),
         "fallback_timeout_seconds": max(1, fallback_timeout if fallback_timeout is not None else timeout),
         "fallback_status": fallback_result.get("status", 0),
         "fallback_error": str(fallback_result.get("error") or ""),

@@ -58,6 +58,15 @@
 8. [`08_GUARD_AUTHORITY_CORRECTION_V2.md`](08_GUARD_AUTHORITY_CORRECTION_V2.md)
    - Guard/质量门越权的 V2 架构纠偏合同，规定客户可见回复所有权、Guard 分级 verdict、硬边界白名单和验收审计要求。
 
+9. [`09_BRAIN_NO_VISIBLE_REPLY_CLASSIFICATION.md`](09_BRAIN_NO_VISIBLE_REPLY_CLASSIFICATION.md)
+   - Brain 空回复 / 无客户可见回复的分类审计、结构修复、同 capture 重试和防吞消息合同。
+
+10. [`10_LLM_PROVIDER_ADAPTER_AND_FALLBACK_20260611.md`](10_LLM_PROVIDER_ADAPTER_AND_FALLBACK_20260611.md)
+   - Kimi 主链路输出适配、DeepSeek v4 Flash 备用链路、前端主备配置展示与测试验收方案。
+
+11. [`../canonical_input_identity_design_20260612.md`](../canonical_input_identity_design_20260612.md)
+   - OCR/RPA 客户输入业务主键 `canonical_input_id`、可见气泡主键 `canonical_visual_id`、session 账本与 reply envelope 绑定规则。
+
 ## 和现有文档的关系
 
 本组文档继承以下已确认原则：

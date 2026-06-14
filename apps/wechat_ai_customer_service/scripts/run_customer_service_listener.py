@@ -113,6 +113,10 @@ RPA_HUMANIZED_SEND_DEFAULTS = {
     "send_pre_delay_max_ms": 1300,
     "send_post_input_delay_min_ms": 120,
     "send_post_input_delay_max_ms": 460,
+    "send_trigger_delay_min_ms": 420,
+    "send_trigger_delay_max_ms": 1350,
+    "send_after_trigger_delay_min_ms": 220,
+    "send_after_trigger_delay_max_ms": 760,
     "adaptive_speed_enabled": True,
     "fast_send_confirmation_enabled": True,
     "send_trigger_mode": "enter_only",
@@ -595,6 +599,26 @@ def load_rpa_humanized_send_settings(config_path: Path) -> dict[str, Any]:
     )
     if settings["send_post_input_delay_max_ms"] < settings["send_post_input_delay_min_ms"]:
         settings["send_post_input_delay_max_ms"] = settings["send_post_input_delay_min_ms"]
+    settings["send_trigger_delay_min_ms"] = non_negative_int(
+        os.getenv("WECHAT_WIN32_OCR_HUMANIZED_SEND_TRIGGER_DELAY_MIN_MS"),
+        int(settings.get("send_trigger_delay_min_ms") or RPA_HUMANIZED_SEND_DEFAULTS["send_trigger_delay_min_ms"]),
+    )
+    settings["send_trigger_delay_max_ms"] = non_negative_int(
+        os.getenv("WECHAT_WIN32_OCR_HUMANIZED_SEND_TRIGGER_DELAY_MAX_MS"),
+        int(settings.get("send_trigger_delay_max_ms") or RPA_HUMANIZED_SEND_DEFAULTS["send_trigger_delay_max_ms"]),
+    )
+    if settings["send_trigger_delay_max_ms"] < settings["send_trigger_delay_min_ms"]:
+        settings["send_trigger_delay_max_ms"] = settings["send_trigger_delay_min_ms"]
+    settings["send_after_trigger_delay_min_ms"] = non_negative_int(
+        os.getenv("WECHAT_WIN32_OCR_HUMANIZED_SEND_AFTER_TRIGGER_DELAY_MIN_MS"),
+        int(settings.get("send_after_trigger_delay_min_ms") or RPA_HUMANIZED_SEND_DEFAULTS["send_after_trigger_delay_min_ms"]),
+    )
+    settings["send_after_trigger_delay_max_ms"] = non_negative_int(
+        os.getenv("WECHAT_WIN32_OCR_HUMANIZED_SEND_AFTER_TRIGGER_DELAY_MAX_MS"),
+        int(settings.get("send_after_trigger_delay_max_ms") or RPA_HUMANIZED_SEND_DEFAULTS["send_after_trigger_delay_max_ms"]),
+    )
+    if settings["send_after_trigger_delay_max_ms"] < settings["send_after_trigger_delay_min_ms"]:
+        settings["send_after_trigger_delay_max_ms"] = settings["send_after_trigger_delay_min_ms"]
     settings["adaptive_speed_enabled"] = env_bool(
         "WECHAT_WIN32_OCR_HUMANIZED_ADAPTIVE_SPEED_ENABLED",
         default=bool(settings.get("adaptive_speed_enabled", RPA_HUMANIZED_SEND_DEFAULTS["adaptive_speed_enabled"])),
@@ -709,6 +733,22 @@ def normalize_rpa_humanized_send_settings(settings: dict[str, Any] | None) -> di
             source.get("send_post_input_delay_max_ms"),
             RPA_HUMANIZED_SEND_DEFAULTS["send_post_input_delay_max_ms"],
         ),
+        "send_trigger_delay_min_ms": non_negative_int(
+            source.get("send_trigger_delay_min_ms"),
+            RPA_HUMANIZED_SEND_DEFAULTS["send_trigger_delay_min_ms"],
+        ),
+        "send_trigger_delay_max_ms": non_negative_int(
+            source.get("send_trigger_delay_max_ms"),
+            RPA_HUMANIZED_SEND_DEFAULTS["send_trigger_delay_max_ms"],
+        ),
+        "send_after_trigger_delay_min_ms": non_negative_int(
+            source.get("send_after_trigger_delay_min_ms"),
+            RPA_HUMANIZED_SEND_DEFAULTS["send_after_trigger_delay_min_ms"],
+        ),
+        "send_after_trigger_delay_max_ms": non_negative_int(
+            source.get("send_after_trigger_delay_max_ms"),
+            RPA_HUMANIZED_SEND_DEFAULTS["send_after_trigger_delay_max_ms"],
+        ),
         "adaptive_speed_enabled": bool(
             source.get("adaptive_speed_enabled", RPA_HUMANIZED_SEND_DEFAULTS["adaptive_speed_enabled"])
         ),
@@ -744,6 +784,10 @@ def normalize_rpa_humanized_send_settings(settings: dict[str, Any] | None) -> di
         normalized["send_pre_delay_max_ms"] = normalized["send_pre_delay_min_ms"]
     if normalized["send_post_input_delay_max_ms"] < normalized["send_post_input_delay_min_ms"]:
         normalized["send_post_input_delay_max_ms"] = normalized["send_post_input_delay_min_ms"]
+    if normalized["send_trigger_delay_max_ms"] < normalized["send_trigger_delay_min_ms"]:
+        normalized["send_trigger_delay_max_ms"] = normalized["send_trigger_delay_min_ms"]
+    if normalized["send_after_trigger_delay_max_ms"] < normalized["send_after_trigger_delay_min_ms"]:
+        normalized["send_after_trigger_delay_max_ms"] = normalized["send_after_trigger_delay_min_ms"]
     return normalized
 
 
@@ -765,6 +809,10 @@ def apply_rpa_humanized_send_env(env: dict[str, str], settings: dict[str, Any]) 
         "WECHAT_WIN32_OCR_HUMANIZED_SEND_PRE_DELAY_MAX_MS": "send_pre_delay_max_ms",
         "WECHAT_WIN32_OCR_HUMANIZED_SEND_POST_INPUT_DELAY_MIN_MS": "send_post_input_delay_min_ms",
         "WECHAT_WIN32_OCR_HUMANIZED_SEND_POST_INPUT_DELAY_MAX_MS": "send_post_input_delay_max_ms",
+        "WECHAT_WIN32_OCR_HUMANIZED_SEND_TRIGGER_DELAY_MIN_MS": "send_trigger_delay_min_ms",
+        "WECHAT_WIN32_OCR_HUMANIZED_SEND_TRIGGER_DELAY_MAX_MS": "send_trigger_delay_max_ms",
+        "WECHAT_WIN32_OCR_HUMANIZED_SEND_AFTER_TRIGGER_DELAY_MIN_MS": "send_after_trigger_delay_min_ms",
+        "WECHAT_WIN32_OCR_HUMANIZED_SEND_AFTER_TRIGGER_DELAY_MAX_MS": "send_after_trigger_delay_max_ms",
         "WECHAT_WIN32_OCR_HUMANIZED_ADAPTIVE_SPEED_ENABLED": "adaptive_speed_enabled",
         "WECHAT_WIN32_OCR_FAST_SEND_CONFIRMATION": "fast_send_confirmation_enabled",
         "WECHAT_WIN32_OCR_SEND_TRIGGER_MODE": "send_trigger_mode",
@@ -3087,10 +3135,12 @@ def estimate_managed_once_timeout_seconds(payload: dict[str, Any]) -> float:
         micro_every = positive_int(send_settings.get("typing_micro_pause_every_chars"), 18, minimum=1)
         pre_delay_ms = _positive_float(send_settings.get("send_pre_delay_max_ms"), 1300.0, minimum=0.0)
         post_input_delay_ms = _positive_float(send_settings.get("send_post_input_delay_max_ms"), 460.0, minimum=0.0)
+        trigger_delay_ms = _positive_float(send_settings.get("send_trigger_delay_max_ms"), 1350.0, minimum=0.0)
+        after_trigger_delay_ms = _positive_float(send_settings.get("send_after_trigger_delay_max_ms"), 760.0, minimum=0.0)
         typo_budget = positive_int(send_settings.get("typing_typo_max"), 0, minimum=0)
         estimated_typing = bounded_chars * char_delay_ms / 1000.0
         estimated_typing += math.ceil(bounded_chars / micro_every) * micro_pause_ms / 1000.0
-        estimated_typing += (pre_delay_ms + post_input_delay_ms) / 1000.0
+        estimated_typing += (pre_delay_ms + post_input_delay_ms + trigger_delay_ms + after_trigger_delay_ms) / 1000.0
         estimated_typing += typo_budget * 1.6
         # Humanized RPA can spend most of a round inside SendInput typing.
         # Keep the watchdog above the configured worst-case typing path instead

@@ -68,7 +68,7 @@ def run_matrix(*, token: str, case_limit: int = 0, case_ids: str = "", delay_sec
     config = build_live_test_config(token)
     config.setdefault("customer_service_brain", {})
     config["customer_service_brain"]["timeout_seconds"] = 35
-    config["customer_service_brain"]["max_tokens"] = 900
+    config["customer_service_brain"].pop("max_tokens", None)
     config["customer_service_brain"]["quality_repair_timeout_seconds"] = 12
     root = ARTIFACT_ROOT / token
     root.mkdir(parents=True, exist_ok=True)
@@ -77,8 +77,6 @@ def run_matrix(*, token: str, case_limit: int = 0, case_ids: str = "", delay_sec
     config.setdefault("operator_alert", {})["enabled"] = False
     config["operator_alert"]["alert_log_path"] = str(root / "operator_alerts.jsonl")
     rules = load_rules(resolve_path(config.get("rules_path")))
-    connector = DryRunConnector()
-    target = TargetConfig(name=FILE_TRANSFER_ASSISTANT, enabled=True, exact=True, allow_self_for_test=True, max_batch_messages=1)
     cases = select_cases(build_cases(token), case_ids)
     if case_limit > 0:
         cases = cases[:case_limit]
@@ -90,6 +88,15 @@ def run_matrix(*, token: str, case_limit: int = 0, case_ids: str = "", delay_sec
         state: dict[str, Any] = {"version": 1, "targets": {}}
         try:
             message = f"{case['message']} ({token}-{index})"
+            connector = DryRunConnector()
+            target = TargetConfig(
+                name=FILE_TRANSFER_ASSISTANT,
+                enabled=True,
+                exact=True,
+                allow_self_for_test=True,
+                max_batch_messages=1,
+                session_key=f"{token}:{case['id']}:{index}",
+            )
             connector.set_customer_message(f"{case['id']}_{index}", message)
             time.sleep(delay_seconds)
             event = process_target(
@@ -148,6 +155,7 @@ def build_cases(token: str) -> list[dict[str, Any]]:
             "id": "soft_small_talk_before_business",
             "message": "今天有点烦，先随便聊两句行吗？",
             "expect": "sent",
+            "allow_brief_reply": True,
             "must_include_any": ["可以", "没事", "聊", "缓", "在"],
             "must_not_include": ["预算", "SUV", "轿车"],
         },
@@ -171,6 +179,7 @@ def build_cases(token: str) -> list[dict[str, Any]]:
             "id": "unrelated_chat_soft_redirect",
             "message": "你觉得今天晚上吃火锅还是烤肉？",
             "expect": "sent",
+            "allow_brief_reply": True,
             "must_include_any": ["火锅", "烤肉", "看车", "车"],
             "must_not_include": ["我不知道", "无法回答"],
         },

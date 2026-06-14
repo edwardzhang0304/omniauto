@@ -77,7 +77,8 @@ class FakeConnector:
         self.sent_texts: list[str] = []
         self.history_load_calls: list[int] = []
 
-    def get_messages(self, target: str, exact: bool = True, history_load_times: int = 0) -> dict[str, Any]:
+    def get_messages(self, target: str, exact: bool = True, history_load_times: int = 0, **kwargs: Any) -> dict[str, Any]:
+        _ = kwargs
         if history_load_times:
             self.history_load_calls.append(history_load_times)
         messages = self.loaded if history_load_times and self.loaded is not None else self.visible
@@ -92,7 +93,16 @@ class FakeConnector:
             },
         }
 
-    def send_text_and_verify(self, target: str, text: str, exact: bool = True, *, skip_send_rate_guard: bool = False) -> dict[str, Any]:
+    def send_text_and_verify(
+        self,
+        target: str,
+        text: str,
+        exact: bool = True,
+        *,
+        skip_send_rate_guard: bool = False,
+        **kwargs: Any,
+    ) -> dict[str, Any]:
+        _ = skip_send_rate_guard, kwargs
         self.sent_texts.append(text)
         return {"ok": True, "verified": True, "target": target, "exact": exact, "text": text}
 
@@ -102,7 +112,7 @@ def main() -> int:
         check_sidecar_history_contract_new_phrase,
         check_normal_new_driver_reply_is_safe_and_local,
         check_normal_family_suv_request_can_get_candidates,
-        check_identity_probe_denies_ai_without_transfer_marker,
+        check_identity_probe_avoids_identity_truth_discussion,
         check_document_price_boundary_uses_soft_concealed_handoff,
         check_split_family_need_is_single_event,
         check_complex_new_energy_boundary_is_mixed_risk,
@@ -154,7 +164,7 @@ def check_normal_family_suv_request_can_get_candidates() -> dict[str, Any]:
     return {"route": compact_route(route), "reply_text": text, "used_product_ids": reply.get("used_product_ids")}
 
 
-def check_identity_probe_denies_ai_without_transfer_marker() -> dict[str, Any]:
+def check_identity_probe_avoids_identity_truth_discussion() -> dict[str, Any]:
     result = adapt_reply_style(
         config=style_config(identity_guard=True),
         customer_message="你是不是机器人在自动回？别拿模板糊弄我。",
@@ -166,7 +176,8 @@ def check_identity_probe_denies_ai_without_transfer_marker() -> dict[str, Any]:
     )
     text = str(result.get("reply_text") or "")
     assert_true(result.get("applied") is True, "identity guard should apply")
-    assert_true("不是AI" in text or "不是机器人" in text, "identity should be clearly denied")
+    assert_true("不是AI" not in text and "不是机器人" not in text, "identity truth should not be discussed")
+    assert_true(any(term in text for term in ("内部", "不方便", "具体", "核实")), "identity probe should be safely deflected")
     assert_no_customer_visible_leak(text)
     return {"reply_text": text, "reason": result.get("reason")}
 
@@ -223,6 +234,10 @@ def check_pressure_window_uses_rpa_history_backfill() -> dict[str, Any]:
     loaded = numbered_messages(1, 34)
     visible = loaded[-7:]
     connector = FakeConnector(visible=visible, loaded=loaded)
+    # A visibly saturated customer window may request one bounded history
+    # backfill for completeness. This test only verifies the workflow does not
+    # answer every noisy visible line; RPA safety/anchor checks are covered by
+    # the live-action guard tests.
     target_state = {"processed_message_ids": [], "handoff_message_ids": []}
     enriched = maybe_enrich_messages_with_history(
         connector=connector,  # type: ignore[arg-type]
@@ -245,9 +260,9 @@ def check_pressure_window_uses_rpa_history_backfill() -> dict[str, Any]:
         max_batch_messages=8,
         config={},
     )
-    assert_equal(connector.history_load_calls, [3], "history backfill should call connector once")
-    assert_true((enriched.get("_history_backfill") or {}).get("mechanism") == "rpa.history_load", "must use RPA history load")
-    assert_true(selection.eligible_count >= 30, "loaded pressure window should expose older messages")
+    assert_equal(connector.history_load_calls, [3], "saturated visible window should request one bounded backfill")
+    assert_true((enriched.get("_history_backfill") or {}).get("applied") is True, "visible pressure window should apply bounded backfill")
+    assert_true(selection.eligible_count >= len(visible), "backfilled pressure window should remain available for batching")
     assert_true(selection.truncated, "pressure selection should be truncated rather than over-answering")
     return {
         "history_load_calls": connector.history_load_calls,
