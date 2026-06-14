@@ -16,6 +16,10 @@ from apps.wechat_ai_customer_service.wechat_message_normalizer import (
     normalize_text_for_speaker_check,
     split_wechat_ocr_speaker_prefix,
 )
+from apps.wechat_ai_customer_service.message_identity import (
+    canonical_input_message_id,
+    canonical_visual_message_id,
+)
 
 
 OCR_RPA_ADAPTERS = {"win32_ocr", "wechat_win32_ocr", "rpa_ocr", "ocr_rpa"}
@@ -170,9 +174,47 @@ def build_message_envelope(
     if conversation_type == "group" and speaker_name and sender_role == "unknown":
         sender_role = "group_member"
 
+    identity_record = {
+        **dict(record),
+        "id": message_id,
+        "message_id": message_id,
+        "bubble_id": bubble_id,
+        "target_name": target_name,
+        "conversation_type": conversation_type,
+        "conversation_id": conversation_id,
+        "sender": sender or ("self" if sender_role == "self" else "unknown"),
+        "sender_role": sender_role,
+        "speaker_name": speaker_name,
+        "group_member_name": str(record.get("group_member_name") or speaker_name),
+        "content": clean_body,
+        "content_body": clean_body,
+        "bubble_rect": rect,
+        "source_adapter": source_adapter,
+        "captured_at": capture_time,
+        "time": record.get("time") or "",
+        "message_time": record.get("message_time") or "",
+        "pending_signal_id": record.get("pending_signal_id") or "",
+        "pending_since": record.get("pending_since") or "",
+        "last_detected_at": record.get("last_detected_at") or "",
+        "last_message_time": record.get("last_message_time") or "",
+        "screen_time_text": str(record.get("screen_time_text") or existing.get("screen_time_text") or screen_time_text or ""),
+    }
+    canonical_visual_id = canonical_visual_message_id(
+        identity_record,
+        target_name=target_name,
+        conversation_type=conversation_type,
+    )
+    canonical_input_id = canonical_input_message_id(
+        identity_record,
+        target_name=target_name,
+        conversation_type=conversation_type,
+    )
+
     envelope = {
         "schema_version": 1,
         "message_id": message_id,
+        "canonical_visual_id": canonical_visual_id,
+        "canonical_input_id": canonical_input_id,
         "bubble_id": bubble_id,
         "conversation_id": conversation_id,
         "target_name": target_name,
@@ -205,6 +247,8 @@ def apply_message_envelope_to_record(record: dict[str, Any], envelope: dict[str,
     content_body = str(envelope.get("content_body") or "").strip()
     next_record["id"] = str(next_record.get("id") or envelope.get("message_id") or "")
     next_record["message_id"] = str(next_record.get("message_id") or envelope.get("message_id") or "")
+    next_record["canonical_visual_id"] = str(envelope.get("canonical_visual_id") or next_record.get("canonical_visual_id") or "")
+    next_record["canonical_input_id"] = str(envelope.get("canonical_input_id") or next_record.get("canonical_input_id") or "")
     next_record["bubble_id"] = str(envelope.get("bubble_id") or "")
     next_record["content"] = content_body
     next_record["content_body"] = content_body
@@ -246,6 +290,8 @@ def recorder_view_from_message(message: dict[str, Any]) -> dict[str, Any]:
         "quoted_fragments": list(envelope.get("quoted_fragments") or []),
         "excluded_fragments": list(envelope.get("excluded_fragments") or []),
         "speaker_name": str(envelope.get("speaker_name") or ""),
+        "canonical_input_id": str(envelope.get("canonical_input_id") or ""),
+        "canonical_visual_id": str(envelope.get("canonical_visual_id") or ""),
         "bubble_id": str(envelope.get("bubble_id") or ""),
     }
 
@@ -259,6 +305,8 @@ def customer_service_view_from_message(message: dict[str, Any]) -> dict[str, Any
         "captured_at": str(envelope.get("captured_at") or ""),
         "quality_flags": list(envelope.get("quality_flags") or []),
         "message_id": str(envelope.get("message_id") or ""),
+        "canonical_input_id": str(envelope.get("canonical_input_id") or ""),
+        "canonical_visual_id": str(envelope.get("canonical_visual_id") or ""),
         "bubble_id": str(envelope.get("bubble_id") or ""),
     }
 

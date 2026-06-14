@@ -1173,11 +1173,13 @@ function renderLlmConfig() {
   const fallback = payload.fallback || {};
   if (summary) {
     summary.innerHTML = `
-      <div><span>主供应商</span><strong>${escapeHtml(payload.provider_label || primaryOption.label || primaryProvider)}</strong></div>
+      <div><span>主供应商</span><strong>${escapeHtml(payload.route_display_label || payload.provider_label || primaryOption.label || primaryProvider)}</strong></div>
       <div><span>主 Key</span><strong>${payload.api_key_configured ? "已配置" : "未配置"}</strong></div>
       <div><span>备选开关</span><strong>${fallback.enabled ? "已启用" : "未启用"}</strong></div>
-      <div><span>备选供应商</span><strong>${escapeHtml(fallback.provider_label || fallback.provider || "—")}</strong></div>
+      <div><span>备选供应商</span><strong>${escapeHtml(fallback.route_display_label || fallback.provider_label || fallback.provider || "—")}</strong></div>
       <div><span>备选 Key</span><strong>${fallback.api_key_configured ? "已配置" : "未配置"}</strong></div>
+      <div><span>主链路适配</span><strong>${escapeHtml(payload.adapter_label || payload.adapter_profile || "通用适配")}</strong></div>
+      <div><span>备选适配</span><strong>${escapeHtml(fallback.adapter_label || fallback.adapter_profile || "—")}</strong></div>
       <div><span>编辑权限</span><strong>${payload.editable ? "所有用户可编辑" : "当前会话只读"}</strong></div>
     `;
   }
@@ -1259,7 +1261,7 @@ async function testLlmConfig(route = "flash", target = "primary") {
     });
     if (payload.ok) {
       alert(
-        `连接成功\n链路: ${targetLabel}\n入口: ${routeLabel}\n供应商: ${escapeHtml(payload.provider_label || payload.provider || "—")}\n模型: ${escapeHtml(payload.model || "—")}\n思考强度: ${llmReasoningLabel(payload.reasoning_effort || "")}\n协议: ${escapeHtml(payload.request_style || "—")}\nBase URL: ${escapeHtml(payload.base_url || "—")}`,
+        `连接成功\n链路: ${targetLabel}\n入口: ${routeLabel}\n供应商: ${escapeHtml(payload.route_display_label || payload.provider_label || payload.provider || "—")}\n模型: ${escapeHtml(payload.model || "—")}\n思考强度: ${llmReasoningLabel(payload.reasoning_effort || "")}\n协议: ${escapeHtml(payload.request_style || "—")}\nBase URL: ${escapeHtml(payload.base_url || "—")}`,
       );
     } else {
       alert(`连接失败: ${payload.message || "未知错误"}`);
@@ -1288,20 +1290,42 @@ function updateLlmInfoPanel() {
   const fallbackProvider = fallback.providerSelect?.value || fallbackPayload.provider || "";
   const fallbackOption = providers.find((item) => item.id === fallbackProvider) || {};
 
-  setLlmInfoText("llm-info-provider", primaryOption.label || config.provider_label || primaryProvider || "—");
+  setLlmInfoText("llm-info-provider", config.route_display_label || primaryOption.label || config.provider_label || primaryProvider || "—");
   setLlmInfoText("llm-info-flash-model", primary.flashModelSelect?.value || primary.flashModelInput?.value || primaryOption.flash_model || "—");
   setLlmInfoText("llm-info-flash-effort", llmReasoningLabel(primary.flashReasoningInput?.value || primaryOption.flash_reasoning_effort || ""));
   setLlmInfoText("llm-info-pro-model", primary.proModelSelect?.value || primary.proModelInput?.value || primaryOption.pro_model || "—");
   setLlmInfoText("llm-info-pro-effort", llmReasoningLabel(primary.proReasoningInput?.value || primaryOption.pro_reasoning_effort || ""));
   setLlmInfoText("llm-info-base-url", primary.baseUrlInput?.value || primaryOption.base_url || "—");
   setLlmInfoText("llm-info-tls", primary.insecureTlsInput?.checked ? "允许自签名证书" : "标准证书校验");
+  setLlmInfoText("llm-info-adapter", routeAdapterText({
+    routePayload: config,
+    provider: primaryProvider,
+    model: primary.flashModelSelect?.value || primary.flashModelInput?.value || primaryOption.flash_model || "",
+    option: primaryOption,
+  }));
 
   setLlmInfoText("llm-info-fallback-enabled", fallback.enabledInput?.checked ? "已启用自动切换" : "未启用");
-  setLlmInfoText("llm-info-fallback-provider", fallbackOption.label || fallbackPayload.provider_label || fallbackProvider || "—");
+  setLlmInfoText("llm-info-fallback-provider", fallbackPayload.route_display_label || fallbackOption.label || fallbackPayload.provider_label || fallbackProvider || "—");
   setLlmInfoText("llm-info-fallback-flash-model", fallback.flashModelSelect?.value || fallback.flashModelInput?.value || fallbackOption.flash_model || "—");
   setLlmInfoText("llm-info-fallback-pro-model", fallback.proModelSelect?.value || fallback.proModelInput?.value || fallbackOption.pro_model || "—");
   setLlmInfoText("llm-info-fallback-base-url", fallback.baseUrlInput?.value || fallbackOption.base_url || "—");
   setLlmInfoText("llm-info-fallback-tls", fallback.insecureTlsInput?.checked ? "允许自签名证书" : "标准证书校验");
+  setLlmInfoText("llm-info-fallback-adapter", routeAdapterText({
+    routePayload: fallbackPayload,
+    provider: fallbackProvider,
+    model: fallback.flashModelSelect?.value || fallback.flashModelInput?.value || fallbackOption.flash_model || "",
+    option: fallbackOption,
+  }));
+}
+
+function routeAdapterText({routePayload, provider, model, option}) {
+  const label = routePayload?.adapter_label || routePayload?.adapter_profile || "";
+  const notes = Array.isArray(routePayload?.adapter_notes) ? routePayload.adapter_notes.filter(Boolean) : [];
+  if (label) return notes.length ? `${label}：${notes.slice(0, 2).join("；")}` : label;
+  const text = `${provider || ""} ${model || option?.flash_model || ""}`.toLowerCase();
+  if (text.includes("kimi")) return "Kimi 输出适配：JSON 代码块清洗 + 对象提取";
+  if (text.includes("deepseek")) return "DeepSeek 备用适配：OpenAI-compatible + 通用 JSON 清洗";
+  return "通用 JSON 适配";
 }
 
 function updateLlmRouteTestButtons(target = "primary") {

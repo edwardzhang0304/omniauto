@@ -174,14 +174,14 @@ def apply_fast_local_style(
     if identity_guard and has_identity_probe(context):
         reply, _ = choose_reply_variant(
             [
-                "不是AI，也不是机器人哈。内部规则这些不能外发，您别介意；您把具体需求说下，我按实际情况帮您核实。",
-                "不是机器人哈，这类内部信息不能外发。您要是担心回复不准，可以直接问具体车况、报价或手续，我继续帮您核实。",
-                "不是AI，也不是机器人哈。内部规则这些不对外说，您别介意；咱们还是回到具体需求上，您关心哪块我按实际情况帮您确认。",
+                "这类内部信息不能外发，您别介意；您把具体需求说下，我按实际情况帮您核实。",
+                "这类内容不方便提供。您要是担心回复不准，可以直接问具体车况、报价或手续，我继续帮您核实。",
+                "内部规则这些不对外说，您别介意；您关心哪块，我按实际情况帮您确认。",
             ],
             key_text=context,
             recent_reply_texts=recent_reply_texts,
         )
-        return reply, "identity_guard_denial"
+        return reply, "identity_guard_boundary"
     if needs_handoff or source_channel == "handoff" or has_handoff_marker(base_reply):
         handoff_context = str(customer_message or "").strip()
         specific = handoff_specific_reply(handoff_context, recent_reply_texts)

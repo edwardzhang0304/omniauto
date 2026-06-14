@@ -48,6 +48,7 @@ from customer_intent_assist import (
 from customer_service_loop import BOT_PREFIX, ReplyDecision, decide_reply, format_reply, load_rules
 from apps.wechat_ai_customer_service.cloud_gate import cloud_gate_status, cloud_required_enabled
 from apps.wechat_ai_customer_service.llm_config import (
+    configured_llm_provider,
     resolve_effective_llm_provider,
     resolve_llm_base_url,
     resolve_llm_tier_model,
@@ -56,6 +57,11 @@ from apps.wechat_ai_customer_service.platform_safety_rules import guard_term_set
 from apps.wechat_ai_customer_service.wechat_message_envelope import (
     apply_message_envelope_to_record,
     build_message_envelope,
+)
+from apps.wechat_ai_customer_service.message_identity import (
+    apply_canonical_identity_fields,
+    canonical_input_message_id,
+    occurrence_marker_for_message,
 )
 from apps.wechat_ai_customer_service.wechat_message_normalizer import normalize_wechat_message_record
 from final_visible_llm_polish import maybe_polish_customer_visible_reply
@@ -69,6 +75,7 @@ from customer_service_brain import (
 )
 from customer_service_conversation_strategy import (
     strategy_state_public_audit,
+    update_conversation_interaction_state_on_capture,
     update_conversation_strategy_state,
 )
 from product_knowledge import decide_product_knowledge_reply, load_product_knowledge
@@ -672,8 +679,9 @@ def process_target(
     allow_fallback_send: bool,
     mark_dry_run: bool,
 ) -> dict[str, Any]:
+    target_state_key = str(getattr(target, "session_key", "") or target.name)
     target_state = state.setdefault("targets", {}).setdefault(
-        target.name,
+        target_state_key,
         {
             "processed_message_ids": [],
             "processed_content_keys": [],
@@ -682,6 +690,9 @@ def process_target(
             "reply_timestamps": [],
         },
     )
+    if target_state_key != target.name:
+        target_state["_session_key"] = target_state_key
+        target_state["_display_name"] = target.name
     write_workflow_phase("target_get_messages_start", target=target.name, send=bool(send))
     payload = connector.get_messages(
         target.name,
@@ -795,9 +806,14 @@ def process_target(
     routing_batch = normalize_batch_content_for_reply_routing(batch)
     semantic_batch_plan = plan_message_batch_semantics(routing_batch, config)
     combined = str(semantic_batch_plan.get("combined_text") or "\n".join(str(item.get("content") or "") for item in batch))
-    update_conversation_preference_context(target_state, combined)
+    preference_context_update = update_conversation_preference_context(target_state, combined)
     strategy_state = update_conversation_strategy_state(target_state, combined)
-    message_ids = [str(item.get("id") or "") for item in batch]
+    message_ids = [reply_input_message_identity(item) for item in batch if reply_input_message_identity(item)]
+    interaction_state = update_conversation_interaction_state_on_capture(
+        target_state,
+        combined,
+        message_ids=message_ids,
+    )
     if send and should_defer_standalone_greeting(config, routing_batch, combined):
         mark_coalesced_messages(
             target_state,
@@ -821,6 +837,7 @@ def process_target(
                 "batch_selection": batch_selection_payload(selection),
                 "semantic_batch_plan": semantic_batch_plan,
                 "conversation_strategy_state": strategy_state_public_audit(strategy_state),
+                "conversation_interaction_state": interaction_state,
                 "reply_routing_normalization": batch_routing_normalization_payload(batch, routing_batch),
                 "dry_run": False,
             },
@@ -962,6 +979,8 @@ def process_target(
             "reply_routing_normalization": batch_routing_normalization_payload(batch, routing_batch),
             "history_backfill": payload.get("_history_backfill", {}),
             "product_knowledge": product_knowledge,
+            "conversation_context_update": dict(preference_context_update),
+            "conversation_context_update_source": "customer_preference_capture" if preference_context_update else "",
             "intent_result": intent_result.to_dict(),
             "intent_assist": skipped_intent_assist(config, "not_evaluated_yet"),
             "dry_run": not send,
@@ -1369,7 +1388,9 @@ def process_target(
         event["visible_reply_surface_cleanup"] = {"applied": True}
     context_update = update_conversation_context_from_reply_event(target_state, event)
     if context_update:
-        event["conversation_context_update"] = context_update
+        existing_context_update = event.get("conversation_context_update") if isinstance(event.get("conversation_context_update"), dict) else {}
+        event["conversation_context_update"] = {**existing_context_update, **context_update}
+        event["conversation_context_update_source"] = "customer_preference_capture+visible_reply_product_context" if existing_context_update else "visible_reply_product_context"
 
     brain_reply_adopted = bool(event.get("customer_service_brain_adopted"))
     style_channel = (
@@ -1883,8 +1904,9 @@ def process_target(
         event["reply_trace_id"] = reply_trace_id
         final_context_update = update_conversation_context_from_reply_event(target_state, event)
         if final_context_update:
-            event["conversation_context_update"] = final_context_update
-            event["conversation_context_update_source"] = "final_visible_reply"
+            existing_context_update = event.get("conversation_context_update") if isinstance(event.get("conversation_context_update"), dict) else {}
+            event["conversation_context_update"] = {**existing_context_update, **final_context_update}
+            event["conversation_context_update_source"] = "customer_preference_capture+final_visible_reply" if existing_context_update else "final_visible_reply"
         finalize_data_capture_state(target_state, data_capture)
         record = maybe_record_rag_experience(
             target=target,
@@ -2482,11 +2504,7 @@ def split_customer_visible_reply_for_multi_bubble(reply_text: str, config: dict[
     min_segment_chars = int(settings.get("min_segment_chars") or 18)
     max_segment_chars = int(settings.get("max_segment_chars") or 52)
 
-    units: list[str] = []
-    for match in re.finditer(r"[^。！？!?；;，,、\n]+[。！？!?；;，,、]?", clean_body):
-        unit = str(match.group(0) or "").strip()
-        if unit:
-            units.append(unit)
+    units = split_reply_body_into_sendable_units(clean_body)
     if not units:
         units = [clean_body]
 
@@ -2552,6 +2570,28 @@ def split_customer_visible_reply_for_multi_bubble(reply_text: str, config: dict[
     else:
         first = normalized_segments[0]
     return [first] + normalized_segments[1:]
+
+
+def split_reply_body_into_sendable_units(text: str) -> list[str]:
+    """Split reply body without creating comma-led dangling bubbles.
+
+    Multi-bubble sending should feel like a person sending several complete
+    messages.  A comma split can turn "秦PLUS可以纯电跑。凯美瑞是纯油，
+    不能纯电行驶。" into a standalone "不能纯电行驶。", which reads like
+    a contextless fragment. Prefer sentence-level punctuation; only fall back
+    to comma-like punctuation when there are no sentence boundaries at all.
+    """
+
+    clean = " ".join(str(text or "").split())
+    if not clean:
+        return []
+    strong_units = [str(match.group(0) or "").strip() for match in re.finditer(r"[^。！？!?；;\n]+[。！？!?；;]?", clean)]
+    strong_units = [item for item in strong_units if item]
+    complete_units = [item for item in strong_units if rpa_reply_content_char_count(item) > 0]
+    if len(complete_units) >= 2 or any(item.endswith(("。", "！", "？", "!", "?", "；", ";")) for item in complete_units):
+        return complete_units
+    comma_units = [str(match.group(0) or "").strip() for match in re.finditer(r"[^，,、\n]+[，,、]?", clean)]
+    return [item for item in comma_units if item]
 
 
 def send_reply_with_optional_multi_bubble(
@@ -2740,7 +2780,6 @@ TRANSIENT_SEND_RETRYABLE_STATES = {
     "send_geometry_blocked",
     "target_not_confirmed",
     "send_uia_unavailable",
-    "send_input_not_ready",
     "send_lock_timeout",
 }
 
@@ -2778,7 +2817,7 @@ def transient_send_retry_delay_seconds(
         return 0.0
     delay_min = float(int(settings.get("transient_retry_delay_min_ms") or 850)) / 1000.0
     delay_max = float(int(settings.get("transient_retry_delay_max_ms") or 1650)) / 1000.0
-    if state in {"send_lock_timeout", "send_input_not_ready"}:
+    if state == "send_lock_timeout":
         # Foreground/lock contention usually recovers quickly; use shorter
         # retry jitter to reduce customer-visible tail latency.
         delay_min = min(delay_min, 0.22)
@@ -3223,9 +3262,9 @@ def concealed_handoff_reply(*, combined: str = "", reason: str = "", recent_repl
     if any(term in context for term in INTERNAL_PROBE_TERMS):
         return choose_customer_visible_variant(
             [
-                "不是AI，也不是机器人哈。内部规则这些肯定不能外发，您别介意；咱们还是回到车源、车况或置换上，您关心哪块我继续帮您核实。",
-                "不是机器人哈，这类内部信息不能外发。您要是担心回复不准，可以直接问具体车况、价格或手续，我按实际情况给您确认。",
-                "不是AI，也不是自动回复哈。内部提示词这些不方便发，您别介意；咱们还是聊正事，您要看车或置换，我继续帮您把关键点核清楚。",
+                "内部规则这些肯定不能外发，您别介意；您关心车源、车况或置换哪块，我继续帮您核实。",
+                "这类内部信息不能外发。您要是担心回复不准，可以直接问具体车况、价格或手续，我按实际情况给您确认。",
+                "内部提示词这些不方便发，您别介意；您要看车或置换，我继续帮您把关键点核清楚。",
             ],
             context=context,
             recent_reply_texts=recent_reply_texts,
@@ -3327,7 +3366,10 @@ def is_identity_guard_denial_reply(text: str) -> bool:
     if not clean:
         return False
     denial_markers = ("不是AI", "不是ai", "不是机器人", "不是自动回复", "不是机器乱回")
-    return any(marker in clean for marker in denial_markers) and not exposes_ai_identity_in_customer_reply(clean)
+    boundary_markers = ("内部规则", "系统提示词", "提示词", "内部信息", "不能外发", "不方便发", "不方便提供")
+    if any(marker in clean for marker in denial_markers):
+        return False
+    return any(marker in clean for marker in boundary_markers) and not exposes_ai_identity_in_customer_reply(clean)
 
 
 def identity_guard_denial_fallback_reply(text: str, config: dict[str, Any]) -> str:
@@ -3335,11 +3377,11 @@ def identity_guard_denial_fallback_reply(text: str, config: dict[str, Any]) -> s
     prefix = configured_reply_prefix(config)
     if any(term in current for term in ("系统提示词", "内部规则", "api密钥", "API密钥", "api key", "密钥", "prompt")):
         return format_reply(
-            "不是AI，也不是机器人哈。内部规则这些不能外发，您别介意；咱们还是回到具体需求上，我按实际情况帮您核实。",
+            "内部规则这些不能外发，您别介意；您有具体需求的话，我按实际情况帮您核实。",
             prefix,
         )
     return format_reply(
-        "不是AI，也不是自动回复哈。我这边在看消息，涉及具体承诺不会随口定；您关心哪块，我按实际情况帮您确认。",
+        "我这边在看消息，涉及具体承诺不会随口定；您关心哪块，我按实际情况帮您确认。",
         prefix,
     )
 
@@ -3552,6 +3594,8 @@ def final_visible_polish_is_degradable_failure(result: dict[str, Any]) -> bool:
     reason = str(result.get("reason") or "").lower()
     llm_status = result.get("llm_status") if isinstance(result.get("llm_status"), dict) else {}
     fallback_reply = str(result.get("reply_text") or "").strip()
+    if "polish_exposed_handoff_marker" in reason:
+        return False
     if fallback_reply and llm_status.get("ok") is False:
         # Final visible polish is a last-mile wording pass on top of an already
         # safe draft. If the polish provider/model/auth/config fails, we should
@@ -4063,7 +4107,7 @@ def record_operator_alert(
     alert = {
         "created_at": datetime.now().isoformat(timespec="seconds"),
         "target": target.name,
-        "message_ids": [str(item.get("id") or "") for item in batch],
+        "message_ids": [reply_input_message_identity(item) for item in batch if reply_input_message_identity(item)],
         "message_contents": [str(item.get("content") or "") for item in batch],
         "combined_content": combined,
         "reason": reason,
@@ -4360,7 +4404,7 @@ def maybe_capture_customer_data(
 
     pending_raw_text = str(pending.get("raw_text") or "") if pending else ""
     pending_message_ids = [str(item) for item in pending.get("message_ids", [])] if pending else []
-    current_message_ids = [str(item.get("id") or "") for item in batch]
+    current_message_ids = [reply_input_message_identity(item) for item in batch if reply_input_message_identity(item)]
 
     # If current message itself has no customer-data signal, don't merge with stale pending
     from customer_data_capture import has_customer_data_signal
@@ -4611,31 +4655,35 @@ def apply_local_customer_service_settings(config: dict[str, Any]) -> dict[str, A
         if provider_text.lower() == "manual_json" and has_manual_candidate:
             return module
 
-        effective_provider = resolve_effective_llm_provider(
-            provider_text if provider_text.lower() != "manual_json" else None
-        )
+        active_provider = configured_llm_provider()
+        # Customer-service LLM modules follow the global route selected in the
+        # console.  Old example/runtime configs may still contain provider-
+        # scoped model names; do not let those stale values override the
+        # operator's current model switch.
+        effective_provider = resolve_effective_llm_provider(active_provider or provider_text)
+        follow_global_route = bool(active_provider)
         module["provider"] = effective_provider
         module["base_url"] = resolve_llm_base_url(
             provider=effective_provider,
-            explicit_base_url=str(module.get("base_url") or ""),
+            explicit_base_url="" if follow_global_route else str(module.get("base_url") or ""),
         )
         model_tier = str(module.get("model_tier") or default_tier or "flash").strip() or "flash"
         module["model"] = resolve_llm_tier_model(
             provider=effective_provider,
             tier=model_tier,
-            explicit_model=str(module.get("model") or ""),
+            explicit_model="" if follow_global_route else str(module.get("model") or ""),
         )
         if normalize_model_routing:
             routing = dict(module.get("model_routing", {}) or {})
             routing["flash_model"] = resolve_llm_tier_model(
                 provider=effective_provider,
                 tier="flash",
-                explicit_model=str(routing.get("flash_model") or module.get("model") or ""),
+                explicit_model="" if follow_global_route else str(routing.get("flash_model") or module.get("model") or ""),
             )
             routing["pro_model"] = resolve_llm_tier_model(
                 provider=effective_provider,
                 tier="pro",
-                explicit_model=str(routing.get("pro_model") or module.get("model") or ""),
+                explicit_model="" if follow_global_route else str(routing.get("pro_model") or module.get("model") or ""),
             )
             module["model_routing"] = routing
         return module
@@ -7052,7 +7100,7 @@ def maybe_enrich_messages_with_anchor_history(
 
 
 def message_window_contains_initial_batch(messages: list[dict[str, Any]], initial_batch: list[dict[str, Any]]) -> bool:
-    original_ids = {str(item.get("id") or "") for item in initial_batch if isinstance(item, dict) and str(item.get("id") or "")}
+    original_ids = {reply_input_message_identity(item) for item in initial_batch if isinstance(item, dict) and reply_input_message_identity(item)}
     original_content_keys = {
         key
         for item in initial_batch
@@ -7158,6 +7206,64 @@ def message_dedupe_key(message: dict[str, Any]) -> str:
     ).hexdigest()[:24]
 
 
+def stable_workflow_id(prefix: str, *parts: Any) -> str:
+    seed = json.dumps([str(item) for item in parts], ensure_ascii=False, sort_keys=True)
+    return f"{prefix}_" + hashlib.sha256(seed.encode("utf-8")).hexdigest()[:20]
+
+
+def reply_input_repeatable_occurrence_identity(message: dict[str, Any]) -> str:
+    """Return an occurrence-aware id for short repeatable customer probes.
+
+    The scheduler state layer already uses this idea. Keep the workflow layer
+    aligned so a later "在不/人呢/好的" turn is not swallowed by raw OCR ids or
+    content-key de-dupe before it reaches Brain.
+    """
+
+    if not message_has_repeatable_probe_content(message):
+        return ""
+    sender = str(message.get("sender") or "").strip()
+    msg_type = str(message.get("type") or "").strip()
+    content = normalize_greeting_probe_text(str(message.get("content") or ""))
+    base_id = str(message.get("id") or message.get("message_id") or "").strip()
+    base_id_lower = base_id.lower()
+    ocr_like_id = base_id_lower.startswith(("win32_ocr:", "ocr:", "screen_ocr:", "uia_ocr:"))
+    if base_id and not ocr_like_id:
+        return base_id
+    occurrence = ""
+    for key in (
+        "pending_signal_id",
+        "pending_since",
+        "last_detected_at",
+        "message_time",
+        "screen_time_text",
+        "time",
+        "captured_at",
+        "created_at",
+    ):
+        occurrence = str(message.get(key) or "").strip()
+        if occurrence:
+            break
+    if occurrence:
+        return stable_workflow_id("repeatable_msg", sender, msg_type, content, base_id, occurrence)
+    if base_id:
+        return stable_workflow_id("repeatable_msg", sender, msg_type, content, base_id)
+    return ""
+
+
+def reply_input_message_identity(message: dict[str, Any]) -> str:
+    canonical_id = canonical_input_message_id(message)
+    if canonical_id:
+        return canonical_id
+    repeatable_id = reply_input_repeatable_occurrence_identity(message)
+    if repeatable_id:
+        return repeatable_id
+    return str(message.get("id") or message.get("message_id") or "").strip()
+
+
+def message_has_occurrence_identity_signal(message: dict[str, Any]) -> bool:
+    return bool(occurrence_marker_for_message(message))
+
+
 def message_content_dedupe_key(message: dict[str, Any]) -> str:
     if message_has_repeatable_probe_content(message):
         return ""
@@ -7199,6 +7305,7 @@ def bounded_nonnegative_int(value: Any, *, default: int, maximum: int) -> int:
 
 
 BOOTSTRAP_PENDING_VISIBLE_MESSAGE = "当前不在可见会话列表里，待收到新消息时会自动识别"
+BOOTSTRAP_SELF_SENDERS = {"self", "assistant", "agent", "me", "outbound"}
 
 
 def truthy_setting(value: Any, *, default: bool = False) -> bool:
@@ -7217,6 +7324,33 @@ def bootstrap_visible_only_target_confirmation_enabled(config: dict[str, Any] | 
     if value is None:
         value = guard.get("startup_bootstrap_visible_only")
     return truthy_setting(value, default=True)
+
+
+def bootstrap_mark_customer_messages_processed(config: dict[str, Any] | None, *, visible_only: bool) -> bool:
+    cfg = config if isinstance(config, dict) else {}
+    bootstrap = cfg.get("bootstrap") if isinstance(cfg.get("bootstrap"), dict) else {}
+    value = bootstrap.get("mark_customer_messages_processed")
+    if value is not None:
+        return truthy_setting(value, default=False)
+    # Visible-only startup bootstrap is a safety/readiness check, not a history
+    # closeout pass.  Marking customer bubbles here can swallow unread messages
+    # after a restart; keep the legacy mark-all behavior only for explicit
+    # history bootstrap/backfill modes.
+    return not visible_only
+
+
+def bootstrap_message_can_be_marked_processed(
+    message: dict[str, Any],
+    *,
+    config: dict[str, Any] | None,
+    mark_customer_messages: bool,
+) -> bool:
+    sender = str(message.get("sender") or "").strip().lower()
+    if sender in BOOTSTRAP_SELF_SENDERS:
+        return True
+    if mark_customer_messages:
+        return True
+    return False
 
 
 def bootstrap_payload_can_wait_for_visible_target(payload: dict[str, Any] | None) -> bool:
@@ -7313,17 +7447,27 @@ def bootstrap_target(
     processed = list(target_state.get("processed_message_ids", []))
     processed_content_keys = list(target_state.get("processed_content_keys", []))
     added = []
+    deferred_customer_message_ids: list[str] = []
     candidates: list[dict[str, Any]] = []
     for source_payload in (latest_payload, payload):
         for message in source_payload.get("messages", []) or []:
             if isinstance(message, dict):
                 candidates.append(message)
+    mark_customer_messages = bootstrap_mark_customer_messages_processed(config, visible_only=visible_only)
     for message in candidates:
-        message_id = str(message.get("id") or "")
+        message_id = reply_input_message_identity(message)
         content = str(message.get("content") or "").strip()
         if not message_id or not content or message.get("type") != "text":
             continue
         if is_bot_reply_content(content, config):
+            continue
+        if not bootstrap_message_can_be_marked_processed(
+            message,
+            config=config,
+            mark_customer_messages=mark_customer_messages,
+        ):
+            if message_id not in deferred_customer_message_ids:
+                deferred_customer_message_ids.append(message_id)
             continue
         content_keys = message_processed_content_keys(message)
         if message_id in processed:
@@ -7351,6 +7495,9 @@ def bootstrap_target(
             "history_load_times": load_times,
             "history_load": payload.get("history_load") if isinstance(payload.get("history_load"), dict) else {},
             "latest_visible_count": len(latest_payload.get("messages", []) or []),
+            "deferred_customer_message_ids": deferred_customer_message_ids,
+            "deferred_customer_count": len(deferred_customer_message_ids),
+            "mark_customer_messages_processed": mark_customer_messages,
         },
     )
 
@@ -7457,16 +7604,16 @@ def select_scheduler_authoritative_batch_details(
     raw_batch = [item for item in (payload.get("_scheduler_authoritative_batch") or []) if isinstance(item, dict)]
     normalized_messages = [item for item in (payload.get("messages") or []) if isinstance(item, dict)]
     by_id = {
-        str(item.get("id") or item.get("message_id") or "").strip(): item
+        reply_input_message_identity(item): item
         for item in normalized_messages
-        if str(item.get("id") or item.get("message_id") or "").strip()
+        if reply_input_message_identity(item)
     }
     if raw_id_list:
         authoritative_messages = [by_id.get(message_id) for message_id in raw_id_list if isinstance(by_id.get(message_id), dict)]
         if len(authoritative_messages) < len(raw_ids):
             for item in raw_batch:
-                message_id = str(item.get("id") or item.get("message_id") or "").strip()
-                if message_id and message_id in raw_ids and not any(str(existing.get("id") or existing.get("message_id") or "").strip() == message_id for existing in authoritative_messages if isinstance(existing, dict)):
+                message_id = reply_input_message_identity(item)
+                if message_id and message_id in raw_ids and not any(reply_input_message_identity(existing) == message_id for existing in authoritative_messages if isinstance(existing, dict)):
                     authoritative_messages.append(item)
     else:
         authoritative_messages = raw_batch
@@ -7506,7 +7653,7 @@ def scheduler_authoritative_message_is_reply_candidate(
     config: dict[str, Any] | None = None,
     sent_reply_content_keys: set[str] | None = None,
 ) -> bool:
-    message_id = str(message.get("id") or message.get("message_id") or "")
+    message_id = reply_input_message_identity(message)
     content = str(message.get("content") or "").strip()
     sender = str(message.get("sender") or "")
     if not message_id or message_id in processed or message_id in handoff:
@@ -7533,7 +7680,7 @@ def message_is_reply_candidate(
     config: dict[str, Any] | None = None,
     sent_reply_content_keys: set[str] | None = None,
 ) -> bool:
-    message_id = str(message.get("id") or "")
+    message_id = reply_input_message_identity(message)
     content = str(message.get("content") or "").strip()
     sender = str(message.get("sender") or "")
     if not message_id or message_id in processed or message_id in handoff:
@@ -7543,6 +7690,7 @@ def message_is_reply_candidate(
     content_key = message_content_dedupe_key(message)
     if (
         not repeatable_probe
+        and not message_has_occurrence_identity_signal(message)
         and processed_content_keys
         and ((stable_key and stable_key in processed_content_keys) or (content_key and content_key in processed_content_keys))
     ):
@@ -7562,8 +7710,8 @@ def message_is_reply_candidate(
 def batch_selection_payload(selection: BatchSelection) -> dict[str, Any]:
     overflow = selection.overflow_messages
     return {
-        "message_ids": [str(item.get("id") or "") for item in selection.batch],
-        "overflow_message_ids": [str(item.get("id") or "") for item in overflow],
+        "message_ids": [reply_input_message_identity(item) for item in selection.batch if reply_input_message_identity(item)],
+        "overflow_message_ids": [reply_input_message_identity(item) for item in overflow if reply_input_message_identity(item)],
         "overflow_count": len(overflow),
         "eligible_count": selection.eligible_count,
         "max_batch_messages": selection.max_batch_messages,
@@ -7633,6 +7781,11 @@ def normalize_messages_for_semantic_processing(
             },
         )
         next_item = apply_message_envelope_to_record(next_item, envelope)
+        next_item = apply_canonical_identity_fields(
+            next_item,
+            target_name=target_name,
+            conversation_type=conversation_type,
+        )
         if next_item.get("ocr_speaker_prefix") or next_item.get("quoted_fragments") or next_item.get("quality_flags"):
             changed.append(
                 {
@@ -7818,12 +7971,38 @@ def is_question_like(text: str) -> bool:
 def is_single_need_fragment_batch(segments: list[dict[str, Any]]) -> bool:
     if len(segments) <= 1:
         return True
+    if has_stale_general_noise_before_business_turn(segments):
+        return False
     categories = {category for segment in segments for category in segment.get("categories", [])}
     complementary = {"budget_or_price", "selection_need", "vehicle_source", "trade_in", "general"}
     if categories <= complementary:
         question_count = sum(1 for segment in segments if segment.get("question_like"))
         short_count = sum(1 for segment in segments if len(str(segment.get("text") or "")) <= 18)
         return question_count <= 1 or short_count >= max(1, len(segments) - 1)
+    return False
+
+
+def has_stale_general_noise_before_business_turn(segments: list[dict[str, Any]]) -> bool:
+    """Detect old visible noise that should not be merged into a new need.
+
+    OCR/RPA can see an unrelated long visible line above the latest customer
+    message when the ledger anchor is unavailable.  Treat that as separate
+    context rather than one customer need, so the Brain focuses on the latest
+    actionable business turn while still receiving the raw segments for audit.
+    """
+
+    if len(segments) < 2:
+        return False
+    latest = segments[-1]
+    latest_categories = set(latest.get("categories") or [])
+    business_categories = {"budget_or_price", "selection_need", "vehicle_source", "finance", "appointment", "trade_in", "price_approval"}
+    if not (latest_categories & business_categories):
+        return False
+    for segment in segments[:-1]:
+        categories = set(segment.get("categories") or [])
+        text = normalize_semantic_text(str(segment.get("text") or ""))
+        if categories == {"general"} and len(text) >= 60:
+            return True
     return False
 
 
@@ -7863,7 +8042,7 @@ def detect_newer_messages_before_send(
     config: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Prevent sending a stale LLM reply when the customer talks during thinking."""
-    original_ids = [str(item.get("id") or "") for item in batch if str(item.get("id") or "")]
+    original_ids = [reply_input_message_identity(item) for item in batch if reply_input_message_identity(item)]
     original_content_keys: set[str] = set()
     for item in batch:
         original_content_keys.update(message_original_match_keys(item))
@@ -7989,7 +8168,7 @@ def detect_newer_messages_before_send(
         sent_reply_content_keys = recent_sent_reply_content_keys(target_state)
         visible_unprocessed = [
             {
-                "id": str(message.get("id") or ""),
+                "id": reply_input_message_identity(message),
                 "content": str(message.get("content") or "").strip()[:220],
                 "sender": str(message.get("sender") or ""),
             }
@@ -8046,7 +8225,7 @@ def detect_newer_messages_before_send(
             sent_reply_content_keys=sent_reply_content_keys,
         ):
             continue
-        message_id = str(message.get("id") or "")
+        message_id = reply_input_message_identity(message)
         content = str(message.get("content") or "").strip()
         sender = str(message.get("sender") or "")
         if message_matches_original_batch(message, original_set, original_content_keys):
@@ -8066,7 +8245,7 @@ def message_matches_original_batch(
     original_ids: set[str],
     original_content_keys: set[str],
 ) -> bool:
-    message_id = str(message.get("id") or "")
+    message_id = reply_input_message_identity(message)
     if message_id and message_id in original_ids:
         return True
     if any(key in original_content_keys for key in message_original_match_keys(message)):
@@ -8196,7 +8375,7 @@ def find_latest_customer_service_anchor_index(
     for index, message in enumerate(messages or []):
         if not isinstance(message, dict):
             continue
-        message_id = str(message.get("id") or "").strip()
+        message_id = reply_input_message_identity(message)
         match_keys = message_anchor_match_keys(message)
         reply_key = normalize_reply_content_key(str(message.get("content") or ""))
         if (
@@ -8508,7 +8687,7 @@ def record_reply_timestamp(target_state: dict[str, Any]) -> None:
 
 
 def build_reply_trace_id(target_name: str, batch: list[dict[str, Any]], reply_text: str) -> str:
-    message_ids = [str(item.get("id") or "") for item in batch if str(item.get("id") or "")]
+    message_ids = [reply_input_message_identity(item) for item in batch if reply_input_message_identity(item)]
     seed = json.dumps(
         {
             "target": target_name,
@@ -8533,7 +8712,7 @@ def mark_processed(
     processed = list(target_state.get("processed_message_ids", []))
     processed_content_keys = list(target_state.get("processed_content_keys", []))
     for message in batch:
-        message_id = str(message.get("id") or "")
+        message_id = reply_input_message_identity(message)
         if message_id and message_id not in processed:
             processed.append(message_id)
         append_unique_limited(processed_content_keys, message_processed_content_keys(message))
@@ -8541,7 +8720,7 @@ def mark_processed(
     target_state["processed_content_keys"] = processed_content_keys[-MAX_STORED_IDS:]
     entry = {
         "reply_trace_id": reply_trace_id or build_reply_trace_id("", batch, reply_text),
-        "message_ids": [item.get("id") for item in batch],
+        "message_ids": [reply_input_message_identity(item) for item in batch if reply_input_message_identity(item)],
         "message_contents": [item.get("content") for item in batch],
         "reply_text": reply_text,
         "processed_at": datetime.now().isoformat(timespec="seconds"),
@@ -8555,7 +8734,7 @@ def mark_processed(
             append_unique_limited(message_content_keys, message_processed_content_keys(message))
         target_state["last_successful_reply_anchor"] = {
             "reply_trace_id": entry["reply_trace_id"],
-            "message_ids": [str(item.get("id") or "") for item in batch if str(item.get("id") or "")],
+            "message_ids": [reply_input_message_identity(item) for item in batch if reply_input_message_identity(item)],
             "message_content_keys": message_content_keys[-MAX_STORED_IDS:],
             "reply_content_key": normalize_reply_content_key(reply_text),
             "reply_text_sample": str(reply_text or "").strip()[:160],
@@ -8578,7 +8757,7 @@ def mark_coalesced_messages(
     processed_content_keys = list(target_state.get("processed_content_keys", []))
     message_ids: list[str] = []
     for message in messages:
-        message_id = str(message.get("id") or "")
+        message_id = reply_input_message_identity(message)
         if not message_id:
             continue
         message_ids.append(message_id)
@@ -8614,7 +8793,7 @@ def mark_handoff(
     handoff = list(target_state.get("handoff_message_ids", []))
     processed_content_keys = list(target_state.get("processed_content_keys", []))
     for message in batch:
-        message_id = str(message.get("id") or "")
+        message_id = reply_input_message_identity(message)
         if message_id and message_id not in handoff:
             handoff.append(message_id)
         append_unique_limited(processed_content_keys, message_processed_content_keys(message))
@@ -8622,7 +8801,7 @@ def mark_handoff(
     target_state["processed_content_keys"] = processed_content_keys[-MAX_STORED_IDS:]
     event = {
         "reply_trace_id": reply_trace_id or build_reply_trace_id("", batch, reply_text),
-        "message_ids": [item.get("id") for item in batch],
+        "message_ids": [reply_input_message_identity(item) for item in batch if reply_input_message_identity(item)],
         "message_contents": [item.get("content") for item in batch],
         "reply_text": reply_text,
         "reason": reason,
@@ -8652,6 +8831,13 @@ def should_adopt_customer_service_brain(result: dict[str, Any] | None) -> bool:
     if str(payload.get("mode") or "") != "brain_first":
         return False
     if not payload.get("applied"):
+        return False
+    if not payload.get("adoptable"):
+        return False
+    if payload.get("customer_visible_reply_blocked"):
+        return False
+    owner = str(payload.get("visible_reply_owner") or "brain").strip()
+    if owner and not owner.startswith("brain"):
         return False
     return bool(str(payload.get("raw_reply_text") or "").strip())
 

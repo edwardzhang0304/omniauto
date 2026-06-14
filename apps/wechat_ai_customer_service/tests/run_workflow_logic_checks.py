@@ -77,6 +77,8 @@ from listen_and_reply import (  # noqa: E402
     parse_targets,
     polish_customer_visible_reply_text,
     process_target,
+    reply_input_message_identity,
+    message_processed_content_keys,
     final_visible_polish_blocks_send,
     resolve_path,
     sanitize_customer_visible_reply_text,
@@ -98,6 +100,7 @@ from apps.wechat_ai_customer_service.admin_backend.services.customer_service_sch
 from apps.wechat_ai_customer_service.admin_backend.services.customer_service_settings import CustomerServiceSettings  # noqa: E402
 from apps.wechat_ai_customer_service.llm_config import (  # noqa: E402
     DEFAULT_DEEPSEEK_CONTEXT_WINDOW_TOKENS,
+    active_llm_provider,
     resolve_deepseek_model,
     resolve_deepseek_tier_model,
     resolve_llm_base_url,
@@ -197,7 +200,12 @@ class RateLimitedTransportConnector(FakeConnector):
 
 
 class InputNotReadyTransportConnector(FakeConnector):
+    def __init__(self, messages: list[dict[str, Any]]) -> None:
+        super().__init__(messages)
+        self.send_calls = 0
+
     def send_text_and_verify(self, target: str, text: str, exact: bool = True, *, skip_send_rate_guard: bool = False, **kwargs: Any) -> dict[str, Any]:
+        self.send_calls += 1
         self.sent_texts.append(text)
         self.sent_session_keys.append(str(kwargs.get("session_key") or ""))
         return {
@@ -308,6 +316,8 @@ def run_checks() -> dict[str, Any]:
         check_scheduler_capture_preserves_reference_context_separately,
         check_empty_or_prefix_only_reply_is_guarded,
         check_continuous_customer_messages_are_batched_with_overflow_guard,
+        check_repeatable_short_probe_is_not_suppressed_by_prior_same_text,
+        check_canonical_input_signal_allows_repeated_long_text_after_prior_same_content,
         check_missing_original_batch_is_treated_as_stale_when_new_messages_visible,
         check_freshness_anchor_mode_does_not_scroll_by_default,
         check_freshness_matches_original_after_ocr_rewrap,
@@ -321,6 +331,7 @@ def run_checks() -> dict[str, Any]:
         check_anchor_history_fallback_preserves_visible_batch_when_load_drops_current,
         check_anchor_history_overflows_when_anchor_not_found,
         check_semantic_batch_planner_groups_split_need,
+        check_semantic_batch_planner_separates_stale_general_noise_from_business_turn,
         check_semantic_batch_planner_detects_mixed_risk_questions,
         check_customer_preference_context_preserves_spouse_parking_need,
         check_conversation_context_preserves_need_fields_for_evidence_pack,
@@ -337,12 +348,15 @@ def run_checks() -> dict[str, Any]:
         check_customer_service_console_switches_take_effect,
         check_live_safety_guard_enforces_single_allowed_target,
         check_bootstrap_target_records_pending_visible_without_error,
+        check_visible_only_bootstrap_does_not_mark_customer_messages_processed,
         check_live_safety_guard_multi_allowed_targets_do_not_starve_secondary_sessions,
         check_rpa_safety_allows_standalone_greeting_by_default,
         check_rpa_safety_defers_standalone_greeting_when_explicitly_enabled,
         check_rpa_safety_caps_visible_reply,
         check_reply_multi_bubble_splits_long_reply,
+        check_reply_multi_bubble_avoids_comma_dangling_fragment,
         check_reply_multi_bubble_retries_transient_send_failures,
+        check_reply_multi_bubble_does_not_retry_input_not_ready,
         check_reply_multi_bubble_verifies_only_final_segment_by_default,
         check_reply_multi_bubble_can_verify_each_segment_when_enabled,
         check_identity_guard_setting_controls_ai_disclosure,
@@ -367,6 +381,7 @@ def run_checks() -> dict[str, Any]:
         check_final_visible_polish_preserves_boundary_topic,
         check_final_visible_polish_removes_risky_affirmative_opening,
         check_final_visible_polish_uses_local_cache,
+        check_final_visible_polish_cache_is_route_scoped,
         check_final_visible_polish_cache_ignores_test_markers,
         check_outbound_naturalness_polishes_templates_without_changing_facts,
         check_outbound_naturalness_diversifies_repeated_structure,
@@ -378,8 +393,11 @@ def run_checks() -> dict[str, Any]:
         check_final_visible_polish_brain_source_is_lightweight_but_stricter,
         check_final_visible_polish_brain_micro_prompt_is_verify_only,
         check_final_visible_polish_brain_micro_rejects_rewrite_and_uses_draft,
+        check_final_visible_polish_brain_micro_rejects_incomplete_tail_and_uses_draft,
         check_final_visible_polish_handoff_micro_preserves_verification_signal,
         check_final_visible_polish_rejects_identity_denial_for_finance_boundary,
+        check_final_visible_polish_rejects_over_explicit_human_identity_claim,
+        check_final_visible_polish_rejects_ambiguous_identity_admission,
         check_final_visible_polish_semantic_guard_preserves_brain_decision,
         check_final_visible_polish_does_not_fast_skip_short_reply_by_default,
         check_safe_brain_reply_clears_soft_no_evidence_handoff,
@@ -392,11 +410,13 @@ def run_checks() -> dict[str, Any]:
         check_multi_target_change_warmup_is_bounded_and_coalesces,
         check_deepseek_flash_is_default,
         check_provider_switch_ignores_stale_provider_scoped_overrides,
+        check_anthropic_kimi_route_ignores_stale_openai_model_overrides,
         check_local_customer_service_settings_follow_active_tenant_for_brain_mode,
         check_customer_service_brain_startup_guard_requires_brain_first,
         check_scheduler_blocks_non_brain_owned_ready_reply_in_brain_first,
         check_customer_service_brain_failure_alert_threshold,
         check_local_customer_service_settings_follow_active_provider_for_llm_modules,
+        check_local_customer_service_settings_follow_active_anthropic_kimi_route,
         check_llm_reply_application_guards,
         check_llm_reply_advisory_does_not_apply_in_brain_first,
         check_llm_boundary_fallback_on_invalid_model_output,
@@ -579,6 +599,69 @@ def check_continuous_customer_messages_are_batched_with_overflow_guard() -> None
         "older same-burst messages should be tracked as overflow instead of being replied later",
     )
     assert_true(selection.truncated, "selection should mark overflow as truncated")
+
+
+def check_repeatable_short_probe_is_not_suppressed_by_prior_same_text() -> None:
+    old_message = {
+        "id": "win32_ocr:same-short-bubble",
+        "type": "text",
+        "content": "在不",
+        "sender": "customer",
+        "time": "2026-06-12T11:16:56",
+    }
+    new_message = {
+        "id": "win32_ocr:same-short-bubble",
+        "type": "text",
+        "content": "在不",
+        "sender": "customer",
+        "time": "2026-06-12T11:21:15",
+    }
+    processed_id = reply_input_message_identity(old_message)
+    selection = select_batch_details(
+        [new_message],
+        target_state={"processed_message_ids": [processed_id], "processed_content_keys": [], "handoff_message_ids": []},
+        allow_self_for_test=False,
+        max_batch_messages=3,
+        config={},
+    )
+    selected_ids = [reply_input_message_identity(item) for item in selection.batch]
+    assert_equal(selection.eligible_count, 1, "new occurrence of the same short probe must still reach Brain")
+    assert_true(selected_ids and selected_ids[0] != processed_id, f"short probe identity should include occurrence time: {selected_ids}")
+
+
+def check_canonical_input_signal_allows_repeated_long_text_after_prior_same_content() -> None:
+    old_message = {
+        "id": "win32_ocr:same-long-layout",
+        "source_adapter": "win32_ocr",
+        "type": "text",
+        "content": "这个车多少钱，能不能今天看",
+        "sender": "customer",
+        "bubble_rect": {"left": 420, "top": 260, "right": 760, "bottom": 310},
+    }
+    new_message = {
+        **old_message,
+        "pending_signal_id": "pending-signal-new-long",
+        "pending_since": "2026-06-12T12:15:03",
+        "last_detected_at": "2026-06-12T12:15:04",
+    }
+    processed_id = reply_input_message_identity(old_message)
+    selection = select_batch_details(
+        [new_message],
+        target_state={
+            "processed_message_ids": [processed_id],
+            "processed_content_keys": message_processed_content_keys(old_message),
+            "handoff_message_ids": [],
+        },
+        allow_self_for_test=False,
+        max_batch_messages=3,
+        config={},
+    )
+    selected_ids = [reply_input_message_identity(item) for item in selection.batch]
+    assert_equal(selection.eligible_count, 1, "pending signal should let repeated long customer text reach Brain")
+    assert_true(
+        selected_ids and selected_ids[0] != processed_id,
+        f"canonical input id should change when a real pending signal marks a new occurrence: {selected_ids}",
+    )
 
 
 def check_missing_original_batch_is_treated_as_stale_when_new_messages_visible() -> None:
@@ -1031,6 +1114,23 @@ def check_semantic_batch_planner_groups_split_need() -> None:
     )
     assert_equal(plan.get("kind"), "single_event", "split fragments for one buying need should be grouped")
     assert_true("同一个需求" in str(plan.get("combined_text") or ""), "combined text should guide one-need understanding")
+
+
+def check_semantic_batch_planner_separates_stale_general_noise_from_business_turn() -> None:
+    plan = plan_message_batch_semantics(
+        [
+            {
+                "content": (
+                    "瑞士洛桑联邦理工学院研究人员发表新研究，开发了一种生成和筛选膜渗透性环肽库的方法。"
+                    "研究团队合成了大量随机环肽库，筛选出可进入细胞的化合物。"
+                )
+            },
+            {"content": "晚上好，家用代步，预算6万以内，省油耐用的你直接推荐一台。"},
+        ],
+        {"semantic_batch_planner": {"enabled": True}},
+    )
+    assert_equal(plan.get("kind"), "multi_question_same_scene", "old long general text should not merge into the latest buying need")
+    assert_true("同一个需求" not in str(plan.get("combined_text") or ""), "combined text should not tell Brain the stale line is one need")
 
 
 def check_semantic_batch_planner_detects_mixed_risk_questions() -> None:
@@ -1742,16 +1842,33 @@ def check_customer_service_console_switches_take_effect() -> None:
         summary_modes = [item.get("id") for item in settings_store.summary().get("customer_service_brain_modes", [])]
         assert_equal(summary_modes, ["brain_first"], "console should hide legacy customer-service brain modes")
         record_only_config = apply_local_customer_service_settings(load_smoke_config())
+        expected_provider = active_llm_provider()
         assert_true(record_only_config["intent_assist"]["llm_advisory"]["enabled"] is True, "LLM switch should enable LLM advisory")
-        assert_equal(record_only_config["intent_assist"]["llm_advisory"]["provider"], "openai", "LLM advisory should follow the active model provider")
+        assert_equal(
+            record_only_config["intent_assist"]["llm_advisory"]["provider"],
+            expected_provider,
+            "LLM advisory should follow the active model provider",
+        )
         assert_true(record_only_config["llm_reply_synthesis"]["enabled"] is True, "LLM switch should enable guarded reply synthesis")
-        assert_equal(record_only_config["llm_reply_synthesis"]["provider"], "openai", "guarded reply synthesis should follow the active model provider")
+        assert_equal(
+            record_only_config["llm_reply_synthesis"]["provider"],
+            expected_provider,
+            "guarded reply synthesis should follow the active model provider",
+        )
         assert_true(record_only_config["reply_style_adapter"]["enabled"] is True, "style-adapter switch should enable reply adaptation")
         assert_true(record_only_config["final_visible_llm_polish"]["enabled"] is True, "LLM switch should enable final visible polish")
-        assert_equal(record_only_config["final_visible_llm_polish"]["provider"], "openai", "final visible polish should follow the active model provider")
+        assert_equal(
+            record_only_config["final_visible_llm_polish"]["provider"],
+            expected_provider,
+            "final visible polish should follow the active model provider",
+        )
         assert_true(record_only_config["customer_service_brain"]["enabled"] is True, "Brain should be enabled when LLM is on")
         assert_equal(record_only_config["customer_service_brain"]["mode"], "brain_first", "customer-service brain should reject console-selected legacy mode")
-        assert_equal(record_only_config["customer_service_brain"]["provider"], "openai", "customer-service brain should follow active model provider")
+        assert_equal(
+            record_only_config["customer_service_brain"]["provider"],
+            expected_provider,
+            "customer-service brain should follow active model provider",
+        )
         record_only_event = process_target(
             connector=FakeConnector([{"id": "record-1", "type": "text", "content": "商用冰箱多少钱", "sender": "self"}]),  # type: ignore[arg-type]
             target=parse_targets(record_only_config)[0],
@@ -2029,6 +2146,39 @@ def check_bootstrap_target_records_pending_visible_without_error() -> None:
     )
 
 
+def check_visible_only_bootstrap_does_not_mark_customer_messages_processed() -> None:
+    class VisibleConnector:
+        def get_messages(self, target: str, exact: bool = True, history_load_times: int = 0, **kwargs: Any) -> dict[str, Any]:
+            return {
+                "ok": True,
+                "target": target,
+                "messages": [
+                    {"id": "m-customer-1", "type": "text", "sender": "customer", "content": "老板在吗"},
+                    {"id": "m-self-1", "type": "text", "sender": "self", "content": "在的，您说。"},
+                ],
+                "history_load": {"requested_load_times": history_load_times},
+            }
+
+    target = TargetConfig(
+        name="许聪",
+        enabled=True,
+        exact=True,
+        allow_self_for_test=False,
+        max_batch_messages=2,
+    )
+    config = load_smoke_config()
+    config["bootstrap"] = {"visible_only_target_confirmation": True, "history_load_times": 0}
+    state: dict[str, Any] = {"targets": {}}
+
+    event = bootstrap_target(VisibleConnector(), target, state, config)  # type: ignore[arg-type]
+    target_state = state.get("targets", {}).get("许聪", {})
+    processed_ids = set(target_state.get("processed_message_ids") or [])
+    assert_true("m-customer-1" not in processed_ids, f"visible-only bootstrap must not swallow customer messages: {event}")
+    assert_true("m-self-1" in processed_ids, "visible-only bootstrap may mark self messages as processed")
+    assert_equal(event.get("deferred_customer_count"), 1, "deferred customer message should be auditable")
+    assert_equal(event.get("mark_customer_messages_processed"), False, "visible-only bootstrap should default to customer-safe mode")
+
+
 def check_live_safety_guard_multi_allowed_targets_do_not_starve_secondary_sessions() -> None:
     tenant_id = "workflow_live_guard_multi_allowed_probe"
     old_tenant = os.environ.get("WECHAT_KNOWLEDGE_TENANT")
@@ -2211,6 +2361,30 @@ def check_reply_multi_bubble_splits_long_reply() -> None:
         assert_true(body_text.endswith(("。", "！", "？", ".", "!", "?")), f"bubble should end naturally: {seg}")
 
 
+def check_reply_multi_bubble_avoids_comma_dangling_fragment() -> None:
+    config = load_smoke_config()
+    config["reply_multi_bubble"] = {
+        "enabled": True,
+        "min_split_chars": 42,
+        "max_segments": 3,
+        "preferred_segment_chars": 30,
+        "max_segment_chars": 56,
+        "min_segment_chars": 16,
+    }
+    reply_text = (
+        "纯电优先的话，秦PLUS DM-i更接近，8.68万，插混绿牌日常通勤可以纯电跑。"
+        "昂克赛拉9.58万是纯油，颜值操控好但不符合纯电需求。"
+        "目前10万内纯电轿车我这台插混是最贴近的，您看要不要到店试试纯电续航感受？"
+    )
+    segments = split_customer_visible_reply_for_multi_bubble(reply_text, config)
+    assert_true(2 <= len(segments) <= 3, f"reply should still split into conversational bubbles: {segments}")
+    for segment in segments:
+        body = str(segment)
+        assert_true(not body.startswith("不能纯电"), f"bubble must not start with a dangling predicate: {segments}")
+        assert_true(not body.startswith("如果"), f"bubble must not start as detached condition: {segments}")
+        assert_true(body.endswith(("。", "！", "？", ".", "!", "?")), f"bubble should end naturally: {segments}")
+
+
 def check_reply_multi_bubble_retries_transient_send_failures() -> None:
     config = load_smoke_config()
     target = parse_targets(config)[0]
@@ -2250,6 +2424,43 @@ def check_reply_multi_bubble_retries_transient_send_failures() -> None:
         connector.send_calls >= int(result.get("segment_count") or 0) + 1,
         "first transient failure should trigger one extra send attempt",
     )
+
+
+def check_reply_multi_bubble_does_not_retry_input_not_ready() -> None:
+    config = load_smoke_config()
+    target = parse_targets(config)[0]
+    config["reply"]["prefix"] = "[车金实盘] "
+    config["reply_multi_bubble"] = {
+        "enabled": True,
+        "min_split_chars": 36,
+        "max_segments": 3,
+        "preferred_segment_chars": 24,
+        "max_segment_chars": 42,
+        "min_segment_chars": 14,
+        "inter_segment_delay_min_ms": 0,
+        "inter_segment_delay_max_ms": 0,
+        "retry_on_transient_send_failures": True,
+        "max_transient_retry_per_segment": 1,
+        "transient_retry_delay_min_ms": 0,
+        "transient_retry_delay_max_ms": 0,
+    }
+    connector = InputNotReadyTransportConnector(messages=[])
+    reply_text = (
+        "[车金实盘] 我先按您现在的预算和用途帮您筛一轮，重点看车况透明、油耗别高的车；"
+        "如果输入框状态不稳定，这条消息不能在同一片段里马上二次操作。"
+    )
+
+    result = send_reply_with_optional_multi_bubble(
+        connector=connector,  # type: ignore[arg-type]
+        target=target,
+        reply_text=reply_text,
+        config=config,
+    )
+
+    assert_true(not bool(result.get("verified")), "input-not-ready should fail the current send safely")
+    assert_equal(int(result.get("retry_attempts") or 0), 0, "input-not-ready must not retry inside the same send segment")
+    assert_equal(connector.send_calls, 1, "input-not-ready must not touch the WeChat input box a second time")
+    assert_equal(str(result.get("state") or ""), "send_input_not_ready", "state should preserve the input readiness failure")
 
 
 def check_reply_multi_bubble_verifies_only_final_segment_by_default() -> None:
@@ -2657,8 +2868,8 @@ def check_concealed_handoff_denies_ai_identity_probe() -> None:
         reason="internal_probe",
     )
     assert_true(
-        any(marker in reply for marker in ("不是AI", "不是机器人", "不是自动回复")),
-        "identity probe should be explicitly denied when identity guard is active",
+        not any(marker in reply for marker in ("不是AI", "不是机器人", "不是自动回复", "我是真人客服")),
+        "identity probe should not discuss identity truth when identity guard is active",
     )
     assert_true("我是AI" not in reply and "我是机器人" not in reply, "identity denial must not expose AI identity")
     assert_true("内部" in reply or "不能外发" in reply, "identity probe should still refuse internal information")
@@ -2968,6 +3179,66 @@ def check_final_visible_polish_uses_local_cache() -> None:
     assert_equal(call_count["value"], 2, "cache hit should avoid LLM until recent-repeat fallback is needed")
     assert_true(bool((second.get("cache") or {}).get("hit")), "second final polish should report cache hit")
     assert_true(bool((third.get("cache") or {}).get("fallback_from_hit")), "recent-repeat cache hit should fall back to live polish")
+
+
+def check_final_visible_polish_cache_is_route_scoped() -> None:
+    cache_path = TEST_ARTIFACTS / "final_visible_polish_cache_route_scope_unit.json"
+    remove_file(cache_path)
+    call_count = {"value": 0}
+    original_polish = final_polish_module.polish_with_llm
+
+    def fake_polish(**kwargs: Any) -> dict[str, Any]:
+        call_count["value"] += 1
+        return {
+            "ok": True,
+            "provider": kwargs.get("settings", {}).get("provider"),
+            "model": kwargs.get("settings", {}).get("model"),
+            "candidate": {
+                "reply": f"路线{call_count['value']}，我这边先核实一下再回复您。",
+                "confidence": 0.96,
+                "reason": "unit route scoped polish",
+            },
+        }
+
+    base_settings = {
+        "enabled": True,
+        "required_for_send": True,
+        "provider": "openai",
+        "model": "unit-polish-model",
+        "base_url": "https://relay-a.example/v1",
+        "cache_enabled": True,
+        "cache_path": str(cache_path),
+        "cache_ttl_seconds": 3600,
+    }
+    try:
+        final_polish_module.polish_with_llm = fake_polish
+        first = maybe_polish_customer_visible_reply(
+            config={"final_visible_llm_polish": dict(base_settings)},
+            customer_message="这台车还有吗？",
+            reply_text="这台车我先帮您核实一下，确认后回复您。",
+        )
+        second = maybe_polish_customer_visible_reply(
+            config={"final_visible_llm_polish": dict(base_settings)},
+            customer_message="这台车还有吗？",
+            reply_text="这台车我先帮您核实一下，确认后回复您。",
+        )
+        switched_settings = dict(base_settings)
+        switched_settings["base_url"] = "https://relay-b.example/v1"
+        third = maybe_polish_customer_visible_reply(
+            config={"final_visible_llm_polish": switched_settings},
+            customer_message="这台车还有吗？",
+            reply_text="这台车我先帮您核实一下，确认后回复您。",
+        )
+    finally:
+        final_polish_module.polish_with_llm = original_polish
+        remove_file(cache_path)
+
+    assert_true(first.get("passed") is True, f"first route-scoped polish should pass: {first}")
+    assert_true(second.get("passed") is True, f"second route-scoped polish should pass: {second}")
+    assert_true(third.get("passed") is True, f"switched route polish should pass: {third}")
+    assert_true(bool((second.get("cache") or {}).get("hit")), "same route should reuse final polish cache")
+    assert_true(not bool((third.get("cache") or {}).get("hit")), "changed base URL must not reuse stale final polish cache")
+    assert_equal(call_count["value"], 2, "route switch should force one fresh polish call")
 
 
 def check_final_visible_polish_cache_ignores_test_markers() -> None:
@@ -3346,6 +3617,69 @@ def check_final_visible_polish_brain_micro_rejects_rewrite_and_uses_draft() -> N
     assert_equal(guard.get("reason"), "brain_micro_candidate_rejected_used_draft", "Audit should explain Brain draft fallback")
 
 
+def check_final_visible_polish_brain_micro_rejects_incomplete_tail_and_uses_draft() -> None:
+    original_polish = final_polish_module.polish_with_llm
+
+    draft = (
+        "自己撞墙属于单方事故，一般看您有没有买车损险。有车损险通常能走理赔，但具体能不能赔、赔多少，"
+        "得按保单条款和保险公司定损结果来。"
+        "我没法直接给您下结论，建议您出险后第一时间打保险公司电话报案，他们会安排查勘定损。"
+        "回头想看那几台车的话，秦PLUS、马自达3和凯美瑞都还在，随时喊我。"
+    )
+
+    def fake_polish(**kwargs: Any) -> dict[str, Any]:
+        return {
+            "ok": True,
+            "provider": "anthropic",
+            "model": "unit-polish-model",
+            "candidate": {
+                "reply": (
+                    "自己撞墙属于单方事故，一般看您有没有买车损险。有车损险通常能走理赔，但具体能不能赔、赔多少，"
+                    "得按保单条款和保险公司定损结果来。"
+                    "我没法直接给您下结论，建议您出险后第一时间打保险公司电话报案，他们会安排查勘定损。"
+                    "回头想看那几台车的话。"
+                ),
+                "confidence": 0.95,
+                "reason": "bad micro polish removed the consequent tail",
+            },
+        }
+
+    config = {
+        "final_visible_llm_polish": {
+            "enabled": True,
+            "required_for_send": True,
+            "provider": "anthropic",
+            "model": "unit-polish-model",
+            "cache_enabled": False,
+            "brain_source_policy": "llm_micro_verify",
+            "brain_micro_guard_fallback_to_draft": True,
+        }
+    }
+    try:
+        final_polish_module.polish_with_llm = fake_polish
+        result = maybe_polish_customer_visible_reply(
+            config=config,
+            customer_message="自己开车撞墙了保险一般赔吗？这个我也想顺便问下。",
+            reply_text=draft,
+            recent_reply_texts=[],
+            source_channel="brain",
+            needs_handoff=False,
+        )
+    finally:
+        final_polish_module.polish_with_llm = original_polish
+
+    assert_true(result.get("passed") is True, f"incomplete polish should fall back to Brain draft: {result}")
+    assert_true(result.get("applied") is False, "Incomplete micro polish must not be applied")
+    assert_equal(result.get("reply_text"), draft, "Final visible layer should preserve the complete Brain draft")
+    guard = result.get("guard") if isinstance(result.get("guard"), dict) else {}
+    rejected = guard.get("rejected_candidate_guard") if isinstance(guard.get("rejected_candidate_guard"), dict) else {}
+    assert_equal(guard.get("reason"), "brain_micro_candidate_rejected_used_draft", "Brain draft fallback should be audited")
+    assert_true(
+        str(rejected.get("reason") or "") in {"polish_incomplete_visible_tail", "polish_cut_complete_tail_to_fragment"},
+        f"Rejected candidate should explain incomplete visible tail: {guard}",
+    )
+
+
 def check_final_visible_polish_handoff_micro_preserves_verification_signal() -> None:
     original_polish = final_polish_module.polish_with_llm
 
@@ -3439,8 +3773,112 @@ def check_final_visible_polish_rejects_identity_denial_for_finance_boundary() ->
     rejected = guard.get("rejected_candidate_guard") if isinstance(guard.get("rejected_candidate_guard"), dict) else {}
     assert_equal(
         rejected.get("reason"),
-        "identity_denial_for_non_identity_request",
-        f"guard should explain non-identity question drift: {result}",
+        "identity_truth_discussion_not_allowed",
+        f"guard should explain identity-truth drift: {result}",
+    )
+
+
+def check_final_visible_polish_rejects_over_explicit_human_identity_claim() -> None:
+    original_polish = final_polish_module.polish_with_llm
+
+    def fake_polish(**kwargs: Any) -> dict[str, Any]:
+        return {
+            "ok": True,
+            "provider": "openai",
+            "model": "unit-polish-model",
+            "candidate": {
+                "reply": "我是真人客服呀，刚才表达有点急了。您想随便聊聊也可以。",
+                "confidence": 0.99,
+                "reason": "over explicit identity claim",
+            },
+        }
+
+    config = {
+        "final_visible_llm_polish": {
+            "enabled": True,
+            "required_for_send": True,
+            "provider": "openai",
+            "model": "unit-polish-model",
+            "cache_enabled": False,
+            "brain_source_policy": "llm_micro_verify",
+            "micro_verify_source_channels": ["brain", "handoff"],
+            "brain_micro_guard_fallback_to_draft": True,
+            "identity_guard_enabled": True,
+        }
+    }
+    draft = "刚才表达有点急了，您想随便聊聊也可以。有具体车源问题我再接着帮您看。"
+    try:
+        final_polish_module.polish_with_llm = fake_polish
+        result = maybe_polish_customer_visible_reply(
+            config=config,
+            customer_message="你是不是机器人在回我？怎么感觉每句都往车上绕。",
+            reply_text=draft,
+            recent_reply_texts=[],
+            source_channel="brain",
+            needs_handoff=False,
+        )
+    finally:
+        final_polish_module.polish_with_llm = original_polish
+    assert_true(result.get("passed") is True, f"safe Brain draft should survive over-explicit identity drift: {result}")
+    assert_equal(result.get("reply_text"), draft, "over-explicit identity claim must be rejected and draft reused")
+    guard = result.get("guard") if isinstance(result.get("guard"), dict) else {}
+    rejected = guard.get("rejected_candidate_guard") if isinstance(guard.get("rejected_candidate_guard"), dict) else {}
+    assert_equal(
+        rejected.get("reason"),
+        "polish_over_explicit_human_identity_claim",
+        f"guard should explain over-explicit identity claim: {result}",
+    )
+
+
+def check_final_visible_polish_rejects_ambiguous_identity_admission() -> None:
+    original_polish = final_polish_module.polish_with_llm
+
+    def fake_polish(**kwargs: Any) -> dict[str, Any]:
+        return {
+            "ok": True,
+            "provider": "openai",
+            "model": "unit-polish-model",
+            "candidate": {
+                "reply": "哈哈被您发现了，我确实说话容易往车上绕，咱们也可以先随便聊两句。",
+                "confidence": 0.99,
+                "reason": "ambiguous identity admission",
+            },
+        }
+
+    config = {
+        "final_visible_llm_polish": {
+            "enabled": True,
+            "required_for_send": True,
+            "provider": "openai",
+            "model": "unit-polish-model",
+            "cache_enabled": False,
+            "brain_source_policy": "llm_micro_verify",
+            "micro_verify_source_channels": ["brain", "handoff"],
+            "brain_micro_guard_fallback_to_draft": True,
+            "identity_guard_enabled": True,
+        }
+    }
+    draft = "哈哈，您觉得我绕了我就不绕。您想聊车我就直接筛车，想先闲聊两句也行。"
+    try:
+        final_polish_module.polish_with_llm = fake_polish
+        result = maybe_polish_customer_visible_reply(
+            config=config,
+            customer_message="你是不是机器人在回我？怎么感觉每句都往车上绕。",
+            reply_text=draft,
+            recent_reply_texts=[],
+            source_channel="brain",
+            needs_handoff=False,
+        )
+    finally:
+        final_polish_module.polish_with_llm = original_polish
+    assert_true(result.get("passed") is True, f"safe Brain draft should survive ambiguous identity polish drift: {result}")
+    assert_equal(result.get("reply_text"), draft, "ambiguous identity admission must be rejected and draft reused")
+    guard = result.get("guard") if isinstance(result.get("guard"), dict) else {}
+    rejected = guard.get("rejected_candidate_guard") if isinstance(guard.get("rejected_candidate_guard"), dict) else {}
+    assert_equal(
+        rejected.get("reason"),
+        "identity_truth_discussion_not_allowed",
+        f"guard should explain ambiguous identity admission: {result}",
     )
 
 
@@ -3805,6 +4243,35 @@ def check_provider_switch_ignores_stale_provider_scoped_overrides() -> None:
     )
 
 
+def check_anthropic_kimi_route_ignores_stale_openai_model_overrides() -> None:
+    config = {
+        "ANTHROPIC_FLASH_MODEL": "kimi-for-coding",
+        "ANTHROPIC_PRO_MODEL": "kimi-for-coding",
+        "OPENAI_FLASH_MODEL": "gpt-5.4",
+        "OPENAI_PRO_MODEL": "gpt-5.4",
+    }
+    assert_equal(
+        resolve_llm_tier_model(
+            provider="anthropic",
+            tier="flash",
+            explicit_model="gpt-5.4",
+            config=config,
+        ),
+        "kimi-for-coding",
+        "Kimi/Anthropic route should ignore stale OpenAI explicit flash model names",
+    )
+    assert_equal(
+        resolve_llm_tier_model(
+            provider="anthropic",
+            tier="pro",
+            explicit_model="gpt-5.4",
+            config=config,
+        ),
+        "kimi-for-coding",
+        "Kimi/Anthropic route should ignore stale OpenAI explicit pro model names",
+    )
+
+
 def check_local_customer_service_settings_follow_active_provider_for_llm_modules() -> None:
     tenant_id = "workflow_provider_normalization_probe"
     settings_store = CustomerServiceSettings(tenant_id=tenant_id)
@@ -3822,10 +4289,11 @@ def check_local_customer_service_settings_follow_active_provider_for_llm_modules
     os.environ["OPENAI_PRO_MODEL"] = "gpt-test-pro"
     remove_file(settings_store.settings_path)
     try:
-        settings_store.save({"use_llm": True})
-        expected_base_url = resolve_llm_base_url(provider="openai")
-        expected_flash_model = resolve_llm_tier_model(provider="openai", tier="flash")
-        expected_pro_model = resolve_llm_tier_model(provider="openai", tier="pro")
+        settings_store.save({"use_llm": True, "customer_service_brain_mode": "brain_first"})
+        expected_provider = active_llm_provider()
+        expected_base_url = resolve_llm_base_url(provider=expected_provider)
+        expected_flash_model = resolve_llm_tier_model(provider=expected_provider, tier="flash")
+        expected_pro_model = resolve_llm_tier_model(provider=expected_provider, tier="pro")
         config = load_smoke_config()
         config["intent_assist"] = {
             "enabled": True,
@@ -3853,15 +4321,23 @@ def check_local_customer_service_settings_follow_active_provider_for_llm_modules
             "enabled": True,
             "provider": "manual_json",
         }
+        config["customer_service_brain"] = {
+            "enabled": True,
+            "mode": "brain_first",
+            "provider": "deepseek",
+            "model_tier": "pro",
+            "model": "deepseek-v4-pro",
+            "base_url": "https://api.deepseek.com",
+        }
         normalized = apply_local_customer_service_settings(config)
 
         advisory = (((normalized.get("intent_assist") or {}).get("llm_advisory")) or {})
-        assert_equal(advisory.get("provider"), "openai", "intent assist should follow active OpenAI provider")
+        assert_equal(advisory.get("provider"), expected_provider, "intent assist should follow active provider")
         assert_equal(advisory.get("model"), expected_flash_model, "intent assist should resolve the active flash model")
         assert_equal(advisory.get("base_url"), expected_base_url, "intent assist should resolve the active base URL")
 
         synthesis = normalized.get("llm_reply_synthesis", {}) or {}
-        assert_equal(synthesis.get("provider"), "openai", "reply synthesis should overwrite stale provider labels")
+        assert_equal(synthesis.get("provider"), expected_provider, "reply synthesis should overwrite stale provider labels")
         assert_equal(synthesis.get("model"), expected_flash_model, "reply synthesis should overwrite stale flash models")
         assert_equal(synthesis.get("base_url"), expected_base_url, "reply synthesis should overwrite stale base URLs")
         routing = synthesis.get("model_routing", {}) or {}
@@ -3869,14 +4345,19 @@ def check_local_customer_service_settings_follow_active_provider_for_llm_modules
         assert_equal(routing.get("pro_model"), expected_pro_model, "reply synthesis pro routing should follow active provider")
 
         entity = normalized.get("product_entity_resolution", {}) or {}
-        assert_equal(entity.get("provider"), "openai", "product entity resolution should follow active provider")
+        assert_equal(entity.get("provider"), expected_provider, "product entity resolution should follow active provider")
         assert_equal(entity.get("model"), expected_flash_model, "product entity resolution should resolve the active flash model")
         assert_equal(entity.get("base_url"), expected_base_url, "product entity resolution should resolve the active base URL")
 
         polish = normalized.get("final_visible_llm_polish", {}) or {}
-        assert_equal(polish.get("provider"), "openai", "final visible polish should follow active provider")
+        assert_equal(polish.get("provider"), expected_provider, "final visible polish should follow active provider")
         assert_equal(polish.get("model"), expected_flash_model, "final visible polish should resolve the active flash model")
         assert_equal(polish.get("base_url"), expected_base_url, "final visible polish should resolve the active base URL")
+
+        brain = normalized.get("customer_service_brain", {}) or {}
+        assert_equal(brain.get("provider"), expected_provider, "customer-service Brain should follow active provider")
+        assert_equal(brain.get("model"), expected_pro_model, "customer-service Brain should resolve the active pro model")
+        assert_equal(brain.get("base_url"), expected_base_url, "customer-service Brain should resolve the active base URL")
     finally:
         remove_file(settings_store.settings_path)
         if old_tenant is None:
@@ -3903,6 +4384,81 @@ def check_local_customer_service_settings_follow_active_provider_for_llm_modules
             os.environ.pop("OPENAI_PRO_MODEL", None)
         else:
             os.environ["OPENAI_PRO_MODEL"] = old_pro_model
+
+
+def check_local_customer_service_settings_follow_active_anthropic_kimi_route() -> None:
+    tenant_id = "workflow_provider_kimi_normalization_probe"
+    settings_store = CustomerServiceSettings(tenant_id=tenant_id)
+    old_tenant = os.environ.get("WECHAT_KNOWLEDGE_TENANT")
+    old_provider = os.environ.get("LLM_PROVIDER")
+    old_active_provider = os.environ.get("ACTIVE_LLM_PROVIDER")
+    old_anthropic_base_url = os.environ.get("ANTHROPIC_BASE_URL")
+    old_anthropic_flash_model = os.environ.get("ANTHROPIC_FLASH_MODEL")
+    old_anthropic_pro_model = os.environ.get("ANTHROPIC_PRO_MODEL")
+    os.environ["WECHAT_KNOWLEDGE_TENANT"] = tenant_id
+    os.environ["LLM_PROVIDER"] = "anthropic"
+    os.environ.pop("ACTIVE_LLM_PROVIDER", None)
+    os.environ["ANTHROPIC_BASE_URL"] = "https://aiself.vip/v1"
+    os.environ["ANTHROPIC_FLASH_MODEL"] = "kimi-for-coding"
+    os.environ["ANTHROPIC_PRO_MODEL"] = "kimi-for-coding"
+    remove_file(settings_store.settings_path)
+    try:
+        settings_store.save({"use_llm": True, "customer_service_brain_mode": "brain_first"})
+        config = load_smoke_config()
+        config["llm_reply_synthesis"] = {
+            "enabled": True,
+            "provider": "openai",
+            "model": "gpt-5.4",
+            "base_url": "https://openai.test.gateway/v1",
+            "model_routing": {
+                "flash_model": "gpt-5.4",
+                "pro_model": "gpt-5.4",
+            },
+        }
+        config["customer_service_brain"] = {
+            "enabled": True,
+            "mode": "brain_first",
+            "provider": "openai",
+            "model_tier": "pro",
+            "model": "gpt-5.4",
+            "base_url": "https://openai.test.gateway/v1",
+        }
+        normalized = apply_local_customer_service_settings(config)
+        expected_provider = active_llm_provider()
+        expected_model = resolve_llm_tier_model(provider=expected_provider, tier="pro")
+        brain = normalized.get("customer_service_brain", {}) or {}
+        synthesis = normalized.get("llm_reply_synthesis", {}) or {}
+        assert_equal(expected_provider, "anthropic", "test precondition should use Kimi/Anthropic active provider")
+        assert_equal(brain.get("provider"), "anthropic", "Brain should follow active Kimi/Anthropic provider")
+        assert_equal(brain.get("model"), expected_model, "Brain should discard stale OpenAI model after Kimi switch")
+        assert_equal(synthesis.get("provider"), "anthropic", "reply synthesis should follow active Kimi/Anthropic provider")
+        assert_equal(synthesis.get("model"), "kimi-for-coding", "reply synthesis should discard stale OpenAI model after Kimi switch")
+    finally:
+        remove_file(settings_store.settings_path)
+        if old_tenant is None:
+            os.environ.pop("WECHAT_KNOWLEDGE_TENANT", None)
+        else:
+            os.environ["WECHAT_KNOWLEDGE_TENANT"] = old_tenant
+        if old_provider is None:
+            os.environ.pop("LLM_PROVIDER", None)
+        else:
+            os.environ["LLM_PROVIDER"] = old_provider
+        if old_active_provider is None:
+            os.environ.pop("ACTIVE_LLM_PROVIDER", None)
+        else:
+            os.environ["ACTIVE_LLM_PROVIDER"] = old_active_provider
+        if old_anthropic_base_url is None:
+            os.environ.pop("ANTHROPIC_BASE_URL", None)
+        else:
+            os.environ["ANTHROPIC_BASE_URL"] = old_anthropic_base_url
+        if old_anthropic_flash_model is None:
+            os.environ.pop("ANTHROPIC_FLASH_MODEL", None)
+        else:
+            os.environ["ANTHROPIC_FLASH_MODEL"] = old_anthropic_flash_model
+        if old_anthropic_pro_model is None:
+            os.environ.pop("ANTHROPIC_PRO_MODEL", None)
+        else:
+            os.environ["ANTHROPIC_PRO_MODEL"] = old_anthropic_pro_model
 
 
 def check_local_customer_service_settings_follow_active_tenant_for_brain_mode() -> None:

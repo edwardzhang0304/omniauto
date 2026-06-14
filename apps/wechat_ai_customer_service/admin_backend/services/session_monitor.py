@@ -612,7 +612,17 @@ class SessionMonitor:
         session = self._session_by_identifier(name)
         if not isinstance(session, SessionState):
             return False
-        return session.unread_detected and session.pending_signal_kind == "high_sensitivity_short"
+        if not session.unread_detected:
+            return False
+        if session.pending_signal_kind == "high_sensitivity_short":
+            return True
+        if int(session.empty_capture_retries or 0) >= 2:
+            return False
+        return bool(
+            str(session.pending_signal_text or "").strip()
+            or str(session.last_unread_badge or "").strip()
+            or str(session.pending_since or "").strip()
+        )
 
     def _session_by_identifier(self, value: str) -> SessionState | None:
         key = str(value or "").strip()

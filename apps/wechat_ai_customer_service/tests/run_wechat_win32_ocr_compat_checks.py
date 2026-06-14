@@ -30,6 +30,7 @@ from apps.wechat_ai_customer_service.adapters.wechat_connector import (  # noqa:
     parse_json_object,
     pop_simulated_inbound_message,
     rpa_payload_has_invalid_window_handle,
+    rpa_payload_is_tray_hidden,
     rpa_payload_needs_interactive_confirmation,
     rpa_payload_needs_render_recovery,
     send_rpa_env,
@@ -73,6 +74,7 @@ from apps.wechat_ai_customer_service.adapters.wechat_win32_ocr_sidecar import ( 
     input_text_region_state,
     input_region_visual_delta_confirms,
     input_region_soft_blank_noise,
+    input_click_candidate_points,
     is_message_noise,
     jitter_client_click_surface_point,
     jitter_input_click_point,
@@ -97,6 +99,8 @@ from apps.wechat_ai_customer_service.adapters.wechat_win32_ocr_sidecar import ( 
     scroll_to_latest_before_read_enabled,
     active_ui_action_budget_decision,
     send_input_confirm_attempt_count,
+    send_click_candidate_points,
+    safe_send_trigger,
 )
 import apps.wechat_ai_customer_service.admin_backend.services.wechat_startup_check as startup_check  # noqa: E402
 import apps.wechat_ai_customer_service.workflows.preflight as preflight  # noqa: E402
@@ -198,6 +202,16 @@ def test_parse_sessions_normalizes_truncated_file_transfer() -> None:
     assert_true(names[:2] == ["文件传输助手", "许聪"], f"truncated file-transfer alias should normalize: {names}")
 
 
+def test_parse_sessions_strips_standalone_relative_day_suffix() -> None:
+    items = [
+        {"text": "新数据测试昨天", "confidence": 0.93, "left": 154, "right": 286, "top": 117, "bottom": 140, "center_x": 220, "center_y": 128},
+        {"text": "许聪", "confidence": 0.99, "left": 154, "right": 195, "top": 198, "bottom": 221, "center_x": 174, "center_y": 209},
+    ]
+    sessions = parse_sessions_from_ocr(items, (981, 860))
+    names = [item["name"] for item in sessions]
+    assert_true(names[:2] == ["新数据测试", "许聪"], f"standalone relative day suffix should normalize: {names}")
+
+
 def test_parse_sessions_preserves_duplicate_display_names_with_session_keys() -> None:
     items = [
         {"text": "许聪", "confidence": 0.99, "left": 154, "right": 195, "top": 117, "bottom": 140, "center_x": 174, "center_y": 128},
@@ -294,6 +308,13 @@ def test_parse_messages_outputs_message_envelope_fields() -> None:
     assert_true("quote_contamination" in set(message.get("quality_flags") or []), f"quote risk should be flagged: {message}")
     assert_true(str(message.get("captured_at") or "").count(":") >= 2, f"captured_at should include seconds: {message}")
     assert_true(isinstance(message.get("message_envelope"), dict), f"message envelope should be attached: {message}")
+    assert_true(str(message.get("canonical_input_id") or "").startswith("canonical_"), f"canonical input id should be attached: {message}")
+    assert_true(str(message.get("canonical_visual_id") or "").startswith("canonical_visual_"), f"canonical visual id should be attached: {message}")
+    envelope = message.get("message_envelope") or {}
+    assert_true(
+        envelope.get("canonical_input_id") == message.get("canonical_input_id"),
+        f"record and envelope canonical input ids should match: {message}",
+    )
 
 
 def test_history_snapshot_merge_orders_and_dedupes() -> None:
@@ -414,6 +435,23 @@ def test_send_points_apply_small_safe_jitter() -> None:
     assert_true(768 <= send_y <= 844, f"send jitter should remain near send button row: {(send_x, send_y)}")
 
 
+def test_send_and_input_points_use_candidate_pools() -> None:
+    geometry = {"width": 980, "height": 860}
+    points = calculate_send_points(geometry)
+    input_candidates = points.get("input_candidate_points") or []
+    send_candidates = points.get("send_candidate_points") or []
+    assert_true(len(input_candidates) >= 10, f"input click should expose a candidate pool: {input_candidates}")
+    assert_true(len(send_candidates) >= 10, f"send click should expose a candidate pool: {send_candidates}")
+    assert_true(
+        len(set(tuple(point) for point in input_click_candidate_points(geometry))) >= 10,
+        "input candidate points should be distinct",
+    )
+    assert_true(
+        len(set(tuple(point) for point in send_click_candidate_points(geometry))) >= 10,
+        "send candidate points should be distinct",
+    )
+
+
 def test_input_click_jitter_has_enough_entropy() -> None:
     previous = {
         "WECHAT_WIN32_OCR_INPUT_POINT_JITTER_X": os.environ.get("WECHAT_WIN32_OCR_INPUT_POINT_JITTER_X"),
@@ -430,9 +468,15 @@ def test_input_click_jitter_has_enough_entropy() -> None:
         points = [jitter_input_click_point(637, 715, geometry) for _ in range(80)]
         xs = [point[0] for point in points]
         ys = [point[1] for point in points]
-        assert_true(len(set(points)) >= 24, f"input point jitter should avoid repeated exact coordinates: {len(set(points))}")
-        assert_true(max(xs) - min(xs) >= 28, f"input point jitter should spread x enough: {min(xs)}..{max(xs)}")
-        assert_true(max(ys) - min(ys) >= 16, f"input point jitter should spread y enough: {min(ys)}..{max(ys)}")
+        assert_true(len(set(points)) >= 32, f"input point jitter should avoid repeated exact coordinates: {len(set(points))}")
+        assert_true(max(xs) - min(xs) >= 80, f"input point jitter should spread x enough: {min(xs)}..{max(xs)}")
+        assert_true(max(ys) - min(ys) >= 28, f"input point jitter should spread y enough: {min(ys)}..{max(ys)}")
+        send_points = [jitter_send_click_point(918, 816, geometry) for _ in range(80)]
+        send_xs = [point[0] for point in send_points]
+        send_ys = [point[1] for point in send_points]
+        assert_true(len(set(send_points)) >= 18, f"send point jitter should avoid fixed button coordinates: {len(set(send_points))}")
+        assert_true(max(send_xs) - min(send_xs) >= 28, f"send point jitter should spread x enough: {min(send_xs)}..{max(send_xs)}")
+        assert_true(max(send_ys) - min(send_ys) >= 18, f"send point jitter should spread y enough: {min(send_ys)}..{max(send_ys)}")
         sidecar_mod.get_window_geometry = lambda _hwnd: {"width": 980, "height": 860}
         surface_points = [jitter_client_click_surface_point(1001, 637, 715) for _ in range(80)]
         finals = [tuple(item[:2]) for item in surface_points]
@@ -619,6 +663,24 @@ def test_startup_capability_decision() -> None:
         and "未检测到" not in str(minimized.get("message") or ""),
         f"minimized window should not be reported as missing WeChat: {minimized}",
     )
+    tray_hidden = evaluate_wechat_capability(
+        {
+            "online": False,
+            "scheme": "win32_ocr_window_in_tray",
+            "state": "main_window_in_tray",
+            "reason": "wechat_window_in_tray",
+            "receive": {"ok": False},
+            "send": {"ok": False},
+        },
+        require_send=True,
+        module_name="微信自动客服",
+    )
+    assert_true(
+        tray_hidden["ok"] is False
+        and tray_hidden["detail"] == "wechat_window_in_tray"
+        and "手动点开微信主窗口" in str(tray_hidden.get("message") or ""),
+        f"tray-hidden WeChat should require manual open: {tray_hidden}",
+    )
 
     receive_only = {
         "online": True,
@@ -750,7 +812,7 @@ def test_connector_passive_session_poll_keeps_probe_env_empty() -> None:
     assert_true(env_overrides == {}, f"passive session poll should remain non-invasive: {observed}")
 
 
-def test_connector_interactive_capabilities_recovers_minimized_window() -> None:
+def test_connector_interactive_capabilities_reports_tray_hidden_window_without_restore() -> None:
     observed: dict[str, object] = {"calls": [], "reserve_calls": 0}
 
     class StubConnector(WeChatConnector):
@@ -758,26 +820,17 @@ def test_connector_interactive_capabilities_recovers_minimized_window() -> None:
             calls = observed["calls"]
             assert isinstance(calls, list)
             calls.append({"args": list(args), "env": dict(env_overrides or {})})
-            if len(calls) == 1:
-                return {
-                    "ok": False,
-                    "online": False,
-                    "adapter": "win32_ocr",
-                    "scheme": "win32_ocr_window_geometry_invalid",
-                    "state": "main_window_geometry_invalid",
-                    "reason": "window_offscreen_or_minimized",
-                    "geometry": {"left": -32000, "top": -32000, "width": 199, "height": 34},
-                    "receive": {"ok": False},
-                    "send": {"ok": False},
-                }
             return {
-                "ok": True,
-                "online": True,
+                "ok": False,
+                "online": False,
                 "adapter": "win32_ocr",
-                "scheme": "win32_ocr_guarded_click",
-                "state": "capabilities_ocr",
-                "receive": {"ok": True},
-                "send": {"ok": True},
+                "scheme": "win32_ocr_window_in_tray",
+                "state": "main_window_in_tray",
+                "reason": "wechat_window_in_tray",
+                "window_probe": {"main_count": 1, "visible_main_count": 0},
+                "receive": {"ok": False},
+                "send": {"ok": False},
+                "manual_action_required": "open_wechat_main_window",
             }
 
         def call_reserve_sidecar(self, args, *, allow_failure=False, primary_payload=None):  # type: ignore[override]
@@ -787,13 +840,12 @@ def test_connector_interactive_capabilities_recovers_minimized_window() -> None:
     payload = StubConnector().capabilities(interactive=True)
     calls = observed["calls"]
     assert isinstance(calls, list)
-    assert_true(payload.get("ok") is True and payload.get("adapter") == "win32_ocr", f"interactive recovery should pass: {payload}")
-    assert_true(len(calls) == 2, f"recoverable geometry failure should be retried once: {observed}")
+    assert_true(payload.get("ok") is False and payload.get("state") == "main_window_in_tray", f"tray-hidden window should block startup: {payload}")
+    assert_true(len(calls) == 1, f"tray-hidden window must not be auto-restored/retried: {observed}")
     assert_true(calls[0]["env"] == interactive_rpa_probe_env(), f"first interactive call should use restore env: {observed}")
-    assert_true(calls[1]["env"] == interactive_rpa_probe_env(), f"retry should keep restore env: {observed}")
-    recovery = payload.get("rpa_recovery") if isinstance(payload.get("rpa_recovery"), dict) else {}
-    assert_true(recovery.get("ok") is True, f"recovery diagnostics should be attached: {payload}")
-    assert_true(observed.get("reserve_calls") == 0, f"wxauto4 reserve should not run after RPA recovery: {observed}")
+    assert_true(payload.get("manual_action_required") == "open_wechat_main_window", f"manual action should be explicit: {payload}")
+    assert_true(rpa_payload_is_tray_hidden(payload) is True, f"helper should detect tray-hidden payload: {payload}")
+    assert_true(observed.get("reserve_calls") == 0, f"wxauto4 reserve should not mask tray-hidden RPA state: {observed}")
 
 
 def test_connector_passive_status_does_not_recover_minimized_window() -> None:
@@ -823,6 +875,36 @@ def test_connector_passive_status_does_not_recover_minimized_window() -> None:
     assert_true(payload.get("ok") is False, f"passive status should stay passive on recoverable failure: {payload}")
     assert_true(len(calls) == 1 and calls[0]["env"] == {}, f"passive status should not do interactive retry: {observed}")
     assert_true(observed.get("reserve_calls") == 1, f"reserve status should still be recorded for diagnostics: {observed}")
+
+
+def test_interactive_probe_does_not_restore_tray_hidden_window() -> None:
+    sidecar_mod = sys.modules["apps.wechat_ai_customer_service.adapters.wechat_win32_ocr_sidecar"]
+    original_probe = sidecar_mod.probe_wechat_windows
+    original_restore = sidecar_mod.restore_wechat_window
+    calls = {"restore": 0}
+    try:
+        sidecar_mod.probe_wechat_windows = lambda: {
+            "windows": [{"hwnd": 1001, "title": "微信", "class_name": "Qt51514QWindowIcon", "visible": False}],
+            "visible_windows": [],
+            "main_windows": [{"hwnd": 1001, "title": "微信", "class_name": "Qt51514QWindowIcon", "visible": False}],
+            "visible_main_windows": [],
+            "visible_count": 0,
+            "main_count": 1,
+            "visible_main_count": 0,
+        }
+
+        def fake_restore(_probe):
+            calls["restore"] += 1
+            return {"hwnd": 1001}
+
+        sidecar_mod.restore_wechat_window = fake_restore
+        probe = sidecar_mod.ensure_visible_wechat_window(interactive=True)
+        assert_true(probe.get("main_window_in_tray") is True, f"tray-hidden state should be explicit: {probe}")
+        assert_true(probe.get("manual_action_required") == "open_wechat_main_window", f"manual action should be required: {probe}")
+        assert_true(calls["restore"] == 0, f"tray-hidden WeChat must not be auto-restored: {calls}")
+    finally:
+        sidecar_mod.probe_wechat_windows = original_probe
+        sidecar_mod.restore_wechat_window = original_restore
 
 
 def test_connector_interactive_status_reports_blank_render_without_auto_recovery_by_default() -> None:
@@ -1111,6 +1193,22 @@ def test_startup_evaluates_nested_rpa_geometry_failure() -> None:
     assert_true(decision.get("detail") == "wechat_window_minimized", f"nested RPA geometry reason should be preserved: {decision}")
     assert_true("未检测到" not in str(decision.get("message") or ""), f"minimized window should not be called missing: {decision}")
     assert_true(rpa_payload_needs_interactive_confirmation(payload["primary_status"]) is True, "recoverable geometry helper should trigger")
+    tray_payload = {
+        "ok": False,
+        "online": False,
+        "adapter": "win32_ocr",
+        "scheme": "win32_ocr_window_in_tray",
+        "state": "main_window_in_tray",
+        "reason": "wechat_window_in_tray",
+    }
+    assert_true(
+        rpa_payload_is_tray_hidden(tray_payload) is True,
+        "tray-hidden WeChat should be classified separately",
+    )
+    assert_true(
+        rpa_payload_needs_interactive_confirmation(tray_payload) is False,
+        "tray-hidden WeChat should not trigger automatic restore retry",
+    )
     blank_payload = {
         "ok": False,
         "online": False,
@@ -1216,6 +1314,7 @@ def test_session_match_and_click_x() -> None:
     assert_true(session_name_matches("文件传输助手(2)", "文件传输助手", exact=False), "fuzzy match should pass")
     assert_true(session_name_matches("File Transfer Assistant", "文件传输助手", exact=True), "alias exact match should pass")
     assert_true(session_name_matches("新数据测试昨天10:39", "新数据测试", exact=True), "OCR-merged session time should be stripped")
+    assert_true(session_name_matches("新数据测试昨天", "新数据测试", exact=True), "OCR-merged standalone day should be stripped")
     assert_true(session_name_matches("许聪星期四", "许聪", exact=True), "OCR-merged weekday suffix should be stripped")
     assert_true(session_name_matches("文件传输站", "文件传输助手", exact=True) is False, "unrelated exact mismatch should fail")
 
@@ -1398,12 +1497,15 @@ def test_quick_login_auto_enter_uses_human_client_click() -> None:
 def test_blocking_screen_ignores_normal_chat_login_words() -> None:
     chat_items = [
         {"text": "许聪", "confidence": 0.99, "left": 420, "right": 470, "top": 62, "bottom": 92, "center_x": 445, "center_y": 76},
+        {"text": "文件传输助手", "confidence": 0.99, "left": 153, "right": 266, "top": 116, "bottom": 140, "center_x": 210, "center_y": 128},
+        {"text": "发送", "confidence": 0.99, "left": 900, "right": 946, "top": 800, "bottom": 832, "center_x": 923, "center_y": 816},
         {"text": "我刚才登录VPS服务端，为什么发了两次验证码？", "confidence": 0.99, "left": 430, "right": 810, "top": 220, "bottom": 250, "center_x": 620, "center_y": 235},
         {"text": "后面扫码确认一下也可以", "confidence": 0.99, "left": 430, "right": 720, "top": 270, "bottom": 300, "center_x": 575, "center_y": 285},
+        {"text": "这是一条发送阶段安全验证测试消息", "confidence": 0.99, "left": 430, "right": 790, "top": 320, "bottom": 350, "center_x": 610, "center_y": 335},
     ]
     assert_true(
         blocking_screen_reason(chat_items) == "",
-        "normal chat text containing login/scan words should not block RPA read",
+        "normal chat text containing login/scan/security words should not block RPA read",
     )
 
     login_items = [
@@ -2461,6 +2563,51 @@ def test_send_trigger_mode_defaults_to_enter_only() -> None:
             os.environ["WECHAT_WIN32_OCR_ALLOW_CLICK_SEND_TRIGGER"] = previous
 
 
+def test_safe_send_trigger_uses_single_enter_with_randomized_delays() -> None:
+    sidecar_mod = sys.modules["apps.wechat_ai_customer_service.adapters.wechat_win32_ocr_sidecar"]
+    originals = {
+        "humanized_sleep_ms": sidecar_mod.humanized_sleep_ms,
+        "humanized_action_sleep": sidecar_mod.humanized_action_sleep,
+        "coordinate_rpa_action": sidecar_mod.coordinate_rpa_action,
+        "ensure_left_button_released": sidecar_mod.ensure_left_button_released,
+        "keybd_event": sidecar_mod.win32api.keybd_event,
+        "human_client_click": sidecar_mod.human_client_click,
+    }
+    calls = {"sleep": [], "action": [], "key": [], "release": 0, "click": 0}
+    try:
+        sidecar_mod.humanized_sleep_ms = lambda low, high: calls["sleep"].append((int(low), int(high))) or 0.0
+        sidecar_mod.humanized_action_sleep = lambda low, high=None: calls["sleep"].append((int(low), int(high or low))) or 0.0
+        sidecar_mod.coordinate_rpa_action = lambda action, metadata=None: calls["action"].append((action, metadata or {})) or {"ok": True}
+        sidecar_mod.ensure_left_button_released = lambda: calls.__setitem__("release", calls["release"] + 1)
+        sidecar_mod.win32api.keybd_event = lambda key, *_args: calls["key"].append(int(key))
+        sidecar_mod.human_client_click = lambda *_args, **_kwargs: calls.__setitem__("click", calls["click"] + 1)
+        result = safe_send_trigger(
+            1001,
+            trigger_mode="enter_only",
+            settings={
+                "enabled": True,
+                "send_trigger_delay_min_ms": 520,
+                "send_trigger_delay_max_ms": 1500,
+                "send_after_trigger_delay_min_ms": 260,
+                "send_after_trigger_delay_max_ms": 820,
+            },
+            focus_guard_func=lambda: {"ok": True, "reason": "window_valid"},
+        )
+        assert_true(result.get("ok") is True, f"safe trigger should pass: {result}")
+        assert_true(calls["click"] == 0, f"default send trigger must not click send button: {calls}")
+        assert_true(calls["key"].count(sidecar_mod.win32con.VK_RETURN) == 2, f"one key down/up pair expected: {calls}")
+        assert_true(calls["release"] >= 1, f"mouse button should be released before keyboard send: {calls}")
+        assert_true(any(item[0] == "send_trigger_enter" for item in calls["action"]), f"send trigger should be audited: {calls}")
+        assert_true((520, 1500) in calls["sleep"], f"pre-trigger randomized wait should be used: {calls}")
+        assert_true((260, 820) in calls["sleep"], f"post-trigger randomized wait should be used: {calls}")
+    finally:
+        for name, value in originals.items():
+            if name == "keybd_event":
+                sidecar_mod.win32api.keybd_event = value
+            else:
+                setattr(sidecar_mod, name, value)
+
+
 def test_input_text_region_state_distinguishes_blank_and_text() -> None:
     geometry = {"left": 0, "top": 0, "width": 980, "height": 860}
     blank = Image.new("RGB", (980, 860), "white")
@@ -2509,7 +2656,7 @@ def test_input_text_region_state_distinguishes_blank_and_text() -> None:
     assert_true(text_state.get("has_visible_text") is True, f"OCR text should block duplicate retry: {text_state}")
 
 
-def test_send_rpa_env_enables_strict_focus_and_single_confirm() -> None:
+def test_send_rpa_env_enables_strict_focus_single_confirm_and_blank_retry() -> None:
     previous = os.environ.get("WECHAT_WIN32_OCR_SEND_INPUT_CONFIRM_ATTEMPTS")
     previous_retry = os.environ.get("WECHAT_WIN32_OCR_BLANK_INPUT_FOCUS_RETRY")
     previous_strict = os.environ.get("WECHAT_WIN32_OCR_STRICT_SEND_FOCUS_GUARD")
@@ -2522,7 +2669,10 @@ def test_send_rpa_env_enables_strict_focus_and_single_confirm() -> None:
         assert_true(env.get("WECHAT_WIN32_OCR_ATTACH_THREAD_INPUT") == "1", f"send env should attach input: {env}")
         assert_true(env.get("WECHAT_WIN32_OCR_STRICT_SEND_FOCUS_GUARD") == "1", f"send env should guard foreground focus: {env}")
         assert_true(env.get("WECHAT_WIN32_OCR_ALLOW_UNKNOWN_FOREGROUND") == "1", f"send env should allow unknown-foreground guarded degrade: {env}")
-        assert_true(env.get("WECHAT_WIN32_OCR_BLANK_INPUT_FOCUS_RETRY") == "0", f"send env should not retry blank focus: {env}")
+        assert_true(
+            env.get("WECHAT_WIN32_OCR_BLANK_INPUT_FOCUS_RETRY") == "1",
+            f"send env should allow one blank-input focus recovery without row reclicks: {env}",
+        )
         assert_true(env.get("WECHAT_WIN32_OCR_SEND_INPUT_CONFIRM_ATTEMPTS") == "1", f"send env should use one confirmed input attempt: {env}")
     finally:
         if previous is None:
@@ -2821,6 +2971,93 @@ def test_target_ready_short_circuits_when_active_target_already_confirmed() -> N
         assert_true(result.get("ok") is True, f"pre-validated active target should pass immediately: {result}")
         assert_true(calls["open"] == 0 and calls["validate"] == 1, f"open_chat should be skipped on pre-validation pass: {calls}")
     finally:
+        for name, value in originals.items():
+            setattr(sidecar_mod, name, value)
+
+
+def test_target_ready_short_circuits_with_session_key_when_active_target_confirmed() -> None:
+    sidecar_mod = sys.modules["apps.wechat_ai_customer_service.adapters.wechat_win32_ocr_sidecar"]
+    originals = {
+        "open_chat": sidecar_mod.open_chat,
+        "validate_active_send_target": sidecar_mod.validate_active_send_target,
+    }
+    calls = {"open": 0, "validate": 0}
+    previous_state = dict(sidecar_mod._LAST_RPA_ACTION_STATE)
+    try:
+        sidecar_mod._LAST_RPA_ACTION_STATE.clear()
+        sidecar_mod._LAST_RPA_ACTION_STATE["active_session_key"] = "wx:rpa:v1:test-session"
+        sidecar_mod.open_chat = lambda *_args, **_kwargs: calls.__setitem__("open", calls["open"] + 1) or False
+
+        def fake_validate(hwnd: int, target: str, *, exact: bool, artifact_dir: str | None = None) -> dict[str, object]:
+            calls["validate"] += 1
+            return {
+                "ok": True,
+                "online": True,
+                "reason": "target_confirmed",
+                "requested_target": target,
+                "confirmed_target": target,
+                "confirmation_confidence": "active_title_strict",
+            }
+
+        sidecar_mod.validate_active_send_target = fake_validate
+        result = sidecar_mod.ensure_target_ready_for_send(1001, "新数据测试", exact=True, session_key="wx:rpa:v1:test-session")
+        assert_true(result.get("ok") is True, f"pre-validated keyed active target should pass immediately: {result}")
+        assert_true(calls["open"] == 0 and calls["validate"] == 1, f"session-key fast path should not click the sidebar again: {calls}")
+        assert_true(
+            sidecar_mod._LAST_RPA_ACTION_STATE.get("active_session_key") == "wx:rpa:v1:test-session",
+            "session-key fast path should refresh active session cache",
+        )
+    finally:
+        sidecar_mod._LAST_RPA_ACTION_STATE.clear()
+        sidecar_mod._LAST_RPA_ACTION_STATE.update(previous_state)
+        for name, value in originals.items():
+            setattr(sidecar_mod, name, value)
+
+
+def test_target_ready_with_session_key_confirms_before_send_when_cache_empty() -> None:
+    sidecar_mod = sys.modules["apps.wechat_ai_customer_service.adapters.wechat_win32_ocr_sidecar"]
+    originals = {
+        "open_chat": sidecar_mod.open_chat,
+        "validate_active_send_target": sidecar_mod.validate_active_send_target,
+        "humanized_action_sleep": sidecar_mod.humanized_action_sleep,
+    }
+    calls = {"open": 0, "validate": 0}
+    previous_state = dict(sidecar_mod._LAST_RPA_ACTION_STATE)
+    try:
+        sidecar_mod._LAST_RPA_ACTION_STATE.clear()
+
+        def fake_open_chat(
+            hwnd: int,
+            target: str,
+            *,
+            exact: bool,
+            artifact_dir: str | None = None,
+            session_key: str = "",
+        ) -> bool:
+            calls["open"] += 1
+            assert_true(session_key == "wx:rpa:v1:test-session", "session_key must flow into open_chat confirmation")
+            return True
+
+        def fake_validate(hwnd: int, target: str, *, exact: bool, artifact_dir: str | None = None) -> dict[str, object]:
+            calls["validate"] += 1
+            return {
+                "ok": True,
+                "online": True,
+                "reason": "target_confirmed",
+                "requested_target": target,
+                "confirmed_target": target,
+                "confirmation_confidence": "active_title_strict",
+            }
+
+        sidecar_mod.open_chat = fake_open_chat
+        sidecar_mod.validate_active_send_target = fake_validate
+        sidecar_mod.humanized_action_sleep = lambda *_args, **_kwargs: None
+        result = sidecar_mod.ensure_target_ready_for_send(1001, "新数据测试", exact=True, session_key="wx:rpa:v1:test-session")
+        assert_true(result.get("ok") is True, f"cache-miss keyed target should confirm through open_chat: {result}")
+        assert_true(calls["open"] == 1 and calls["validate"] == 2, f"cache-miss path should do one confirmation, not repeated clicks: {calls}")
+    finally:
+        sidecar_mod._LAST_RPA_ACTION_STATE.clear()
+        sidecar_mod._LAST_RPA_ACTION_STATE.update(previous_state)
         for name, value in originals.items():
             setattr(sidecar_mod, name, value)
 
@@ -3450,6 +3687,7 @@ def main() -> int:
         test_parse_sessions_from_ocr,
         test_parse_sessions_detects_visual_unread_red_dot,
         test_parse_sessions_normalizes_truncated_file_transfer,
+        test_parse_sessions_strips_standalone_relative_day_suffix,
         test_parse_sessions_preserves_duplicate_display_names_with_session_keys,
         test_message_probe_tokens_prefer_semantic_body_after_live_marker,
         test_parse_messages_from_ocr,
@@ -3463,6 +3701,7 @@ def main() -> int:
         test_connector_helpers,
         test_send_geometry_guard,
         test_send_points_apply_small_safe_jitter,
+        test_send_and_input_points_use_candidate_pools,
         test_input_click_jitter_has_enough_entropy,
         test_send_rate_guard,
         test_wechat_rpa_lock_recovers_stale_lock_and_times_out_on_live_lock,
@@ -3473,8 +3712,9 @@ def main() -> int:
         test_connector_interactive_status_passes_probe_env,
         test_connector_fresh_session_discovery_passes_probe_env,
         test_connector_passive_session_poll_keeps_probe_env_empty,
-        test_connector_interactive_capabilities_recovers_minimized_window,
+        test_connector_interactive_capabilities_reports_tray_hidden_window_without_restore,
         test_connector_passive_status_does_not_recover_minimized_window,
+        test_interactive_probe_does_not_restore_tray_hidden_window,
         test_connector_interactive_status_reports_blank_render_without_auto_recovery_by_default,
         test_connector_capabilities_skips_reserve_after_blank_render_stop,
         test_connector_interactive_status_recovers_blank_render_when_explicitly_enabled,
@@ -3529,12 +3769,13 @@ def main() -> int:
         test_sendinput_unicode_text_entry_helpers,
         test_sendinput_unicode_aborts_when_window_guard_fails,
         test_send_trigger_mode_defaults_to_enter_only,
+        test_safe_send_trigger_uses_single_enter_with_randomized_delays,
         test_input_text_region_state_distinguishes_blank_and_text,
         test_input_region_visual_delta_confirmation,
         test_input_region_soft_blank_noise_allows_post_clear_progress,
         test_input_area_token_confirmation_excludes_recent_chat_bubble,
         test_clear_existing_input_draft_noops_when_blank,
-        test_send_rpa_env_enables_strict_focus_and_single_confirm,
+        test_send_rpa_env_enables_strict_focus_single_confirm_and_blank_retry,
         test_activate_window_debounces_aggressive_refocus,
         test_non_retryable_input_failure_detects_focus_loss,
         test_foreground_guard_zero_hwnd_can_degrade_when_enabled,
@@ -3545,6 +3786,8 @@ def main() -> int:
         test_target_ready_defaults_to_single_attempt_and_hard_stops_blank_render,
         test_target_ready_requires_guard_confirmation_even_when_open_chat_returns_true,
         test_target_ready_short_circuits_when_active_target_already_confirmed,
+        test_target_ready_short_circuits_with_session_key_when_active_target_confirmed,
+        test_target_ready_with_session_key_confirms_before_send_when_cache_empty,
         test_target_ready_reopens_when_prevalidation_is_weak,
         test_send_payload_rechecks_prevalidated_guard_before_typing,
         test_send_payload_blocks_stale_prevalidated_guard_when_active_target_changed,

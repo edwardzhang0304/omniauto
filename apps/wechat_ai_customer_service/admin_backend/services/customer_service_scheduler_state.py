@@ -12,9 +12,10 @@ import hashlib
 import json
 import os
 import re
+import tempfile
 import time
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Callable
 
@@ -24,6 +25,12 @@ from apps.wechat_ai_customer_service.admin_backend.services.customer_service_ses
     stable_session_key,
 )
 from apps.wechat_ai_customer_service.knowledge_paths import active_tenant_id, tenant_runtime_root
+from apps.wechat_ai_customer_service.message_identity import (
+    canonical_input_message_id,
+    message_has_repeatable_probe_content as canonical_message_has_repeatable_probe_content,
+    normalize_repeatable_probe_text as canonical_normalize_repeatable_probe_text,
+    occurrence_marker_for_message,
+)
 
 
 STATE_VERSION = 2
@@ -79,19 +86,15 @@ def message_content_digest(message_ids: list[Any] | None, content_keys: list[Any
 
 
 def normalize_repeatable_probe_text(text: Any) -> str:
-    compact = re.sub(r"[\s，。,.！？!、~～：:；;“”\"'（）()]+", "", str(text or "")).lower()
-    return compact.strip()
+    return canonical_normalize_repeatable_probe_text(text)
 
 
 def message_has_repeatable_probe_content(message: dict[str, Any]) -> bool:
-    compact = normalize_repeatable_probe_text(message.get("content"))
-    if not compact:
-        return False
-    if len(compact) <= 7:
-        return True
-    if compact in {"你好", "您好", "在吗", "有人吗", "老板在吗", "hello", "hi", "哈喽", "嗨", "在", "在不", "在么", "在嘛", "在呢"}:
-        return True
-    return compact.startswith("在") and len(compact) <= 3
+    return canonical_message_has_repeatable_probe_content(message)
+
+
+def message_has_occurrence_identity_signal(message: dict[str, Any]) -> bool:
+    return bool(occurrence_marker_for_message(message))
 
 
 def message_repeatable_occurrence_identity(message: dict[str, Any]) -> str:
@@ -135,6 +138,9 @@ def message_repeatable_occurrence_identity(message: dict[str, Any]) -> str:
 
 
 def message_identity(message: dict[str, Any]) -> str:
+    canonical_id = canonical_input_message_id(message)
+    if canonical_id:
+        return canonical_id
     repeatable_id = message_repeatable_occurrence_identity(message)
     if repeatable_id:
         return repeatable_id
@@ -187,6 +193,8 @@ class SchedulerConfig:
     planner_max_concurrency: int = 2
     polish_max_concurrency: int = 2
     send_max_replies_per_round: int = 1
+    planner_task_timeout_seconds: int = 60
+    polish_task_timeout_seconds: int = 15
     same_session_single_inflight: bool = True
     stale_reply_policy: str = "discard_and_requeue"
     pending_session_ttl_seconds: int = DEFAULT_PENDING_SESSION_TTL_SECONDS
@@ -199,6 +207,12 @@ class SchedulerConfig:
         raw = (config or {}).get("concurrency_scheduler", {})
         if not isinstance(raw, dict):
             raw = {}
+        brain = (config or {}).get("customer_service_brain", {})
+        if not isinstance(brain, dict):
+            brain = {}
+        final_polish = (config or {}).get("final_visible_llm_polish", {})
+        if not isinstance(final_polish, dict):
+            final_polish = {}
 
         def bounded_int(name: str, default: int, minimum: int = 1, maximum: int = 1000) -> int:
             try:
@@ -207,7 +221,47 @@ class SchedulerConfig:
                 value = default
             return max(minimum, min(maximum, value))
 
+        def config_int(source: dict[str, Any], name: str, default: int, minimum: int = 1, maximum: int = 1000) -> int:
+            try:
+                value = int(source.get(name, default) or default)
+            except (TypeError, ValueError):
+                value = default
+            return max(minimum, min(maximum, value))
+
         legacy_llm_concurrency = bounded_int("llm_max_concurrency", 2, 1, 10)
+        brain_primary_budget = max(
+            config_int(brain, "timeout_seconds", 35, 1, 180),
+            config_int(brain, "large_prompt_timeout_seconds", 60, 1, 180),
+            config_int(brain, "very_large_prompt_timeout_seconds", 90, 1, 240),
+        )
+        brain_fallback_budget = config_int(brain, "fallback_timeout_seconds", 45, 0, 180)
+        brain_repair_budget = max(
+            config_int(brain, "quality_repair_timeout_seconds", 12, 0, 120),
+            config_int(brain, "json_structure_repair_timeout_seconds", 8, 0, 120),
+            config_int(brain, "semantic_reviewer_timeout_seconds", 8, 0, 120),
+        )
+        fast_primary_budget = config_int(brain, "low_authority_fast_timeout_seconds", 12, 1, 120)
+        fast_fallback_budget = config_int(brain, "low_authority_fast_fallback_timeout_seconds", 10, 0, 120)
+        fast_repair_budget = config_int(brain, "low_authority_fast_repair_timeout_seconds", 6, 0, 120)
+        # The scheduler timeout wraps the whole Brain pipeline, not just one
+        # provider read. Cover primary + fallback + repair/reviewer budgets so
+        # long but valid Brain calls are not killed and requeued as "read but no reply".
+        brain_pipeline_budget = max(
+            brain_primary_budget + brain_fallback_budget + brain_repair_budget,
+            fast_primary_budget + fast_fallback_budget + fast_repair_budget,
+        )
+        planner_timeout = bounded_int(
+            "planner_task_timeout_seconds",
+            min(240, brain_pipeline_budget + 15),
+            10,
+            240,
+        )
+        polish_timeout = bounded_int(
+            "polish_task_timeout_seconds",
+            config_int(final_polish, "timeout_seconds", 6, 1, 120) + 10,
+            5,
+            180,
+        )
         return cls(
             enabled=raw.get("enabled", False) is True,
             capture_max_sessions_per_round=bounded_int("capture_max_sessions_per_round", 3, 1, 20),
@@ -215,6 +269,8 @@ class SchedulerConfig:
             planner_max_concurrency=bounded_int("planner_max_concurrency", legacy_llm_concurrency, 1, 12),
             polish_max_concurrency=bounded_int("polish_max_concurrency", legacy_llm_concurrency, 1, 12),
             send_max_replies_per_round=bounded_int("send_max_replies_per_round", 1, 1, 10),
+            planner_task_timeout_seconds=planner_timeout,
+            polish_task_timeout_seconds=polish_timeout,
             same_session_single_inflight=raw.get("same_session_single_inflight", True) is not False,
             stale_reply_policy=str(raw.get("stale_reply_policy") or "discard_and_requeue"),
             pending_session_ttl_seconds=bounded_int("pending_session_ttl_seconds", DEFAULT_PENDING_SESSION_TTL_SECONDS, 60, 86400),
@@ -328,9 +384,32 @@ class SchedulerStateStore:
         payload = copy.deepcopy(state)
         payload["updated_at"] = utcnow_iso()
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        temp = self.path.with_suffix(self.path.suffix + ".tmp")
-        temp.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
-        os.replace(temp, self.path)
+        fd, temp_name = tempfile.mkstemp(
+            prefix=f".{self.path.name}.",
+            suffix=".tmp",
+            dir=str(self.path.parent),
+            text=True,
+        )
+        temp = Path(temp_name)
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8", newline="") as handle:
+                handle.write(json.dumps(payload, ensure_ascii=False, indent=2))
+            last_error: OSError | None = None
+            for attempt in range(6):
+                try:
+                    os.replace(temp, self.path)
+                    return
+                except PermissionError as exc:
+                    last_error = exc
+                    time.sleep(0.05 * (attempt + 1))
+            if last_error is not None:
+                raise last_error
+        finally:
+            try:
+                if temp.exists():
+                    temp.unlink()
+            except OSError:
+                pass
 
     def update(self, mutator: Callable[[dict[str, Any]], Any]) -> Any:
         with SchedulerStateLock(self.lock_path):
@@ -548,15 +627,31 @@ def cleanup_scheduler_state(
             continue
         pending_reason = str(session.get("pending_reason") or "").strip()
         pending_recapture_kind = str(session.get("pending_recapture_kind") or "").strip()
-        if pending_reason == "recoverable_llm_failure" and pending_recapture_kind != "monitor_only_short_pending":
-            session["pending_capture"] = False
-            session["pending_reason"] = ""
-            session["pending_recapture_kind"] = ""
-            session["pending_signal_has_unread_evidence"] = False
-            session["pending_message_count"] = 0
-            session["oldest_unreplied_at"] = ""
-            session["status"] = "idle"
-            cleared_stale_recoverable_recaptures += 1
+        if pending_reason == "recoverable_llm_failure":
+            pending_count = int(session.get("pending_message_count") or 0)
+            oldest = str(session.get("oldest_unreplied_at") or "")
+            if pending_count > 0 or oldest:
+                session["pending_capture"] = False
+                session["pending_reason"] = ""
+                session["pending_recapture_kind"] = ""
+                session["pending_signal_has_unread_evidence"] = False
+                session["pending_message_count"] = max(1, pending_count)
+                session["oldest_unreplied_at"] = oldest or utcnow_iso()
+                session["status"] = "internal_handoff_pending"
+                risk_state = session.setdefault("risk_state", {})
+                if isinstance(risk_state, dict):
+                    risk_state["handoff_required"] = True
+                    risk_state["handoff_reason"] = "legacy_recoverable_llm_failure_pending_preserved"
+                cleared_stale_recoverable_recaptures += 1
+            else:
+                session["pending_capture"] = False
+                session["pending_reason"] = ""
+                session["pending_recapture_kind"] = ""
+                session["pending_signal_has_unread_evidence"] = False
+                session["pending_message_count"] = 0
+                session["oldest_unreplied_at"] = ""
+                session["status"] = "idle"
+                cleared_stale_recoverable_recaptures += 1
         ids = [str(item) for item in (session.get("ready_reply_ids") or []) if str(item)]
         active_ids = [
             reply_id
@@ -851,6 +946,9 @@ def record_session_signal(
         now=now,
     )
     risk_state = session.get("risk_state") if isinstance(session.get("risk_state"), dict) else {}
+    exhausted_until = str(risk_state.get("llm_failure_exhausted_until") or "").strip()
+    exhausted_digest = str(risk_state.get("llm_failure_exhausted_content_digest") or "").strip()
+    exhausted_time = str(risk_state.get("llm_failure_exhausted_message_time") or "").strip()
     retry_not_before = str((risk_state or {}).get("capture_retry_not_before") or "")
     if retry_not_before:
         now_ts = _iso_to_ts(now)
@@ -867,6 +965,28 @@ def record_session_signal(
     has_unread_badge = bool(unread_badge)
     has_active_work = has_active_session_work(state, name, session_key=session_key)
     has_signal = bool(digest or msg_time or unread_badge or unread_detected)
+    if (
+        unread_detected
+        and exhausted_until
+        and exhausted_digest
+        and digest == exhausted_digest
+        and exhausted_time
+        and msg_time
+        and msg_time == exhausted_time
+    ):
+        now_ts = _iso_to_ts(now)
+        until_ts = _iso_to_ts(exhausted_until)
+        if until_ts > 0 and now_ts > 0 and now_ts < until_ts:
+            session["last_detected_at"] = now
+            session["status"] = "llm_failed_waiting_internal_recovery"
+            append_event(
+                state,
+                "scheduler_session_signal_suppressed_after_llm_exhaustion",
+                target_name=session["target_name"],
+                session_key=str(session.get("session_key") or ""),
+                reason="same_signal_after_llm_failure_exhausted",
+            )
+            return session
     unread_only_signal = bool(unread_detected and not digest and not msg_time and not unread_badge)
     if unread_only_signal and has_active_work:
         session["last_detected_at"] = now
@@ -881,7 +1001,15 @@ def record_session_signal(
         session["last_content_digest"] = digest
         session["last_message_time"] = msg_time
         session["last_unread_badge"] = unread_badge
-        if unread_detected or has_unread_badge or has_active_work:
+        session["pending_signal_text"] = content
+        session["pending_signal_kind"] = (
+            "high_sensitivity_short"
+            if message_has_repeatable_probe_content({"content": content, "type": "text", "sender": "unknown"})
+            else "normal"
+        )
+        has_new_message_evidence = bool(unread_detected or has_unread_badge)
+        has_preview_only_evidence = bool((digest and digest != previous_digest) or (msg_time and msg_time != previous_time))
+        if has_new_message_evidence or (has_active_work and has_preview_only_evidence):
             queued = enqueue_pending_session(
                 state,
                 name,
@@ -892,7 +1020,15 @@ def record_session_signal(
                 reason="session_signal_changed",
                 now=now,
             )
-            queued["pending_signal_has_unread_evidence"] = bool(unread_detected or has_unread_badge)
+            queued["pending_signal_has_unread_evidence"] = has_new_message_evidence
+            queued["pending_signal_text"] = content
+            queued["pending_signal_kind"] = session.get("pending_signal_kind") or "normal"
+            queued["last_content_digest"] = digest
+            queued["last_message_time"] = msg_time
+            queued["last_unread_badge"] = unread_badge
+            if has_active_work and not has_new_message_evidence:
+                queued["pending_reason"] = "session_signal_preview_changed_during_active_work"
+                queued["pending_signal_has_unread_evidence"] = False
         else:
             session["status"] = "idle"
             session["pending_signal_has_unread_evidence"] = False
@@ -916,25 +1052,71 @@ def select_capture_sessions(
 
     def dispatchable(session: dict[str, Any]) -> bool:
         pending_reason = str(session.get("pending_reason") or "").strip()
-        if pending_reason == "recoverable_llm_failure":
-            recapture_kind = str(session.get("pending_recapture_kind") or "").strip()
-            if recapture_kind != "monitor_only_short_pending":
+        risk_state = session.get("risk_state") if isinstance(session.get("risk_state"), dict) else {}
+        retry_not_before = str((risk_state or {}).get("capture_retry_not_before") or "").strip()
+        if retry_not_before:
+            now_ts = time.time()
+            retry_ts = _iso_to_ts(retry_not_before)
+            if retry_ts > 0 and now_ts < retry_ts:
+                session["status"] = "capture_cooldown"
                 append_event(
                     state,
-                    "scheduler_capture_skipped_recoverable_llm_gate",
+                    "scheduler_capture_cooldown_deferred",
                     target_name=str(session.get("target_name") or ""),
                     session_key=str(session.get("session_key") or ""),
-                    reason=pending_reason,
-                    recapture_kind=recapture_kind,
+                    pending_reason=pending_reason,
+                    retry_not_before=retry_not_before,
                 )
-                session["pending_capture"] = False
-                session["pending_reason"] = ""
-                session["pending_recapture_kind"] = ""
-                session["pending_signal_has_unread_evidence"] = False
+                return False
+        if pending_reason == "session_signal_preview_changed_during_active_work" and has_active_session_work(
+            state,
+            str(session.get("target_name") or ""),
+            session_key=str(session.get("session_key") or ""),
+        ):
+            append_event(
+                state,
+                "scheduler_capture_deferred_until_active_work_finishes",
+                target_name=str(session.get("target_name") or ""),
+                session_key=str(session.get("session_key") or ""),
+                reason=pending_reason,
+            )
+            return False
+        if pending_reason == "recoverable_llm_failure":
+            recapture_kind = str(session.get("pending_recapture_kind") or "").strip()
+            pending_count = int(session.get("pending_message_count") or 0)
+            oldest = str(session.get("oldest_unreplied_at") or "")
+            append_event(
+                state,
+                "scheduler_capture_skipped_recoverable_llm_gate",
+                target_name=str(session.get("target_name") or ""),
+                session_key=str(session.get("session_key") or ""),
+                reason=pending_reason,
+                recapture_kind=recapture_kind,
+            )
+            session["pending_capture"] = False
+            session["pending_reason"] = ""
+            session["pending_recapture_kind"] = ""
+            session["pending_signal_has_unread_evidence"] = False
+            if pending_count > 0 or oldest:
+                session["pending_message_count"] = max(1, pending_count)
+                session["oldest_unreplied_at"] = oldest or utcnow_iso()
+                session["status"] = "internal_handoff_pending"
+                risk_state = session.setdefault("risk_state", {})
+                if isinstance(risk_state, dict):
+                    risk_state["handoff_required"] = True
+                    risk_state["handoff_reason"] = "recoverable_llm_failure_pending_preserved"
+                append_event(
+                    state,
+                    "scheduler_recoverable_llm_pending_preserved",
+                    target_name=str(session.get("target_name") or ""),
+                    session_key=str(session.get("session_key") or ""),
+                    pending_message_count=session["pending_message_count"],
+                )
+            else:
                 session["pending_message_count"] = 0
                 session["oldest_unreplied_at"] = ""
                 session["status"] = "idle"
-                return False
+            return False
         if (
             pending_reason == "session_signal_changed"
             and not bool(session.get("pending_signal_has_unread_evidence"))
@@ -952,7 +1134,6 @@ def select_capture_sessions(
             session["pending_reason"] = ""
             session["status"] = "idle"
             return False
-        risk_state = session.get("risk_state") if isinstance(session.get("risk_state"), dict) else {}
         if risk_state and str(risk_state.get("last_error") or "").strip():
             return True
         if int(session.get("pending_message_count") or 0) > 0:
@@ -1043,13 +1224,13 @@ def requeue_capture_after_recoverable_llm_failure(
     now: str | None = None,
     max_attempts: int = 2,
 ) -> dict[str, Any]:
-    """Re-enter capture when Brain failed without a customer-visible reply.
+    """Recover when Brain failed without a customer-visible reply.
 
     Brain is the only customer-visible author.  When Brain/polish produces no
-    sendable wording, do not synthesize a local fallback; keep the session
-    pending so the scheduler can re-capture the WeChat pane and ask Brain again.
-    Short monitor previews are one important case, but normal business captures
-    must also avoid becoming silent "read but not replied" failures.
+    sendable wording, do not synthesize a local fallback and do not re-open
+    WeChat to re-read the same already-consumed signal.  Retry the same durable
+    capture through Brain instead so a read message cannot become a silent loss
+    or cause a mechanical foreground switching loop.
     """
 
     now = now or utcnow_iso()
@@ -1062,8 +1243,20 @@ def requeue_capture_after_recoverable_llm_failure(
         "empty_planned_reply",
         "final_visible_llm_polish_failed",
         "customer_service_brain_llm_unavailable",
+        "brain_response_was_not_json_object",
+        "brain_response_json_repair_failed",
+        "brain_repair_response_was_not_json_object",
+        "brain_repair_response_json_repair_failed",
+        "brain_plan_validation_failed",
+        "brain_quality_verification_failed",
+        "brain_guard_rejected",
+        "llm_task_runtime_timeout",
     }
-    if normalized_reason not in recoverable_reasons:
+    if (
+        normalized_reason not in recoverable_reasons
+        and not normalized_reason.startswith("customer_service_brain_no_visible_reply:")
+        and not normalized_reason.startswith("brain_no_visible:")
+    ):
         return {"ok": False, "reason": "not_recoverable_reason"}
     capture_ids = [str(item) for item in task.get("capture_ids", []) if str(item)]
     capture = (state.get("captures", {}) or {}).get(capture_ids[-1] if capture_ids else "")
@@ -1096,6 +1289,39 @@ def requeue_capture_after_recoverable_llm_failure(
         risk_state["recoverable_llm_retries"] = attempts_by_key
     attempts = int(attempts_by_key.get(retry_key) or 0)
     if attempts >= max(1, int(max_attempts or 1)):
+        if session.get("llm_inflight_task_id") == task_id:
+            session["llm_inflight_task_id"] = ""
+        batch = [item for item in (capture.get("batch") or []) if isinstance(item, dict)]
+        visible_customer_count = 0
+        for item in batch:
+            sender = str(item.get("sender") or "").strip().lower()
+            if sender in SELF_MESSAGE_SENDERS:
+                continue
+            visible_customer_count += 1
+        session["pending_capture"] = False
+        session["pending_reason"] = ""
+        session["pending_recapture_kind"] = ""
+        session["pending_signal_has_unread_evidence"] = False
+        session["pending_message_count"] = max(
+            1,
+            visible_customer_count,
+            int(session.get("pending_message_count") or 0),
+        )
+        session["oldest_unreplied_at"] = str(session.get("oldest_unreplied_at") or capture.get("captured_at") or now)
+        session["status"] = "internal_handoff_pending"
+        try:
+            risk_state["llm_failure_exhausted_until"] = (
+                datetime.fromisoformat(now) + timedelta(seconds=300)
+            ).isoformat(timespec="seconds")
+        except (TypeError, ValueError):
+            risk_state["llm_failure_exhausted_until"] = ""
+        risk_state["llm_failure_exhausted_content_digest"] = str(session.get("last_content_digest") or "")
+        risk_state["llm_failure_exhausted_message_time"] = str(session.get("last_message_time") or "")
+        risk_state["llm_failure_exhausted_message_digest"] = str(task.get("message_content_digest") or "")
+        risk_state["handoff_required"] = True
+        risk_state["handoff_reason"] = "llm_recovery_exhausted_without_visible_reply"
+        risk_state["last_error"] = normalized_reason
+        risk_state["last_llm_failure_at"] = now
         append_event(
             state,
             "scheduler_llm_failure_recapture_exhausted",
@@ -1104,6 +1330,14 @@ def requeue_capture_after_recoverable_llm_failure(
             reason=normalized_reason,
             recapture_kind=recapture_kind,
             attempts=attempts,
+        )
+        append_event(
+            state,
+            "scheduler_llm_failure_internal_handoff_pending",
+            target_name=session["target_name"],
+            task_id=task_id,
+            reason=normalized_reason,
+            pending_message_count=session["pending_message_count"],
         )
         return {"ok": False, "reason": "retry_exhausted", "attempts": attempts}
     if session.get("llm_inflight_task_id") == task_id:
@@ -1135,56 +1369,52 @@ def requeue_capture_after_recoverable_llm_failure(
             skip_reason="no_customer_messages_in_capture",
         )
         return {"ok": False, "reason": "no_customer_messages_in_capture", "attempts": attempts}
-    if not is_monitor_only_short:
+    if True:
+        attempts_by_key[retry_key] = attempts + 1
+        retry_after = max(1.0, min(5.0, 2.0 + attempts))
+        try:
+            retry_not_before = (datetime.fromisoformat(now) + timedelta(seconds=retry_after)).isoformat(timespec="seconds")
+        except (TypeError, ValueError):
+            retry_not_before = ""
+        previous_result = task.get("result") if isinstance(task.get("result"), dict) else {}
+        if previous_result:
+            task["last_failed_result"] = copy.deepcopy(previous_result)
+        task["status"] = "queued"
+        task["error"] = None
+        task["result"] = None
+        task["started_at"] = ""
+        task["finished_at"] = ""
+        task["requeued_at"] = now
+        task["retry_not_before"] = retry_not_before
+        task["recoverable_retry_count"] = int(task.get("recoverable_retry_count") or 0) + 1
         session["pending_capture"] = False
         session["pending_reason"] = ""
         session["pending_recapture_kind"] = ""
         session["pending_signal_has_unread_evidence"] = False
-        session["pending_message_count"] = 0
-        session["oldest_unreplied_at"] = ""
-        session["status"] = "failed"
+        session["pending_message_count"] = max(1, visible_customer_count, int(session.get("pending_message_count") or 0))
+        session["oldest_unreplied_at"] = str(session.get("oldest_unreplied_at") or capture.get("created_at") or now)
+        session["status"] = "llm_queued"
+        session["llm_inflight_task_id"] = task_id
         risk_state["last_error"] = normalized_reason
-        risk_state["last_llm_failure_at"] = now
+        risk_state["last_llm_failure_requeued_at"] = now
         append_event(
             state,
-            "scheduler_llm_failure_recapture_skipped",
+            "scheduler_llm_failure_requeued_planner",
             target_name=session["target_name"],
             task_id=task_id,
             reason=normalized_reason,
             recapture_kind=recapture_kind,
-            skip_reason="captured_messages_should_not_trigger_rpa_recapture",
+            attempts=attempts + 1,
+            retry_not_before=retry_not_before,
         )
         return {
-            "ok": False,
-            "reason": "captured_messages_should_not_trigger_rpa_recapture",
-            "attempts": attempts,
+            "ok": True,
+            "reason": "same_capture_llm_retry",
+            "event": "llm_task_failed_requeued_planner",
+            "recapture_kind": recapture_kind,
+            "attempts": attempts + 1,
+            "retry_not_before": retry_not_before,
         }
-    attempts_by_key[retry_key] = attempts + 1
-    session["pending_capture"] = True
-    session["pending_reason"] = "recoverable_llm_failure"
-    session["pending_recapture_kind"] = recapture_kind
-    session["pending_signal_has_unread_evidence"] = False
-    session["status"] = "capture_pending"
-    session["pending_since"] = str(session.get("pending_since") or now)
-    session["last_detected_at"] = now
-    session["pending_message_count"] = max(1, visible_customer_count, int(session.get("pending_message_count") or 0))
-    session["oldest_unreplied_at"] = str(session.get("oldest_unreplied_at") or capture.get("created_at") or now)
-    risk_state["last_error"] = normalized_reason
-    risk_state["last_llm_failure_requeued_at"] = now
-    append_event(
-        state,
-        "scheduler_llm_failure_requeued_capture",
-        target_name=session["target_name"],
-        task_id=task_id,
-        reason=normalized_reason,
-        recapture_kind=recapture_kind,
-        attempts=attempts + 1,
-    )
-    return {
-        "ok": True,
-        "reason": f"{recapture_kind}_recapture",
-        "attempts": attempts + 1,
-    }
 
 
 def mark_capture_started(state: dict[str, Any], target_name: str, *, session_key: str = "", now: str | None = None) -> dict[str, Any]:
@@ -1288,7 +1518,11 @@ def record_capture_result(
         for item in batch
         if message_identity(item)
         and message_identity(item) not in existing_ids
-        and (not message_content_key(item) or message_content_key(item) not in existing_keys)
+        and (
+            message_has_occurrence_identity_signal(item)
+            or not message_content_key(item)
+            or message_content_key(item) not in existing_keys
+        )
     ]
     if new_messages:
         session["context_version"] = int(session.get("context_version") or 0) + 1
@@ -1302,6 +1536,10 @@ def record_capture_result(
             risk_state.pop("capture_fail_count", None)
             risk_state.pop("capture_retry_not_before", None)
             risk_state.pop("last_capture_failed_at", None)
+            risk_state.pop("llm_failure_exhausted_until", None)
+            risk_state.pop("llm_failure_exhausted_content_digest", None)
+            risk_state.pop("llm_failure_exhausted_message_time", None)
+            risk_state.pop("llm_failure_exhausted_message_digest", None)
     else:
         session["pending_message_count"] = 0
         session["pending_capture"] = False
@@ -1368,7 +1606,7 @@ def record_capture_result(
             conversation_type=conversation_type,
             capture_id=capture_id,
             messages=messages,
-            batch=batch,
+            batch=new_messages,
             history_backfill=history_backfill,
             context_version=int(capture.get("context_version") or 0),
         )
@@ -1941,6 +2179,8 @@ def mark_reply_sent(state: dict[str, Any], reply_id: str, *, send_result: dict[s
         # Preserve queued follow-up signals that arrived while this reply was in flight.
         session["status"] = "capture_pending"
         session["pending_capture"] = True
+        if str(session.get("pending_reason") or "") == "session_signal_preview_changed_during_active_work":
+            session["pending_reason"] = "session_signal_changed"
         session["pending_message_count"] = max(1, int(session.get("pending_message_count") or 0))
         if not str(session.get("pending_since") or ""):
             session["pending_since"] = now

@@ -1,8 +1,8 @@
 {
   "schema_version": 1,
   "source": "cloud_official_shared_library",
-  "version": "shared_1d259befa2a82f73acc1",
-  "tenant_id": "default",
+  "version": "shared_746992b6678e70a89a56",
+  "tenant_id": "chejin",
   "tenant_industry_id": "used_car",
   "industry_catalog": [
     {
@@ -30,21 +30,21 @@
       "status": "active"
     }
   ],
-  "generated_at": "2026-05-19T12:42:55+00:00",
+  "generated_at": "2026-06-13T18:24:25+00:00",
   "ttl_seconds": 1800,
   "refresh_after_seconds": 300,
-  "issued_at": "2026-05-19T12:42:55+00:00",
-  "refresh_after_at": "2026-05-19T12:47:55+00:00",
-  "expires_at": "2026-05-19T13:12:55+00:00",
-  "lease_id": "shared_lease_f04b32ba9c91e1f7960d",
+  "issued_at": "2026-06-13T18:24:25+00:00",
+  "refresh_after_at": "2026-06-13T18:29:25+00:00",
+  "expires_at": "2026-06-13T18:54:25+00:00",
+  "lease_id": "shared_lease_6ec0c1dffd422871c553",
   "cache_policy": {
     "mode": "cloud_authoritative_lease",
     "ttl_seconds": 1800,
     "refresh_after_seconds": 300,
-    "issued_at": "2026-05-19T12:42:55+00:00",
-    "refresh_after_at": "2026-05-19T12:47:55+00:00",
-    "expires_at": "2026-05-19T13:12:55+00:00",
-    "lease_id": "shared_lease_f04b32ba9c91e1f7960d",
+    "issued_at": "2026-06-13T18:24:25+00:00",
+    "refresh_after_at": "2026-06-13T18:29:25+00:00",
+    "expires_at": "2026-06-13T18:54:25+00:00",
+    "lease_id": "shared_lease_6ec0c1dffd422871c553",
     "requires_cloud_refresh": true
   },
   "categories": [
@@ -53,8 +53,8 @@
       "name": "global_guidelines",
       "kind": "mixed",
       "enabled": true,
-      "item_count": 5,
-      "global_item_count": 2,
+      "item_count": 6,
+      "global_item_count": 3,
       "industry_item_count": 3
     },
     {
@@ -158,6 +158,53 @@
       "created_at": "2026-05-07T21:57:53+00:00",
       "updated_by": "system_seed",
       "updated_at": "2026-05-07T21:57:53+00:00"
+    },
+    {
+      "item_id": "shared_global_entity_normalization_first",
+      "industry_id": "global",
+      "category_id": "global_guidelines",
+      "title": "实体归一识别优先",
+      "content": "客户提到商品、车型、型号、品牌等实体时，先做别名、错别字、同音、音译、简称归一；确认是同一实体后再按商品库与正式知识回复，不确定时先澄清。",
+      "keywords": [
+        "别名",
+        "错别字",
+        "同音",
+        "音译",
+        "简称",
+        "归一",
+        "商品",
+        "车型",
+        "型号"
+      ],
+      "applies_to": "所有行业的商品/服务实体问答",
+      "notes": "平台通用实体理解原则",
+      "status": "active",
+      "source": "system_seed_industry_library",
+      "tenant_id": "default",
+      "data": {
+        "title": "实体归一识别优先",
+        "guideline_text": "客户提到商品、车型、型号、品牌等实体时，先做别名、错别字、同音、音译、简称归一；确认是同一实体后再按商品库与正式知识回复，不确定时先澄清。",
+        "intent_tags": [
+          "catalog",
+          "quote",
+          "discount",
+          "stock",
+          "shipping",
+          "spec",
+          "scene_product",
+          "product"
+        ],
+        "tone_tags": [
+          "natural",
+          "precise",
+          "evidence_first"
+        ],
+        "always_include": true
+      },
+      "created_by": "system_seed",
+      "created_at": "2026-06-01T02:06:07+00:00",
+      "updated_by": "system_seed",
+      "updated_at": "2026-06-01T02:06:07+00:00"
     },
     {
       "item_id": "customer_service_style_guidelines",
@@ -784,6 +831,13 @@
             "enabled": true
           },
           {
+            "id": "entity_normalization_first",
+            "title": "实体归一优先",
+            "description": "客户提及商品/车型/型号时先做归一识别，再基于证据答复。",
+            "instruction": "当客户提到商品、车型、型号、品牌等实体时，先进行别名、错别字、同音、音译和口语简称的归一识别；确认是同一实体后再依据商品库和正式知识回复。若仍不确定，先澄清确认，不得答非所问。",
+            "enabled": true
+          },
+          {
             "id": "human_action_boundary",
             "title": "人工动作边界",
             "description": "强约束场景默认转人工。",
@@ -1287,6 +1341,13 @@
             "title": "禁止编造",
             "description": "关键事实必须可追溯。",
             "instruction": "价格、库存、时效、审批、合同、赔付、开票、资质等关键信息必须来自证据；无证据时先说明需核实并转人工。",
+            "enabled": true
+          },
+          {
+            "id": "entity_normalization_first",
+            "title": "实体归一优先",
+            "description": "客户提及商品/车型/型号时先做归一识别，再基于证据答复。",
+            "instruction": "当客户提到商品、车型、型号、品牌等实体时，先进行别名、错别字、同音、音译和口语简称的归一识别；确认是同一实体后再依据商品库和正式知识回复。若仍不确定，先澄清确认，不得答非所问。",
             "enabled": true
           },
           {

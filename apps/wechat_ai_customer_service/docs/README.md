@@ -22,6 +22,7 @@
 当前知识与 RAG 架构说明：
 
 - [`brain_code_mechanism_layer_integration_design_20260609.md`](brain_code_mechanism_layer_integration_design_20260609.md)
+- [`canonical_input_identity_design_20260612.md`](canonical_input_identity_design_20260612.md)
 - [`brain_code_mechanism_layer_rule_inventory_20260609.md`](brain_code_mechanism_layer_rule_inventory_20260609.md)
 - [`brain_code_mechanism_layer_implementation_plan_20260609.md`](brain_code_mechanism_layer_implementation_plan_20260609.md)
 - [`brain_code_mechanism_layer_test_acceptance_plan_20260609.md`](brain_code_mechanism_layer_test_acceptance_plan_20260609.md)

@@ -13,6 +13,7 @@ invariant that WeChat foreground automation remains serial.
 from __future__ import annotations
 
 import copy
+import json
 import os
 import random
 import re
@@ -62,6 +63,10 @@ from apps.wechat_ai_customer_service.admin_backend.services.customer_service_ses
     SessionLedgerStore,
     stable_session_key,
 )
+from apps.wechat_ai_customer_service.message_identity import (
+    apply_canonical_identity_fields,
+    canonical_input_message_id,
+)
 from apps.wechat_ai_customer_service.workflows.listen_and_reply import TargetConfig as WorkflowTargetConfig
 from apps.wechat_ai_customer_service.wechat_message_normalizer import split_wechat_ocr_speaker_prefix
 
@@ -90,6 +95,10 @@ _RPA_HUMANIZED_SEND_ENV_MAPPING = {
     "WECHAT_WIN32_OCR_HUMANIZED_SEND_PRE_DELAY_MAX_MS": "send_pre_delay_max_ms",
     "WECHAT_WIN32_OCR_HUMANIZED_SEND_POST_INPUT_DELAY_MIN_MS": "send_post_input_delay_min_ms",
     "WECHAT_WIN32_OCR_HUMANIZED_SEND_POST_INPUT_DELAY_MAX_MS": "send_post_input_delay_max_ms",
+    "WECHAT_WIN32_OCR_HUMANIZED_SEND_TRIGGER_DELAY_MIN_MS": "send_trigger_delay_min_ms",
+    "WECHAT_WIN32_OCR_HUMANIZED_SEND_TRIGGER_DELAY_MAX_MS": "send_trigger_delay_max_ms",
+    "WECHAT_WIN32_OCR_HUMANIZED_SEND_AFTER_TRIGGER_DELAY_MIN_MS": "send_after_trigger_delay_min_ms",
+    "WECHAT_WIN32_OCR_HUMANIZED_SEND_AFTER_TRIGGER_DELAY_MAX_MS": "send_after_trigger_delay_max_ms",
     "WECHAT_WIN32_OCR_HUMANIZED_ADAPTIVE_SPEED_ENABLED": "adaptive_speed_enabled",
     "WECHAT_WIN32_OCR_FAST_SEND_CONFIRMATION": "fast_send_confirmation_enabled",
     "WECHAT_WIN32_OCR_SEND_TRIGGER_MODE": "send_trigger_mode",
@@ -103,6 +112,51 @@ _RPA_HUMANIZED_SEND_ENV_MAPPING = {
 _SELF_MESSAGE_SENDERS = {"self", "assistant", "agent", "me", "outbound"}
 _SHORT_PENDING_SIGNAL_KIND = "high_sensitivity_short"
 _SHORT_PENDING_SIGNAL_MAX_AGE_SECONDS = 120.0
+
+
+def safe_json_roundtrip(value: Any) -> Any:
+    """Return a JSON-safe copy for scheduler task results.
+
+    Planner/polish result payloads can contain dataclasses, exceptions, or
+    other non-JSON objects in failure paths.  State files must stay writable,
+    but this helper must never author or modify customer-visible wording.
+    """
+
+    try:
+        return json.loads(json.dumps(value, ensure_ascii=False, default=str))
+    except Exception:
+        return {"unserializable": repr(value)}
+
+
+def polish_failure_retry_instruction(task: dict[str, Any]) -> str:
+    """Build prompt-only feedback for Brain after a final-polish block."""
+
+    failure = task.get("last_polish_failure") if isinstance(task.get("last_polish_failure"), dict) else {}
+    if not failure:
+        return ""
+    reason = str(failure.get("reason") or failure.get("error") or "").strip()
+    event = failure.get("event") if isinstance(failure.get("event"), dict) else {}
+    final_polish = event.get("final_visible_llm_polish") if isinstance(event.get("final_visible_llm_polish"), dict) else {}
+    guard = final_polish.get("guard") if isinstance(final_polish.get("guard"), dict) else {}
+    guard_reason = str(guard.get("reason") or final_polish.get("reason") or "").strip()
+    candidate = final_polish.get("candidate") if isinstance(final_polish.get("candidate"), dict) else {}
+    candidate_reply = str(candidate.get("reply") or final_polish.get("reply_text") or "").strip()
+    parts = [
+        "上一版Brain回复被最终可见审校拦截，本次必须由Brain重新思考并改写，不能沿用原回复。",
+        "审校只提供风险信号，最终客户可见话术仍必须由Brain重新生成。",
+    ]
+    normalized = " ".join(item for item in (reason, guard_reason) if item)
+    if normalized:
+        parts.append("拦截原因：" + normalized[:180])
+    if "identity_truth_discussion_not_allowed" in normalized:
+        parts.append(
+            "客户在试探是否AI、机器人、自动回复或真人时，不能承认或否认身份，"
+            "不能说被发现了、猜对了、确实是、不是AI或不是机器人；"
+            "请自然回应客户感受，调整沟通节奏，再接住当前问题。"
+        )
+    if candidate_reply:
+        parts.append("上一版不可发送回复片段：" + candidate_reply[:180])
+    return " ".join(parts)[:700]
 
 
 def _parse_iso_datetime(value: Any) -> datetime | None:
@@ -278,6 +332,215 @@ def recover_high_sensitivity_short_pending_batch(
     return [synthetic]
 
 
+def recover_pending_signal_batch_from_monitor(
+    messages: list[dict[str, Any]],
+    pending_signal: dict[str, Any] | None,
+    *,
+    target_name: str = "",
+    allow_self_for_test: bool = False,
+    max_batch_messages: int = 1,
+    now: str | datetime | None = None,
+    max_signal_age_seconds: float = 300.0,
+) -> list[dict[str, Any]]:
+    """Recover current unread preview text when chat-pane OCR/anchors are empty.
+
+    This is a code-mechanism recovery path only: it converts a session-list
+    unread preview into Brain input so an already-read customer turn is not
+    swallowed when images/manual work/history gaps push the anchor off screen.
+    It never authors customer-visible wording.
+    """
+
+    recovered_short = recover_high_sensitivity_short_pending_batch(
+        messages,
+        pending_signal,
+        target_name=target_name,
+        allow_self_for_test=allow_self_for_test,
+        max_batch_messages=max_batch_messages,
+        now=now,
+        max_signal_age_seconds=max_signal_age_seconds,
+    )
+    if recovered_short:
+        return recovered_short
+    if not isinstance(pending_signal, dict):
+        return []
+    has_pending_evidence = bool(
+        pending_signal.get("unread_detected")
+        or pending_signal.get("pending")
+        or pending_signal.get("pending_since")
+        or pending_signal.get("last_detected_at")
+        or pending_signal.get("unread_badge")
+    )
+    if not has_pending_evidence:
+        return []
+    pending_text = str(pending_signal.get("pending_signal_text") or pending_signal.get("preview_content") or "").strip()
+    semantic_pending_text, speaker_meta = _short_pending_semantic_text(pending_text, target_name=target_name)
+    compact = normalize_repeatable_probe_text(semantic_pending_text)
+    if not compact or short_pending_text_is_media_only(semantic_pending_text):
+        return []
+    target_compact = normalize_repeatable_probe_text(target_name)
+    speaker_compact = normalize_repeatable_probe_text(speaker_meta.get("speaker_name") if speaker_meta else "")
+    if compact and (compact == target_compact or (speaker_compact and compact == speaker_compact)):
+        return []
+    detected_at = str(
+        pending_signal.get("pending_since")
+        or pending_signal.get("last_detected_at")
+        or pending_signal.get("last_message_time")
+        or ""
+    )
+    if detected_at and not _short_pending_signal_is_fresh(
+        detected_at,
+        now=now,
+        max_age_seconds=max_signal_age_seconds,
+    ) and not bool(pending_signal.get("unread_detected")):
+        return []
+    synthetic_id = stable_id(
+        "monitor-pending-signal",
+        target_name,
+        compact,
+        detected_at,
+        str(pending_signal.get("session_key") or ""),
+    )
+    synthetic: dict[str, Any] = {
+        "id": f"monitor_pending:{synthetic_id}",
+        "type": "text",
+        "sender": "unknown",
+        "sender_role": "unknown",
+        "content": semantic_pending_text,
+        "time": detected_at,
+        "monitor_pending_recovered": True,
+        "monitor_pending_synthesized_from_preview": True,
+        "pending_signal_text": pending_text,
+        "pending_signal_kind": str(pending_signal.get("pending_signal_kind") or "normal"),
+    }
+    if speaker_meta:
+        synthetic["speaker_name"] = speaker_meta.get("speaker_name")
+        synthetic["group_member_name"] = speaker_meta.get("speaker_name")
+        synthetic["original_content"] = speaker_meta.get("original_content")
+        synthetic["ocr_speaker_prefix"] = speaker_meta
+    return [synthetic]
+
+
+def pending_signal_identity_payload(
+    pending_signal: dict[str, Any] | None,
+    *,
+    target_name: str = "",
+    session_key: str = "",
+) -> dict[str, Any]:
+    """Return occurrence metadata from scheduler/session-list monitoring.
+
+    This is code-mechanism metadata only.  It helps distinguish a new customer
+    turn from an old OCR bubble with the same text/layout; it must never enter
+    customer-visible wording.
+    """
+
+    if not isinstance(pending_signal, dict):
+        return {}
+    pending_since = str(pending_signal.get("pending_since") or "").strip()
+    last_detected_at = str(pending_signal.get("last_detected_at") or "").strip()
+    last_message_time = str(pending_signal.get("last_message_time") or pending_signal.get("time") or "").strip()
+    pending_text = str(pending_signal.get("pending_signal_text") or pending_signal.get("preview_content") or "").strip()
+    unread_badge = str(pending_signal.get("last_unread_badge") or pending_signal.get("unread_badge") or "").strip()
+    unread_detected = bool(pending_signal.get("unread_detected") or pending_signal.get("pending") or unread_badge)
+    if not any([pending_since, last_detected_at, last_message_time, pending_text, unread_badge, unread_detected]):
+        return {}
+    clean_session_key = str(session_key or pending_signal.get("session_key") or "").strip()
+    signal_id = stable_id(
+        "pending-signal",
+        clean_session_key,
+        target_name,
+        pending_since,
+        last_detected_at,
+        last_message_time,
+        pending_text,
+        unread_badge,
+        bool(unread_detected),
+    )
+    return {
+        "pending_signal_id": signal_id,
+        "pending_since": pending_since,
+        "last_detected_at": last_detected_at,
+        "last_message_time": last_message_time,
+        "pending_signal_text": pending_text,
+        "pending_signal_kind": str(pending_signal.get("pending_signal_kind") or "normal"),
+        "pending_signal_has_unread_evidence": bool(unread_detected),
+    }
+
+
+def _pending_signal_matches_message(content: str, pending_text: str) -> bool:
+    compact_content = normalize_repeatable_probe_text(content)
+    compact_pending = normalize_repeatable_probe_text(pending_text)
+    if not compact_pending:
+        return True
+    if not compact_content:
+        return False
+    if compact_pending in compact_content or compact_content in compact_pending:
+        return True
+    tokens = re.findall(r"[\u4e00-\u9fffA-Za-z0-9]{4,14}", compact_pending)
+    return any(token and token in compact_content for token in tokens)
+
+
+def annotate_latest_customer_messages_with_pending_signal(
+    messages: list[dict[str, Any]],
+    pending_signal: dict[str, Any] | None,
+    *,
+    target_name: str = "",
+    conversation_type: str = "unknown",
+    session_key: str = "",
+    allow_self_for_test: bool = False,
+    max_messages: int = 1,
+) -> list[dict[str, Any]]:
+    """Attach occurrence metadata to the newest customer text candidates.
+
+    The metadata is intentionally narrow: a pending unread/session-list signal
+    should distinguish the newest likely customer input, not rewrite the whole
+    visible history.  Content remains unchanged and Brain still sees the same
+    customer text.
+    """
+
+    signal = pending_signal_identity_payload(pending_signal, target_name=target_name, session_key=session_key)
+    if not signal:
+        return list(messages or [])
+    pending_text = str(signal.get("pending_signal_text") or "").strip()
+    next_messages = [copy.deepcopy(item) for item in (messages or []) if isinstance(item, dict)]
+    candidate_indexes: list[int] = []
+    for index in range(len(next_messages) - 1, -1, -1):
+        item = next_messages[index]
+        msg_type = str(item.get("type") or "text").strip().lower() or "text"
+        if msg_type != "text":
+            continue
+        content = str(item.get("content") or "").strip()
+        if not content:
+            continue
+        sender = str(item.get("sender") or "").strip().lower()
+        if sender in _SELF_MESSAGE_SENDERS and not allow_self_for_test:
+            continue
+        if pending_text and not _pending_signal_matches_message(content, pending_text):
+            continue
+        candidate_indexes.append(index)
+        if len(candidate_indexes) >= max(1, int(max_messages or 1)):
+            break
+    if not candidate_indexes and pending_text:
+        for index in range(len(next_messages) - 1, -1, -1):
+            item = next_messages[index]
+            msg_type = str(item.get("type") or "text").strip().lower() or "text"
+            sender = str(item.get("sender") or "").strip().lower()
+            if msg_type == "text" and str(item.get("content") or "").strip() and (allow_self_for_test or sender not in _SELF_MESSAGE_SENDERS):
+                candidate_indexes.append(index)
+                break
+    for index in candidate_indexes:
+        item = dict(next_messages[index])
+        item.update({key: value for key, value in signal.items() if value not in ("", None)})
+        item["_canonical_input_signal_applied"] = True
+        item = apply_canonical_identity_fields(
+            item,
+            target_name=target_name,
+            conversation_type=conversation_type,
+            force_recompute=True,
+        )
+        next_messages[index] = item
+    return next_messages
+
+
 def short_pending_text_is_media_only(text: str) -> bool:
     compact = normalize_repeatable_probe_text(text)
     return compact in {
@@ -428,6 +691,17 @@ class CustomerServiceSchedulerRuntime:
         state.setdefault("llm_tasks", {})[task_id] = copy.deepcopy(snapshot)
         return True
 
+    def _task_exceeded_runtime_budget(self, task: dict[str, Any] | None, *, now: str | None = None) -> bool:
+        if not isinstance(task, dict):
+            return False
+        started_at = _parse_iso_datetime(task.get("started_at"))
+        now_dt = _parse_iso_datetime(now or datetime.now().isoformat(timespec="seconds"))
+        if started_at is None or now_dt is None:
+            return False
+        timeout_seconds = max(1.0, float(task.get("timeout_seconds") or 30))
+        grace_seconds = max(1.0, float(os.getenv("WECHAT_CUSTOMER_SERVICE_LLM_TIMEOUT_GRACE_SECONDS", "6") or 6))
+        return (now_dt - started_at).total_seconds() > timeout_seconds + grace_seconds
+
     def tick(
         self,
         *,
@@ -565,7 +839,12 @@ class CustomerServiceSchedulerRuntime:
                 except Exception as exc:  # noqa: BLE001
                     events.append({"event": "capture_done_callback_failed", "target_name": target_name, "error": repr(exc)})
             if capture.get("status") == "captured":
-                task = enqueue_llm_task(state, str(capture.get("capture_id") or ""), now=now)
+                task = enqueue_llm_task(
+                    state,
+                    str(capture.get("capture_id") or ""),
+                    timeout_seconds=int(self.config.planner_task_timeout_seconds),
+                    now=now,
+                )
                 events.append({"event": "capture_completed", "target_name": target_name, "capture_id": capture["capture_id"], "task_id": task["task_id"]})
             else:
                 events.append({"event": "capture_empty", "target_name": target_name, "capture_id": capture["capture_id"]})
@@ -583,6 +862,15 @@ class CustomerServiceSchedulerRuntime:
             if isinstance(task, dict)
             and task.get("status") == "queued"
             and str(task.get("task_id") or "") not in self._planner_futures
+            and (
+                not str(task.get("retry_not_before") or "").strip()
+                or (
+                    _parse_iso_datetime(task.get("retry_not_before")) is not None
+                    and _parse_iso_datetime(now or datetime.now().isoformat(timespec="seconds")) is not None
+                    and _parse_iso_datetime(task.get("retry_not_before"))
+                    <= _parse_iso_datetime(now or datetime.now().isoformat(timespec="seconds"))
+                )
+            )
         ]
         tasks.sort(key=lambda item: str(item.get("created_at") or ""))
         captures = state.get("captures", {}) or {}
@@ -604,6 +892,28 @@ class CustomerServiceSchedulerRuntime:
         events: list[dict[str, Any]] = []
         for task_id, future in list(self._planner_futures.items()):
             if not future.done():
+                task = (state.get("llm_tasks", {}) or {}).get(task_id)
+                if self._task_exceeded_runtime_budget(task if isinstance(task, dict) else self._planner_task_snapshots.get(task_id), now=now):
+                    self._planner_futures.pop(task_id, None)
+                    future.cancel()
+                    if not self._restore_missing_llm_task_from_snapshot(state, task_id):
+                        events.append({"event": "llm_task_failed", "task_id": task_id, "reason": "llm_task_timeout_missing_snapshot"})
+                        continue
+                    recovered_task = self._fail_llm_task_with_recovery(
+                        state,
+                        task_id,
+                        reason="llm_task_runtime_timeout",
+                        now=now,
+                        events=events,
+                    )
+                    self._planner_task_snapshots.pop(task_id, None)
+                    events.append(
+                        {
+                            "event": "llm_task_timeout_recovered",
+                            "task_id": task_id,
+                            "target_name": recovered_task.get("target_name"),
+                        }
+                    )
                 continue
             self._planner_futures.pop(task_id, None)
             try:
@@ -692,7 +1002,12 @@ class CustomerServiceSchedulerRuntime:
             )
             if completion.get("status") == "completed" and self.polish_reply_fn is not None:
                 try:
-                    polish_task = enqueue_polish_task(state, task_id, now=now)
+                    polish_task = enqueue_polish_task(
+                        state,
+                        task_id,
+                        timeout_seconds=int(self.config.polish_task_timeout_seconds),
+                        now=now,
+                    )
                 except Exception as exc:  # noqa: BLE001
                     fail_llm_task(state, task_id, reason=f"polish_enqueue_failed:{exc!r}", now=now)
                     self._planner_task_snapshots.pop(task_id, None)
@@ -718,9 +1033,10 @@ class CustomerServiceSchedulerRuntime:
         task = fail_llm_task(state, task_id, reason=reason, now=now, result_payload=result_payload)
         recovery = requeue_capture_after_recoverable_llm_failure(state, task_id, reason=reason, now=now)
         if recovery.get("ok"):
+            event_name = str(recovery.get("event") or "llm_task_failed_requeued_capture")
             events.append(
                 {
-                    "event": "llm_task_failed_requeued_capture",
+                    "event": event_name,
                     "task_id": task_id,
                     "target_name": task.get("target_name"),
                     "reason": reason,
@@ -728,6 +1044,42 @@ class CustomerServiceSchedulerRuntime:
                 }
             )
         return task
+
+    def _fail_planner_task_from_polish_with_recovery(
+        self,
+        state: dict[str, Any],
+        planner_task_id: str,
+        polish_task_id: str,
+        *,
+        reason: str,
+        now: str | None,
+        events: list[dict[str, Any]],
+        result_payload: dict[str, Any] | None = None,
+    ) -> dict[str, Any] | None:
+        """Route final-polish blocks back to Brain without authoring fallback text."""
+
+        planner_task = (state.get("llm_tasks", {}) or {}).get(planner_task_id)
+        if not isinstance(planner_task, dict):
+            events.append(
+                {
+                    "event": "polish_recovery_planner_missing",
+                    "task_id": polish_task_id,
+                    "planner_task_id": planner_task_id,
+                    "reason": reason,
+                }
+            )
+            return None
+        previous_result = planner_task.get("result") if isinstance(planner_task.get("result"), dict) else {}
+        planner_task["last_failed_result"] = safe_json_roundtrip(previous_result)
+        planner_task["last_polish_failure"] = safe_json_roundtrip(result_payload or {"ok": False, "reason": reason})
+        return self._fail_llm_task_with_recovery(
+            state,
+            planner_task_id,
+            reason=reason,
+            now=now,
+            events=events,
+            result_payload=result_payload,
+        )
 
     def _submit_polish_tasks(self, state: dict[str, Any], *, now: str | None = None) -> list[dict[str, Any]]:
         events: list[dict[str, Any]] = []
@@ -764,6 +1116,22 @@ class CustomerServiceSchedulerRuntime:
         events: list[dict[str, Any]] = []
         for task_id, future in list(self._polish_futures.items()):
             if not future.done():
+                task = (state.get("polish_tasks", {}) or {}).get(task_id)
+                if self._task_exceeded_runtime_budget(task if isinstance(task, dict) else self._polish_task_snapshots.get(task_id), now=now):
+                    self._polish_futures.pop(task_id, None)
+                    future.cancel()
+                    if not self._restore_missing_polish_task_from_snapshot(state, task_id):
+                        events.append({"event": "polish_task_failed", "task_id": task_id, "reason": "polish_task_timeout_missing_snapshot"})
+                        continue
+                    task = fail_polish_task(state, task_id, reason="polish_task_runtime_timeout", now=now)
+                    self._polish_task_snapshots.pop(task_id, None)
+                    events.append(
+                        {
+                            "event": "polish_task_timeout_failed",
+                            "task_id": task_id,
+                            "target_name": task.get("target_name"),
+                        }
+                    )
                 continue
             self._polish_futures.pop(task_id, None)
             try:
@@ -798,9 +1166,22 @@ class CustomerServiceSchedulerRuntime:
                         }
                     )
                     continue
-                fail_polish_task(state, task_id, reason=str(result.get("reason") or result.get("error") or "polish_failed"), now=now)
+                failure_reason = str(result.get("reason") or result.get("error") or "polish_failed")
+                planner_task_id = str(((state.get("polish_tasks", {}) or {}).get(task_id) or {}).get("planner_task_id") or "")
+                task = fail_polish_task(state, task_id, reason=failure_reason, now=now)
+                task["result"] = safe_json_roundtrip(result)
+                if failure_reason == "final_visible_llm_polish_failed" and planner_task_id:
+                    self._fail_planner_task_from_polish_with_recovery(
+                        state,
+                        planner_task_id,
+                        task_id,
+                        reason=failure_reason,
+                        now=now,
+                        events=events,
+                        result_payload=result if isinstance(result, dict) else None,
+                    )
                 self._polish_task_snapshots.pop(task_id, None)
-                events.append({"event": "polish_task_failed", "task_id": task_id, "reason": result.get("reason")})
+                events.append({"event": "polish_task_failed", "task_id": task_id, "reason": failure_reason})
                 continue
             reply_text = str(result.get("reply_text") or "").strip()
             if not reply_text:
@@ -884,6 +1265,7 @@ class CustomerServiceSchedulerRuntime:
             if freshness.get("stale") or freshness.get("has_newer_messages"):
                 mark_reply_stale(state, reply_id, reason=str(freshness.get("reason") or "freshness_stale"), now=now)
                 if self.config.stale_reply_policy == "discard_and_requeue":
+                    self._record_stale_reply_context(state, reply, freshness=freshness, now=now)
                     enqueue_pending_session(
                         state,
                         str(reply.get("target_name") or ""),
@@ -937,6 +1319,7 @@ class CustomerServiceSchedulerRuntime:
                 events.append(failed_event)
                 continue
             mark_reply_sent(state, reply_id, send_result=send_result, now=now)
+            self._clear_stale_reply_context(state, reply)
             completed_event = {
                 "event": "send_completed",
                 "reply_id": reply_id,
@@ -946,6 +1329,59 @@ class CustomerServiceSchedulerRuntime:
                 completed_event["send_observability"] = send_observability
             events.append(completed_event)
         return events
+
+    def _record_stale_reply_context(
+        self,
+        state: dict[str, Any],
+        reply: dict[str, Any],
+        *,
+        freshness: dict[str, Any],
+        now: str | None = None,
+    ) -> None:
+        target_name = str(reply.get("target_name") or "")
+        session = get_session_by_identity(state, target_name, session_key=str(reply.get("session_key") or "")) or {}
+        if not isinstance(session, dict):
+            return
+        newer_messages = [
+            {
+                "id": str(item.get("id") or "")[:80],
+                "content": str(item.get("content") or "")[:220],
+                "sender": str(item.get("sender") or "")[:40],
+            }
+            for item in (freshness.get("newer_messages") or [])
+            if isinstance(item, dict)
+        ]
+        session["stale_reply_context"] = {
+            "schema_version": 1,
+            "recorded_at": now or datetime.now().isoformat(timespec="seconds"),
+            "reason": str(freshness.get("reason") or "freshness_stale"),
+            "reply_id": str(reply.get("reply_id") or ""),
+            "input_message_ids": [str(item) for item in reply.get("input_message_ids") or [] if str(item)],
+            "message_content_digest": str(reply.get("message_content_digest") or ""),
+            "unsent_brain_reply_sample": str(reply.get("reply_text") or "")[:260],
+            "newer_messages": newer_messages[:5],
+            "handoff_to_brain": (
+                "上一轮 Brain 回复尚未发送前，会话出现更新。请把未发送草稿仅作为上下文线索，"
+                "结合最新客户消息重新思考并生成最终回复。"
+            ),
+        }
+        append_event(
+            state,
+            "scheduler_stale_reply_context_recorded",
+            target_name=target_name,
+            session_key=str(session.get("session_key") or reply.get("session_key") or ""),
+            reply_id=str(reply.get("reply_id") or ""),
+            newer_message_count=len(newer_messages),
+        )
+
+    def _clear_stale_reply_context(self, state: dict[str, Any], reply: dict[str, Any]) -> None:
+        session = get_session_by_identity(
+            state,
+            str(reply.get("target_name") or ""),
+            session_key=str(reply.get("session_key") or ""),
+        )
+        if isinstance(session, dict) and "stale_reply_context" in session:
+            session.pop("stale_reply_context", None)
 
     def _brain_first_ready_reply_ownership_failure(self, reply: dict[str, Any]) -> str:
         return brain_first_ready_reply_ownership_failure(reply)
@@ -1023,17 +1459,25 @@ def mark_session_capture_failed(
     risk_state["capture_fail_count"] = fail_count
     # Exponential backoff avoids tight retry loops that look mechanical in UI.
     backoff_seconds = min(90, max(3, 3 * (2 ** min(fail_count - 1, 4))))
+    soft_target_unconfirmed = "target_not_confirmed_for_messages" in reason_lower or "target_title_not_confirmed" in reason_lower
     if "lock_timeout" in reason_lower:
         # Lock contention is usually transient; retry sooner to avoid
         # customer-visible long-tail waiting while still preventing tight loops.
         backoff_seconds = min(12, max(2, 2 + fail_count))
-    if "target_not_confirmed_for_messages" in reason_lower:
-        backoff_seconds = max(backoff_seconds, 18)
+    if soft_target_unconfirmed:
+        # A failed title confirmation is usually a UI/OCR settle issue, not a
+        # Brain failure. Preserve the pending intent, but cool down briefly so
+        # we do not click the same session row again in a mechanical loop.
+        backoff_seconds = min(7, max(3, 2 + fail_count) + random.uniform(0.4, 1.8))
     if "blank_render" in reason_lower:
         backoff_seconds = max(backoff_seconds, 25)
     retry_not_before = (now_dt + timedelta(seconds=backoff_seconds)).isoformat(timespec="seconds")
-    session["status"] = "capture_failed"
-    session["pending_capture"] = False
+    session["status"] = "capture_cooldown" if soft_target_unconfirmed else "capture_failed"
+    session["pending_capture"] = bool(soft_target_unconfirmed)
+    if soft_target_unconfirmed:
+        session["pending_reason"] = "target_unconfirmed_retry"
+    else:
+        session["pending_reason"] = ""
     risk_state["last_error"] = reason_text
     risk_state["last_capture_failed_at"] = now_text
     risk_state["capture_retry_not_before"] = retry_not_before
@@ -1103,9 +1547,9 @@ class CapturedMessagesConnector:
         messages = self.capture.get("messages") or []
         authoritative_batch = self.capture.get("batch") if isinstance(self.capture.get("batch"), list) else []
         authoritative_batch_ids = [
-            str(item.get("id") or item.get("message_id") or "")
+            canonical_input_message_id(item)
             for item in authoritative_batch
-            if isinstance(item, dict) and str(item.get("id") or item.get("message_id") or "")
+            if isinstance(item, dict) and canonical_input_message_id(item)
         ]
         used_batch_fallback = False
         if not messages and authoritative_batch:
@@ -1179,6 +1623,20 @@ def plan_reply_with_listen_workflow(
         )
 
     connector = CapturedMessagesConnector(capture)
+    retry_instruction = polish_failure_retry_instruction(task)
+    if retry_instruction:
+        target_state_key = str(getattr(target_config, "session_key", "") or target_config.name)
+        target_state = workflow_state.setdefault("targets", {}).setdefault(
+            target_state_key,
+            {
+                "processed_message_ids": [],
+                "processed_content_keys": [],
+                "handoff_message_ids": [],
+                "sent_replies": [],
+                "reply_timestamps": [],
+            },
+        )
+        target_state["brain_retry_instruction"] = retry_instruction
     event = process_target(
         connector=connector,  # type: ignore[arg-type]
         target=target_config,
@@ -1208,11 +1666,7 @@ def plan_reply_with_listen_workflow(
             "reason": "brain_first_non_brain_owned_planner_reply_blocked",
             "event": event,
         }
-    target_state = {}
-    try:
-        target_state = (workflow_state.get("targets", {}) or {}).get(str(target_config.name), {}) or {}
-    except Exception:
-        target_state = {}
+    target_state = workflow_target_state_for_target(workflow_state, target_config)
     recent_reply_texts = recent_customer_visible_reply_texts(target_state)
     profile = {
         "target_name": str(target_config.name),
@@ -1265,6 +1719,7 @@ def plan_reply_with_listen_workflow(
                 source_channel=str(((event.get("reply_style_adapter") or {}) if isinstance(event.get("reply_style_adapter"), dict) else {}).get("source_channel") or "normal"),
                 needs_handoff=False,
             )
+            final_polish.setdefault("reply_text", reply_text)
             event["final_visible_llm_polish"] = final_polish
             if final_polish.get("passed"):
                 reply_text = str(final_polish.get("reply_text") or reply_text)
@@ -1346,11 +1801,7 @@ def polish_reply_with_listen_workflow(
         return {"ok": False, "reason": "brain_first_non_brain_owned_polish_reply_blocked", "event": event}
     if brain_owned_reply:
         reply_text = normalize_brain_owned_customer_visible_reply_text(reply_text, config=config)
-    target_state = {}
-    try:
-        target_state = (workflow_state.get("targets", {}) or {}).get(str(target_config.name), {}) or {}
-    except Exception:
-        target_state = {}
+    target_state = workflow_target_state_for_target(workflow_state, target_config)
     recent_reply_texts = recent_customer_visible_reply_texts(target_state)
     combined = str(event.get("combined_content") or "")
     source_channel = str(((event.get("reply_style_adapter") or {}) if isinstance(event.get("reply_style_adapter"), dict) else {}).get("source_channel") or "normal")
@@ -1362,6 +1813,7 @@ def polish_reply_with_listen_workflow(
         source_channel=source_channel,
         needs_handoff=False,
     )
+    final_polish.setdefault("reply_text", reply_text)
     event["final_visible_llm_polish"] = final_polish
     degraded = False
     if final_polish.get("passed"):
@@ -1386,6 +1838,22 @@ def polish_reply_with_listen_workflow(
         "event": event,
         "degraded": degraded,
     }
+
+
+def workflow_target_state_for_target(workflow_state: dict[str, Any], target_config: Any) -> dict[str, Any]:
+    try:
+        targets = workflow_state.get("targets", {}) if isinstance(workflow_state, dict) else {}
+        if not isinstance(targets, dict):
+            return {}
+        session_key = str(getattr(target_config, "session_key", "") or "").strip()
+        if session_key and isinstance(targets.get(session_key), dict):
+            return targets.get(session_key) or {}
+        target_name = str(getattr(target_config, "name", "") or "").strip()
+        if target_name and isinstance(targets.get(target_name), dict):
+            return targets.get(target_name) or {}
+    except Exception:
+        return {}
+    return {}
 
 
 class ManagedListenerSchedulerBridge:
@@ -1819,7 +2287,11 @@ class ManagedListenerSchedulerBridge:
                 if non_busy:
                     pending = non_busy
                 elif busy:
-                    pending = busy[:1]
+                    # All currently pending sessions already have planner/polish/send
+                    # work in flight. Re-capturing one of them would only reopen the
+                    # same chat and amplify mechanical foreground switching; the
+                    # monitor keeps the pending signal for a later tick.
+                    pending = []
             next_name = ""
             if pending:
                 next_name = str(getattr(pending[0], "name", "") or "")
@@ -1908,10 +2380,21 @@ class ManagedListenerSchedulerBridge:
             target_state = self._target_state(workflow_state, target_name, session_key=session_key)
             self._merge_session_ledger_summary(target_state, session_key)
             context = session.get("conversation_context") if isinstance(session.get("conversation_context"), dict) else {}
-            if not context:
-                continue
-            existing = target_state.get("conversation_context") if isinstance(target_state.get("conversation_context"), dict) else {}
-            target_state["conversation_context"] = {**existing, **context}
+            if context:
+                existing = target_state.get("conversation_context") if isinstance(target_state.get("conversation_context"), dict) else {}
+                target_state["conversation_context"] = {**existing, **context}
+            stale_context = session.get("stale_reply_context") if isinstance(session.get("stale_reply_context"), dict) else {}
+            if stale_context:
+                interaction = (
+                    target_state.get("conversation_interaction_state")
+                    if isinstance(target_state.get("conversation_interaction_state"), dict)
+                    else {}
+                )
+                target_state["conversation_interaction_state"] = {
+                    **interaction,
+                    "stale_unsent_reply_context": copy.deepcopy(stale_context),
+                    "unanswered_exists": True,
+                }
         return workflow_state
 
     def _merge_session_ledger_summary(self, target_state: dict[str, Any], session_key: str) -> None:
@@ -1955,6 +2438,30 @@ class ManagedListenerSchedulerBridge:
                 **context,
                 "ledger_recent_messages": recent_messages[-20:],
             }
+        interaction = target_state.get("conversation_interaction_state") if isinstance(target_state.get("conversation_interaction_state"), dict) else {}
+        unreplied_ids = [str(item).strip() for item in summary.get("last_unreplied_message_ids") or [] if str(item).strip()]
+        unreplied_text = ""
+        if unreplied_ids and recent_messages:
+            id_set = set(unreplied_ids)
+            for item in reversed(recent_messages):
+                if not isinstance(item, dict):
+                    continue
+                identity = str(item.get("identity") or item.get("id") or "").strip()
+                if identity in id_set:
+                    unreplied_text = str(item.get("content") or "").strip()
+                    break
+        anchor = summary.get("last_successful_reply_anchor") if isinstance(summary.get("last_successful_reply_anchor"), dict) else {}
+        target_state["conversation_interaction_state"] = {
+            **interaction,
+            "schema_version": 1,
+            "last_customer_message_at": str(summary.get("last_capture_at") or interaction.get("last_customer_message_at") or ""),
+            "last_reply_sent_at": str(summary.get("last_reply_at") or interaction.get("last_reply_sent_at") or ""),
+            "last_reply_text_sample": str(anchor.get("reply_text_sample") or interaction.get("last_reply_text_sample") or "")[:180],
+            "last_unanswered_customer_text": unreplied_text[:220] if unreplied_text else str(interaction.get("last_unanswered_customer_text") or ""),
+            "last_unanswered_message_ids": unreplied_ids[-20:],
+            "unanswered_exists": bool(unreplied_ids),
+            "updated_at": str(summary.get("updated_at") or interaction.get("updated_at") or ""),
+        }
 
     def _target_state(self, state: dict[str, Any], target_name: str, *, session_key: str = "") -> dict[str, Any]:
         clean_session_key = str(session_key or "").strip()
@@ -2035,6 +2542,20 @@ class ManagedListenerSchedulerBridge:
             config=self.config,
         )
         messages = list(payload.get("messages") or [])
+        pending_signal = self._session_monitor_snapshot_for_target(
+            target.name,
+            session_key=str(getattr(target, "session_key", "") or session.get("session_key") or ""),
+        )
+        messages = annotate_latest_customer_messages_with_pending_signal(
+            messages,
+            pending_signal,
+            target_name=target.name,
+            conversation_type=str(session.get("conversation_type") or "unknown"),
+            session_key=str(getattr(target, "session_key", "") or session.get("session_key") or ""),
+            allow_self_for_test=target.allow_self_for_test,
+            max_messages=min(2, max(1, int(target.max_batch_messages or 1))),
+        )
+        payload["messages"] = messages
         history_meta = payload.get("_history_backfill", {}) if isinstance(payload.get("_history_backfill"), dict) else {}
         selection = self._workflow["select_batch_details"](
             messages,
@@ -2044,9 +2565,9 @@ class ManagedListenerSchedulerBridge:
             config=self.config,
         )
         if not selection.batch:
-            recovered_short_batch = recover_high_sensitivity_short_pending_batch(
+            recovered_short_batch = recover_pending_signal_batch_from_monitor(
                 messages,
-                self._session_monitor_snapshot_for_target(target.name),
+                pending_signal,
                 target_name=target.name,
                 allow_self_for_test=target.allow_self_for_test,
                 max_batch_messages=min(2, max(1, int(target.max_batch_messages or 1))),
@@ -2060,7 +2581,7 @@ class ManagedListenerSchedulerBridge:
                     eligible_count=len(recovered_short_batch),
                 )
                 history_meta = dict(history_meta)
-                history_meta["short_pending_recovered_from_anchor_empty"] = True
+                history_meta["monitor_pending_recovered_from_anchor_empty"] = True
                 history_meta["short_pending_recovered_count"] = len(recovered_short_batch)
         if self._workflow["history_gap_risk_blocks_reply"](history_meta, self.config) and selection.eligible_count > 0:
             return {
@@ -2105,7 +2626,15 @@ class ManagedListenerSchedulerBridge:
                 self.session_monitor.reset_unread(reset_key)
 
     def _plan_reply(self, capture: dict[str, Any], task: dict[str, Any]) -> dict[str, Any]:
-        target = self._target_for_name(str(capture.get("target_name") or ""), exact=bool(capture.get("exact", True)))
+        session_key = str(task.get("session_key") or capture.get("session_key") or "").strip()
+        target = self._target_for_session(
+            {
+                "target_name": str(capture.get("target_name") or task.get("target_name") or ""),
+                "exact": bool(capture.get("exact", True)),
+                "conversation_type": str(capture.get("conversation_type") or task.get("conversation_type") or "unknown"),
+                "session_key": session_key,
+            }
+        )
         with self._tenant_environment():
             planned = plan_reply_with_listen_workflow(
                 capture,
@@ -2218,7 +2747,7 @@ class ManagedListenerSchedulerBridge:
         except Exception:
             return None
 
-    def _session_monitor_snapshot_for_target(self, target_name: str) -> dict[str, Any] | None:
+    def _session_monitor_snapshot_for_target(self, target_name: str, *, session_key: str = "") -> dict[str, Any] | None:
         monitor = self.session_monitor
         if monitor is None or not hasattr(monitor, "all_sessions"):
             return None
@@ -2228,13 +2757,22 @@ class ManagedListenerSchedulerBridge:
             return None
         if not isinstance(sessions, list):
             return None
+        clean_key = str(session_key or "").strip()
+        if clean_key:
+            for item in sessions:
+                if not isinstance(item, dict):
+                    continue
+                if str(item.get("session_key") or "").strip() == clean_key:
+                    return item
+            return None
+        matches: list[dict[str, Any]] = []
         for item in sessions:
             if not isinstance(item, dict):
                 continue
             if str(item.get("name") or "").strip() != target_name:
                 continue
-            return item
-        return None
+            matches.append(item)
+        return matches[0] if len(matches) == 1 else None
 
     @staticmethod
     def _compact_preview_text(value: Any) -> str:
@@ -2247,9 +2785,10 @@ class ManagedListenerSchedulerBridge:
             return False
         return left == right
 
-    def _session_list_preview_for_target(self, target_name: str, *, cache_seconds: float) -> dict[str, Any] | None:
+    def _session_list_preview_for_target(self, target_name: str, *, cache_seconds: float, session_key: str = "") -> dict[str, Any] | None:
         now_ts = time.time()
-        cache_key = str(target_name or "").strip()
+        clean_session_key = str(session_key or "").strip()
+        cache_key = clean_session_key or str(target_name or "").strip()
         cached = self._freshness_session_list_preview_cache.get(cache_key)
         if isinstance(cached, dict):
             cached_at = float(cached.get("cached_at") or 0.0)
@@ -2266,30 +2805,41 @@ class ManagedListenerSchedulerBridge:
         sessions = payload.get("sessions")
         if not isinstance(sessions, list):
             return None
+        matches: list[dict[str, Any]] = []
         for item in sessions:
             if not isinstance(item, dict):
                 continue
-            name = str(item.get("name") or "").strip()
-            if not self._target_name_matches_preview(target_name, name):
-                continue
-            unread = bool(
-                item.get("unread_detected")
-                or item.get("unread_signal")
-                or item.get("unread")
-                or item.get("unread_badge")
-            )
-            preview = {
-                "name": name,
-                "unread_detected": unread,
-                "last_detected_at": "",
-                "pending_since": "",
-                "last_message_time": str(item.get("time") or ""),
-                "preview_content": str(item.get("content") or ""),
-                "_source": "session_list",
-            }
-            self._freshness_session_list_preview_cache[cache_key] = {"cached_at": now_ts, "preview": preview}
-            return preview
-        return None
+            item_key = str(item.get("session_key") or "").strip()
+            if clean_session_key:
+                if item_key != clean_session_key:
+                    continue
+            else:
+                name = str(item.get("name") or "").strip()
+                if not self._target_name_matches_preview(target_name, name):
+                    continue
+            matches.append(item)
+        if len(matches) != 1:
+            return None
+        item = matches[0]
+        name = str(item.get("name") or "").strip()
+        unread = bool(
+            item.get("unread_detected")
+            or item.get("unread_signal")
+            or item.get("unread")
+            or item.get("unread_badge")
+        )
+        preview = {
+            "name": name,
+            "session_key": str(item.get("session_key") or clean_session_key or ""),
+            "unread_detected": unread,
+            "last_detected_at": "",
+            "pending_since": "",
+            "last_message_time": str(item.get("time") or ""),
+            "preview_content": str(item.get("content") or ""),
+            "_source": "session_list",
+        }
+        self._freshness_session_list_preview_cache[cache_key] = {"cached_at": now_ts, "preview": preview}
+        return preview
 
     def _session_list_preview_matches_capture(self, reply: dict[str, Any], preview: dict[str, Any]) -> bool:
         preview_content = self._compact_preview_text(
@@ -2377,11 +2927,13 @@ class ManagedListenerSchedulerBridge:
             return False
         reason = str(freshness.get("reason") or "").strip()
         if reason in {"original_batch_not_visible_assume_stale", "original_batch_not_found_gap_risk"} or bool(freshness.get("gap_risk")):
-            preview = self._session_monitor_snapshot_for_target(target_name)
+            session_key = str(reply.get("session_key") or "")
+            preview = self._session_monitor_snapshot_for_target(target_name, session_key=session_key)
             if not isinstance(preview, dict):
                 preview = self._session_list_preview_for_target(
                     target_name,
                     cache_seconds=float(self._scheduler_freshness_settings().get("preview_from_session_list_cache_seconds") or 0.0),
+                    session_key=session_key,
                 )
             if isinstance(preview, dict) and bool(preview.get("unread_detected")):
                 if self._session_list_preview_matches_capture(reply, preview):
@@ -2404,11 +2956,13 @@ class ManagedListenerSchedulerBridge:
         newer = [item for item in (freshness.get("newer_messages") or []) if isinstance(item, dict)]
         if not newer:
             return bool(freshness.get("has_newer_messages"))
-        preview = self._session_monitor_snapshot_for_target(target_name)
+        session_key = str(reply.get("session_key") or "")
+        preview = self._session_monitor_snapshot_for_target(target_name, session_key=session_key)
         if not isinstance(preview, dict):
             preview = self._session_list_preview_for_target(
                 target_name,
                 cache_seconds=float(self._scheduler_freshness_settings().get("preview_from_session_list_cache_seconds") or 0.0),
+                session_key=session_key,
             )
         if isinstance(preview, dict) and bool(preview.get("unread_detected")):
             return True
@@ -2511,7 +3065,8 @@ class ManagedListenerSchedulerBridge:
         except Exception:
             scheduler_state = {}
         session = get_session_by_identity(scheduler_state, target_name, session_key=str(reply.get("session_key") or "")) or {}
-        preview = self._session_monitor_snapshot_for_target(target_name)
+        session_key = str(reply.get("session_key") or "")
+        preview = self._session_monitor_snapshot_for_target(target_name, session_key=session_key)
         if (
             not isinstance(preview, dict)
             and bool(settings.get("preview_from_session_list_enabled", True))
@@ -2519,6 +3074,7 @@ class ManagedListenerSchedulerBridge:
             preview = self._session_list_preview_for_target(
                 target_name,
                 cache_seconds=float(settings.get("preview_from_session_list_cache_seconds") or 0.0),
+                session_key=session_key,
             )
         # Scheduler-level pending signal is authoritative only when it points to
         # work newer than the captured batch.  RPA/OCR can leave the same unread

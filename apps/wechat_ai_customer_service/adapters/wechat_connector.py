@@ -97,6 +97,13 @@ class WeChatConnector:
                     primary.setdefault("transport_priority", "rpa_first")
                     attach_rpa_lock_meta(primary, lock_meta)
                     return primary
+                if rpa_payload_is_tray_hidden(primary):
+                    primary.setdefault("adapter", "win32_ocr")
+                    primary.setdefault("transport_priority", "rpa_first")
+                    primary.setdefault("receive", {"ok": False})
+                    primary.setdefault("send", {"ok": False})
+                    attach_rpa_lock_meta(primary, lock_meta)
+                    return primary
                 reserve = self.call_reserve_sidecar(["status"], allow_failure=True, primary_payload=snapshot_payload(primary))
                 if reserve.get("ok") and reserve.get("online"):
                     reserve.setdefault("adapter", "wxauto4")
@@ -153,6 +160,13 @@ class WeChatConnector:
                     attach_rpa_lock_meta(primary, lock_meta)
                     return primary
                 if rpa_render_fault_should_stop(primary):
+                    primary.setdefault("adapter", "win32_ocr")
+                    primary.setdefault("receive", {"ok": False})
+                    primary.setdefault("send", {"ok": False})
+                    primary.setdefault("transport_priority", "rpa_first")
+                    attach_rpa_lock_meta(primary, lock_meta)
+                    return primary
+                if rpa_payload_is_tray_hidden(primary):
                     primary.setdefault("adapter", "win32_ocr")
                     primary.setdefault("receive", {"ok": False})
                     primary.setdefault("send", {"ok": False})
@@ -255,6 +269,11 @@ class WeChatConnector:
                     attach_rpa_lock_meta(primary, lock_meta)
                     return primary
                 if rpa_render_fault_should_stop(primary):
+                    primary.setdefault("adapter", "win32_ocr")
+                    primary.setdefault("transport_priority", "rpa_first")
+                    attach_rpa_lock_meta(primary, lock_meta)
+                    return primary
+                if rpa_payload_is_tray_hidden(primary):
                     primary.setdefault("adapter", "win32_ocr")
                     primary.setdefault("transport_priority", "rpa_first")
                     attach_rpa_lock_meta(primary, lock_meta)
@@ -1030,14 +1049,36 @@ def _ensure_daemon(
 
 def _kill_daemon() -> None:
     global _daemon_proc
-    if _daemon_proc is not None:
+    proc = _daemon_proc
+    _daemon_proc = None
+    if proc is not None:
         try:
-            _daemon_proc.stdin.write(b'{"action": "exit"}\n')
-            _daemon_proc.stdin.flush()
-            _daemon_proc.wait(timeout=2)
+            if proc.poll() is None and proc.stdin is not None:
+                try:
+                    proc.stdin.write(b'{"action": "exit"}\n')
+                    proc.stdin.flush()
+                except (BrokenPipeError, OSError, ValueError):
+                    pass
+                proc.wait(timeout=2)
+        except subprocess.TimeoutExpired:
+            try:
+                proc.kill()
+                proc.wait(timeout=2)
+            except Exception:
+                pass
         except Exception:
-            _daemon_proc.kill()
-        _daemon_proc = None
+            try:
+                if proc.poll() is None:
+                    proc.kill()
+            except Exception:
+                pass
+        finally:
+            for pipe in (proc.stdin, proc.stdout, proc.stderr):
+                try:
+                    if pipe is not None:
+                        pipe.close()
+                except (OSError, ValueError):
+                    pass
 
 
 def _compat_daemon_env(
@@ -1077,14 +1118,36 @@ def _ensure_compat_daemon(
 
 def _kill_compat_daemon() -> None:
     global _compat_daemon_proc
-    if _compat_daemon_proc is not None:
+    proc = _compat_daemon_proc
+    _compat_daemon_proc = None
+    if proc is not None:
         try:
-            _compat_daemon_proc.stdin.write(b'{"action": "exit"}\n')
-            _compat_daemon_proc.stdin.flush()
-            _compat_daemon_proc.wait(timeout=2)
+            if proc.poll() is None and proc.stdin is not None:
+                try:
+                    proc.stdin.write(b'{"action": "exit"}\n')
+                    proc.stdin.flush()
+                except (BrokenPipeError, OSError, ValueError):
+                    pass
+                proc.wait(timeout=2)
+        except subprocess.TimeoutExpired:
+            try:
+                proc.kill()
+                proc.wait(timeout=2)
+            except Exception:
+                pass
         except Exception:
-            _compat_daemon_proc.kill()
-        _compat_daemon_proc = None
+            try:
+                if proc.poll() is None:
+                    proc.kill()
+            except Exception:
+                pass
+        finally:
+            for pipe in (proc.stdin, proc.stdout, proc.stderr):
+                try:
+                    if pipe is not None:
+                        pipe.close()
+                except (OSError, ValueError):
+                    pass
 
 
 def _compat_daemon_request(
@@ -1156,7 +1219,11 @@ def send_rpa_env() -> dict[str, str]:
     env["WECHAT_WIN32_OCR_STRICT_SEND_FOCUS_GUARD"] = "1"
     env["WECHAT_WIN32_OCR_ALLOW_UNKNOWN_FOREGROUND"] = "1"
     if not str(os.getenv("WECHAT_WIN32_OCR_BLANK_INPUT_FOCUS_RETRY") or "").strip():
-        env["WECHAT_WIN32_OCR_BLANK_INPUT_FOCUS_RETRY"] = "0"
+        # Keep the product-level single-confirm rule, but allow one extra
+        # candidate input point when the first attempt leaves the input region
+        # visibly blank. This avoids blind sends after a missed input focus
+        # without reopening or repeatedly clicking the conversation row.
+        env["WECHAT_WIN32_OCR_BLANK_INPUT_FOCUS_RETRY"] = "1"
     if not str(os.getenv("WECHAT_WIN32_OCR_SEND_INPUT_CONFIRM_ATTEMPTS") or "").strip():
         env["WECHAT_WIN32_OCR_SEND_INPUT_CONFIRM_ATTEMPTS"] = "1"
     return env
@@ -1369,6 +1436,8 @@ def rpa_payload_needs_interactive_confirmation(payload: dict[str, Any]) -> bool:
         return False
     if payload.get("ok") and payload.get("online"):
         return False
+    if rpa_payload_is_tray_hidden(payload):
+        return False
     if rpa_payload_needs_render_recovery(payload):
         return True
 
@@ -1400,6 +1469,20 @@ def rpa_payload_needs_interactive_confirmation(payload: dict[str, Any]) -> bool:
     probe = payload.get("window_probe") if isinstance(payload.get("window_probe"), dict) else {}
     if state == "main_window_not_found" and int(probe.get("main_count") or 0) > 0:
         return True
+    return False
+
+
+def rpa_payload_is_tray_hidden(payload: dict[str, Any]) -> bool:
+    if not isinstance(payload, dict):
+        return False
+    state = str(payload.get("state") or "").strip()
+    reason = str(payload.get("reason") or "").strip()
+    scheme = str(payload.get("scheme") or "").strip()
+    if state == "main_window_in_tray" or reason == "wechat_window_in_tray" or scheme == "win32_ocr_window_in_tray":
+        return True
+    primary = payload.get("primary_status") if isinstance(payload.get("primary_status"), dict) else {}
+    if primary:
+        return rpa_payload_is_tray_hidden(primary)
     return False
 
 
