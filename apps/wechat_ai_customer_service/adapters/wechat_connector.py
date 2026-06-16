@@ -564,6 +564,69 @@ class WeChatConnector:
             "verification_mode": verification_mode,
         }
 
+    def add_friend(
+        self,
+        *,
+        phone: str = "",
+        wechat: str = "",
+        verify_message: str = "",
+        remark_name: str = "",
+        remark_code: str = "",
+        artifact_dir: str | None = None,
+    ) -> dict[str, Any]:
+        query = re.sub(r"\D+", "", str(phone or "")) or str(wechat or "").strip()
+        if not query:
+            raise WeChatConnectorError("phone or wechat is required")
+        if not str(verify_message or "").strip():
+            raise WeChatConnectorError("verify_message is required")
+        if not str(remark_name or "").strip():
+            raise WeChatConnectorError("remark_name is required")
+        if not str(remark_code or "").strip():
+            raise WeChatConnectorError("remark_code is required")
+        if str(remark_code).strip() not in str(remark_name).strip():
+            raise WeChatConnectorError("remark_name must include remark_code")
+        args = ["add-friend-entry-click-plan"]
+        if phone:
+            args.extend(["--phone", str(phone)])
+        if wechat:
+            args.extend(["--wechat", str(wechat)])
+        args.extend(["--verify-message", str(verify_message)])
+        args.extend(["--remark-name", str(remark_name)])
+        args.extend(["--remark-code", str(remark_code)])
+        if artifact_dir:
+            args.extend(["--artifact-dir", str(artifact_dir)])
+        lock_timeout = rpa_lock_timeout_seconds("add_friend", default=45.0)
+        try:
+            with wechat_rpa_lock("add_friend", timeout_seconds=lock_timeout) as lock_meta:
+                primary = self.call_compat_sidecar(args, allow_failure=True, env_overrides=add_friend_rpa_env())
+                primary.setdefault("adapter", "win32_ocr")
+                primary.setdefault("transport_priority", "rpa_first")
+                primary.setdefault(
+                    "wxauto4_reserve_status",
+                    {
+                        "ok": False,
+                        "online": False,
+                        "adapter": "wxauto4",
+                        "state": "wxauto4_reserve_skipped_for_add_friend",
+                        "message": "add_friend is implemented through the Win32/OCR RPA transport.",
+                    },
+                )
+                attach_rpa_lock_meta(primary, lock_meta)
+                return primary
+        except TimeoutError as exc:
+            return {
+                "ok": False,
+                "online": bool(any_weixin_process()),
+                "adapter": "win32_ocr",
+                "state": "add_friend_lock_timeout",
+                "task_type": "add_friend",
+                "phone": phone,
+                "wechat": wechat,
+                "error": repr(exc),
+                "transport_priority": "rpa_first",
+                "rpa_lock": rpa_lock_timeout_payload(exc, action="add_friend", timeout_seconds=lock_timeout),
+            }
+
     def require_online(self) -> dict[str, Any]:
         status = self.status(interactive=True)
         if not status.get("ok") or not status.get("online"):
@@ -1229,6 +1292,19 @@ def send_rpa_env() -> dict[str, str]:
     return env
 
 
+def add_friend_rpa_env() -> dict[str, str]:
+    """Environment overrides for add_friend RPA.
+
+    add_friend needs foreground input, but it must not use invasive render
+    recovery by default. If WeChat is blank or unreadable, report and stop.
+    """
+    env = interactive_rpa_probe_env()
+    env["WECHAT_WIN32_OCR_QUICK_LOGIN_AUTO_ENTER"] = "0"
+    env["WECHAT_WIN32_OCR_WINDOW_NORMALIZE"] = os.getenv("WECHAT_WIN32_OCR_WINDOW_NORMALIZE", "0") or "0"
+    env["WECHAT_WIN32_OCR_RENDER_RECOVERY_AUTO"] = os.getenv("WECHAT_WIN32_OCR_RENDER_RECOVERY_AUTO", "0") or "0"
+    return env
+
+
 def message_target_pending_visible(payload: dict[str, Any] | None) -> bool:
     data = payload if isinstance(payload, dict) else {}
     state = str(data.get("state") or "")
@@ -1306,6 +1382,21 @@ def _args_to_request(args: list[str]) -> dict[str, Any]:
                 request["skip_send_rate_guard"] = True
             elif arg == "--artifact-dir" and i + 1 < len(args):
                 request["artifact_dir"] = args[i + 1]
+    elif args[0] == "add-friend-entry-click-plan":
+        request["action"] = "add-friend-entry-click-plan"
+        for i, arg in enumerate(args):
+            if arg == "--phone" and i + 1 < len(args):
+                request["phone"] = args[i + 1]
+            elif arg == "--wechat" and i + 1 < len(args):
+                request["wechat"] = args[i + 1]
+            elif arg == "--verify-message" and i + 1 < len(args):
+                request["verify_message"] = args[i + 1]
+            elif arg == "--remark-name" and i + 1 < len(args):
+                request["remark_name"] = args[i + 1]
+            elif arg == "--remark-code" and i + 1 < len(args):
+                request["remark_code"] = args[i + 1]
+            elif arg == "--artifact-dir" and i + 1 < len(args):
+                request["artifact_dir"] = args[i + 1]
     elif args[0] in {"status", "capabilities", "sessions", "recover-render"}:
         request["action"] = args[0]
         for i, arg in enumerate(args):
@@ -1333,6 +1424,8 @@ def compat_args(args: list[str]) -> list[str]:
             "--target",
             "--text",
             "--session-key",
+            "--phone",
+            "--wechat",
             "--history-load-times",
             "--history-mode",
             "--anchor-id",

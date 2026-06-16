@@ -21,6 +21,7 @@ if str(PROJECT_ROOT) not in sys.path:
 from apps.wechat_ai_customer_service.adapters.wechat_connector import (  # noqa: E402
     RPALockTimeoutError,
     WeChatConnector,
+    add_friend_rpa_env,
     blind_send_without_ocr,
     compat_args,
     enqueue_simulated_inbound_message,
@@ -40,6 +41,10 @@ from apps.wechat_ai_customer_service.adapters.wechat_connector import (  # noqa:
 import apps.wechat_ai_customer_service.adapters.wechat_connector as wechat_connector_module  # noqa: E402
 from apps.wechat_ai_customer_service.adapters.wechat_win32_ocr_sidecar import (  # noqa: E402
     active_chat_matches,
+    add_friend_ocr_compact,
+    add_friend_surface_readiness,
+    add_friend_optional_field_fill_enabled,
+    add_friend_virtual_key_for_digit,
     active_chat_title_cutoff_y,
     adapt_humanized_input_settings,
     auxiliary_wechat_shell_like,
@@ -49,11 +54,16 @@ from apps.wechat_ai_customer_service.adapters.wechat_win32_ocr_sidecar import ( 
     chat_header_cutoff_y,
     calculate_send_points,
     classify_message_side,
+    clear_add_friend_sidebar_search_box,
+    classify_add_friend_ocr_surface,
     clear_existing_input_draft,
     detect_session_subview_back_target,
     detect_blank_render,
     allow_blind_target_confirmation,
+    find_add_friend_action_item,
+    find_add_friend_search_result_item,
     likely_foreign_overlay_capture,
+    normalize_add_friend_query,
     normalize_chat_title_for_match,
     parse_messages_from_ocr,
     parse_sessions_from_ocr,
@@ -70,6 +80,9 @@ from apps.wechat_ai_customer_service.adapters.wechat_win32_ocr_sidecar import ( 
     select_uia_edit_control,
     select_uia_send_button,
     humanized_chunk_text,
+    add_friend_human_pause,
+    type_add_friend_phone_query_like_human,
+    type_add_friend_search_query,
     humanized_input_settings,
     input_text_region_state,
     input_region_visual_delta_confirms,
@@ -228,6 +241,186 @@ def test_parse_sessions_preserves_duplicate_display_names_with_session_keys() ->
         xucong[0].get("session_key") != xucong[1].get("session_key"),
         f"duplicate display names should not collapse to the same session key: {xucong}",
     )
+
+
+def test_add_friend_query_normalization_prefers_phone_digits() -> None:
+    assert_true(normalize_add_friend_query(phone="173 6874-6889", wechat="wxid_demo") == "17368746889", "phone digits should be the primary add_friend query")
+    assert_true(normalize_add_friend_query(phone="", wechat=" wxid_demo ") == "wxid_demo", "wechat id should be used when phone is empty")
+    assert_true(add_friend_ocr_compact(" 网络查找手机 / QQ号 ") == "网络查找手机/qq号", "OCR text should compact consistently")
+
+
+def test_add_friend_search_result_detection_from_ocr() -> None:
+    items = [
+        {"text": "搜索", "confidence": 0.98, "left": 120, "right": 170, "top": 62, "bottom": 86, "center_x": 145, "center_y": 74},
+        {"text": "网络查找手机/QQ号：17368746889", "confidence": 0.98, "left": 225, "right": 520, "top": 170, "bottom": 205, "center_x": 372, "center_y": 187},
+        {"text": "17368746889", "confidence": 0.98, "left": 260, "right": 386, "top": 250, "bottom": 276, "center_x": 323, "center_y": 263},
+    ]
+    result = find_add_friend_search_result_item(items, "17368746889", (980, 860))
+    assert_true(result is not None, f"phone search result should be detected: {items}")
+    assert_true("17368746889" in str(result.get("text")), f"result should carry the searched phone: {result}")
+
+
+def test_add_friend_surface_classification() -> None:
+    add_entry_items = [
+        {"text": "挂杌山兮", "confidence": 0.98, "left": 410, "right": 510, "top": 250, "bottom": 280, "center_x": 460, "center_y": 265},
+        {"text": "添加到通讯录", "confidence": 0.99, "left": 430, "right": 560, "top": 520, "bottom": 555, "center_x": 495, "center_y": 538},
+    ]
+    add_entry = classify_add_friend_ocr_surface(add_entry_items, (980, 860))
+    assert_true(add_entry.get("state") == "add_contact_entry", f"add contact entry should be classified: {add_entry}")
+    assert_true(find_add_friend_action_item(add_entry_items, ("添加到通讯录",), (980, 860)) is not None, "add button should be located")
+
+    invite_items = [
+        {"text": "发送添加朋友申请", "confidence": 0.99, "left": 260, "right": 450, "top": 180, "bottom": 215, "center_x": 355, "center_y": 197},
+        {"text": "备注名", "confidence": 0.98, "left": 260, "right": 340, "top": 318, "bottom": 345, "center_x": 300, "center_y": 332},
+        {"text": "发送", "confidence": 0.99, "left": 808, "right": 880, "top": 760, "bottom": 795, "center_x": 844, "center_y": 778},
+    ]
+    invite = classify_add_friend_ocr_surface(invite_items, (980, 860))
+    assert_true(invite.get("state") == "invite_form", f"invite form should be classified: {invite}")
+
+    already_items = [
+        {"text": "发消息", "confidence": 0.99, "left": 430, "right": 500, "top": 550, "bottom": 580, "center_x": 465, "center_y": 565},
+        {"text": "音视频通话", "confidence": 0.99, "left": 515, "right": 630, "top": 550, "bottom": 580, "center_x": 572, "center_y": 565},
+    ]
+    already = classify_add_friend_ocr_surface(already_items, (980, 860))
+    assert_true(already.get("result_code") == "already_friend", f"already-friend state should become result_code: {already}")
+
+    not_found_items = [
+        {"text": "该用户不存在", "confidence": 0.99, "left": 330, "right": 500, "top": 300, "bottom": 330, "center_x": 415, "center_y": 315},
+    ]
+    not_found = classify_add_friend_ocr_surface(not_found_items, (980, 860))
+    assert_true(not_found.get("error_code") == "PHONE_NOT_FOUND", f"not found state should map to PHONE_NOT_FOUND: {not_found}")
+
+
+def test_add_friend_surface_readiness_blocks_blank_or_empty_ocr() -> None:
+    blank = Image.new("RGB", (980, 860), "white")
+    readiness = add_friend_surface_readiness(blank, [], {"width": 980, "height": 860}, stage="after_search")
+    assert_true(readiness.get("ok") is False, f"blank add_friend surface should be blocked: {readiness}")
+    assert_true(readiness.get("error_code") == "WECHAT_RENDER_NOT_READY", f"blank surface should not become PHONE_NOT_FOUND: {readiness}")
+
+    sparse = Image.new("RGB", (980, 860), "white")
+    sparse_items = [{"text": "Weixin", "confidence": 0.98, "left": 10, "right": 80, "top": 10, "bottom": 34, "center_x": 45, "center_y": 22}]
+    sparse_readiness = add_friend_surface_readiness(sparse, sparse_items, {"width": 980, "height": 860}, stage="before_search")
+    assert_true(sparse_readiness.get("ok") is False, f"title-only WeChat shell should be blocked: {sparse_readiness}")
+    assert_true(sparse_readiness.get("error_code") == "WECHAT_RENDER_NOT_READY", f"title-only shell should be render-not-ready: {sparse_readiness}")
+
+    not_found_items = [{"text": "该用户不存在", "confidence": 0.98, "left": 320, "right": 500, "top": 290, "bottom": 322, "center_x": 410, "center_y": 306}]
+    not_found_readiness = add_friend_surface_readiness(sparse, not_found_items, {"width": 980, "height": 860}, stage="after_search")
+    assert_true(not_found_readiness.get("ok") is True, f"single business error text should remain classifiable: {not_found_readiness}")
+
+
+def test_connector_add_friend_builds_win32_ocr_request() -> None:
+    class FakeAddFriendConnector(WeChatConnector):
+        def __init__(self) -> None:
+            object.__setattr__(self, "calls", [])
+
+        def call_compat_sidecar(self, args: list[str], *, allow_failure: bool = False, primary_payload: dict[str, Any] | None = None, env_overrides: dict[str, str] | None = None) -> dict[str, Any]:
+            self.calls.append({"args": list(args), "allow_failure": allow_failure, "env": dict(env_overrides or {})})
+            return {"ok": True, "state": "completed", "result_code": "invite_sent"}
+
+    connector = FakeAddFriendConnector()
+    result = connector.add_friend(
+        phone="17368746889",
+        verify_message="我是车金二手车张伟",
+        remark_name="客户-CJ8K2P-6889",
+        remark_code="CJ8K2P",
+    )
+    assert_true(result.get("ok") is True and result.get("result_code") == "invite_sent", f"unexpected add_friend result: {result}")
+    args = connector.calls[0]["args"]
+    assert_true(args[:3] == ["add-friend-entry-click-plan", "--phone", "17368746889"], f"add_friend should call the official Win32/OCR action: {args}")
+    assert_true("--verify-message" in args and "我是车金二手车张伟" in args, f"verify_message should pass through: {args}")
+    assert_true("--remark-name" in args and "客户-CJ8K2P-6889" in args, f"remark_name should pass through: {args}")
+    assert_true("--remark-code" in args and "CJ8K2P" in args, f"remark_code should pass through: {args}")
+    assert_true("--remark" not in args and "--greeting" not in args and "--sales-name" not in args, f"removed add_friend flags must not pass through: {args}")
+    assert_true(result.get("wxauto4_reserve_status", {}).get("state") == "wxauto4_reserve_skipped_for_add_friend", f"wxauto reserve should be skipped for add_friend: {result}")
+
+
+def test_add_friend_rpa_env_is_non_recovery_by_default() -> None:
+    previous_recovery = os.environ.get("WECHAT_WIN32_OCR_RENDER_RECOVERY_AUTO")
+    previous_normalize = os.environ.get("WECHAT_WIN32_OCR_WINDOW_NORMALIZE")
+    try:
+        os.environ.pop("WECHAT_WIN32_OCR_RENDER_RECOVERY_AUTO", None)
+        os.environ.pop("WECHAT_WIN32_OCR_WINDOW_NORMALIZE", None)
+        env = add_friend_rpa_env()
+        assert_true(env.get("WECHAT_WIN32_OCR_RENDER_RECOVERY_AUTO") == "0", f"add_friend must not auto-recover blank render by default: {env}")
+        assert_true(env.get("WECHAT_WIN32_OCR_WINDOW_NORMALIZE") == "0", f"add_friend must not normalize the window by default: {env}")
+        assert_true(env.get("WECHAT_WIN32_OCR_PASSIVE_PROBE") == "0", f"add_friend still needs an explicit foreground action env: {env}")
+    finally:
+        if previous_recovery is None:
+            os.environ.pop("WECHAT_WIN32_OCR_RENDER_RECOVERY_AUTO", None)
+        else:
+            os.environ["WECHAT_WIN32_OCR_RENDER_RECOVERY_AUTO"] = previous_recovery
+        if previous_normalize is None:
+            os.environ.pop("WECHAT_WIN32_OCR_WINDOW_NORMALIZE", None)
+        else:
+            os.environ["WECHAT_WIN32_OCR_WINDOW_NORMALIZE"] = previous_normalize
+
+
+def test_add_friend_entry_click_script_keeps_render_recovery_opt_in() -> None:
+    script_path = PROJECT_ROOT / "apps" / "wechat_ai_customer_service" / "scripts" / "run_wechat_add_friend_entry_click_plan.ps1"
+    script = script_path.read_text(encoding="utf-8")
+    assert_true("[switch]$AllowRenderRecovery" in script, "entry-click script should make render recovery an explicit operator choice")
+    assert_true('WECHAT_WIN32_OCR_RENDER_RECOVERY_AUTO = $(if ($AllowRenderRecovery) { "1" } else { "0" })' in script, "entry-click script should default render recovery to off")
+    assert_true("[switch]$NormalizeWindow" in script, "entry-click script should make window normalization explicit")
+    for removed in ["run_wechat_add_friend_live.ps1", "run_wechat_add_friend_plan.ps1", "run_wechat_add_friend_entry_plan.ps1"]:
+        assert_true(not (script_path.parent / removed).exists(), f"removed add_friend script should not exist: {removed}")
+
+
+def test_add_friend_uses_serialized_human_pacing() -> None:
+    sidecar = PROJECT_ROOT / "apps" / "wechat_ai_customer_service" / "adapters" / "wechat_win32_ocr_sidecar.py"
+    source = sidecar.read_text(encoding="utf-8")
+    assert_true(callable(add_friend_human_pause), "add_friend human pacing helper should be importable")
+    assert_true(callable(clear_add_friend_sidebar_search_box), "add_friend slow clear helper should be importable")
+    assert_true("clear_add_friend_sidebar_search_box(hwnd, search_x, search_y, target_hint=query)" in source, "add_friend should use slow serialized search clearing")
+    assert_true("clear_sidebar_search_box_without_select_all(hwnd, search_x, search_y, target_hint=query)" not in source, "add_friend must not use fast shared search clearing")
+    assert_true("add_friend_wait_before_ocr(\"after_search_input_before_ocr\")" in source, "add_friend must pause between keyboard input and OCR")
+    assert_true("add_friend_human_pause(650, 1450, reason=\"before_mouse_click\")" in source, "add_friend must pause before mouse click")
+    assert_true("add_friend_human_pause(900, 1900, reason=\"after_mouse_click\")" in source, "add_friend must pause after mouse click")
+
+
+def test_add_friend_query_input_uses_digit_key_presses_by_default() -> None:
+    sidecar_mod = sys.modules["apps.wechat_ai_customer_service.adapters.wechat_win32_ocr_sidecar"]
+    original_pause = sidecar_mod.add_friend_human_pause
+    pressed: list[int] = []
+    try:
+        sidecar_mod.add_friend_human_pause = lambda *_args, **_kwargs: 0.0
+        result = type_add_friend_phone_query_like_human(
+            1001,
+            "173 6874 6889",
+            key_press_func=lambda key: pressed.append(int(key)),
+            window_guard_func=lambda: {"ok": True},
+        )
+        assert_true(result.get("ok") is True, f"phone query input should pass: {result}")
+        assert_true(result.get("method") == "add_friend_digit_keys", f"phone query must use digit key method: {result}")
+        assert_true(pressed == [ord(char) for char in "17368746889"], f"unexpected digit keys: {pressed}")
+        assert_true(add_friend_virtual_key_for_digit("8") == ord("8"), "digit key mapping should use visible digit VK")
+    finally:
+        sidecar_mod.add_friend_human_pause = original_pause
+
+
+def test_add_friend_query_blocks_non_numeric_sendinput_without_opt_in() -> None:
+    previous = os.environ.get("WECHAT_WIN32_OCR_ADD_FRIEND_ALLOW_SENDINPUT_QUERY")
+    try:
+        os.environ.pop("WECHAT_WIN32_OCR_ADD_FRIEND_ALLOW_SENDINPUT_QUERY", None)
+        result = type_add_friend_search_query(1001, "wxid_demo")
+        assert_true(result.get("ok") is False, f"non-numeric query should not default to SendInput: {result}")
+        assert_true(result.get("reason") == "non_numeric_query_requires_explicit_sendinput_opt_in", f"unexpected reason: {result}")
+    finally:
+        if previous is None:
+            os.environ.pop("WECHAT_WIN32_OCR_ADD_FRIEND_ALLOW_SENDINPUT_QUERY", None)
+        else:
+            os.environ["WECHAT_WIN32_OCR_ADD_FRIEND_ALLOW_SENDINPUT_QUERY"] = previous
+
+
+def test_add_friend_optional_field_fill_disabled_by_default() -> None:
+    previous = os.environ.get("WECHAT_WIN32_OCR_ADD_FRIEND_FILL_OPTIONAL_FIELDS")
+    try:
+        os.environ.pop("WECHAT_WIN32_OCR_ADD_FRIEND_FILL_OPTIONAL_FIELDS", None)
+        assert_true(add_friend_optional_field_fill_enabled() is False, "optional text fill should be disabled by default")
+    finally:
+        if previous is None:
+            os.environ.pop("WECHAT_WIN32_OCR_ADD_FRIEND_FILL_OPTIONAL_FIELDS", None)
+        else:
+            os.environ["WECHAT_WIN32_OCR_ADD_FRIEND_FILL_OPTIONAL_FIELDS"] = previous
 
 
 def test_message_probe_tokens_prefer_semantic_body_after_live_marker() -> None:
@@ -2250,6 +2443,8 @@ def test_auxiliary_wechat_shell_is_blocked() -> None:
 
 def test_normalize_wechat_window_clamps_offscreen_when_size_is_already_safe() -> None:
     sidecar_mod = sys.modules["apps.wechat_ai_customer_service.adapters.wechat_win32_ocr_sidecar"]
+    if not hasattr(sidecar_mod.ctypes, "windll"):
+        return
     original_get_window_geometry = sidecar_mod.get_window_geometry
     original_win32gui = sidecar_mod.win32gui
     if sidecar_mod.win32gui is None:
@@ -3689,6 +3884,17 @@ def main() -> int:
         test_parse_sessions_normalizes_truncated_file_transfer,
         test_parse_sessions_strips_standalone_relative_day_suffix,
         test_parse_sessions_preserves_duplicate_display_names_with_session_keys,
+        test_add_friend_query_normalization_prefers_phone_digits,
+        test_add_friend_search_result_detection_from_ocr,
+        test_add_friend_surface_classification,
+        test_add_friend_surface_readiness_blocks_blank_or_empty_ocr,
+        test_connector_add_friend_builds_win32_ocr_request,
+        test_add_friend_rpa_env_is_non_recovery_by_default,
+        test_add_friend_entry_click_script_keeps_render_recovery_opt_in,
+        test_add_friend_uses_serialized_human_pacing,
+        test_add_friend_query_input_uses_digit_key_presses_by_default,
+        test_add_friend_query_blocks_non_numeric_sendinput_without_opt_in,
+        test_add_friend_optional_field_fill_disabled_by_default,
         test_message_probe_tokens_prefer_semantic_body_after_live_marker,
         test_parse_messages_from_ocr,
         test_parse_messages_keeps_low_visible_bubble_lines,
