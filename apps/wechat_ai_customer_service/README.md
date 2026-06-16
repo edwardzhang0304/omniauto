@@ -48,6 +48,42 @@ python apps\wechat_ai_customer_service\tests\run_vps_local_two_port_shared_sync_
 - 支持边界问题转人工，但对客户不说“转人工”，而是说“需要请示负责人/核实资料后再回复”。
 - 支持防 AI 暴露开关：开启后，客户问“是不是 AI/机器人”时会明确否认并转回业务话题。
 
+### 微信加好友 RPA
+
+- 支持通过 Win32/OCR RPA 通道执行 `add_friend`：搜索手机号或微信号，进入资料页，点击“添加到通讯录”，填写申请说明/备注，并发送邀请。
+- 当前正式主链路固定为 `add-friend-entry-click-plan`，不保留本轮开发过程中的临时 add_friend 入口。
+- 主链路必须传入正式字段：
+  - `phone_or_wechat`：由 `phone` 或 `wechat` 提供，至少一个必填，用于搜索目标用户。
+  - `verify_message`：写入微信“发送添加朋友申请”输入框。
+  - `remark_name`：写入微信“备注名”输入框。
+  - `remark_code`：外部系统生成的短码，且 `remark_name` 必须包含该短码。
+- 主链路不使用 `sales_name` 生成申请语，不用 `remark` 兜底备注名，也不在 OmniAuto 内生成短码；缺少任一正式字段会返回 `TASK_PAYLOAD_INVALID`，并且不会操作微信 UI。
+- Worker 接入时应调用正式字段；正式包不暴露旧 demo / diagnostic add_friend 入口。
+- 成功结果使用 `result_code`：
+  - `invite_sent`：已发送添加通讯录邀请。
+- 失败结果使用 `error_code`：
+  - `PHONE_NOT_FOUND`
+  - `WECHAT_ID_NOT_FOUND`
+  - `ADD_CONTACT_ENTRY_NOT_FOUND`
+  - `INVITE_CONFIRM_CLICK_FAILED`
+  - `ACCOUNT_RESTRICTED`
+  - `TASK_PAYLOAD_INVALID`
+  - `OTHER`
+- 该能力不走 wxauto4 备用通道，避免把添加好友动作依赖在聊天会话 API 上。
+- 每次运行会生成 timestamp 历史目录和 `latest` 快速入口，HTML/JSON 报告由统一 step event 生成，包含 OCR、候选目标、选中目标、点击边界、最终点位、耗时、状态和结果。
+
+Windows 真机验证：
+
+```powershell
+.\apps\wechat_ai_customer_service\scripts\run_wechat_add_friend_entry_click_plan.ps1 `
+  -Phone "17368746889" `
+  -VerifyMessage "我是车金二手车张伟" `
+  -RemarkName "CJ-张伟-CJ8K2P-6889" `
+  -RemarkCode "CJ8K2P"
+```
+
+验证前需要保持 Windows 微信已登录、主窗口可见。脚本会把结果 JSON、错误日志、截图和 OCR 取证保存到 `runtime\add_friend_entry_click_plan\时间戳\`，并同步一份到 `runtime\add_friend_entry_click_plan\latest\`。
+
 ### 资料导入与知识成长
 
 - 用户从“资料导入”上传清洗资料或业务资料。
