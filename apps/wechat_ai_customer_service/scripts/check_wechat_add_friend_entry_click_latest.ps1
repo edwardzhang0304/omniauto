@@ -1,7 +1,7 @@
 param(
     [string]$ProjectRoot = "",
-    [ValidateSet("windows", "reference", "legacy")]
-    [string]$Route = "windows",
+    [ValidateSet("canonical", "windows", "reference", "legacy")]
+    [string]$Route = "canonical",
     [string]$ArtifactScope = "",
     [string]$PlanJson = "",
     [string]$ReviewJson = "",
@@ -28,6 +28,7 @@ function Resolve-AddFriendArtifactScope {
         return $ExplicitScope
     }
     switch ($RouteName.ToLowerInvariant()) {
+        "canonical" { return "add_friend_entry_click_plan_windows" }
         "windows" { return "add_friend_entry_click_plan_windows" }
         "reference" { return "add_friend_entry_click_plan_windows_1080p_reference" }
         "legacy" { return "add_friend_entry_click_plan" }

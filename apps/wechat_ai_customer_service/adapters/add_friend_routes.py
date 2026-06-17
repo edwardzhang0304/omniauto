@@ -6,37 +6,57 @@ from typing import Any
 
 from apps.wechat_ai_customer_service.adapters.add_friend_contract import (
     ADD_FRIEND_ENTRY_CLICK_ROUTE,
+    ADD_FRIEND_ENTRY_CLICK_WINDOWS_1080P_REFERENCE_ROUTE,
     ADD_FRIEND_ENTRY_CLICK_WINDOWS_ROUTE,
 )
 
 
-ADD_FRIEND_WINDOWS_1080P_REFERENCE_ROUTE = ADD_FRIEND_ENTRY_CLICK_ROUTE
+ADD_FRIEND_CANONICAL_ROUTE = ADD_FRIEND_ENTRY_CLICK_ROUTE
+ADD_FRIEND_WINDOWS_1080P_REFERENCE_ROUTE = ADD_FRIEND_ENTRY_CLICK_WINDOWS_1080P_REFERENCE_ROUTE
 ADD_FRIEND_WINDOWS_ROUTE = ADD_FRIEND_ENTRY_CLICK_WINDOWS_ROUTE
-ADD_FRIEND_MAIN_ROUTE = ADD_FRIEND_WINDOWS_ROUTE
+ADD_FRIEND_MAIN_ROUTE = ADD_FRIEND_CANONICAL_ROUTE
 ADD_FRIEND_WINDOWS_REFERENCE_ROUTE = ADD_FRIEND_WINDOWS_1080P_REFERENCE_ROUTE
 ADD_FRIEND_WINDOWS_MAIN_ROUTE = ADD_FRIEND_WINDOWS_ROUTE
 
-ADD_FRIEND_FORMAL_ROUTES = (ADD_FRIEND_MAIN_ROUTE,)
-ADD_FRIEND_ROUTES = (ADD_FRIEND_WINDOWS_1080P_REFERENCE_ROUTE, ADD_FRIEND_WINDOWS_ROUTE)
+ADD_FRIEND_FORMAL_ROUTES = (ADD_FRIEND_MAIN_ROUTE, ADD_FRIEND_WINDOWS_ROUTE)
+ADD_FRIEND_ROUTES = (ADD_FRIEND_MAIN_ROUTE, ADD_FRIEND_WINDOWS_ROUTE, ADD_FRIEND_WINDOWS_1080P_REFERENCE_ROUTE)
 
 ADD_FRIEND_ROUTE_MANIFEST: dict[str, dict[str, Any]] = {
+    ADD_FRIEND_MAIN_ROUTE: {
+        "kind": "windows",
+        "description": "Stable Worker-facing add_friend entry-click CLI; routes to the current platform adapter.",
+        "accepts_query": True,
+        "accepts_formal_fields": True,
+        "passive_probe": False,
+        "diagnostic": False,
+        "legacy": False,
+        "official_main": True,
+        "platform": "windows",
+        "alias_of": "",
+    },
+    ADD_FRIEND_WINDOWS_ROUTE: {
+        "kind": "windows",
+        "description": "Explicit Windows alias for the stable add_friend entry-click CLI.",
+        "accepts_query": True,
+        "accepts_formal_fields": True,
+        "passive_probe": False,
+        "diagnostic": False,
+        "legacy": False,
+        "official_main": False,
+        "platform": "windows",
+        "alias_of": ADD_FRIEND_MAIN_ROUTE,
+    },
     ADD_FRIEND_WINDOWS_1080P_REFERENCE_ROUTE: {
         "kind": "windows_1080p_reference",
         "description": "Windows 1920x1080-oriented add_friend entry-click layout reference kept for comparison.",
         "accepts_query": True,
         "accepts_formal_fields": True,
         "passive_probe": True,
+        "diagnostic": True,
+        "legacy": False,
         "official_main": False,
         "platform": "windows_1080p_reference",
-    },
-    ADD_FRIEND_WINDOWS_ROUTE: {
-        "kind": "windows",
-        "description": "Windows WeChat desktop add_friend RPA flow.",
-        "accepts_query": True,
-        "accepts_formal_fields": True,
-        "passive_probe": False,
-        "official_main": True,
-        "platform": "windows",
+        "alias_of": "",
     },
 }
 
@@ -63,11 +83,11 @@ def is_add_friend_main_route(action: Any) -> bool:
 
 
 def is_add_friend_diagnostic_route(action: Any) -> bool:
-    return False
+    return bool(add_friend_route_metadata(action).get("diagnostic"))
 
 
 def is_add_friend_legacy_route(action: Any) -> bool:
-    return False
+    return bool(add_friend_route_metadata(action).get("legacy"))
 
 
 def add_friend_route_accepts_query(action: Any) -> bool:

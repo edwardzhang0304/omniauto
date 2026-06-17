@@ -32,6 +32,8 @@ from typing import Any
 
 import psutil
 
+from apps.wechat_ai_customer_service.adapters.add_friend_routes import ADD_FRIEND_ROUTES
+
 
 ROOT = Path(__file__).resolve().parents[3]
 SIDECAR_PYTHON = ROOT / "runtime/tool_envs/wxauto4-py312/Scripts/python.exe"
@@ -585,7 +587,7 @@ class WeChatConnector:
             raise WeChatConnectorError("remark_code is required")
         if str(remark_code).strip() not in str(remark_name).strip():
             raise WeChatConnectorError("remark_name must include remark_code")
-        args = ["add-friend-entry-click-plan-windows"]
+        args = ["add-friend-entry-click-plan"]
         if phone:
             args.extend(["--phone", str(phone)])
         if wechat:
@@ -1382,7 +1384,7 @@ def _args_to_request(args: list[str]) -> dict[str, Any]:
                 request["skip_send_rate_guard"] = True
             elif arg == "--artifact-dir" and i + 1 < len(args):
                 request["artifact_dir"] = args[i + 1]
-    elif args[0] in {"add-friend-entry-click-plan", "add-friend-entry-click-plan-windows"}:
+    elif args[0] in ADD_FRIEND_ROUTES:
         request["action"] = args[0]
         for i, arg in enumerate(args):
             if arg == "--phone" and i + 1 < len(args):

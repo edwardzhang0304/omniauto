@@ -2,13 +2,13 @@
 
 更新时间：2026-06-16
 
-> 阅读说明（2026-06-17）：本文主体是朋友 PR #17 / commit `7199023` 的历史 readiness 快照，用于追溯原始实现和当时回归口径。当前 add_friend 后续开发的源-of-truth 是 [`add_friend_rpa_adaptive_refactor_plan_20260617.md`](add_friend_rpa_adaptive_refactor_plan_20260617.md)。本文中出现的 `add-friend-entry-click-plan`、`runtime/add_friend_entry_click_plan` 和旧脚本口径代表 PR 原始/参考路线，不代表当前 Windows 正式主路线。
+> 阅读说明（2026-06-17）：本文主体是朋友 PR #17 / commit `7199023` 的历史 readiness 快照，用于追溯原始实现和当时回归口径。当前 add_friend 后续开发的源-of-truth 是 [`add_friend_cli_contract_stability_plan_20260617.md`](add_friend_cli_contract_stability_plan_20260617.md) 和 [`add_friend_rpa_adaptive_refactor_plan_20260617.md`](add_friend_rpa_adaptive_refactor_plan_20260617.md)。本文中出现的早期 `runtime/add_friend_entry_click_plan` 和旧脚本口径代表 PR 原始/参考路线，不代表当前正式主路线；当前对外稳定 CLI 名称重新收口为 `add-friend-entry-click-plan`。
 
 ## 2026-06-17 Windows 多分辨率适配标记
 
 当前 OmniAuto 微信操控栈是 Windows 适配：Win32 窗口枚举、截图、OCR 区域、鼠标点击、键盘输入、发送、监听、加好友链路都按 Windows 微信桌面版实现。不同显示分辨率、DPI、窗口尺寸会改变微信窗口内布局，不能直接复用固定坐标。
 
-本 PR 原始入口 `add-friend-entry-click-plan` 保留为 Windows 1920x1080 固定布局参考/旧路线，用于对照朋友在 Windows 1920x1080 环境下的界面假设。Windows 自适应正式路线为 `add-friend-entry-click-plan-windows`，对应脚本为：
+本 PR 原始实现曾以 `add-friend-entry-click-plan` 承载 Windows 1920x1080 固定布局假设。当前该 CLI 名称已恢复为 Worker-facing 稳定主入口，并在 Windows 上路由到自适应实现；`add-friend-entry-click-plan-windows` 保留为显式 Windows 别名，固定 1920x1080 对照实现应使用显式 reference route。
 
 ```powershell
 .\apps\wechat_ai_customer_service\scripts\run_wechat_add_friend_entry_click_plan_windows.ps1

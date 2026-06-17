@@ -2,7 +2,7 @@
 
 ## 结论
 
-当前微信操控能力本质上是 Windows 适配系统：Win32 窗口发现、前台激活、截图、OCR、鼠标键盘输入、发送、监听、加好友都围绕 Windows 微信桌面版实现。刚合入的加好友入口已经拆出 `add-friend-entry-click-plan-windows` 作为 Windows 主路线，并把原 `add-friend-entry-click-plan` 保留为 Windows 1920x1080 界面参考路线。
+当前微信操控能力本质上是 Windows 适配系统：Win32 窗口发现、前台激活、截图、OCR、鼠标键盘输入、发送、监听、加好友都围绕 Windows 微信桌面版实现。当前加好友对外稳定入口是 `add-friend-entry-click-plan`，在 Windows 上路由到 Windows 自适应实现；`add-friend-entry-click-plan-windows` 仅作为显式 Windows 别名保留，固定 1920x1080 参考路线应使用显式 reference route。
 
 这次 Windows 真机修复解决了朋友在 Windows 1920x1080 上开发导致的入口坐标偏移问题：Windows 微信左侧搜索栏旁的加号不再使用靠近聊天分割线的旧点位，而是锚定左侧搜索框。实测手机号 `17756658083` 的加好友流程已经能进入搜索结果，并识别为 `already_friend`。
 
@@ -238,7 +238,7 @@ WeChatConnector
 
 ### Phase 1：当前 Windows 路线收口
 
-- 保持 `add-friend-entry-click-plan-windows` 为 Windows 主路线。
+- 保持 `add-friend-entry-click-plan` 为对外稳定主路线，Windows 内部实现继续演进。
 - 修正 `plus_entry_button` jitter 角色，使 Windows 新加号点也按加号按钮保护边界处理。
 - 把 `already_friend` 的中间事件名从 failure 语义整理成 completed/terminal profile state。
 

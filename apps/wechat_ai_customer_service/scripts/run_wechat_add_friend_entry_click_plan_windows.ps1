@@ -87,7 +87,7 @@ $Args += @("--remark-code", $RemarkCode)
 
 Write-Host "ProjectRoot: $ProjectRoot"
 Write-Host "ArtifactDir: $ArtifactDir"
-Write-Host "Running Windows add_friend entry click plan. It focuses Windows WeChat, clicks the Windows sidebar + entry, searches the contact, clicks add-contact, fills invite text and remark, clicks confirm, then writes the review report."
+Write-Host "Running explicit Windows add_friend entry click alias. The stable Worker-facing command is add-friend-entry-click-plan; this alias uses the same Windows adaptive implementation."
 
 $NativeErrorActionPreference = "Continue"
 $PreviousErrorActionPreference = $ErrorActionPreference

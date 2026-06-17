@@ -8,6 +8,7 @@ from typing import Any
 
 ADD_FRIEND_ENTRY_CLICK_ROUTE = "add-friend-entry-click-plan"
 ADD_FRIEND_ENTRY_CLICK_WINDOWS_ROUTE = "add-friend-entry-click-plan-windows"
+ADD_FRIEND_ENTRY_CLICK_WINDOWS_1080P_REFERENCE_ROUTE = "add-friend-entry-click-plan-windows-1080p-reference"
 ADD_FRIEND_ENTRY_CLICK_REQUIRED_FIELDS = ("phone_or_wechat", "verify_message", "remark_name", "remark_code")
 
 VALIDATION_ERROR_REQUIRED = "REQUIRED"
