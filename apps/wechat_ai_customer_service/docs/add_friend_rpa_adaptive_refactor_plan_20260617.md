@@ -64,17 +64,21 @@ PR 原始版本的重要限制：
 
 ### 3.1 Route 命名
 
-当前必须把历史路线和正式路线分开理解：
+当前必须把对外稳定契约、Windows 显式别名和历史参考路线分开理解：
 
 ```text
 add-friend-entry-click-plan
-  -> 历史 PR 原始入口
-  -> 当前保留为 Windows 1920x1080 固定布局参考/旧路线
-  -> 不作为当前 Windows 正式主入口
+  -> 对外稳定 Worker-facing 主入口
+  -> 当前在 Windows 上路由到 Windows 自适应实现
+  -> Worker 和上层系统默认调用此入口
 
 add-friend-entry-click-plan-windows
-  -> 当前 Windows 正式主入口
-  -> 后续自适应重构都应围绕这条路线推进
+  -> 显式 Windows 别名
+  -> 与 stable 主入口共享当前 Windows 自适应实现
+
+add-friend-entry-click-plan-windows-1080p-reference
+  -> 历史 PR / Windows 1920x1080 固定布局参考路线
+  -> 仅用于对照、回放、诊断，不作为 Worker 接入口
 ```
 
 对应代码：
@@ -83,11 +87,12 @@ add-friend-entry-click-plan-windows
 add_friend_contract.py
   ADD_FRIEND_ENTRY_CLICK_ROUTE = "add-friend-entry-click-plan"
   ADD_FRIEND_ENTRY_CLICK_WINDOWS_ROUTE = "add-friend-entry-click-plan-windows"
+  ADD_FRIEND_ENTRY_CLICK_WINDOWS_1080P_REFERENCE_ROUTE = "add-friend-entry-click-plan-windows-1080p-reference"
 
 add_friend_routes.py
-  ADD_FRIEND_WINDOWS_1080P_REFERENCE_ROUTE = ADD_FRIEND_ENTRY_CLICK_ROUTE
+  ADD_FRIEND_MAIN_ROUTE = ADD_FRIEND_ENTRY_CLICK_ROUTE
   ADD_FRIEND_WINDOWS_ROUTE = ADD_FRIEND_ENTRY_CLICK_WINDOWS_ROUTE
-  ADD_FRIEND_MAIN_ROUTE = ADD_FRIEND_WINDOWS_ROUTE
+  ADD_FRIEND_WINDOWS_1080P_REFERENCE_ROUTE = ADD_FRIEND_ENTRY_CLICK_WINDOWS_1080P_REFERENCE_ROUTE
 ```
 
 ### 3.2 Artifact 目录
@@ -299,8 +304,9 @@ AddFriendReporter
 
 目标：
 
-- 明确 `add-friend-entry-click-plan` 是历史 PR / Windows 1080p reference。
-- 明确 `add-friend-entry-click-plan-windows` 是当前 Windows 主路线。
+- 明确 `add-friend-entry-click-plan` 是对外稳定主入口。
+- 明确 `add-friend-entry-click-plan-windows` 是显式 Windows 别名。
+- 明确固定坐标参考路线必须使用显式 reference 名称，不占用稳定 CLI 名称。
 - 文档索引中区分当前源-of-truth、历史 PR 文档、分辨率审计文档。
 - 标记旧脚本、旧 runtime、旧 checker 的迁移状态。
 
@@ -422,7 +428,7 @@ expected_locator_regions.json
 
 文档收口验收：
 
-- 开发者能清楚区分历史 PR 路线、当前 Windows 主路线、未来自适应目标。
+- 开发者能清楚区分稳定 Worker CLI、Windows alias、历史 reference 路线、未来自适应目标。
 - docs 索引能指向当前主文档。
 - 历史 PR readiness 不再被误读成当前实现源-of-truth。
 
@@ -440,4 +446,3 @@ expected_locator_regions.json
 - `run_wechat_win32_ocr_compat_checks.py` 通过。
 - 新增 locator/profile fixture 测试通过。
 - 当前机器 live 低风险验证能做到：失败不盲点，成功可复盘。
-

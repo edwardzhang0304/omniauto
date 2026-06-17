@@ -52,7 +52,7 @@ python apps\wechat_ai_customer_service\tests\run_vps_local_two_port_shared_sync_
 
 - 当前微信操控能力是 Windows 适配：窗口枚举、截图、OCR 区域、鼠标点击、键盘输入、发送、监听和加好友链路均按 Windows 微信桌面版实现。不同显示分辨率、DPI、窗口尺寸会改变微信窗口内布局，不能直接复用固定坐标。
 - 支持通过 Windows Win32/OCR RPA 通道执行 `add_friend`：搜索手机号或微信号，进入资料页，点击“添加到通讯录”，填写申请说明/备注，并发送邀请。
-- 当前 Windows 正式主链路为 `add-friend-entry-click-plan-windows`。`add-friend-entry-click-plan` 保留为 Windows 1920x1080 固定布局参考/旧路线，用于对照，不作为自适应 Windows 主入口。
+- 对外稳定主链路为 `add-friend-entry-click-plan`，当前在 Windows 上会路由到 Windows 自适应 Win32/OCR 实现。`add-friend-entry-click-plan-windows` 保留为显式 Windows 别名；固定 1920x1080 参考路线仅作为内部/诊断 reference，不作为 Worker 接入口。
 - 主链路必须传入正式字段：
   - `phone_or_wechat`：由 `phone` 或 `wechat` 提供，至少一个必填，用于搜索目标用户。
   - `verify_message`：写入微信“发送添加朋友申请”输入框。
