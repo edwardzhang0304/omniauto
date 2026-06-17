@@ -42,6 +42,7 @@ import apps.wechat_ai_customer_service.adapters.wechat_connector as wechat_conne
 from apps.wechat_ai_customer_service.adapters.wechat_win32_ocr_sidecar import (  # noqa: E402
     active_chat_matches,
     add_friend_ocr_compact,
+    add_friend_login_or_security_block,
     add_friend_surface_readiness,
     add_friend_optional_field_fill_enabled,
     add_friend_virtual_key_for_digit,
@@ -62,6 +63,8 @@ from apps.wechat_ai_customer_service.adapters.wechat_win32_ocr_sidecar import ( 
     allow_blind_target_confirmation,
     find_add_friend_action_item,
     find_add_friend_search_result_item,
+    add_friend_windows_1080p_reference_plus_button_point_for_geometry,
+    add_friend_windows_plus_button_point_for_geometry,
     likely_foreign_overlay_capture,
     normalize_add_friend_query,
     normalize_chat_title_for_match,
@@ -249,6 +252,27 @@ def test_add_friend_query_normalization_prefers_phone_digits() -> None:
     assert_true(add_friend_ocr_compact(" 网络查找手机 / QQ号 ") == "网络查找手机/qq号", "OCR text should compact consistently")
 
 
+def test_add_friend_windows_plus_entry_uses_windows_sidebar_geometry() -> None:
+    geometry = {"left": -22, "top": 0, "right": 959, "bottom": 860, "width": 981, "height": 860}
+    windows_point = add_friend_windows_plus_button_point_for_geometry(geometry)
+    windows_1080p_reference_point = add_friend_windows_1080p_reference_plus_button_point_for_geometry(geometry)
+    assert_true(292 <= windows_point[0] <= 314, f"Windows add_friend + should land beside the Windows search box: {windows_point}")
+    assert_true(58 <= windows_point[1] <= 78, f"Windows add_friend + y should stay on the search row: {windows_point}")
+    assert_true(
+        windows_1080p_reference_point[0] > windows_point[0] + 35,
+        f"Windows 1920x1080 reference point should remain distinct from adaptive Windows point: ref={windows_1080p_reference_point}, adaptive={windows_point}",
+    )
+    import apps.wechat_ai_customer_service.adapters.wechat_win32_ocr_sidecar as sidecar_mod
+
+    original_get_window_geometry = sidecar_mod.get_window_geometry
+    try:
+        sidecar_mod.get_window_geometry = lambda _hwnd: dict(geometry)
+        _x, _y, meta = sidecar_mod.jitter_window_image_click_surface_point(1001, windows_point[0], windows_point[1])
+        assert_true(meta.get("role") == "plus_entry_button", f"Windows plus point should use plus-entry jitter bounds: {meta}")
+    finally:
+        sidecar_mod.get_window_geometry = original_get_window_geometry
+
+
 def test_add_friend_search_result_detection_from_ocr() -> None:
     items = [
         {"text": "搜索", "confidence": 0.98, "left": 120, "right": 170, "top": 62, "bottom": 86, "center_x": 145, "center_y": 74},
@@ -284,6 +308,15 @@ def test_add_friend_surface_classification() -> None:
     already = classify_add_friend_ocr_surface(already_items, (980, 860))
     assert_true(already.get("result_code") == "already_friend", f"already-friend state should become result_code: {already}")
 
+    windows_profile_items = [
+        {"text": "朋友资料", "confidence": 0.99, "left": 68, "right": 142, "top": 290, "bottom": 312, "center_x": 105, "center_y": 301},
+        {"text": "发消息", "confidence": 0.99, "left": 93, "right": 142, "top": 794, "bottom": 813, "center_x": 117, "center_y": 803},
+        {"text": "语音聊天", "confidence": 0.99, "left": 182, "right": 246, "top": 795, "bottom": 813, "center_x": 214, "center_y": 804},
+        {"text": "视频聊天", "confidence": 0.99, "left": 278, "right": 342, "top": 795, "bottom": 813, "center_x": 310, "center_y": 804},
+    ]
+    windows_profile = classify_add_friend_ocr_surface(windows_profile_items, (428, 577))
+    assert_true(windows_profile.get("result_code") == "already_friend", f"Windows friend profile should become already_friend: {windows_profile}")
+
     not_found_items = [
         {"text": "该用户不存在", "confidence": 0.99, "left": 330, "right": 500, "top": 300, "bottom": 330, "center_x": 415, "center_y": 315},
     ]
@@ -307,6 +340,57 @@ def test_add_friend_surface_readiness_blocks_blank_or_empty_ocr() -> None:
     not_found_readiness = add_friend_surface_readiness(sparse, not_found_items, {"width": 980, "height": 860}, stage="after_search")
     assert_true(not_found_readiness.get("ok") is True, f"single business error text should remain classifiable: {not_found_readiness}")
 
+    login_items = [{"text": "全，请重新登录。", "confidence": 0.99, "left": 180, "right": 303, "top": 213, "bottom": 232, "center_x": 241, "center_y": 222}]
+    login_geometry = {"width": 368, "height": 484}
+    login_block = add_friend_login_or_security_block(login_items, geometry=login_geometry)
+    assert_true(login_block.get("detected") is True, f"login prompt should be detected: {login_block}")
+    login_readiness = add_friend_surface_readiness(sparse, login_items, login_geometry, stage="entry_before_click")
+    assert_true(login_readiness.get("ok") is False, f"login prompt must stop before clicking: {login_readiness}")
+    assert_true(login_readiness.get("error_code") == "WECHAT_WINDOW_NOT_READY", f"login prompt should map to window-not-ready: {login_readiness}")
+
+    security_items = [{"text": "账号安全，操作频繁，请稍后再试", "confidence": 0.99, "left": 430, "right": 720, "top": 260, "bottom": 288, "center_x": 575, "center_y": 274}]
+    security_readiness = add_friend_surface_readiness(sparse, security_items, {"width": 980, "height": 860}, stage="entry_before_click")
+    assert_true(security_readiness.get("ok") is False, f"security prompt must stop before clicking: {security_readiness}")
+    assert_true(security_readiness.get("error_code") == "ACCOUNT_RESTRICTED", f"security prompt should map to restricted: {security_readiness}")
+
+    sidebar_preview_items = [
+        {"text": "文件传输助手", "confidence": 0.98, "left": 155, "right": 270, "top": 116, "bottom": 140, "center_x": 212, "center_y": 128},
+        {"text": "【低压发送安全验证】", "confidence": 0.98, "left": 161, "right": 313, "top": 144, "bottom": 164, "center_x": 237, "center_y": 154},
+    ]
+    preview_block = add_friend_login_or_security_block(sidebar_preview_items, geometry={"width": 981, "height": 860})
+    assert_true(preview_block.get("detected") is False, f"sidebar chat preview must not become a security block: {preview_block}")
+    preview_readiness = add_friend_surface_readiness(sparse, sidebar_preview_items, {"width": 981, "height": 860}, stage="entry_before_click")
+    assert_true(preview_readiness.get("ok") is True, f"sidebar security words should not block add_friend: {preview_readiness}")
+
+    chat_explanation_items = [
+        {"text": "许聪", "confidence": 0.99, "left": 352, "right": 398, "top": 56, "bottom": 82, "center_x": 375, "center_y": 69},
+        {
+            "text": "遇到登录、安全验证、操作频繁、账号异常等状态",
+            "confidence": 0.99,
+            "left": 466,
+            "right": 856,
+            "top": 472,
+            "bottom": 495,
+            "center_x": 661,
+            "center_y": 483,
+        },
+    ]
+    chat_explanation_block = add_friend_login_or_security_block(chat_explanation_items, geometry={"width": 981, "height": 860})
+    assert_true(
+        chat_explanation_block.get("detected") is False,
+        f"normal chat explanation about security prompts must not block add_friend: {chat_explanation_block}",
+    )
+    chat_explanation_readiness = add_friend_surface_readiness(
+        sparse,
+        chat_explanation_items,
+        {"width": 981, "height": 860},
+        stage="entry_before_click",
+    )
+    assert_true(
+        chat_explanation_readiness.get("ok") is True,
+        f"main-chat security discussion should stay readable for add_friend: {chat_explanation_readiness}",
+    )
+
 
 def test_connector_add_friend_builds_win32_ocr_request() -> None:
     class FakeAddFriendConnector(WeChatConnector):
@@ -326,7 +410,7 @@ def test_connector_add_friend_builds_win32_ocr_request() -> None:
     )
     assert_true(result.get("ok") is True and result.get("result_code") == "invite_sent", f"unexpected add_friend result: {result}")
     args = connector.calls[0]["args"]
-    assert_true(args[:3] == ["add-friend-entry-click-plan", "--phone", "17368746889"], f"add_friend should call the official Win32/OCR action: {args}")
+    assert_true(args[:3] == ["add-friend-entry-click-plan-windows", "--phone", "17368746889"], f"add_friend should call the official Windows Win32/OCR action: {args}")
     assert_true("--verify-message" in args and "我是车金二手车张伟" in args, f"verify_message should pass through: {args}")
     assert_true("--remark-name" in args and "客户-CJ8K2P-6889" in args, f"remark_name should pass through: {args}")
     assert_true("--remark-code" in args and "CJ8K2P" in args, f"remark_code should pass through: {args}")
@@ -356,7 +440,7 @@ def test_add_friend_rpa_env_is_non_recovery_by_default() -> None:
 
 
 def test_add_friend_entry_click_script_keeps_render_recovery_opt_in() -> None:
-    script_path = PROJECT_ROOT / "apps" / "wechat_ai_customer_service" / "scripts" / "run_wechat_add_friend_entry_click_plan.ps1"
+    script_path = PROJECT_ROOT / "apps" / "wechat_ai_customer_service" / "scripts" / "run_wechat_add_friend_entry_click_plan_windows.ps1"
     script = script_path.read_text(encoding="utf-8")
     assert_true("[switch]$AllowRenderRecovery" in script, "entry-click script should make render recovery an explicit operator choice")
     assert_true('WECHAT_WIN32_OCR_RENDER_RECOVERY_AUTO = $(if ($AllowRenderRecovery) { "1" } else { "0" })' in script, "entry-click script should default render recovery to off")
@@ -365,16 +449,60 @@ def test_add_friend_entry_click_script_keeps_render_recovery_opt_in() -> None:
         assert_true(not (script_path.parent / removed).exists(), f"removed add_friend script should not exist: {removed}")
 
 
+def test_add_friend_menu_click_handles_stale_dialog_hwnd() -> None:
+    sidecar_mod = sys.modules["apps.wechat_ai_customer_service.adapters.wechat_win32_ocr_sidecar"]
+    screenshot = Image.new("RGB", (980, 860), "white")
+    geometry = {"left": 0, "top": 0, "right": 980, "bottom": 860, "width": 980, "height": 860}
+    target = {
+        "name": "add_friend_menu_entry",
+        "source": "ocr_popup_menu_item",
+        "x": 320,
+        "y": 150,
+        "click_bounds": [280, 120, 380, 180],
+        "click_screen_bounds": [280, 120, 380, 180],
+    }
+    originals = {
+        "add_friend_paced_pause": sidecar_mod.add_friend_paced_pause,
+        "human_screen_hover": sidecar_mod.human_screen_hover,
+        "human_screen_click_in_bounds": sidecar_mod.human_screen_click_in_bounds,
+        "wait_for_add_friend_dialog_window": sidecar_mod.wait_for_add_friend_dialog_window,
+        "get_window_geometry": sidecar_mod.get_window_geometry,
+        "capture_wechat_window_visible_screen": sidecar_mod.capture_wechat_window_visible_screen,
+        "draw_add_friend_screen_annotation": sidecar_mod.draw_add_friend_screen_annotation,
+    }
+    try:
+        sidecar_mod.add_friend_paced_pause = lambda *_args, **_kwargs: 0.0
+        sidecar_mod.human_screen_hover = lambda *_args, **_kwargs: {"ok": True}
+        sidecar_mod.human_screen_click_in_bounds = lambda *_args, **_kwargs: {"ok": True}
+        sidecar_mod.wait_for_add_friend_dialog_window = lambda **_kwargs: {"ok": True, "hwnd": 2002}
+        sidecar_mod.get_window_geometry = lambda hwnd: (_ for _ in ()).throw(RuntimeError("invalid hwnd")) if int(hwnd) == 2002 else dict(geometry)
+        sidecar_mod.capture_wechat_window_visible_screen = lambda hwnd, **_kwargs: (screenshot, f"capture_{hwnd}.png")
+        sidecar_mod.draw_add_friend_screen_annotation = lambda *_args, **_kwargs: "annotated.png"
+        result = sidecar_mod.click_add_friend_menu_entry_and_capture(1001, PROJECT_ROOT, menu_targets=[target])
+        assert_true(result.get("clicked") is False, f"stale dialog hwnd should not be treated as clicked: {result}")
+        assert_true(result.get("menu_clicked") is True, f"menu click itself should be preserved: {result}")
+        assert_true(result.get("reason") == "add_friend_dialog_window_handle_invalid_after_menu_click", f"unexpected stale hwnd reason: {result}")
+        assert_true(result.get("next_hwnd") == 0, f"stale next hwnd should be cleared: {result}")
+        assert_true(result.get("readiness", {}).get("dialog_handle_invalid") is True, f"readiness should record stale hwnd: {result}")
+    finally:
+        for name, value in originals.items():
+            setattr(sidecar_mod, name, value)
+
+
 def test_add_friend_uses_serialized_human_pacing() -> None:
     sidecar = PROJECT_ROOT / "apps" / "wechat_ai_customer_service" / "adapters" / "wechat_win32_ocr_sidecar.py"
     source = sidecar.read_text(encoding="utf-8")
     assert_true(callable(add_friend_human_pause), "add_friend human pacing helper should be importable")
     assert_true(callable(clear_add_friend_sidebar_search_box), "add_friend slow clear helper should be importable")
-    assert_true("clear_add_friend_sidebar_search_box(hwnd, search_x, search_y, target_hint=query)" in source, "add_friend should use slow serialized search clearing")
+    assert_true("clear_add_friend_sidebar_search_box(" in source and "target_hint=query" in source, "add_friend should use slow serialized search clearing")
     assert_true("clear_sidebar_search_box_without_select_all(hwnd, search_x, search_y, target_hint=query)" not in source, "add_friend must not use fast shared search clearing")
     assert_true("add_friend_wait_before_ocr(\"after_search_input_before_ocr\")" in source, "add_friend must pause between keyboard input and OCR")
     assert_true("add_friend_human_pause(650, 1450, reason=\"before_mouse_click\")" in source, "add_friend must pause before mouse click")
     assert_true("add_friend_human_pause(900, 1900, reason=\"after_mouse_click\")" in source, "add_friend must pause after mouse click")
+    flow_source = (PROJECT_ROOT / "apps" / "wechat_ai_customer_service" / "adapters" / "add_friend_flow.py").read_text(encoding="utf-8")
+    assert_true('default=1' in flow_source and 'WECHAT_WIN32_OCR_PLUS_ENTRY_CLICK_MAX_ATTEMPTS' in flow_source, "add_friend plus entry should default to a single click attempt")
+    assert_true('maximum=2' in flow_source, "add_friend plus entry retries must stay tightly capped")
+    assert_true('add_friend_surface_readiness(before_shot' in flow_source, "add_friend must preflight full-window readiness before clicking")
 
 
 def test_add_friend_query_input_uses_digit_key_presses_by_default() -> None:
@@ -2150,6 +2278,8 @@ def test_passive_probe_mode_toggle() -> None:
         assert_true(use_passive_probe_mode("capabilities"), "capabilities should support passive probe mode")
         assert_true(use_passive_probe_mode("sessions"), "sessions should support passive probe mode")
         assert_true(use_passive_probe_mode("send") is False, "send action should never use passive probe mode")
+        assert_true(use_passive_probe_mode("add-friend-entry-click-plan-windows") is False, "formal add_friend should focus WeChat before clicks")
+        assert_true(use_passive_probe_mode("add-friend-entry-click-plan"), "reference add_friend route can remain passive for comparison")
         os.environ["WECHAT_WIN32_OCR_PASSIVE_PROBE"] = "0"
         assert_true(use_passive_probe_mode("status") is False, "env override should disable passive probe mode")
     finally:
@@ -2377,6 +2507,37 @@ def test_window_selection_prefers_real_wechat_title_over_weixin_shell() -> None:
         sidecar_mod.get_window_geometry = original_get_window_geometry
         sidecar_mod.activate_window = original_activate
         sidecar_mod.foreground_window_matches_target = original_foreground_match
+
+
+def test_window_selection_prefers_large_actionable_window_over_quick_login_title() -> None:
+    sidecar_mod = sys.modules["apps.wechat_ai_customer_service.adapters.wechat_win32_ocr_sidecar"]
+    original_get_window_geometry = sidecar_mod.get_window_geometry
+    previous_probe = os.environ.get("WECHAT_WIN32_OCR_MULTI_WINDOW_CONTENT_PROBE")
+    try:
+        os.environ["WECHAT_WIN32_OCR_MULTI_WINDOW_CONTENT_PROBE"] = "0"
+        geometry_map = {
+            1001: {"left": 775, "top": 331, "right": 1143, "bottom": 815, "width": 368, "height": 484},
+            1002: {"left": 0, "top": 0, "right": 980, "bottom": 860, "width": 980, "height": 860},
+        }
+        sidecar_mod.get_window_geometry = lambda hwnd: geometry_map[int(hwnd)]
+        selected = select_primary_visible_main_window(
+            {
+                "visible_main_windows": [
+                    {"hwnd": 1001, "title": "微信", "class_name": "Qt51514QWindowIcon", "visible": True},
+                    {"hwnd": 1002, "title": "Weixin", "class_name": "Qt51514QWindowIcon", "visible": True},
+                ]
+            }
+        )
+        assert_true(
+            int((selected or {}).get("hwnd") or 0) == 1002,
+            f"selection should prefer large actionable main window over small quick-login/title window: {selected}",
+        )
+    finally:
+        if previous_probe is None:
+            os.environ.pop("WECHAT_WIN32_OCR_MULTI_WINDOW_CONTENT_PROBE", None)
+        else:
+            os.environ["WECHAT_WIN32_OCR_MULTI_WINDOW_CONTENT_PROBE"] = previous_probe
+        sidecar_mod.get_window_geometry = original_get_window_geometry
 
 
 def test_window_selection_prefers_readable_window_over_larger_blank_window() -> None:
@@ -2825,6 +2986,23 @@ def test_input_text_region_state_distinguishes_blank_and_text() -> None:
     assert_true(
         dark_blank_state.get("has_visible_text") is False,
         f"dark-mode blank input should stay retry-safe: {dark_blank_state}",
+    )
+    dark_blank_with_boundary_ocr = input_text_region_state(
+        dark_blank,
+        [
+            {
+                "text": "许聪",
+                "left": 356,
+                "top": 670,
+                "right": 410,
+                "bottom": 705,
+            }
+        ],
+        geometry=geometry,
+    )
+    assert_true(
+        dark_blank_with_boundary_ocr.get("has_visible_text") is False,
+        f"dark-mode blank input with boundary OCR noise should stay retry-safe: {dark_blank_with_boundary_ocr}",
     )
     dark_text_image = dark_blank.copy()
     ImageDraw.Draw(dark_text_image).rectangle([370, 690, 560, 715], fill="white")
@@ -3885,12 +4063,14 @@ def main() -> int:
         test_parse_sessions_strips_standalone_relative_day_suffix,
         test_parse_sessions_preserves_duplicate_display_names_with_session_keys,
         test_add_friend_query_normalization_prefers_phone_digits,
+        test_add_friend_windows_plus_entry_uses_windows_sidebar_geometry,
         test_add_friend_search_result_detection_from_ocr,
         test_add_friend_surface_classification,
         test_add_friend_surface_readiness_blocks_blank_or_empty_ocr,
         test_connector_add_friend_builds_win32_ocr_request,
         test_add_friend_rpa_env_is_non_recovery_by_default,
         test_add_friend_entry_click_script_keeps_render_recovery_opt_in,
+        test_add_friend_menu_click_handles_stale_dialog_hwnd,
         test_add_friend_uses_serialized_human_pacing,
         test_add_friend_query_input_uses_digit_key_presses_by_default,
         test_add_friend_query_blocks_non_numeric_sendinput_without_opt_in,
@@ -3947,6 +4127,7 @@ def main() -> int:
         test_interactive_probe_restores_offscreen_visible_window,
         test_capture_geometry_guard_and_window_selection,
         test_window_selection_prefers_real_wechat_title_over_weixin_shell,
+        test_window_selection_prefers_large_actionable_window_over_quick_login_title,
         test_window_selection_prefers_readable_window_over_larger_blank_window,
         test_auxiliary_wechat_shell_is_blocked,
         test_normalize_wechat_window_clamps_offscreen_when_size_is_already_safe,

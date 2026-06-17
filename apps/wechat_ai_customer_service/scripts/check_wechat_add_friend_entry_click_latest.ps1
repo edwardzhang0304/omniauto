@@ -1,5 +1,8 @@
 param(
     [string]$ProjectRoot = "",
+    [ValidateSet("windows", "reference", "legacy")]
+    [string]$Route = "windows",
+    [string]$ArtifactScope = "",
     [string]$PlanJson = "",
     [string]$ReviewJson = "",
     [string]$ExpectedVerifyMessage = "",
@@ -16,11 +19,30 @@ if ([string]::IsNullOrWhiteSpace($ProjectRoot)) {
     $ProjectRoot = Resolve-Path (Join-Path $ScriptDir "..\..\..")
 }
 
+function Resolve-AddFriendArtifactScope {
+    param(
+        [string]$RouteName,
+        [string]$ExplicitScope
+    )
+    if (-not [string]::IsNullOrWhiteSpace($ExplicitScope)) {
+        return $ExplicitScope
+    }
+    switch ($RouteName.ToLowerInvariant()) {
+        "windows" { return "add_friend_entry_click_plan_windows" }
+        "reference" { return "add_friend_entry_click_plan_windows_1080p_reference" }
+        "legacy" { return "add_friend_entry_click_plan" }
+        default { return "add_friend_entry_click_plan_windows" }
+    }
+}
+
+$ResolvedArtifactScope = Resolve-AddFriendArtifactScope -RouteName $Route -ExplicitScope $ArtifactScope
+$LatestRoot = Join-Path $ProjectRoot ("runtime\{0}\latest" -f $ResolvedArtifactScope)
+
 if ([string]::IsNullOrWhiteSpace($PlanJson)) {
-    $PlanJson = Join-Path $ProjectRoot "runtime\add_friend_entry_click_plan\latest\add_friend_entry_click_plan.json"
+    $PlanJson = Join-Path $LatestRoot "add_friend_entry_click_plan.json"
 }
 if ([string]::IsNullOrWhiteSpace($ReviewJson)) {
-    $ReviewJson = Join-Path $ProjectRoot "runtime\add_friend_entry_click_plan\latest\add_friend_entry_click_review.json"
+    $ReviewJson = Join-Path $LatestRoot "add_friend_entry_click_review.json"
 }
 
 $Failures = New-Object System.Collections.Generic.List[string]
@@ -128,16 +150,23 @@ if ($null -ne $Review) {
     if ($Events.Count -lt 1) {
         Add-Failure "review.events is empty"
     }
-    $ConfirmEvents = @($Events | Where-Object { $_.step_id -eq "invite_confirm_after_click" })
-    if ($ConfirmEvents.Count -lt 1) {
-        Add-Failure "review.events missing invite_confirm_after_click"
+    $ExpectedTerminalStepId = ""
+    switch ($ExpectedResultCode) {
+        "invite_sent" { $ExpectedTerminalStepId = "invite_confirm_after_click" }
+        "already_friend" { $ExpectedTerminalStepId = "add_contact_search_terminal" }
+    }
+    if (-not [string]::IsNullOrWhiteSpace($ExpectedTerminalStepId)) {
+        $TerminalEvents = @($Events | Where-Object { $_.step_id -eq $ExpectedTerminalStepId })
+        if ($TerminalEvents.Count -lt 1) {
+            Add-Failure "review.events missing $ExpectedTerminalStepId"
+        }
     }
 }
 
 foreach ($Path in @($PlanJson, $ReviewJson)) {
     if (Test-Path -LiteralPath $Path) {
         $Text = Get-Content -LiteralPath $Path -Raw -Encoding UTF8
-        if ($Text -match '"already_friend"') {
+        if ($ExpectedResultCode -ne "already_friend" -and $Text -match '"already_friend"') {
             Add-Failure "$Path contains already_friend"
         }
     }
@@ -152,6 +181,8 @@ if ($Failures.Count -gt 0) {
 }
 
 Write-Host "add_friend latest report check: OK"
+Write-Host "Route: $Route"
+Write-Host "ArtifactScope: $ResolvedArtifactScope"
 Write-Host "PlanJson: $PlanJson"
 Write-Host "ReviewJson: $ReviewJson"
 exit 0

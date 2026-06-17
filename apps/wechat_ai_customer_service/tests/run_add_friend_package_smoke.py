@@ -34,8 +34,10 @@ def test_required_files_exist() -> None:
         "apps/wechat_ai_customer_service/adapters/add_friend_flow.py",
         "apps/wechat_ai_customer_service/adapters/add_friend_flow_context.py",
         "apps/wechat_ai_customer_service/adapters/add_friend_flow_events.py",
+        "apps/wechat_ai_customer_service/adapters/add_friend_layout.py",
         "apps/wechat_ai_customer_service/adapters/add_friend_locator.py",
         "apps/wechat_ai_customer_service/adapters/add_friend_ocr.py",
+        "apps/wechat_ai_customer_service/adapters/add_friend_operator_guard.py",
         "apps/wechat_ai_customer_service/adapters/add_friend_pacing.py",
         "apps/wechat_ai_customer_service/adapters/add_friend_payloads.py",
         "apps/wechat_ai_customer_service/adapters/add_friend_result_mapping.py",
@@ -44,6 +46,7 @@ def test_required_files_exist() -> None:
         "apps/wechat_ai_customer_service/adapters/wechat_win32_ocr_sidecar.py",
         "apps/wechat_ai_customer_service/adapters/wechat_connector.py",
         "apps/wechat_ai_customer_service/scripts/run_wechat_add_friend_entry_click_plan.ps1",
+        "apps/wechat_ai_customer_service/scripts/run_wechat_add_friend_entry_click_plan_windows.ps1",
         "apps/wechat_ai_customer_service/scripts/check_wechat_add_friend_entry_click_latest.ps1",
     ]
     for relative_path in required:
@@ -60,16 +63,18 @@ def test_requirements_cover_live_imports() -> None:
 
 def test_entry_click_script_defaults_are_low_disturbance() -> None:
     script = (
-        PROJECT_ROOT / "apps/wechat_ai_customer_service/scripts/run_wechat_add_friend_entry_click_plan.ps1"
+        PROJECT_ROOT / "apps/wechat_ai_customer_service/scripts/run_wechat_add_friend_entry_click_plan_windows.ps1"
     ).read_text(
         encoding="utf-8"
     )
     assert_true(
-        '$env:WECHAT_WIN32_OCR_WINDOW_NORMALIZE = "0"' in script,
+        "[switch]$NormalizeWindow" in script
+        and 'WECHAT_WIN32_OCR_WINDOW_NORMALIZE = $(if ($NormalizeWindow) { "1" } else { "0" })' in script,
         "window normalization must default to off",
     )
     assert_true(
-        '$env:WECHAT_WIN32_OCR_RENDER_RECOVERY_AUTO = "0"' in script,
+        "[switch]$AllowRenderRecovery" in script
+        and 'WECHAT_WIN32_OCR_RENDER_RECOVERY_AUTO = $(if ($AllowRenderRecovery) { "1" } else { "0" })' in script,
         "render recovery must default to off",
     )
     for removed in [
@@ -85,16 +90,16 @@ def test_entry_click_script_defaults_are_low_disturbance() -> None:
 
 def test_entry_click_script_is_main_review_entry() -> None:
     script = (
-        PROJECT_ROOT / "apps/wechat_ai_customer_service/scripts/run_wechat_add_friend_entry_click_plan.ps1"
+        PROJECT_ROOT / "apps/wechat_ai_customer_service/scripts/run_wechat_add_friend_entry_click_plan_windows.ps1"
     ).read_text(encoding="utf-8")
-    assert_true('"add-friend-entry-click-plan"' in script, "entry-click script must call the verified main route")
+    assert_true('"add-friend-entry-click-plan-windows"' in script, "entry-click script must call the Windows main route")
     for token in ["VerifyMessage", "RemarkName", "RemarkCode", "--verify-message", "--remark-name", "--remark-code"]:
         assert_true(token in script, f"entry-click script must expose formal field: {token}")
     assert_true('"--sales-name"' not in script, "entry-click main route must not pass removed sales-name")
     assert_true('"--remark"' not in script, "entry-click main route must not pass removed remark")
     assert_true("add_friend_entry_click_review.html" in script, "entry-click script must write HTML review")
     assert_true("add_friend_entry_click_review.json" in script, "entry-click script must write JSON review")
-    assert_true("runtime\\add_friend_entry_click_plan\\latest" in script, "entry-click script must update latest report")
+    assert_true("runtime\\add_friend_entry_click_plan_windows\\latest" in script, "entry-click script must update latest report")
     assert_true("Start-Process -FilePath" in script, "review open command must use FilePath for Windows PowerShell")
 
 
@@ -109,11 +114,17 @@ def test_entry_click_latest_check_script_contract() -> None:
         "ExpectedRemarkName",
         "ExpectedRemarkCode",
         "invite_sent",
+        'ExpectedResultCode -ne "already_friend"',
         "add_friend.step_events.v1",
         "native_diagnostic_events",
         "diagnostic_events",
         "invite_confirm_after_click",
+        "add_contact_search_terminal",
         "already_friend",
+        "Route",
+        "ArtifactScope",
+        "add_friend_entry_click_plan_windows",
+        "add_friend_entry_click_plan_windows_1080p_reference",
     ]:
         assert_true(token in script, f"latest check script missing contract token: {token}")
     assert_true("exit 1" in script and "exit 0" in script, "latest check script must be CI-friendly")
@@ -125,7 +136,7 @@ def test_add_friend_readme_formal_contract() -> None:
         PROJECT_ROOT / "apps/wechat_ai_customer_service/docs/add_friend_rpa_pr_readiness_20260616.md"
     ).read_text(encoding="utf-8")
     for text, name in [(readme, "README"), (readiness, "readiness doc")]:
-        assert_true("add-friend-entry-click-plan" in text, f"{name} must name the official main route")
+        assert_true("add-friend-entry-click-plan-windows" in text, f"{name} must name the Windows main route or handoff route")
         for token in ["verify_message", "remark_name", "remark_code", "TASK_PAYLOAD_INVALID", "invite_sent"]:
             assert_true(token in text, f"{name} missing formal contract token: {token}")
         assert_true("phone_or_wechat" in text, f"{name} must document phone_or_wechat")
@@ -157,6 +168,8 @@ def test_add_friend_artifact_layout_contract() -> None:
         ADD_FRIEND_ENTRY_CLICK_STDOUT_JSON,
         ADD_FRIEND_LATEST_DIR,
         ADD_FRIEND_RUNTIME_DIR,
+        ADD_FRIEND_WINDOWS_1080P_REFERENCE_ARTIFACT_SCOPE,
+        ADD_FRIEND_WINDOWS_ARTIFACT_SCOPE,
         add_friend_artifact_manifest,
         add_friend_artifact_scope,
         add_friend_entry_click_artifact_paths,
@@ -169,14 +182,19 @@ def test_add_friend_artifact_layout_contract() -> None:
 
     assert_true(ADD_FRIEND_RUNTIME_DIR == "runtime", f"runtime dir mismatch: {ADD_FRIEND_RUNTIME_DIR}")
     assert_true(ADD_FRIEND_LATEST_DIR == "latest", f"latest dir mismatch: {ADD_FRIEND_LATEST_DIR}")
-    assert_true(add_friend_artifact_scope(ADD_FRIEND_MAIN_ROUTE) == "add_friend_entry_click_plan", "main route artifact scope mismatch")
+    assert_true(ADD_FRIEND_WINDOWS_ARTIFACT_SCOPE == "add_friend_entry_click_plan_windows", "Windows artifact scope constant mismatch")
+    assert_true(
+        ADD_FRIEND_WINDOWS_1080P_REFERENCE_ARTIFACT_SCOPE == "add_friend_entry_click_plan_windows_1080p_reference",
+        "Windows 1920x1080 reference artifact scope constant mismatch",
+    )
+    assert_true(add_friend_artifact_scope(ADD_FRIEND_MAIN_ROUTE) == ADD_FRIEND_WINDOWS_ARTIFACT_SCOPE, "main route artifact scope mismatch")
     root = Path("C:/omniauto")
     route_root = add_friend_route_artifact_root(root, ADD_FRIEND_MAIN_ROUTE)
-    assert_true(str(route_root).replace("\\", "/").endswith("runtime/add_friend_entry_click_plan"), f"route root mismatch: {route_root}")
+    assert_true(str(route_root).replace("\\", "/").endswith("runtime/add_friend_entry_click_plan_windows"), f"route root mismatch: {route_root}")
     run_dir = add_friend_timestamp_run_dir(root, ADD_FRIEND_MAIN_ROUTE, timestamp="20260616_120102")
-    assert_true(str(run_dir).replace("\\", "/").endswith("runtime/add_friend_entry_click_plan/20260616_120102"), f"run dir mismatch: {run_dir}")
+    assert_true(str(run_dir).replace("\\", "/").endswith("runtime/add_friend_entry_click_plan_windows/20260616_120102"), f"run dir mismatch: {run_dir}")
     latest_dir = add_friend_latest_dir(root, ADD_FRIEND_MAIN_ROUTE)
-    assert_true(str(latest_dir).replace("\\", "/").endswith("runtime/add_friend_entry_click_plan/latest"), f"latest dir mismatch: {latest_dir}")
+    assert_true(str(latest_dir).replace("\\", "/").endswith("runtime/add_friend_entry_click_plan_windows/latest"), f"latest dir mismatch: {latest_dir}")
     assert_true(add_friend_timestamp_id(datetime(2026, 6, 16, 12, 1, 2)) == "20260616_120102", "timestamp format mismatch")
     paths = add_friend_entry_click_artifact_paths(run_dir)
     assert_true(paths["plan_json"].endswith(ADD_FRIEND_ENTRY_CLICK_PLAN_JSON), f"plan json path mismatch: {paths}")
@@ -185,18 +203,22 @@ def test_add_friend_artifact_layout_contract() -> None:
     assert_true(paths["stdout_json"].endswith(ADD_FRIEND_ENTRY_CLICK_STDOUT_JSON), f"stdout path mismatch: {paths}")
     assert_true(paths["stderr_log"].endswith(ADD_FRIEND_ENTRY_CLICK_STDERR_LOG), f"stderr path mismatch: {paths}")
     manifest = add_friend_artifact_manifest(root, ADD_FRIEND_MAIN_ROUTE)
-    assert_true(manifest.get("scope") == "add_friend_entry_click_plan", f"manifest scope mismatch: {manifest}")
+    assert_true(manifest.get("scope") == "add_friend_entry_click_plan_windows", f"manifest scope mismatch: {manifest}")
     script = (
-        PROJECT_ROOT / "apps/wechat_ai_customer_service/scripts/run_wechat_add_friend_entry_click_plan.ps1"
+        PROJECT_ROOT / "apps/wechat_ai_customer_service/scripts/run_wechat_add_friend_entry_click_plan_windows.ps1"
     ).read_text(encoding="utf-8")
-    assert_true("runtime\\add_friend_entry_click_plan\\$Timestamp" in script, "entry-click script timestamp dir must match artifact contract")
-    assert_true("runtime\\add_friend_entry_click_plan\\latest" in script, "entry-click script latest dir must match artifact contract")
+    assert_true("runtime\\add_friend_entry_click_plan_windows\\$Timestamp" in script, "entry-click script timestamp dir must match artifact contract")
+    assert_true("runtime\\add_friend_entry_click_plan_windows\\latest" in script, "entry-click script latest dir must match artifact contract")
 
 
 def test_add_friend_route_manifest_contract() -> None:
     from apps.wechat_ai_customer_service.adapters.add_friend_routes import (
         ADD_FRIEND_MAIN_ROUTE,
+        ADD_FRIEND_WINDOWS_1080P_REFERENCE_ROUTE,
         ADD_FRIEND_ROUTES,
+        ADD_FRIEND_WINDOWS_MAIN_ROUTE,
+        ADD_FRIEND_WINDOWS_REFERENCE_ROUTE,
+        ADD_FRIEND_WINDOWS_ROUTE,
         add_friend_route_accepts_formal_fields,
         add_friend_route_accepts_query,
         add_friend_route_kind,
@@ -207,13 +229,20 @@ def test_add_friend_route_manifest_contract() -> None:
         is_add_friend_route,
     )
 
-    assert_true(ADD_FRIEND_MAIN_ROUTE == "add-friend-entry-click-plan", f"unexpected main route: {ADD_FRIEND_MAIN_ROUTE}")
-    assert_true(ADD_FRIEND_ROUTES == ("add-friend-entry-click-plan",), f"only the main route should remain: {ADD_FRIEND_ROUTES}")
+    assert_true(ADD_FRIEND_MAIN_ROUTE == "add-friend-entry-click-plan-windows", f"unexpected main route: {ADD_FRIEND_MAIN_ROUTE}")
+    assert_true(ADD_FRIEND_WINDOWS_ROUTE == ADD_FRIEND_MAIN_ROUTE, f"Windows route should be main: {ADD_FRIEND_WINDOWS_ROUTE}")
+    assert_true(ADD_FRIEND_WINDOWS_MAIN_ROUTE == ADD_FRIEND_MAIN_ROUTE, f"Windows main alias mismatch: {ADD_FRIEND_WINDOWS_MAIN_ROUTE}")
+    assert_true(ADD_FRIEND_WINDOWS_1080P_REFERENCE_ROUTE == "add-friend-entry-click-plan", f"unexpected Windows 1920x1080 reference route: {ADD_FRIEND_WINDOWS_1080P_REFERENCE_ROUTE}")
+    assert_true(ADD_FRIEND_WINDOWS_REFERENCE_ROUTE == ADD_FRIEND_WINDOWS_1080P_REFERENCE_ROUTE, f"Windows reference alias mismatch: {ADD_FRIEND_WINDOWS_REFERENCE_ROUTE}")
+    assert_true(ADD_FRIEND_ROUTES == ("add-friend-entry-click-plan", "add-friend-entry-click-plan-windows"), f"expected Windows 1920x1080 reference plus Windows route: {ADD_FRIEND_ROUTES}")
     assert_true(is_add_friend_main_route(ADD_FRIEND_MAIN_ROUTE), "entry-click route must be the official main route")
-    assert_true(add_friend_route_kind(ADD_FRIEND_MAIN_ROUTE) == "main", "main route kind mismatch")
+    assert_true(not is_add_friend_main_route(ADD_FRIEND_WINDOWS_1080P_REFERENCE_ROUTE), "Windows 1920x1080 reference route should not be the Windows main route")
+    assert_true(add_friend_route_kind(ADD_FRIEND_MAIN_ROUTE) == "windows", "main route kind mismatch")
+    assert_true(add_friend_route_kind(ADD_FRIEND_WINDOWS_1080P_REFERENCE_ROUTE) == "windows_1080p_reference", "Windows 1920x1080 reference route kind mismatch")
     assert_true(add_friend_route_accepts_formal_fields(ADD_FRIEND_MAIN_ROUTE), "main route must accept formal fields")
     assert_true(add_friend_route_accepts_query(ADD_FRIEND_MAIN_ROUTE), "main route must accept phone/wechat query")
-    assert_true(add_friend_route_uses_passive_probe(ADD_FRIEND_MAIN_ROUTE), "main route should support passive pre-probe")
+    assert_true(add_friend_route_uses_passive_probe(ADD_FRIEND_MAIN_ROUTE) is False, "main route must focus WeChat before formal add_friend clicks")
+    assert_true(add_friend_route_uses_passive_probe(ADD_FRIEND_WINDOWS_1080P_REFERENCE_ROUTE), "reference route can remain passive for comparison")
     for removed in ["add-friend", "add-friend-plan", "add-friend-entry-plan"]:
         assert_true(not is_add_friend_route(removed), f"removed add_friend action should not be a route: {removed}")
         assert_true(not is_add_friend_diagnostic_route(removed), f"removed add_friend action should not be diagnostic: {removed}")
@@ -782,6 +811,42 @@ def test_add_friend_flow_context_contract() -> None:
         assert_true(saved.get("diagnostic_events") == events, f"saved plan should include finalized events: {saved}")
 
 
+def test_add_friend_already_friend_terminal_event_contract() -> None:
+    from apps.wechat_ai_customer_service.adapters.add_friend_flow_events import add_friend_query_search_events_from_result
+
+    events = add_friend_query_search_events_from_result(
+        {
+            "ok": True,
+            "state": "already_friend",
+            "task_status": "completed",
+            "result_code": "already_friend",
+            "current_step": "searching_contact",
+            "result": {
+                "screenshot_path": "profile.png",
+                "annotated_path": "profile_annotated.png",
+                "ocr_items": [{"text": "发消息"}],
+            },
+            "add_contact_result": {
+                "ok": True,
+                "state": "already_friend",
+                "task_status": "completed",
+                "result_code": "already_friend",
+                "current_step": "searching_contact",
+                "screenshot_path": "profile.png",
+                "annotated_path": "profile_annotated.png",
+                "ocr_items": [{"text": "发消息"}],
+                "result_basis": "search_result_profile_has_message_actions",
+            },
+        }
+    )
+    ids = [event.get("step_id") for event in events]
+    assert_true("add_contact_search_terminal" in ids, f"already_friend should be a terminal event: {ids}")
+    assert_true("add_contact_search_failure" not in ids, f"already_friend must not be labeled failure: {ids}")
+    terminal = next(event for event in events if event.get("step_id") == "add_contact_search_terminal")
+    assert_true(terminal.get("status") == "completed", f"already_friend terminal status mismatch: {terminal}")
+    assert_true(terminal.get("result", {}).get("result_code") == "already_friend", f"already_friend result mismatch: {terminal}")
+
+
 def test_sidecar_uses_flow_context_for_entry_click() -> None:
     sidecar = (
         PROJECT_ROOT / "apps/wechat_ai_customer_service/adapters/wechat_win32_ocr_sidecar.py"
@@ -813,8 +878,8 @@ def test_sidecar_uses_flow_context_for_entry_click() -> None:
     )
     assert_true("def _build_entry_click_payload(" in flow_source, "entry-click flow should centralize payload assembly")
     assert_true(
-        flow_source.count("_build_entry_click_payload(") == 3,
-        "entry-click flow should have one helper definition and two branch calls",
+        flow_source.count("_build_entry_click_payload(") == 4,
+        "entry-click flow should have one helper definition and three branch calls",
     )
 
 
@@ -830,6 +895,173 @@ def test_sidecar_uses_add_friend_payload_builders() -> None:
     ]:
         assert_true(token in sidecar, f"sidecar should route task result through payload builder: {token}")
     assert_true("add_friend_search_not_found_result(" not in sidecar, "sidecar should not directly build search-not-found task result")
+
+
+def test_add_friend_uses_shared_operator_guard_module() -> None:
+    guard_source = (
+        PROJECT_ROOT / "apps/wechat_ai_customer_service/adapters/add_friend_operator_guard.py"
+    ).read_text(encoding="utf-8")
+    sidecar = (
+        PROJECT_ROOT / "apps/wechat_ai_customer_service/adapters/wechat_win32_ocr_sidecar.py"
+    ).read_text(encoding="utf-8")
+    flow_source = (PROJECT_ROOT / "apps/wechat_ai_customer_service/adapters/add_friend_flow.py").read_text(
+        encoding="utf-8"
+    )
+    assert_true("run_rpa_operator_guard.py" in guard_source, "add_friend must reuse the shared floating-ball operator guard script")
+    assert_true("SetWindowsHookExW" not in guard_source, "add_friend adapter must not duplicate keyboard/mouse hook logic")
+    assert_true("start_add_friend_operator_guard(" in sidecar, "sidecar should start operator guard before add_friend click flow")
+    assert_true("stop_add_friend_operator_guard(" in sidecar, "sidecar should stop operator guard after add_friend click flow")
+    assert_true("OPERATOR_GUARD_NOT_READY" in sidecar, "operator guard failure should be a first-class add_friend failure")
+    assert_true("add_friend_operator_guard_checkpoint(" in flow_source, "flow should honor floating-ball pause/stop checkpoints")
+    assert_true("GetCursorPos" not in flow_source, "flow should not implement a separate mouse-idle guard")
+
+
+def test_add_friend_preflight_blocks_unready_window() -> None:
+    import apps.wechat_ai_customer_service.adapters.wechat_win32_ocr_sidecar as sidecar_mod
+
+    originals = {
+        "get_window_geometry": sidecar_mod.get_window_geometry,
+        "validate_capture_geometry": sidecar_mod.validate_capture_geometry,
+        "run_add_friend_entry_click_plan_flow": sidecar_mod.run_add_friend_entry_click_plan_flow,
+        "write_add_friend_entry_click_review": sidecar_mod.write_add_friend_entry_click_review,
+    }
+    calls = {"flow": 0}
+    try:
+        sidecar_mod.get_window_geometry = lambda _hwnd: {"left": 775, "top": 331, "right": 1143, "bottom": 815, "width": 368, "height": 484}
+        sidecar_mod.validate_capture_geometry = lambda geometry: {"ok": False, "reason": "window_too_small_for_capture", "geometry": geometry}
+        sidecar_mod.run_add_friend_entry_click_plan_flow = lambda *args, **kwargs: calls.__setitem__("flow", calls["flow"] + 1) or {"ok": True}
+        sidecar_mod.write_add_friend_entry_click_review = lambda output_dir, payload: str(Path(output_dir) / "review.html")
+        payload = sidecar_mod.add_friend_entry_click_plan_payload(
+            1001,
+            {"quick_login": {"detected": True, "reason": "quick_login_detected_no_auto_enter"}},
+            phone="17368746889",
+            verify_message="你好",
+            remark_name="客户-CJ8K2P",
+            remark_code="CJ8K2P",
+            artifact_dir=str(PROJECT_ROOT / "runtime" / "add_friend_preflight_test"),
+        )
+        assert_true(payload.get("ok") is False, f"unready window should fail preflight: {payload}")
+        assert_true(payload.get("state") == "wechat_window_not_ready", f"unexpected state: {payload}")
+        assert_true(payload.get("error_code") == "WECHAT_WINDOW_NOT_READY", f"unexpected error: {payload}")
+        assert_true(payload.get("current_step") == "preflight_window_ready", f"unexpected current step: {payload}")
+        assert_true(calls["flow"] == 0, f"unready window must not enter click flow: {calls}")
+    finally:
+        for name, value in originals.items():
+            setattr(sidecar_mod, name, value)
+
+
+def test_add_friend_requires_operator_guard_before_click_flow() -> None:
+    import apps.wechat_ai_customer_service.adapters.wechat_win32_ocr_sidecar as sidecar_mod
+
+    originals = {
+        "get_window_geometry": sidecar_mod.get_window_geometry,
+        "validate_capture_geometry": sidecar_mod.validate_capture_geometry,
+        "add_friend_pre_click_main_window_readiness": sidecar_mod.add_friend_pre_click_main_window_readiness,
+        "start_add_friend_operator_guard": sidecar_mod.start_add_friend_operator_guard,
+        "run_add_friend_entry_click_plan_flow": sidecar_mod.run_add_friend_entry_click_plan_flow,
+        "write_add_friend_entry_click_review": sidecar_mod.write_add_friend_entry_click_review,
+    }
+    calls = {"flow": 0}
+    try:
+        sidecar_mod.get_window_geometry = lambda _hwnd: {"left": 0, "top": 0, "right": 981, "bottom": 860, "width": 981, "height": 860}
+        sidecar_mod.validate_capture_geometry = lambda geometry: {"ok": True, "geometry": geometry}
+        sidecar_mod.add_friend_pre_click_main_window_readiness = lambda *_args, **_kwargs: {
+            "ok": True,
+            "state": "wechat_main_surface_ready",
+            "focus_guard": {"ok": True, "reason": "foreground_matches_target"},
+            "surface_readiness": {"ok": True, "main_surface": {"ok": True}},
+        }
+        sidecar_mod.start_add_friend_operator_guard = lambda **_kwargs: {
+            "ok": False,
+            "enabled": True,
+            "reason": "guard_hook_not_ready",
+        }
+        sidecar_mod.run_add_friend_entry_click_plan_flow = lambda *args, **kwargs: calls.__setitem__("flow", calls["flow"] + 1) or {"ok": True}
+        sidecar_mod.write_add_friend_entry_click_review = lambda output_dir, payload: str(Path(output_dir) / "review.html")
+        payload = sidecar_mod.add_friend_entry_click_plan_payload(
+            1001,
+            {"quick_login": {"detected": False}},
+            phone="17368746889",
+            verify_message="你好",
+            remark_name="客户-CJ8K2P",
+            remark_code="CJ8K2P",
+            artifact_dir=str(PROJECT_ROOT / "runtime" / "add_friend_operator_guard_test"),
+        )
+        assert_true(payload.get("ok") is False, f"operator guard failure should block add_friend: {payload}")
+        assert_true(payload.get("state") == "operator_guard_not_ready", f"unexpected state: {payload}")
+        assert_true(payload.get("error_code") == "OPERATOR_GUARD_NOT_READY", f"unexpected error: {payload}")
+        assert_true(payload.get("current_step") == "operator_guard_ready", f"unexpected current step: {payload}")
+        assert_true(calls["flow"] == 0, f"click flow must not run before operator guard is ready: {calls}")
+    finally:
+        for name, value in originals.items():
+            setattr(sidecar_mod, name, value)
+
+
+def test_add_friend_formal_preclick_requires_foreground_and_main_surface() -> None:
+    from apps.wechat_ai_customer_service.adapters.wechat_win32_ocr_sidecar import (
+        add_friend_focus_guard_ready,
+        add_friend_pre_click_readiness_decision,
+    )
+
+    not_foreground = add_friend_pre_click_readiness_decision(
+        focus_guard={"ok": False, "reason": "foreground_not_wechat_target"},
+        surface_readiness={"ok": True, "state": "wechat_main_surface_ready"},
+    )
+    assert_true(not_foreground.get("ok") is False, f"foreground mismatch should block: {not_foreground}")
+    assert_true(not_foreground.get("state") == "wechat_window_not_foreground", f"unexpected state: {not_foreground}")
+    assert_true(not_foreground.get("no_clicks_performed") is True, f"must be a no-click block: {not_foreground}")
+
+    degraded_focus = add_friend_focus_guard_ready({"ok": True, "reason": "foreground_guard_unavailable"})
+    assert_true(degraded_focus.get("ok") is False, f"formal add_friend must not accept degraded focus: {degraded_focus}")
+
+    wrong_surface = add_friend_pre_click_readiness_decision(
+        focus_guard={"ok": True, "reason": "foreground_matches_target"},
+        surface_readiness={
+            "ok": False,
+            "state": "wechat_main_surface_not_ready",
+            "error_code": "WECHAT_WINDOW_NOT_READY",
+            "reason": "sidebar_search_anchor_missing_or_non_wechat_content",
+        },
+    )
+    assert_true(wrong_surface.get("ok") is False, f"wrong surface should block: {wrong_surface}")
+    assert_true(wrong_surface.get("state") == "wechat_main_surface_not_ready", f"unexpected surface block: {wrong_surface}")
+
+    ready = add_friend_pre_click_readiness_decision(
+        focus_guard={"ok": True, "reason": "foreground_root_matches_target"},
+        surface_readiness={"ok": True, "state": "wechat_main_surface_ready"},
+    )
+    assert_true(ready.get("ok") is True, f"foreground root + main surface should pass: {ready}")
+
+
+def test_add_friend_calibration_mode_contract() -> None:
+    import apps.wechat_ai_customer_service.adapters.wechat_win32_ocr_sidecar as sidecar_mod
+
+    sidecar = (
+        PROJECT_ROOT / "apps/wechat_ai_customer_service/adapters/wechat_win32_ocr_sidecar.py"
+    ).read_text(encoding="utf-8")
+    assert_true("--calibration-only" in sidecar, "sidecar CLI must expose add_friend calibration-only mode")
+    assert_true("calibration_only=bool" in sidecar, "run_action should pass calibration_only into add_friend payload")
+    validation_call = sidecar.split("validation = validate_add_friend_entry_click_contract(", 1)[-1].split(")", 1)[0]
+    assert_true("calibration_only" not in validation_call, "calibration flag must not be passed to field contract validation")
+    assert_true("start_add_friend_operator_guard(" in sidecar, "normal flow should still start the floating-ball guard")
+    calibration_section = sidecar.split("def add_friend_calibration_payload", 1)[-1].split("def add_friend_failure_payload", 1)[0]
+    assert_true("human_window_image_click" not in calibration_section, "calibration payload must not click")
+    assert_true("paste_invite_form_text" not in calibration_section, "calibration payload must not type/paste")
+    assert_true("no_clicks_performed" in calibration_section, "calibration payload must mark no-click behavior")
+    assert_true("add_friend_device_profile(" in calibration_section, "calibration should include device profile")
+    assert_true('"ok": calibration_ready' in calibration_section, "calibration ok must follow readiness, not unconditional success")
+
+    argv = sidecar_mod.args_for_daemon_request(
+        {
+            "action": "add-friend-entry-click-plan-windows",
+            "phone": "17756658083",
+            "verify_message": "你好",
+            "remark_name": "客户-CJ8K2P",
+            "remark_code": "CJ8K2P",
+            "calibration_only": True,
+        }
+    )
+    assert_true("--calibration-only" in argv, f"daemon argv should pass calibration flag: {argv}")
 
 
 def test_entry_click_task_outcome_contract() -> None:
@@ -902,6 +1134,7 @@ def test_add_friend_actions_contract() -> None:
 
 
 def test_invite_form_locator_contract() -> None:
+    from apps.wechat_ai_customer_service.adapters.add_friend_layout import invite_form_field_verification
     from apps.wechat_ai_customer_service.adapters.wechat_win32_ocr_sidecar import add_friend_invite_form_targets
 
     targets = add_friend_invite_form_targets((468, 834))
@@ -929,10 +1162,51 @@ def test_invite_form_locator_contract() -> None:
         assert_true(target.get("x") == target["point"][0] and target.get("y") == target["point"][1], f"{name} legacy x/y mismatch: {target}")
         assert_true(target.get("click_bounds") == target.get("bounds"), f"{name} legacy click_bounds mismatch: {target}")
 
+    def ocr_item(text: str, left: int, top: int, right: int, bottom: int, confidence: float = 0.91) -> dict[str, object]:
+        return {
+            "text": text,
+            "left": left,
+            "top": top,
+            "right": right,
+            "bottom": bottom,
+            "center_x": int((left + right) / 2),
+            "center_y": int((top + bottom) / 2),
+            "confidence": confidence,
+        }
+
+    semantic_targets = add_friend_invite_form_targets(
+        (468, 834),
+        [
+            ocr_item("发送添加朋友申请", 38, 82, 182, 108),
+            ocr_item("备注", 38, 276, 82, 304),
+            ocr_item("确定", 112, 770, 166, 802),
+        ],
+    )
+    assert_true(
+        semantic_targets["invite_greeting_textarea"].get("strategy") == "semantic_ocr_anchor_locator",
+        f"greeting should use semantic locator: {semantic_targets}",
+    )
+    assert_true(
+        semantic_targets["invite_remark_input"].get("fallback_used") is False,
+        f"remark semantic target should not be fallback: {semantic_targets}",
+    )
+    assert_true(
+        semantic_targets["invite_confirm_button"].get("source") == "ocr_invite_confirm_button_anchor",
+        f"confirm should use OCR anchor: {semantic_targets}",
+    )
+    field_check = invite_form_field_verification(
+        verify_message="我是车金二手车张伟",
+        remark_name="客户-CJ8K2P",
+        remark_code="CJ8K2P",
+        ocr_items=[ocr_item("我是车金二手车张伟", 40, 122, 260, 152), ocr_item("客户-CJ8K2P", 40, 330, 180, 358)],
+    )
+    assert_true(field_check.get("ok") is True, f"field verification should pass visible OCR text: {field_check}")
+
 
 def test_add_friend_primary_locator_contract() -> None:
     from apps.wechat_ai_customer_service.adapters.wechat_win32_ocr_sidecar import (
         add_friend_menu_candidate_targets,
+        add_friend_plus_entry_target,
         add_friend_search_result_add_contact_target,
         find_add_friend_page_search_targets,
     )
@@ -965,6 +1239,32 @@ def test_add_friend_primary_locator_contract() -> None:
             assert_true(field in target, f"{name} locator missing field {field}: {target}")
         assert_true(target.get("x") == target["point"][0] and target.get("y") == target["point"][1], f"{name} legacy x/y mismatch: {target}")
         assert_true(target.get("click_bounds") == target.get("bounds"), f"{name} click bounds mismatch: {target}")
+
+    plus_target = add_friend_plus_entry_target(
+        {"width": 981, "height": 860, "left": 0, "top": 0, "right": 981, "bottom": 860},
+        (981, 860),
+        [ocr_item("搜索", 112, 60, 154, 82)],
+        route_kind="windows",
+    )
+    assert_locator(plus_target, "plus_entry")
+    assert_true(plus_target.get("strategy") == "multi_candidate_sidebar_plus_locator", f"plus locator strategy mismatch: {plus_target}")
+    assert_true(plus_target.get("source") == "sidebar_search_ocr_anchor", f"plus locator should prefer OCR anchor: {plus_target}")
+    assert_true(plus_target.get("fallback_used") is False, f"OCR anchored plus locator should not mark fallback: {plus_target}")
+    assert_true(len(plus_target.get("candidates") or []) >= 3, f"plus locator should expose OCR/current/reference candidates: {plus_target}")
+    assert_true(250 <= int(plus_target.get("x") or 0) <= 334, f"plus locator x outside sidebar toolbar: {plus_target}")
+    assert_true(48 <= int(plus_target.get("y") or 0) <= 118, f"plus locator y outside sidebar toolbar: {plus_target}")
+    sources = {str(item.get("source") or "") for item in plus_target.get("candidates") or [] if isinstance(item, dict)}
+    assert_true("windows_1080p_reference_geometry" in sources, f"plus locator must keep reference candidate for diagnostics: {plus_target}")
+
+    fallback_plus_target = add_friend_plus_entry_target(
+        {"width": 981, "height": 860, "left": 0, "top": 0, "right": 981, "bottom": 860},
+        (981, 860),
+        [],
+        route_kind="windows",
+    )
+    assert_locator(fallback_plus_target, "plus_entry_fallback")
+    assert_true(fallback_plus_target.get("source") == "windows_current_geometry", f"main route should fallback to current Windows geometry: {fallback_plus_target}")
+    assert_true(fallback_plus_target.get("fallback_used") is True, f"geometry fallback should be explicit: {fallback_plus_target}")
 
     menu_targets = add_friend_menu_candidate_targets(
         [ocr_item("添加朋友", 270, 148, 336, 172)],
@@ -1131,11 +1431,14 @@ def test_sidecar_add_friend_helpers_import() -> None:
         normalize_add_friend_query as contract_normalize_add_friend_query,
     )
     from apps.wechat_ai_customer_service.adapters.wechat_win32_ocr_sidecar import (
+        add_friend_windows_1080p_reference_plus_button_point_for_geometry,
         add_friend_optional_field_fill_enabled,
+        add_friend_plus_button_point_for_geometry,
         args_for_daemon_request,
         classify_add_friend_after_confirm_surface,
         add_friend_surface_readiness,
         classify_add_friend_ocr_surface,
+        add_friend_windows_plus_button_point_for_geometry,
         normalize_add_friend_query,
         type_add_friend_phone_query_like_human,
         type_add_friend_search_query,
@@ -1150,6 +1453,12 @@ def test_sidecar_add_friend_helpers_import() -> None:
         == contract_normalize_add_friend_query(phone="", wechat=" wxid_demo "),
         "sidecar query normalization must reuse contract behavior",
     )
+    geometry = {"width": 981, "height": 860, "left": -22, "top": 0, "right": 959, "bottom": 860}
+    windows_point = add_friend_windows_plus_button_point_for_geometry(geometry)
+    windows_1080p_point = add_friend_windows_1080p_reference_plus_button_point_for_geometry(geometry)
+    assert_true(add_friend_plus_button_point_for_geometry(geometry) == windows_point, "default add_friend plus locator should be Windows-adapted")
+    assert_true(292 <= windows_point[0] <= 314, f"Windows plus point mismatch: {windows_point}")
+    assert_true(windows_1080p_point[0] > windows_point[0] + 35, f"Windows 1920x1080 reference point should remain separate: ref={windows_1080p_point}, adaptive={windows_point}")
     surface = classify_add_friend_ocr_surface([{"text": "添加朋友"}], (980, 860))
     assert_true(surface.get("state") == "add_contact_entry", f"unexpected surface: {surface}")
     invite_sent = classify_add_friend_after_confirm_surface([{"text": "等待验证"}], (468, 834), confirm_ok=True)
@@ -1170,6 +1479,21 @@ def test_sidecar_add_friend_helpers_import() -> None:
         stage="after_search",
     )
     assert_true(blank.get("ok") is False, f"blank surface should block add_friend: {blank}")
+    non_wechat_ready = add_friend_surface_readiness(
+        {"detected": False},
+        [{"text": "127.0.0.1:8017", "left": 190, "top": 68, "right": 320, "bottom": 91, "center_x": 255, "center_y": 79}],
+        {"width": 981, "height": 860},
+        stage="calibration",
+    )
+    assert_true(non_wechat_ready.get("ok") is False, f"non-WeChat content should not calibrate as ready: {non_wechat_ready}")
+    assert_true(non_wechat_ready.get("state") == "wechat_main_surface_not_ready", f"unexpected non-WeChat state: {non_wechat_ready}")
+    wechat_ready = add_friend_surface_readiness(
+        {"detected": False},
+        [{"text": "搜索", "left": 108, "top": 58, "right": 156, "bottom": 82, "center_x": 132, "center_y": 70, "confidence": 0.92}],
+        {"width": 981, "height": 860},
+        stage="calibration",
+    )
+    assert_true(wechat_ready.get("ok") is True, f"search anchor should calibrate as ready: {wechat_ready}")
     pressed: list[int] = []
     import apps.wechat_ai_customer_service.adapters.wechat_win32_ocr_sidecar as sidecar
 
@@ -1208,8 +1532,14 @@ def main() -> int:
         test_entry_click_validation_failure_report_uses_native_events,
         test_add_friend_flow_events_contract,
         test_add_friend_flow_context_contract,
+        test_add_friend_already_friend_terminal_event_contract,
         test_sidecar_uses_flow_context_for_entry_click,
         test_sidecar_uses_add_friend_payload_builders,
+        test_add_friend_uses_shared_operator_guard_module,
+        test_add_friend_preflight_blocks_unready_window,
+        test_add_friend_requires_operator_guard_before_click_flow,
+        test_add_friend_formal_preclick_requires_foreground_and_main_surface,
+        test_add_friend_calibration_mode_contract,
         test_entry_click_task_outcome_contract,
         test_add_friend_actions_contract,
         test_invite_form_locator_contract,

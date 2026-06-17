@@ -13,7 +13,10 @@ from apps.wechat_ai_customer_service.adapters.add_friend_contract import (
 from apps.wechat_ai_customer_service.adapters.add_friend_flow_context import AddFriendFlowContext
 from apps.wechat_ai_customer_service.adapters.add_friend_flow_events import add_friend_query_search_events_from_result
 from apps.wechat_ai_customer_service.adapters.add_friend_result_mapping import add_friend_server_report_payload
-from apps.wechat_ai_customer_service.adapters.add_friend_routes import ADD_FRIEND_MAIN_ROUTE
+from apps.wechat_ai_customer_service.adapters.add_friend_routes import (
+    ADD_FRIEND_WINDOWS_1080P_REFERENCE_ROUTE,
+    ADD_FRIEND_MAIN_ROUTE,
+)
 
 
 class AddFriendOpsProtocol(Protocol):
@@ -25,9 +28,13 @@ class AddFriendOpsProtocol(Protocol):
     def get_window_geometry(self, hwnd: int) -> dict[str, Any]: ...
     def capture_wechat_window_visible_screen(self, hwnd: int, *, artifact_dir: str, label: str) -> tuple[Any, str]: ...
     def add_friend_plus_button_point_for_geometry(self, geometry: dict[str, Any]) -> tuple[int, int]: ...
+    def add_friend_windows_1080p_reference_plus_button_point_for_geometry(self, geometry: dict[str, Any]) -> tuple[int, int]: ...
+    def add_friend_windows_plus_button_point_for_geometry(self, geometry: dict[str, Any]) -> tuple[int, int]: ...
+    def add_friend_plus_entry_target(self, geometry: dict[str, Any], image_size: Any, ocr_items: list[dict[str, Any]] | None = None, **kwargs: Any) -> dict[str, Any]: ...
     def add_friend_popup_menu_bounds(self, image_size: Any, *, plus_screen_x: int, plus_screen_y: int) -> list[int]: ...
     def run_ocr_on_screen_region(self, image: Any, bounds: list[int]) -> list[dict[str, Any]]: ...
     def add_friend_ocr_snapshots(self, items: list[dict[str, Any]], image_size: Any) -> list[dict[str, Any]]: ...
+    def add_friend_surface_readiness(self, image: Any, items: list[dict[str, Any]], geometry: dict[str, Any], **kwargs: Any) -> dict[str, Any]: ...
     def add_friend_menu_candidate_targets(self, items: list[dict[str, Any]], image_size: Any, **kwargs: Any) -> list[dict[str, Any]]: ...
     def plus_entry_popup_menu_detected(self, items: list[dict[str, Any]], targets: list[dict[str, Any]]) -> dict[str, Any]: ...
     def draw_add_friend_screen_annotation(self, image: Any, **kwargs: Any) -> str: ...
@@ -36,14 +43,16 @@ class AddFriendOpsProtocol(Protocol):
     def input_add_friend_query_and_search(self, hwnd: int, output_dir: Any, **kwargs: Any) -> dict[str, Any]: ...
     def write_add_friend_entry_click_review(self, output_dir: Any, payload: dict[str, Any]) -> str: ...
     def add_friend_paced_pause(self, tier: str, **kwargs: Any) -> float: ...
+    def add_friend_operator_guard_checkpoint(self, **kwargs: Any) -> dict[str, Any]: ...
     def human_window_image_hover(self, hwnd: int, x: int, y: int) -> dict[str, Any]: ...
     def human_window_image_click(self, hwnd: int, x: int, y: int) -> Any: ...
     def bounded_int(self, value: Any, *, default: int, minimum: int, maximum: int) -> int: ...
 
 
 def add_friend_entry_click_task_outcome(query_search: dict[str, Any]) -> dict[str, Any]:
-    ok = bool(query_search.get("ok"))
-    task_status = str(query_search.get("task_status") or ("completed" if ok else "failed"))
+    explicit_status = str(query_search.get("task_status") or "")
+    ok = bool(query_search.get("ok")) or explicit_status == "completed"
+    task_status = explicit_status or ("completed" if ok else "failed")
     result_code = str(query_search.get("result_code") or "")
     error_code = str(query_search.get("error_code") or "")
     current_step = str(
@@ -79,12 +88,14 @@ def run_add_friend_entry_click_plan_flow(
     remark_name: str = "",
     remark_code: str = "",
     artifact_dir: str | None = None,
+    route: str = ADD_FRIEND_MAIN_ROUTE,
 ) -> dict[str, Any]:
-    """Run the official add_friend entry-click flow using sidecar Win32/OCR ops."""
+    """Run an add_friend entry-click flow using sidecar Windows Win32/OCR ops."""
+    selected_route = str(route or ADD_FRIEND_MAIN_ROUTE).strip().lower()
     query = normalize_add_friend_query(phone=phone, wechat=wechat)
     flow = AddFriendFlowContext(
         project_root=ops.PROJECT_ROOT,
-        route=ADD_FRIEND_MAIN_ROUTE,
+        route=selected_route,
         artifact_dir=artifact_dir,
     )
     output_dir = flow.output_dir
@@ -136,14 +147,35 @@ def run_add_friend_entry_click_plan_flow(
     ]
 
     timings = flow.timings
+    guard_checkpoint = ops.add_friend_operator_guard_checkpoint(reason="before_entry_capture")
+    timings.append({"name": "operator_guard_before_entry_capture", "seconds": 0.0, "result": guard_checkpoint})
     before_shot, before_screenshot_path = ops.capture_wechat_window_visible_screen(
         hwnd,
         artifact_dir=str(output_dir),
         label="add_friend_entry_before_click_window",
     )
-    plus_x, plus_y = ops.add_friend_plus_button_point_for_geometry(geometry)
     window_origin_x = int(geometry.get("left") or 0)
     window_origin_y = int(geometry.get("top") or 0)
+    platform_adapter = "windows_1080p_reference" if selected_route == ADD_FRIEND_WINDOWS_1080P_REFERENCE_ROUTE else "windows"
+    before_full_ocr_started_at = time.perf_counter()
+    before_full_items = ops.run_ocr_on_screen_region(before_shot, [0, 0, before_shot.size[0], before_shot.size[1]])
+    timings.append(
+        {
+            "name": "before_full_surface_ocr",
+            "seconds": round(time.perf_counter() - before_full_ocr_started_at, 3),
+            "ocr_scope": "full_window_preflight",
+            "bounds": [0, 0, before_shot.size[0], before_shot.size[1]],
+            "ocr_count": len(before_full_items),
+        }
+    )
+    plus_target = ops.add_friend_plus_entry_target(
+        geometry,
+        before_shot.size,
+        before_full_items,
+        route_kind=platform_adapter,
+    )
+    plus_x = int(plus_target.get("x") or plus_target.get("point", [0, 0])[0])
+    plus_y = int(plus_target.get("y") or plus_target.get("point", [0, 0])[1])
     popup_bounds = ops.add_friend_popup_menu_bounds(before_shot.size, plus_screen_x=plus_x, plus_screen_y=plus_y)
     before_ocr_started_at = time.perf_counter()
     before_items = ops.run_ocr_on_screen_region(before_shot, popup_bounds)
@@ -156,21 +188,13 @@ def run_add_friend_entry_click_plan_flow(
             "ocr_count": len(before_items),
         }
     )
+    before_readiness = ops.add_friend_surface_readiness(before_shot, before_full_items or before_items, geometry, stage="entry_before_click")
     before_readiness = {
-        "ok": True,
-        "stage": "entry_before_click",
+        **before_readiness,
         "capture_mode": "screen_visible",
-        "ocr_scope": "plus_entry_popup_region",
-        "ocr_count": len(before_items),
-    }
-    plus_target = {
-        "name": "plus_entry",
-        "label": "Step1 click target: plus entry beside search box",
-        "x": plus_x,
-        "y": plus_y,
-        "region": ops.add_friend_region_for_point(plus_x, plus_y, before_shot.size),
-        "risk": "single_click_plus_only",
-        "item": None,
+        "ocr_scope": "full_window_preflight",
+        "popup_ocr_count": len(before_items),
+        "ocr_count": int(before_readiness.get("ocr_count") or len(before_full_items or before_items)),
     }
     before_annotated_path = output_dir / "add_friend_entry_before_click_screen_annotated.png"
     before_actual_menu_targets = ops.add_friend_menu_candidate_targets(
@@ -203,7 +227,7 @@ def run_add_friend_entry_click_plan_flow(
         status="completed",
         state_before="payload_valid",
         state_after="plus_entry_popup_menu" if before_popup_detection.get("detected") else "main_window",
-        ocr_items=ops.add_friend_ocr_snapshots(before_items, before_shot.size),
+        ocr_items=ops.add_friend_ocr_snapshots(before_full_items or before_items, before_shot.size),
         targets=[plus_target, *before_menu_targets],
         selected_target=plus_target,
         artifacts={"raw": before_screenshot_path, "annotated": before_annotated},
@@ -214,6 +238,62 @@ def run_add_friend_entry_click_plan_flow(
             "popup_detection": before_popup_detection,
         },
     )
+    if not before_readiness.get("ok"):
+        query_search = {
+            "ok": False,
+            "state": before_readiness.get("state") or "wechat_window_not_ready",
+            "task_status": "failed",
+            "result_code": "",
+            "error_code": before_readiness.get("error_code") or "WECHAT_WINDOW_NOT_READY",
+            "current_step": "preflight_window_ready",
+            "server_report_payload": add_friend_server_report_payload(
+                task_status="failed",
+                error_code=str(before_readiness.get("error_code") or "WECHAT_WINDOW_NOT_READY"),
+                current_step="preflight_window_ready",
+            ),
+            "reason": before_readiness.get("reason") or "add_friend_surface_not_ready_before_click",
+            "readiness": before_readiness,
+        }
+        task_outcome = add_friend_entry_click_task_outcome(query_search)
+        payload = _build_entry_click_payload(
+            task_outcome=task_outcome,
+            query=query,
+            phone=phone,
+            wechat=wechat,
+            verify_message=clean_verify_message,
+            remark_name=clean_remark_name,
+            remark_code=clean_remark_code,
+            remark_code_valid=remark_code_valid,
+            probe=probe,
+            geometry_before=geometry,
+            geometry_after=geometry,
+            before={
+                "screenshot_path": before_screenshot_path,
+                "annotated_path": before_annotated,
+                "capture_mode": "screen_visible",
+                "readiness": before_readiness,
+                "ocr_items": ops.add_friend_ocr_snapshots(before_full_items or before_items, before_shot.size),
+                "planned_targets": [plus_target, *before_menu_targets],
+                "popup_detection": before_popup_detection,
+                "hover": {"skipped": True, "reason": "surface_not_ready_before_click"},
+            },
+            after={
+                "screenshot_path": before_screenshot_path,
+                "annotated_path": before_annotated,
+                "capture_mode": "screen_visible",
+                "readiness": before_readiness,
+                "ocr_items": ops.add_friend_ocr_snapshots(before_full_items or before_items, before_shot.size),
+                "planned_targets": before_menu_targets,
+                "popup_detection": before_popup_detection,
+            },
+            click_attempts=[],
+            menu_click={"clicked": False, "reason": before_readiness.get("reason") or "surface_not_ready_before_click", "target": None},
+            query_search=query_search,
+            plan_path=str(flow.plan_path),
+            note="add_friend_preflight_stopped_before_click_due_to_window_or_account_state",
+        )
+        _append_flow_timings(payload, timings, payload["menu_click"], query_search, flow.started_at)
+        return flow.finalize_payload(payload, report_writer=ops.write_add_friend_entry_click_review)
 
     if before_popup_detection.get("detected"):
         plan_path = flow.plan_path
@@ -297,9 +377,9 @@ def run_add_friend_entry_click_plan_flow(
 
     max_attempts = ops.bounded_int(
         os.getenv("WECHAT_WIN32_OCR_PLUS_ENTRY_CLICK_MAX_ATTEMPTS"),
-        default=3,
+        default=1,
         minimum=1,
-        maximum=5,
+        maximum=2,
     )
     click_attempts: list[dict[str, Any]] = []
     after_geometry = geometry
@@ -314,6 +394,8 @@ def run_add_friend_entry_click_plan_flow(
         if attempt > 1:
             pause_seconds = ops.add_friend_paced_pause("critical_click", reason=f"before_plus_entry_retry_{attempt}")
             timings.append({"name": f"before_plus_entry_retry_{attempt}_pause", "seconds": round(pause_seconds, 3)})
+        guard_checkpoint = ops.add_friend_operator_guard_checkpoint(reason=f"before_plus_entry_click_{attempt}")
+        timings.append({"name": f"operator_guard_before_plus_entry_click_{attempt}", "seconds": 0.0, "result": guard_checkpoint})
         click_started_at = time.perf_counter()
         ops.human_window_image_click(hwnd, plus_x, plus_y)
         timings.append({"name": f"plus_entry_click_{attempt}", "seconds": round(time.perf_counter() - click_started_at, 3)})
@@ -338,13 +420,13 @@ def run_add_friend_entry_click_plan_flow(
                 "ocr_count": len(after_items),
             }
         )
+        after_readiness = ops.add_friend_surface_readiness(after_shot, after_items, after_geometry, stage="entry_after_click")
         after_readiness = {
-            "ok": True,
-            "stage": "entry_after_click",
+            **after_readiness,
             "capture_mode": "screen_visible",
             "attempt": attempt,
             "ocr_scope": "plus_entry_popup_region",
-            "ocr_count": len(after_items),
+            "ocr_count": int(after_readiness.get("ocr_count") or len(after_items)),
         }
         actual_menu_targets = ops.add_friend_menu_candidate_targets(
             after_items,
@@ -400,6 +482,13 @@ def run_add_friend_entry_click_plan_flow(
         after_annotated = attempt_annotated
         if popup_detection.get("detected"):
             break
+        if not after_readiness.get("ok"):
+            popup_detection = {
+                "detected": False,
+                "reason": after_readiness.get("reason") or "surface_not_ready_after_plus_click",
+                "readiness": after_readiness,
+            }
+            break
 
     menu_click = (
         ops.click_add_friend_menu_entry_and_capture(
@@ -412,7 +501,7 @@ def run_add_friend_entry_click_plan_flow(
             ),
         )
         if popup_detection.get("detected")
-        else {"clicked": False, "reason": "plus_entry_popup_menu_not_detected", "target": None}
+        else {"clicked": False, "reason": popup_detection.get("reason") or "plus_entry_popup_menu_not_detected", "target": None}
     )
     query_hwnd = int(menu_click.get("next_hwnd") or 0) if isinstance(menu_click, dict) else 0
     query_search = (
@@ -427,10 +516,27 @@ def run_add_friend_entry_click_plan_flow(
         if menu_click.get("clicked") and query and query_hwnd
         else {
             "ok": False,
-            "state": "query_not_run",
-            "reason": "empty_query_or_menu_click_failed_or_dialog_hwnd_missing",
+            "state": after_readiness.get("state") if after_readiness and not after_readiness.get("ok") else "query_not_run",
+            "task_status": "failed" if after_readiness and not after_readiness.get("ok") else None,
+            "error_code": after_readiness.get("error_code") if after_readiness and not after_readiness.get("ok") else None,
+            "current_step": "preflight_window_ready" if after_readiness and not after_readiness.get("ok") else None,
+            "server_report_payload": (
+                add_friend_server_report_payload(
+                    task_status="failed",
+                    error_code=str(after_readiness.get("error_code")),
+                    current_step="preflight_window_ready",
+                )
+                if after_readiness and not after_readiness.get("ok") and after_readiness.get("error_code")
+                else None
+            ),
+            "reason": (
+                after_readiness.get("reason")
+                if after_readiness and not after_readiness.get("ok")
+                else "empty_query_or_menu_click_failed_or_dialog_hwnd_missing"
+            ),
             "query": query,
             "dialog_hwnd": query_hwnd,
+            "readiness": after_readiness if after_readiness and not after_readiness.get("ok") else {},
         }
     )
     _add_menu_and_query_events(

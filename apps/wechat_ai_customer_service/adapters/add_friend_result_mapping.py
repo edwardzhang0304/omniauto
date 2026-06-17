@@ -15,6 +15,8 @@ ERROR_ACCOUNT_RESTRICTED = "ACCOUNT_RESTRICTED"
 ERROR_ADD_CONTACT_ENTRY_NOT_FOUND = "ADD_CONTACT_ENTRY_NOT_FOUND"
 ERROR_INVITE_FORM_WINDOW_NOT_FOUND = "INVITE_FORM_WINDOW_NOT_FOUND"
 ERROR_INVITE_CONFIRM_CLICK_FAILED = "INVITE_CONFIRM_CLICK_FAILED"
+ERROR_WECHAT_WINDOW_NOT_READY = "WECHAT_WINDOW_NOT_READY"
+ERROR_OPERATOR_GUARD_NOT_READY = "OPERATOR_GUARD_NOT_READY"
 
 
 def add_friend_server_report_payload(
@@ -44,6 +46,7 @@ def add_friend_completed_result(
     **extra: Any,
 ) -> dict[str, Any]:
     return {
+        "ok": True,
         "state": state,
         "task_status": "completed",
         "result_code": result_code,
@@ -66,6 +69,7 @@ def add_friend_failed_result(
     **extra: Any,
 ) -> dict[str, Any]:
     return {
+        "ok": False,
         "state": state,
         "task_status": "failed",
         "result_code": "",

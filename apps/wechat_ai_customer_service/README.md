@@ -50,8 +50,9 @@ python apps\wechat_ai_customer_service\tests\run_vps_local_two_port_shared_sync_
 
 ### 微信加好友 RPA
 
-- 支持通过 Win32/OCR RPA 通道执行 `add_friend`：搜索手机号或微信号，进入资料页，点击“添加到通讯录”，填写申请说明/备注，并发送邀请。
-- 当前正式主链路固定为 `add-friend-entry-click-plan`，不保留本轮开发过程中的临时 add_friend 入口。
+- 当前微信操控能力是 Windows 适配：窗口枚举、截图、OCR 区域、鼠标点击、键盘输入、发送、监听和加好友链路均按 Windows 微信桌面版实现。不同显示分辨率、DPI、窗口尺寸会改变微信窗口内布局，不能直接复用固定坐标。
+- 支持通过 Windows Win32/OCR RPA 通道执行 `add_friend`：搜索手机号或微信号，进入资料页，点击“添加到通讯录”，填写申请说明/备注，并发送邀请。
+- 当前 Windows 正式主链路为 `add-friend-entry-click-plan-windows`。`add-friend-entry-click-plan` 保留为 Windows 1920x1080 固定布局参考/旧路线，用于对照，不作为自适应 Windows 主入口。
 - 主链路必须传入正式字段：
   - `phone_or_wechat`：由 `phone` 或 `wechat` 提供，至少一个必填，用于搜索目标用户。
   - `verify_message`：写入微信“发送添加朋友申请”输入框。
@@ -75,14 +76,14 @@ python apps\wechat_ai_customer_service\tests\run_vps_local_two_port_shared_sync_
 Windows 真机验证：
 
 ```powershell
-.\apps\wechat_ai_customer_service\scripts\run_wechat_add_friend_entry_click_plan.ps1 `
+.\apps\wechat_ai_customer_service\scripts\run_wechat_add_friend_entry_click_plan_windows.ps1 `
   -Phone "17368746889" `
   -VerifyMessage "我是车金二手车张伟" `
   -RemarkName "CJ-张伟-CJ8K2P-6889" `
   -RemarkCode "CJ8K2P"
 ```
 
-验证前需要保持 Windows 微信已登录、主窗口可见。脚本会把结果 JSON、错误日志、截图和 OCR 取证保存到 `runtime\add_friend_entry_click_plan\时间戳\`，并同步一份到 `runtime\add_friend_entry_click_plan\latest\`。
+验证前需要保持 Windows 微信已登录、主窗口可见。脚本会把结果 JSON、错误日志、截图和 OCR 取证保存到 `runtime\add_friend_entry_click_plan_windows\时间戳\`，并同步一份到 `runtime\add_friend_entry_click_plan_windows\latest\`。
 
 ### 资料导入与知识成长
 

@@ -585,7 +585,7 @@ class WeChatConnector:
             raise WeChatConnectorError("remark_code is required")
         if str(remark_code).strip() not in str(remark_name).strip():
             raise WeChatConnectorError("remark_name must include remark_code")
-        args = ["add-friend-entry-click-plan"]
+        args = ["add-friend-entry-click-plan-windows"]
         if phone:
             args.extend(["--phone", str(phone)])
         if wechat:
@@ -1382,8 +1382,8 @@ def _args_to_request(args: list[str]) -> dict[str, Any]:
                 request["skip_send_rate_guard"] = True
             elif arg == "--artifact-dir" and i + 1 < len(args):
                 request["artifact_dir"] = args[i + 1]
-    elif args[0] == "add-friend-entry-click-plan":
-        request["action"] = "add-friend-entry-click-plan"
+    elif args[0] in {"add-friend-entry-click-plan", "add-friend-entry-click-plan-windows"}:
+        request["action"] = args[0]
         for i, arg in enumerate(args):
             if arg == "--phone" and i + 1 < len(args):
                 request["phone"] = args[i + 1]

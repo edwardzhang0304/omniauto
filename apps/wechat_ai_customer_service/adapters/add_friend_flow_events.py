@@ -221,11 +221,14 @@ def _add_add_contact_events(add: Any, add_contact_result: dict[str, Any]) -> Non
             )
         )
     elif add_contact_result.get("annotated_path") or add_contact_result.get("screenshot_path"):
+        task_status = str(add_contact_result.get("task_status") or "")
+        result_code = str(add_contact_result.get("result_code") or "")
+        terminal_ok = task_status == "completed" or result_code == "already_friend"
         add(
             make_step_event(
-                step_id="add_contact_search_failure",
-                title="搜索结果失败判定",
-                status="failed",
+                step_id="add_contact_search_terminal" if terminal_ok else "add_contact_search_failure",
+                title="搜索结果终态判定" if terminal_ok else "搜索结果失败判定",
+                status="completed" if terminal_ok else "failed",
                 state_before="search_result_checked",
                 state_after=str(add_contact_result.get("state") or "search_failed"),
                 ocr_items=_list(add_contact_result.get("ocr_items")),

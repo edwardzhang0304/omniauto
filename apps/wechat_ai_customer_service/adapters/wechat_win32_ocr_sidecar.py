@@ -1,9 +1,10 @@
-"""Win32/OCR sidecar for the WeChat desktop recorder.
+"""Windows Win32/OCR sidecar for the WeChat desktop recorder.
 
 This adapter is designed as the primary transport because it relies only on
 the top-level Win32 window, screenshots, OCR, clipboard paste, and guarded
-click/input flows. It does not depend on wxauto4 internals and remains usable
-across broader WeChat desktop variants.
+click/input flows. It is the Windows adaptation of WeChat control. Windows 1920x1080
+WeChat has different UI geometry and should use a separate platform adapter
+rather than reusing these coordinates blindly.
 """
 
 from __future__ import annotations
@@ -86,10 +87,23 @@ from apps.wechat_ai_customer_service.adapters.add_friend_flow import (
     add_friend_entry_click_task_outcome,
     run_add_friend_entry_click_plan_flow,
 )
+from apps.wechat_ai_customer_service.adapters.add_friend_layout import (
+    invite_form_field_verification,
+    plus_entry_target as layout_plus_entry_target,
+    semantic_invite_form_targets,
+    windows_1080p_reference_plus_point,
+    windows_plus_point,
+)
 from apps.wechat_ai_customer_service.adapters.add_friend_locator import (
     fixed_geometry_locator,
     geometry_fallback_locator,
+    make_locator_result,
     ocr_item_locator,
+)
+from apps.wechat_ai_customer_service.adapters.add_friend_operator_guard import (
+    add_friend_operator_guard_checkpoint,
+    start_add_friend_operator_guard,
+    stop_add_friend_operator_guard,
 )
 from apps.wechat_ai_customer_service.adapters.add_friend_ocr import (
     compact_ocr_text as mapped_compact_ocr_text,
@@ -107,8 +121,10 @@ from apps.wechat_ai_customer_service.adapters.add_friend_payloads import (
 )
 from apps.wechat_ai_customer_service.adapters.add_friend_result_mapping import (
     ERROR_ACCOUNT_RESTRICTED,
+    ERROR_OPERATOR_GUARD_NOT_READY,
     ERROR_PHONE_NOT_FOUND,
     ERROR_TASK_PAYLOAD_INVALID,
+    ERROR_WECHAT_WINDOW_NOT_READY,
     RESULT_ALREADY_FRIEND,
     RESULT_INVITE_SENT,
     add_friend_completed_result as mapped_add_friend_completed_result,
@@ -117,7 +133,9 @@ from apps.wechat_ai_customer_service.adapters.add_friend_result_mapping import (
 )
 from apps.wechat_ai_customer_service.adapters.add_friend_routes import (
     ADD_FRIEND_MAIN_ROUTE,
+    ADD_FRIEND_WINDOWS_1080P_REFERENCE_ROUTE,
     ADD_FRIEND_ROUTES,
+    ADD_FRIEND_WINDOWS_ROUTE,
     add_friend_route_accepts_formal_fields,
     add_friend_route_accepts_query,
     add_friend_route_uses_passive_probe,
@@ -212,7 +230,7 @@ DEFAULT_HUMANIZED_SHORT_TEXT_CHARS = 90
 DEFAULT_HUMANIZED_LONG_TEXT_CHARS = 240
 DEFAULT_INPUT_COPYBACK_STRONG_CONFIRM = False
 DEFAULT_SEND_INPUT_CONFIRM_ATTEMPTS = 3
-DEFAULT_INPUT_FAST_VISUAL_CONFIRM = True
+DEFAULT_INPUT_FAST_VISUAL_CONFIRM = False
 DEFAULT_POST_SEND_STRICT_CONFIRM = False
 DEFAULT_SEND_TRIGGER_MODE = "enter_only"
 DEFAULT_STRICT_SEND_FOCUS_GUARD = True
@@ -238,6 +256,21 @@ SOFT_BLOCKING_SCREEN_TOKENS = (
     "登录环境异常",
     "操作频繁",
     "拖拽",
+)
+WECHAT_LOGIN_OR_SECURITY_BLOCK_TOKENS = (
+    "请重新登录",
+    "重新登录",
+    "登录已过期",
+    "登录失效",
+    "退出登录",
+    "无法继续使用微信",
+    "账号安全",
+    "安全验证",
+    "登录环境异常",
+    "操作频繁",
+    "账号异常",
+    "被限制",
+    "限制使用",
 )
 FOREIGN_CAPTURE_TOKENS = (
     "apps/wechat_ai_customer_servic",
@@ -296,6 +329,7 @@ def main() -> int:
     parser.add_argument("--verify-message", default="", help="Required add-friend verification message for the entry-click route.")
     parser.add_argument("--remark-name", default="", help="Required WeChat remark name for the entry-click route.")
     parser.add_argument("--remark-code", default="", help="Required system remark code that must be included in remark-name.")
+    parser.add_argument("--calibration-only", action="store_true", help="For add-friend routes, capture/OCR/locate/report without clicking.")
     parser.add_argument("--exact", action="store_true", help="Use exact chat name matching.")
     parser.add_argument(
         "--skip-send-rate-guard",
@@ -334,7 +368,7 @@ def main() -> int:
 
 def run_action(args: argparse.Namespace) -> dict[str, Any]:
     action = str(args.action or "").strip().lower()
-    if action == ADD_FRIEND_MAIN_ROUTE:
+    if action in ADD_FRIEND_ROUTES:
         validation = validate_add_friend_entry_click_contract(
             phone=str(args.phone or ""),
             wechat=str(args.wechat or ""),
@@ -545,16 +579,18 @@ def run_action(args: argparse.Namespace) -> dict[str, Any]:
             artifact_dir=args.artifact_dir,
             validated_guard=target_ready.get("validation") if isinstance(target_ready.get("validation"), dict) else None,
         )
-    if action == ADD_FRIEND_MAIN_ROUTE:
+    if action in ADD_FRIEND_ROUTES:
         return add_friend_entry_click_plan_payload(
             hwnd,
             probe,
+            route=action,
             phone=str(args.phone or ""),
             wechat=str(args.wechat or ""),
             verify_message=str(args.verify_message or ""),
             remark_name=str(args.remark_name or ""),
             remark_code=str(args.remark_code or ""),
             artifact_dir=args.artifact_dir,
+            calibration_only=bool(getattr(args, "calibration_only", False)),
         )
     return {"ok": False, "online": False, "adapter": "win32_ocr", "state": "unsupported_action"}
 
@@ -1586,6 +1622,97 @@ def add_friend_surface_text(ocr_items: list[dict[str, Any]]) -> str:
     return mapped_ocr_surface_text(ocr_items)
 
 
+def add_friend_blocking_prompt_region(
+    item: dict[str, Any],
+    *,
+    geometry: dict[str, Any] | None = None,
+    image_size: tuple[int, int] | None = None,
+) -> dict[str, Any]:
+    width = int((image_size or (0, 0))[0] or (geometry or {}).get("width") or 0)
+    height = int((image_size or (0, 0))[1] or (geometry or {}).get("height") or 0)
+    if width <= 0 or height <= 0:
+        return {"region": "unknown", "sidebar_noise": False, "width": width, "height": height}
+    center_x, center_y = add_friend_item_center(item)
+    split_x = session_split_x(width)
+    nav_right = max(64, min(92, int(width * 0.075)))
+    search_bottom = max(112, min(148, int(height * 0.16)))
+    sidebar_noise = nav_right < center_x < split_x and center_y > search_bottom
+    return {
+        "region": "sidebar_session_list" if sidebar_noise else add_friend_region_for_point(center_x, center_y, (width, height)),
+        "sidebar_noise": sidebar_noise,
+        "width": width,
+        "height": height,
+    }
+
+
+def add_friend_login_or_security_block(
+    ocr_items: list[dict[str, Any]],
+    *,
+    geometry: dict[str, Any] | None = None,
+    image_size: tuple[int, int] | None = None,
+) -> dict[str, Any]:
+    text = add_friend_surface_text(ocr_items)
+    matched_items: list[dict[str, Any]] = []
+    for item in ocr_items:
+        item_text = add_friend_item_text(item)
+        if not item_text:
+            continue
+        item_tokens = [token for token in WECHAT_LOGIN_OR_SECURITY_BLOCK_TOKENS if add_friend_text_has_any(item_text, (token,))]
+        if not item_tokens:
+            continue
+        region = add_friend_blocking_prompt_region(item, geometry=geometry, image_size=image_size)
+        matched_items.append({"text": item_text, "tokens": item_tokens, "region": region})
+    matched = sorted({token for item in matched_items for token in item.get("tokens", [])})
+    if not matched:
+        return {"detected": False, "matched_tokens": [], "surface_text": text}
+    strong_login = {"请重新登录", "登录已过期", "登录失效", "退出登录", "无法继续使用微信"}
+    strong_security = {"账号安全", "登录环境异常", "操作频繁", "账号异常", "被限制", "限制使用"}
+    small_window = int((geometry or {}).get("width") or 0) <= LOGIN_WINDOW_MAX_WIDTH and int((geometry or {}).get("height") or 0) <= LOGIN_WINDOW_MAX_HEIGHT
+    accepted_items: list[dict[str, Any]] = []
+    for item in matched_items:
+        tokens = set(item.get("tokens") or [])
+        item_text = str(item.get("text") or "")
+        item_compact = add_friend_ocr_compact(item_text)
+        item_compact_len = len(item_compact)
+        region = item.get("region") if isinstance(item.get("region"), dict) else {}
+        sidebar_noise = bool(region.get("sidebar_noise"))
+        explanatory_chat_text = (
+            "遇到" in item_compact
+            and "状态" in item_compact
+            and bool(tokens & {"安全验证", "操作频繁", "账号异常"})
+        )
+        if explanatory_chat_text:
+            continue
+        if tokens & strong_login and (small_window or not sidebar_noise):
+            accepted_items.append(item)
+            continue
+        security_prompt_like = item_compact_len <= (44 if small_window else 20)
+        if tokens & strong_security and (not sidebar_noise) and security_prompt_like:
+            accepted_items.append(item)
+            continue
+        if "安全验证" in tokens and not sidebar_noise and item_compact_len <= 24:
+            accepted_items.append(item)
+    if not accepted_items:
+        return {
+            "detected": False,
+            "matched_tokens": matched,
+            "ignored_as_sidebar_preview": True,
+            "matched_items": matched_items,
+            "surface_text": text,
+        }
+    accepted_tokens = sorted({token for item in accepted_items for token in item.get("tokens", [])})
+    account_restricted = any(token in accepted_tokens for token in ("账号安全", "安全验证", "登录环境异常", "操作频繁", "账号异常", "被限制", "限制使用"))
+    return {
+        "detected": True,
+        "matched_tokens": accepted_tokens,
+        "matched_items": accepted_items,
+        "surface_text": text,
+        "state": "account_restricted" if account_restricted else "wechat_window_not_ready",
+        "error_code": ERROR_ACCOUNT_RESTRICTED if account_restricted else ERROR_WECHAT_WINDOW_NOT_READY,
+        "reason": "wechat_account_or_security_prompt" if account_restricted else "wechat_login_required",
+    }
+
+
 def add_friend_item_center(item: dict[str, Any]) -> tuple[int, int]:
     return int(float(item.get("center_x") or 0)), int(float(item.get("center_y") or 0))
 
@@ -1654,13 +1781,66 @@ def add_friend_region_for_item(item: dict[str, Any], image_size: tuple[int, int]
     return add_friend_region_for_point(center_x, center_y, image_size)
 
 
+def add_friend_windows_1080p_reference_plus_button_point_for_geometry(geometry: dict[str, Any]) -> tuple[int, int]:
+    """Windows 1920x1080-oriented plus-entry reference kept from the incoming PR.
+
+    On Windows WeChat this can land in the right conversation pane because the
+    sidebar split and search-row layout differ. Keep it for comparison only.
+    """
+    return windows_1080p_reference_plus_point(
+        geometry,
+        split_x_fn=session_split_x,
+        search_box_point_fn=search_box_point_for_geometry,
+    )
+
+
+def add_friend_windows_plus_button_point_for_geometry(geometry: dict[str, Any]) -> tuple[int, int]:
+    """Windows WeChat plus-entry point beside the sidebar search box."""
+    return windows_plus_point(
+        geometry,
+        split_x_fn=session_split_x,
+        search_box_point_fn=search_box_point_for_geometry,
+    )
+
+
 def add_friend_plus_button_point_for_geometry(geometry: dict[str, Any]) -> tuple[int, int]:
-    width = int(geometry.get("width") or 0)
-    split_x = session_split_x(width)
-    _search_x, search_y = search_box_point_for_geometry(geometry)
-    plus_x = bounded_int(split_x - 16, default=354, minimum=max(230, split_x - 48), maximum=max(260, split_x - 8))
-    plus_y = bounded_int(search_y, default=70, minimum=48, maximum=130)
-    return plus_x, plus_y
+    return add_friend_windows_plus_button_point_for_geometry(geometry)
+
+
+def add_friend_plus_entry_safe_bounds(image_size: tuple[int, int]) -> list[int]:
+    from apps.wechat_ai_customer_service.adapters.add_friend_layout import plus_entry_safe_bounds
+
+    return plus_entry_safe_bounds(image_size, split_x_fn=session_split_x)
+
+
+def find_sidebar_search_anchor_item(ocr_items: list[dict[str, Any]], image_size: tuple[int, int]) -> dict[str, Any] | None:
+    from apps.wechat_ai_customer_service.adapters.add_friend_layout import find_sidebar_search_anchor_item as layout_find_anchor
+
+    return layout_find_anchor(ocr_items, image_size, split_x_fn=session_split_x)
+
+
+def add_friend_plus_entry_target(
+    geometry: dict[str, Any],
+    image_size: tuple[int, int],
+    ocr_items: list[dict[str, Any]] | None = None,
+    *,
+    route_kind: str = "windows",
+) -> dict[str, Any]:
+    return layout_plus_entry_target(
+        geometry,
+        image_size,
+        ocr_items or [],
+        route_kind=route_kind,
+        split_x_fn=session_split_x,
+        search_box_point_fn=search_box_point_for_geometry,
+        region_for_point_fn=add_friend_region_for_point,
+    )
+
+
+def normalize_point_for_add_friend_target(point: Any) -> list[int]:
+    if isinstance(point, (list, tuple)) and len(point) >= 2:
+        return [int(point[0] or 0), int(point[1] or 0)]
+    return [0, 0]
 
 
 def add_friend_text_has_any(text: str, tokens: tuple[str, ...]) -> bool:
@@ -2363,6 +2543,18 @@ def click_add_contact_entry_from_search_result(
         window_rect=None,
     )
     if target is None:
+        surface = classify_add_friend_ocr_surface(result_items, result_shot.size)
+        if surface.get("result_code") == RESULT_ALREADY_FRIEND:
+            return add_friend_completed_result(
+                state="already_friend",
+                result_code=RESULT_ALREADY_FRIEND,
+                current_step="searching_contact",
+                screenshot_path=result_path,
+                annotated_path=annotated_before,
+                targets=[],
+                ocr_items=add_friend_ocr_snapshots(result_items, result_shot.size),
+                result_basis="search_result_profile_has_message_actions",
+            )
         return add_friend_add_contact_entry_not_found_payload(
             phone=query,
             screenshot_path=result_path,
@@ -2391,7 +2583,7 @@ def click_add_contact_entry_from_search_result(
     after_shot, after_path = capture_wechat_window_visible_screen(evidence_hwnd, artifact_dir=str(output_dir), label="add_contact_entry_after_click_window")
     after_items = run_ocr_on_screen_region(after_shot, [0, 0, after_shot.size[0], after_shot.size[1]])
     after_annotated_path = output_dir / "add_contact_entry_after_click_window_annotated.png"
-    after_targets = list(add_friend_invite_form_targets(after_shot.size).values()) if invite_hwnd else []
+    after_targets = list(add_friend_invite_form_targets(after_shot.size, after_items).values()) if invite_hwnd else []
     after_annotated = draw_add_friend_screen_annotation(
         after_shot,
         ocr_items=after_items,
@@ -2454,66 +2646,15 @@ def click_add_contact_entry_from_search_result(
     }
 
 
-def add_friend_invite_form_targets(image_size: tuple[int, int]) -> dict[str, dict[str, Any]]:
-    width, height = image_size
-    input_left = int(max(24, width * 0.07))
-    input_right = int(min(width - 24, width * 0.93))
-    greeting_bounds = [
-        input_left,
-        int(max(78, height * 0.10)),
-        input_right,
-        int(min(height - 280, max(170, height * 0.24))),
-    ]
-    remark_bounds = [
-        input_left,
-        int(max(255, height * 0.31)),
-        input_right,
-        int(min(height - 190, max(335, height * 0.40))),
-    ]
-    confirm_bounds = [
-        int(max(70, width * 0.23)),
-        int(max(height - 86, height * 0.89)),
-        int(min(width - 190, width * 0.50)),
-        int(min(height - 18, height * 0.985)),
-    ]
-    greeting_x, greeting_y = center_of_bounds(greeting_bounds)
-    remark_y = center_of_bounds(remark_bounds)[1]
-    # Click in the left text area instead of the geometric center. On WeChat's
-    # invite form the remark field can fail to focus when clicked near borders.
-    remark_x = int(min(max(remark_bounds[0] + 96, remark_bounds[0] + 16), remark_bounds[2] - 40))
-    confirm_x, confirm_y = center_of_bounds(confirm_bounds)
-    return {
-        "invite_greeting_textarea": fixed_geometry_locator(
-            name="invite_greeting_textarea",
-            label="发送添加朋友申请 textarea",
-            region="invite_form.verify_message",
-            bounds=greeting_bounds,
-            point=[greeting_x, greeting_y],
-            selected_reason="fixed invite form verify-message textarea region",
-            risk="clear_default_then_paste_verify_message",
-            metadata={"image_size": [width, height]},
-        ),
-        "invite_remark_input": fixed_geometry_locator(
-            name="invite_remark_input",
-            label="备注 input",
-            region="invite_form.remark_name",
-            bounds=remark_bounds,
-            point=[remark_x, remark_y],
-            selected_reason="left-biased fixed remark input point avoids border focus loss",
-            risk="clear_default_then_paste_remark_name",
-            metadata={"image_size": [width, height]},
-        ),
-        "invite_confirm_button": fixed_geometry_locator(
-            name="invite_confirm_button",
-            label="确定 button",
-            region="invite_form.confirm_button",
-            bounds=confirm_bounds,
-            point=[confirm_x, confirm_y],
-            selected_reason="fixed lower-left green confirm button region",
-            risk="click_confirm_after_text_review",
-            metadata={"image_size": [width, height]},
-        ),
-    }
+def add_friend_invite_form_targets(
+    image_size: tuple[int, int],
+    ocr_items: list[dict[str, Any]] | None = None,
+) -> dict[str, dict[str, Any]]:
+    return semantic_invite_form_targets(
+        image_size,
+        ocr_items or [],
+        region_for_point_fn=add_friend_region_for_point,
+    )
 
 
 def paste_invite_form_text(
@@ -2605,11 +2746,11 @@ def fill_add_friend_invite_form_and_confirm(
     pause_seconds = add_friend_paced_pause("verify", reason="before_invite_form_capture")
     timings.append({"name": "before_invite_form_capture_pause", "seconds": round(pause_seconds, 3)})
     before_shot, before_path = capture_wechat_window_visible_screen(hwnd, artifact_dir=str(output_dir), label="add_friend_invite_form_before_fill_window")
-    before_targets_map = add_friend_invite_form_targets(before_shot.size)
-    before_targets = list(before_targets_map.values())
     before_ocr_started_at = time.perf_counter()
     before_items = run_ocr_on_screen_region(before_shot, [0, 0, before_shot.size[0], before_shot.size[1]])
     timings.append({"name": "invite_form_before_fill_ocr", "seconds": round(time.perf_counter() - before_ocr_started_at, 3), "ocr_count": len(before_items)})
+    before_targets_map = add_friend_invite_form_targets(before_shot.size, before_items)
+    before_targets = list(before_targets_map.values())
     before_annotated_path = output_dir / "add_friend_invite_form_before_fill_window_annotated.png"
     before_annotated = draw_add_friend_screen_annotation(
         before_shot,
@@ -2640,11 +2781,17 @@ def fill_add_friend_invite_form_and_confirm(
     pause_seconds = add_friend_paced_pause("verify", reason="after_invite_form_fill_before_review_capture")
     timings.append({"name": "after_invite_form_fill_before_review_capture_pause", "seconds": round(pause_seconds, 3)})
     filled_shot, filled_path = capture_wechat_window_visible_screen(hwnd, artifact_dir=str(output_dir), label="add_friend_invite_form_filled_before_confirm_window")
-    filled_targets_map = add_friend_invite_form_targets(filled_shot.size)
-    filled_targets = list(filled_targets_map.values())
     filled_ocr_started_at = time.perf_counter()
     filled_items = run_ocr_on_screen_region(filled_shot, [0, 0, filled_shot.size[0], filled_shot.size[1]])
     timings.append({"name": "invite_form_filled_ocr", "seconds": round(time.perf_counter() - filled_ocr_started_at, 3), "ocr_count": len(filled_items)})
+    filled_targets_map = add_friend_invite_form_targets(filled_shot.size, filled_items)
+    filled_targets = list(filled_targets_map.values())
+    field_verification = invite_form_field_verification(
+        verify_message=clean_verify_message,
+        remark_name=clean_remark_name,
+        remark_code=clean_remark_code,
+        ocr_items=filled_items,
+    )
     filled_annotated_path = output_dir / "add_friend_invite_form_filled_before_confirm_window_annotated.png"
     filled_annotated = draw_add_friend_screen_annotation(
         filled_shot,
@@ -2708,6 +2855,7 @@ def fill_add_friend_invite_form_and_confirm(
             "annotated_path": filled_annotated,
             "targets": filled_targets,
             "ocr_items": add_friend_ocr_snapshots(filled_items, filled_shot.size),
+            "field_verification": field_verification,
         },
         "after": {
             "screenshot_path": after_path,
@@ -2717,6 +2865,7 @@ def fill_add_friend_invite_form_and_confirm(
         },
         "greeting": greeting_result,
         "remark_fill": remark_result,
+        "field_verification": field_verification,
         "confirm": confirm_result,
         "server_report_payload": final_status.get("server_report_payload") or {"task.current_step": "invite_confirm_clicked"},
         "timings": timings,
@@ -3138,7 +3287,7 @@ def wait_for_add_friend_invite_form_window(
                 annotated = draw_add_friend_screen_annotation(
                     screenshot,
                     ocr_items=ocr_items,
-                    targets=list(add_friend_invite_form_targets(screenshot.size).values()),
+                    targets=list(add_friend_invite_form_targets(screenshot.size, ocr_items).values()),
                     output_path=annotated_path,
                     window_rect=None,
                 )
@@ -3237,18 +3386,54 @@ def click_add_friend_menu_entry_and_capture(
     dialog_probe = wait_for_add_friend_dialog_window(exclude_hwnd=hwnd, output_dir=output_dir)
     next_hwnd = int(dialog_probe.get("hwnd") or 0) if dialog_probe.get("ok") else 0
     evidence_hwnd = next_hwnd or hwnd
-    geometry = get_window_geometry(evidence_hwnd)
-    screenshot, screenshot_path = capture_wechat_window_visible_screen(
-        evidence_hwnd,
-        artifact_dir=str(output_dir),
-        label="add_friend_menu_entry_after_click_window",
-    )
+    capture_error = ""
+    dialog_handle_invalid = False
+    try:
+        geometry = get_window_geometry(evidence_hwnd)
+        screenshot, screenshot_path = capture_wechat_window_visible_screen(
+            evidence_hwnd,
+            artifact_dir=str(output_dir),
+            label="add_friend_menu_entry_after_click_window",
+        )
+    except Exception as exc:
+        capture_error = repr(exc)
+        if evidence_hwnd == hwnd:
+            return {
+                "clicked": False,
+                "menu_clicked": bool(click_result.get("ok")),
+                "next_hwnd": 0,
+                "dialog_window": dialog_probe,
+                "reason": "add_friend_menu_entry_after_click_capture_failed",
+                "target": target,
+                "hover": hover_result,
+                "click": click_result,
+                "timings": timings,
+                "error": capture_error,
+            }
+        dialog_handle_invalid = True
+        stale_hwnd = evidence_hwnd
+        evidence_hwnd = hwnd
+        next_hwnd = 0
+        geometry = get_window_geometry(evidence_hwnd)
+        screenshot, screenshot_path = capture_wechat_window_visible_screen(
+            evidence_hwnd,
+            artifact_dir=str(output_dir),
+            label="add_friend_menu_entry_after_click_fallback_main_window",
+        )
+        dialog_probe = {
+            **dialog_probe,
+            "stale_hwnd": stale_hwnd,
+            "fallback_hwnd": hwnd,
+            "fallback_reason": "dialog_window_handle_invalid",
+            "fallback_error": capture_error,
+        }
     ocr_items: list[dict[str, Any]] = []
     readiness = {
-        "ok": bool(dialog_probe.get("ok")),
+        "ok": bool(dialog_probe.get("ok")) and not dialog_handle_invalid,
         "stage": "after_add_friend_menu_entry_click",
         "capture_mode": "wechat_window_visible",
         "dialog_window_found": bool(dialog_probe.get("ok")),
+        "dialog_handle_invalid": dialog_handle_invalid,
         "ocr_count": 0,
         "ocr_skipped": True,
     }
@@ -3265,15 +3450,20 @@ def click_add_friend_menu_entry_and_capture(
         window_rect=None,
     )
     return {
-        "clicked": bool(click_result.get("ok")) and bool(dialog_probe.get("ok")),
+        "clicked": bool(click_result.get("ok")) and bool(dialog_probe.get("ok")) and not dialog_handle_invalid,
         "menu_clicked": bool(click_result.get("ok")),
         "next_hwnd": next_hwnd,
         "dialog_window": dialog_probe,
-        "reason": "add_friend_dialog_window_ready" if dialog_probe.get("ok") else "add_friend_dialog_window_not_found_after_menu_click",
+        "reason": (
+            "add_friend_dialog_window_handle_invalid_after_menu_click"
+            if dialog_handle_invalid
+            else "add_friend_dialog_window_ready" if dialog_probe.get("ok") else "add_friend_dialog_window_not_found_after_menu_click"
+        ),
         "target": target,
         "hover": hover_result,
         "click": click_result,
         "timings": timings,
+        "error": capture_error,
         "geometry": geometry,
         "screenshot_path": screenshot_path,
         "annotated_path": annotated,
@@ -3328,6 +3518,11 @@ def input_add_friend_query_and_search(
     timings.append({"name": "add_friend_search_input_click", "seconds": round(time.perf_counter() - input_click_started_at, 3), "result": input_click_result})
     pause_seconds = add_friend_paced_pause("input", reason="after_add_friend_search_input_click_before_typing")
     timings.append({"name": "after_add_friend_search_input_click_before_typing_pause", "seconds": round(pause_seconds, 3)})
+    clear_started_at = time.perf_counter()
+    search_x = int(input_target.get("x") or 0)
+    search_y = int(input_target.get("y") or 0)
+    clear_result = clear_add_friend_sidebar_search_box(hwnd, search_x, search_y, target_hint=query)
+    timings.append({"name": "clear_add_friend_search_box", "seconds": round(time.perf_counter() - clear_started_at, 3), "result": clear_result})
 
     input_attempts: list[dict[str, Any]] = []
     verified = False
@@ -3340,8 +3535,9 @@ def input_add_friend_query_and_search(
         type_started_at = time.perf_counter()
         type_result = type_add_friend_query_like_human_for_entry(query)
         timings.append({"name": f"type_query_attempt_{attempt}", "seconds": round(time.perf_counter() - type_started_at, 3), "result": type_result})
-        pause_seconds = add_friend_paced_pause("verify", reason=f"after_query_type_attempt_{attempt}_before_verify")
-        timings.append({"name": f"after_query_type_attempt_{attempt}_before_verify_pause", "seconds": round(pause_seconds, 3)})
+        wait_started_at = time.perf_counter()
+        add_friend_wait_before_ocr("after_search_input_before_ocr")
+        timings.append({"name": f"after_query_type_attempt_{attempt}_before_verify_pause", "seconds": round(time.perf_counter() - wait_started_at, 3)})
         latest_verify_shot, latest_verify_path = capture_wechat_window_visible_screen(hwnd, artifact_dir=str(output_dir), label=f"add_friend_query_verify_attempt_{attempt}_window")
         verify_region = add_friend_page_search_region(latest_verify_shot.size)
         verify_ocr_started_at = time.perf_counter()
@@ -3728,12 +3924,17 @@ def write_add_friend_entry_click_review(output_dir: Path, payload: dict[str, Any
     summary = {
         "state": payload.get("state"),
         "note": payload.get("note"),
+        "calibration_only": bool(payload.get("calibration_only")),
+        "no_clicks_performed": bool(payload.get("no_clicks_performed")),
         "verify_message": payload.get("verify_message"),
         "remark_name": payload.get("remark_name"),
         "remark_code": payload.get("remark_code"),
         "remark_code_valid": payload.get("remark_code_valid"),
         "validation_errors": payload.get("validation_errors") or [],
         "legacy_remark_fallback": payload.get("legacy_remark_fallback"),
+        "device_profile": payload.get("device_profile") or (payload.get("window_probe") or {}).get("device_profile"),
+        "operator_guard": payload.get("operator_guard") or (payload.get("window_probe") or {}).get("operator_guard"),
+        "operator_guard_release": payload.get("operator_guard_release") or {},
         "timings": payload.get("timings") or [],
     }
     diagnostic_events = payload.get("diagnostic_events")
@@ -3763,24 +3964,422 @@ def add_friend_entry_click_plan_payload(
     hwnd: int,
     probe: dict[str, Any],
     *,
+    route: str = ADD_FRIEND_MAIN_ROUTE,
     phone: str = "",
     wechat: str = "",
     verify_message: str = "",
     remark_name: str = "",
     remark_code: str = "",
     artifact_dir: str | None = None,
+    calibration_only: bool = False,
 ) -> dict[str, Any]:
-    return run_add_friend_entry_click_plan_flow(
-        sys.modules[__name__],
+    try:
+        geometry = get_window_geometry(hwnd)
+    except Exception as exc:
+        geometry = {}
+        geometry_check = {"ok": False, "reason": "wechat_window_geometry_unavailable", "error": repr(exc)}
+    else:
+        geometry_check = validate_capture_geometry(geometry)
+    quick_login = probe.get("quick_login") if isinstance(probe.get("quick_login"), dict) else {}
+    if not geometry_check.get("ok") or quick_login.get("detected"):
+        output_dir = Path(artifact_dir) if artifact_dir else add_friend_route_artifact_root(PROJECT_ROOT, route) / time.strftime("%Y%m%d_%H%M%S")
+        output_dir.mkdir(parents=True, exist_ok=True)
+        reason = str(quick_login.get("reason") or geometry_check.get("reason") or "wechat_window_not_ready")
+        payload = add_friend_failure_payload(
+            error_code=ERROR_WECHAT_WINDOW_NOT_READY,
+            message="WeChat main window is not ready for add_friend automation.",
+            steps=["preflight_window_ready"],
+            query=normalize_add_friend_query(phone=phone, wechat=wechat),
+            phone=phone,
+            wechat=wechat,
+            probe=probe,
+            evidence={
+                "geometry": geometry,
+                "geometry_check": geometry_check,
+                "quick_login": quick_login,
+                "reason": reason,
+                "manual_action_required": "open_or_login_wechat_main_window",
+            },
+            state="wechat_window_not_ready",
+        )
+        payload["task_status"] = "failed"
+        payload["current_step"] = "preflight_window_ready"
+        payload["server_report_payload"] = mapped_add_friend_server_report_payload(
+            task_status="failed",
+            error_code=ERROR_WECHAT_WINDOW_NOT_READY,
+            current_step="preflight_window_ready",
+        )
+        payload["plan_path"] = str(output_dir / ADD_FRIEND_ENTRY_CLICK_PLAN_JSON)
+        payload["review_path"] = write_add_friend_entry_click_review(output_dir, payload)
+        Path(str(payload["plan_path"])).write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+        return payload
+    output_dir = Path(artifact_dir) if artifact_dir else add_friend_route_artifact_root(PROJECT_ROOT, route) / time.strftime("%Y%m%d_%H%M%S")
+    output_dir.mkdir(parents=True, exist_ok=True)
+    device_profile = add_friend_device_profile(hwnd, geometry=geometry, route=route)
+    probe = dict(probe or {})
+    probe["device_profile"] = device_profile
+    if calibration_only:
+        return add_friend_calibration_payload(
+            hwnd,
+            probe,
+            geometry=geometry,
+            route=route,
+            phone=phone,
+            wechat=wechat,
+            verify_message=verify_message,
+            remark_name=remark_name,
+            remark_code=remark_code,
+            output_dir=output_dir,
+        )
+    pre_click_readiness = add_friend_pre_click_main_window_readiness(
         hwnd,
-        probe,
-        phone=phone,
-        wechat=wechat,
-        verify_message=verify_message,
-        remark_name=remark_name,
-        remark_code=remark_code,
-        artifact_dir=artifact_dir,
+        geometry,
+        route=route,
+        output_dir=output_dir,
     )
+    probe["add_friend_pre_click_main_window_readiness"] = pre_click_readiness
+    if not pre_click_readiness.get("ok"):
+        state = str(pre_click_readiness.get("state") or "wechat_main_surface_not_ready")
+        error_code = str(pre_click_readiness.get("error_code") or ERROR_WECHAT_WINDOW_NOT_READY)
+        payload = add_friend_failure_payload(
+            error_code=error_code,
+            message="WeChat main window is not foreground or not on the add_friend entry surface.",
+            steps=["preflight_main_surface_ready"],
+            query=normalize_add_friend_query(phone=phone, wechat=wechat),
+            phone=phone,
+            wechat=wechat,
+            probe=probe,
+            evidence={
+                "geometry": geometry,
+                "geometry_check": geometry_check,
+                "pre_click_readiness": pre_click_readiness,
+                "manual_action_required": "run_wechat_startup_self_check_or_bring_wechat_main_window_foreground",
+            },
+            state=state,
+        )
+        payload["task_status"] = "failed"
+        payload["current_step"] = "preflight_main_surface_ready"
+        payload["no_clicks_performed"] = True
+        payload["wechat_ui_action_attempted"] = False
+        payload["calibration_only"] = False
+        payload["route"] = route
+        payload["verify_message"] = verify_message
+        payload["remark_name"] = remark_name
+        payload["remark_code"] = remark_code
+        payload["server_report_payload"] = mapped_add_friend_server_report_payload(
+            task_status="failed",
+            error_code=error_code,
+            current_step="preflight_main_surface_ready",
+        )
+        payload["plan_path"] = str(output_dir / ADD_FRIEND_ENTRY_CLICK_PLAN_JSON)
+        payload["review_path"] = write_add_friend_entry_click_review(output_dir, payload)
+        Path(str(payload["plan_path"])).write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+        return payload
+    operator_guard = start_add_friend_operator_guard(route=route, artifact_dir=str(output_dir))
+    if operator_guard.get("ok") is not True:
+        payload = add_friend_failure_payload(
+            error_code=ERROR_OPERATOR_GUARD_NOT_READY,
+            message="Add-friend RPA operator guard is not ready; the click flow was not started.",
+            steps=["operator_guard_ready"],
+            query=normalize_add_friend_query(phone=phone, wechat=wechat),
+            phone=phone,
+            wechat=wechat,
+            probe=probe,
+            evidence={
+                "geometry": geometry,
+                "geometry_check": geometry_check,
+                "operator_guard": operator_guard,
+                "manual_action_required": "check_rpa_floating_ball_operator_guard",
+            },
+            state="operator_guard_not_ready",
+        )
+        payload["task_status"] = "failed"
+        payload["current_step"] = "operator_guard_ready"
+        payload["server_report_payload"] = mapped_add_friend_server_report_payload(
+            task_status="failed",
+            error_code=ERROR_OPERATOR_GUARD_NOT_READY,
+            current_step="operator_guard_ready",
+        )
+        payload["plan_path"] = str(output_dir / ADD_FRIEND_ENTRY_CLICK_PLAN_JSON)
+        payload["review_path"] = write_add_friend_entry_click_review(output_dir, payload)
+        Path(str(payload["plan_path"])).write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+        return payload
+
+    flow_probe = dict(probe)
+    flow_probe["operator_guard"] = operator_guard
+    payload: dict[str, Any] = {}
+    try:
+        payload = run_add_friend_entry_click_plan_flow(
+            sys.modules[__name__],
+            hwnd,
+            flow_probe,
+            phone=phone,
+            wechat=wechat,
+            verify_message=verify_message,
+            remark_name=remark_name,
+            remark_code=remark_code,
+            artifact_dir=str(output_dir),
+            route=route,
+        )
+        payload["operator_guard"] = operator_guard
+    finally:
+        release = stop_add_friend_operator_guard(operator_guard, reason="add_friend_entry_click_plan_finished")
+        if isinstance(payload, dict):
+            payload["operator_guard_release"] = release
+            persist_add_friend_operator_guard_release(payload, release)
+    return payload
+
+
+ADD_FRIEND_FOREGROUND_READY_REASONS = {
+    "foreground_matches_target",
+    "foreground_root_matches_target",
+}
+
+
+def add_friend_focus_guard_ready(focus_guard: dict[str, Any]) -> dict[str, Any]:
+    reason = str((focus_guard or {}).get("reason") or "")
+    ok = bool((focus_guard or {}).get("ok")) and reason in ADD_FRIEND_FOREGROUND_READY_REASONS
+    return {
+        "ok": ok,
+        "reason": reason or "foreground_guard_missing",
+        "allowed_reasons": sorted(ADD_FRIEND_FOREGROUND_READY_REASONS),
+        "focus_guard": focus_guard or {},
+    }
+
+
+def add_friend_pre_click_readiness_decision(
+    *,
+    focus_guard: dict[str, Any],
+    surface_readiness: dict[str, Any],
+) -> dict[str, Any]:
+    focus_ready = add_friend_focus_guard_ready(focus_guard)
+    if not focus_ready.get("ok"):
+        return {
+            "ok": False,
+            "state": "wechat_window_not_foreground",
+            "error_code": ERROR_WECHAT_WINDOW_NOT_READY,
+            "reason": str(focus_ready.get("reason") or "foreground_not_wechat_target"),
+            "focus_ready": focus_ready,
+            "surface_readiness": surface_readiness,
+            "no_clicks_performed": True,
+        }
+    if not bool((surface_readiness or {}).get("ok")):
+        return {
+            "ok": False,
+            "state": str((surface_readiness or {}).get("state") or "wechat_main_surface_not_ready"),
+            "error_code": str((surface_readiness or {}).get("error_code") or ERROR_WECHAT_WINDOW_NOT_READY),
+            "reason": str((surface_readiness or {}).get("reason") or "add_friend_entry_surface_not_confirmed"),
+            "focus_ready": focus_ready,
+            "surface_readiness": surface_readiness or {},
+            "no_clicks_performed": True,
+        }
+    return {
+        "ok": True,
+        "state": "wechat_main_surface_ready",
+        "error_code": "",
+        "reason": "foreground_and_main_surface_ready",
+        "focus_ready": focus_ready,
+        "surface_readiness": surface_readiness or {},
+    }
+
+
+def add_friend_pre_click_main_window_readiness(
+    hwnd: int,
+    geometry: dict[str, Any],
+    *,
+    route: str,
+    output_dir: Path,
+) -> dict[str, Any]:
+    focus_guard = foreground_window_matches_target(hwnd)
+    try:
+        screenshot, screenshot_path = capture_wechat_window_visible_screen(
+            hwnd,
+            artifact_dir=str(output_dir),
+            label="add_friend_pre_click_main_window",
+        )
+    except Exception as exc:
+        surface_readiness = {
+            "ok": False,
+            "state": "wechat_main_surface_not_ready",
+            "error_code": ERROR_WECHAT_WINDOW_NOT_READY,
+            "stage": "formal_pre_click",
+            "reason": "pre_click_capture_failed",
+            "error": repr(exc),
+            "ocr_count": 0,
+        }
+        decision = add_friend_pre_click_readiness_decision(
+            focus_guard=focus_guard,
+            surface_readiness=surface_readiness,
+        )
+        return {
+            **decision,
+            "stage": "formal_pre_click",
+            "focus_guard": focus_guard,
+            "screenshot_path": "",
+            "annotated_path": "",
+            "ocr_count": 0,
+        }
+
+    ocr_started_at = time.perf_counter()
+    ocr_items = run_ocr_on_screen_region(screenshot, [0, 0, screenshot.size[0], screenshot.size[1]])
+    ocr_seconds = round(time.perf_counter() - ocr_started_at, 3)
+    route_kind = "windows_1080p_reference" if str(route or "") == ADD_FRIEND_WINDOWS_1080P_REFERENCE_ROUTE else "windows"
+    plus_target = add_friend_plus_entry_target(geometry, screenshot.size, ocr_items, route_kind=route_kind)
+    surface_readiness = add_friend_surface_readiness(
+        screenshot,
+        ocr_items,
+        geometry,
+        stage="formal_pre_click",
+        require_main_surface=True,
+    )
+    annotated_path = output_dir / "add_friend_pre_click_main_window_annotated.png"
+    annotated = draw_add_friend_screen_annotation(
+        screenshot,
+        ocr_items=ocr_items,
+        targets=[plus_target],
+        output_path=annotated_path,
+        window_rect=None,
+    )
+    decision = add_friend_pre_click_readiness_decision(
+        focus_guard=focus_guard,
+        surface_readiness=surface_readiness,
+    )
+    return {
+        **decision,
+        "stage": "formal_pre_click",
+        "focus_guard": focus_guard,
+        "screenshot_path": screenshot_path,
+        "annotated_path": annotated,
+        "ocr_count": len(ocr_items),
+        "ocr_seconds": ocr_seconds,
+        "planned_targets": [plus_target],
+        "ocr_items": add_friend_ocr_snapshots(ocr_items, screenshot.size),
+        "surface_readiness": surface_readiness,
+    }
+
+
+def persist_add_friend_operator_guard_release(payload: dict[str, Any], release: dict[str, Any]) -> None:
+    plan_path = Path(str(payload.get("plan_path") or ""))
+    if not str(plan_path):
+        return
+    try:
+        if plan_path.exists():
+            saved = json.loads(plan_path.read_text(encoding="utf-8"))
+            if isinstance(saved, dict):
+                if payload.get("operator_guard") and "operator_guard" not in saved:
+                    saved["operator_guard"] = payload.get("operator_guard")
+                if payload.get("device_profile") and "device_profile" not in saved:
+                    saved["device_profile"] = payload.get("device_profile")
+                saved["operator_guard_release"] = release
+                payload.update({"diagnostic_events": saved.get("diagnostic_events") or payload.get("diagnostic_events")})
+                plan_path.write_text(json.dumps(saved, ensure_ascii=False, indent=2), encoding="utf-8")
+                review_path = write_add_friend_entry_click_review(plan_path.parent, saved)
+                payload["review_path"] = review_path
+                return
+        plan_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+        payload["review_path"] = write_add_friend_entry_click_review(plan_path.parent, payload)
+    except Exception as exc:
+        payload["operator_guard_release_persist_error"] = repr(exc)
+
+
+def add_friend_calibration_payload(
+    hwnd: int,
+    probe: dict[str, Any],
+    *,
+    geometry: dict[str, Any],
+    route: str,
+    phone: str,
+    wechat: str,
+    verify_message: str,
+    remark_name: str,
+    remark_code: str,
+    output_dir: Path,
+) -> dict[str, Any]:
+    screenshot, screenshot_path = capture_wechat_window_visible_screen(
+        hwnd,
+        artifact_dir=str(output_dir),
+        label="add_friend_calibration_main_window",
+    )
+    ocr_started_at = time.perf_counter()
+    ocr_items = run_ocr_on_screen_region(screenshot, [0, 0, screenshot.size[0], screenshot.size[1]])
+    route_kind = "windows_1080p_reference" if str(route or "") == ADD_FRIEND_WINDOWS_1080P_REFERENCE_ROUTE else "windows"
+    plus_target = add_friend_plus_entry_target(geometry, screenshot.size, ocr_items, route_kind=route_kind)
+    readiness = add_friend_surface_readiness(screenshot, ocr_items, geometry, stage="calibration")
+    annotated_path = output_dir / "add_friend_calibration_main_window_annotated.png"
+    annotated = draw_add_friend_screen_annotation(
+        screenshot,
+        ocr_items=ocr_items,
+        targets=[plus_target],
+        output_path=annotated_path,
+        window_rect=None,
+    )
+    device_profile = add_friend_device_profile(
+        hwnd,
+        geometry=geometry,
+        screenshot_size=screenshot.size,
+        route=route,
+    )
+    calibration_ready = bool(readiness.get("ok"))
+    payload = {
+        "ok": calibration_ready,
+        "state": "calibration_ready" if readiness.get("ok") else "calibration_surface_not_ready",
+        "task_status": "calibration_only",
+        "result_code": "",
+        "error_code": "" if readiness.get("ok") else str(readiness.get("error_code") or ERROR_WECHAT_WINDOW_NOT_READY),
+        "current_step": "calibration",
+        "route": route,
+        "query": normalize_add_friend_query(phone=phone, wechat=wechat),
+        "phone": phone,
+        "wechat": wechat,
+        "verify_message": verify_message,
+        "remark_name": remark_name,
+        "remark_code": remark_code,
+        "remark_code_valid": bool(str(remark_code or "") and str(remark_code or "") in str(remark_name or "")),
+        "calibration_only": True,
+        "no_clicks_performed": True,
+        "window_probe": probe,
+        "geometry": geometry,
+        "device_profile": device_profile,
+        "before": {
+            "screenshot_path": screenshot_path,
+            "annotated_path": annotated,
+            "capture_mode": "screen_visible",
+            "readiness": readiness,
+            "ocr_items": add_friend_ocr_snapshots(ocr_items, screenshot.size),
+            "planned_targets": [plus_target],
+            "ocr_seconds": round(time.perf_counter() - ocr_started_at, 3),
+        },
+        "timings": [
+            {
+                "name": "calibration_full_window_ocr",
+                "seconds": round(time.perf_counter() - ocr_started_at, 3),
+                "ocr_count": len(ocr_items),
+            }
+        ],
+        "diagnostic_events": [
+            {
+                "step_id": "add_friend_calibration",
+                "title": "add_friend 自适应校准",
+                "status": "completed" if readiness.get("ok") else "failed",
+                "state_before": "main_window",
+                "state_after": "calibration_ready" if readiness.get("ok") else "calibration_surface_not_ready",
+                "artifacts": {"raw": screenshot_path, "annotated": annotated},
+                "targets": [plus_target],
+                "selected_target": plus_target,
+                "result": {
+                    "ok": bool(readiness.get("ok")),
+                    "readiness": readiness,
+                    "device_profile": device_profile,
+                    "no_clicks_performed": True,
+                },
+            }
+        ],
+    }
+    payload["plan_path"] = str(output_dir / ADD_FRIEND_ENTRY_CLICK_PLAN_JSON)
+    payload["review_path"] = write_add_friend_entry_click_review(output_dir, payload)
+    Path(str(payload["plan_path"])).write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    return payload
+
 
 def add_friend_failure_payload(
     *,
@@ -3818,9 +4417,32 @@ def add_friend_surface_readiness(
     geometry: dict[str, Any],
     *,
     stage: str,
+    require_main_surface: bool | None = None,
 ) -> dict[str, Any]:
     blank_render = detect_blank_render(screenshot, ocr_items, geometry=geometry)
     shell_probe = auxiliary_wechat_shell_like(ocr_items, geometry=geometry)
+    screenshot_size = getattr(
+        screenshot,
+        "size",
+        (
+            int(geometry.get("width") or 0),
+            int(geometry.get("height") or 0),
+        ),
+    )
+    blocking_prompt = add_friend_login_or_security_block(ocr_items, geometry=geometry, image_size=screenshot_size)
+    if blocking_prompt.get("detected"):
+        return {
+            "ok": False,
+            "error_code": blocking_prompt.get("error_code") or ERROR_WECHAT_WINDOW_NOT_READY,
+            "state": blocking_prompt.get("state") or "wechat_window_not_ready",
+            "stage": stage,
+            "reason": blocking_prompt.get("reason") or "wechat_login_or_security_prompt",
+            "blocking_prompt": blocking_prompt,
+            "render_probe": blank_render,
+            "shell_probe": shell_probe,
+            "ocr_count": len(ocr_items),
+            "ocr_texts": [item.get("text") for item in ocr_items[:20]],
+        }
     if blank_render.get("detected"):
         return {
             "ok": False,
@@ -3857,12 +4479,54 @@ def add_friend_surface_readiness(
             "ocr_count": len(ocr_items),
             "ocr_texts": [],
         }
+    main_surface = add_friend_main_entry_surface_evidence(ocr_items, screenshot_size)
+    main_surface_required = stage == "calibration" if require_main_surface is None else bool(require_main_surface)
+    if main_surface_required and not main_surface.get("ok"):
+        return {
+            "ok": False,
+            "error_code": ERROR_WECHAT_WINDOW_NOT_READY,
+            "state": "wechat_main_surface_not_ready",
+            "stage": stage,
+            "reason": str(main_surface.get("reason") or "add_friend_entry_surface_not_confirmed"),
+            "main_surface": main_surface,
+            "render_probe": blank_render,
+            "shell_probe": shell_probe,
+            "ocr_count": len(ocr_items),
+            "ocr_texts": [item.get("text") for item in ocr_items[:20]],
+        }
     return {
         "ok": True,
         "stage": stage,
+        "main_surface": main_surface,
         "render_probe": blank_render,
         "shell_probe": shell_probe,
         "ocr_count": len(ocr_items),
+    }
+
+
+def add_friend_main_entry_surface_evidence(ocr_items: list[dict[str, Any]], image_size: tuple[int, int]) -> dict[str, Any]:
+    search_anchor = find_sidebar_search_anchor_item(ocr_items, image_size)
+    if search_anchor is not None:
+        return {
+            "ok": True,
+            "reason": "sidebar_search_anchor_detected",
+            "anchor": add_friend_item_snapshot(search_anchor, image_size),
+        }
+    text = add_friend_surface_text(ocr_items)
+    compact = add_friend_ocr_compact(text)
+    has_wechat_sidebar = any(token in compact for token in ("通讯录", "聊天", "文件传输助手", "微信团队"))
+    has_browser_like_text = any(token.lower() in compact.lower() for token in ("127.0.0.1", "localhost", "github", "twitter", "provider", "http"))
+    if has_wechat_sidebar and not has_browser_like_text:
+        return {
+            "ok": True,
+            "reason": "wechat_sidebar_text_detected",
+            "surface_text_sample": [item.get("text") for item in ocr_items[:12]],
+        }
+    return {
+        "ok": False,
+        "reason": "sidebar_search_anchor_missing_or_non_wechat_content",
+        "browser_like_text": has_browser_like_text,
+        "surface_text_sample": [item.get("text") for item in ocr_items[:12]],
     }
 
 
@@ -3873,6 +4537,7 @@ def add_friend_human_pause(min_ms: int, max_ms: int | None = None, *, reason: st
     Keep mouse, keyboard and OCR phases strictly separated by visible human
     pauses so the flow does not look like a burst of synthetic operations.
     """
+    checkpoint = add_friend_operator_guard_checkpoint(reason=f"pause:{reason or 'add_friend'}")
     multiplier = bounded_float(
         os.getenv("WECHAT_WIN32_OCR_ADD_FRIEND_HUMAN_PACE_MULTIPLIER"),
         default=1.0,
@@ -3891,6 +4556,7 @@ def add_friend_human_pause(min_ms: int, max_ms: int | None = None, *, reason: st
             "max_ms": high,
             "delay_seconds": delay,
             "pace_multiplier": multiplier,
+            "operator_guard_checkpoint": checkpoint,
         },
     )
     return delay
@@ -4791,11 +5457,11 @@ def input_text_region_bounds(geometry: dict[str, Any]) -> tuple[int, int, int, i
     width = int(geometry.get("width") or 0)
     height = int(geometry.get("height") or 0)
     left = max(session_split_x(width) + 24, int(width * 0.36))
-    top = max(int(height * 0.74), height - 190)
+    top = max(int(height * 0.79), height - 180)
     right = max(left + 20, width - 95)
-    bottom = min(height - 62, height)
+    bottom = min(height - 58, height)
     if bottom <= top:
-        top = max(0, int(height * 0.78))
+        top = max(0, int(height * 0.84))
         bottom = max(top + 1, height - 58)
     return (left, top, right, bottom)
 
@@ -4850,16 +5516,16 @@ def input_text_region_state(
     # Treat a uniformly dark crop without OCR or bright text strokes as blank;
     # otherwise the send guard will repeatedly refuse to type into an empty box.
     dark_theme_blank_like = bool(
-        ocr_hits == 0
-        and dark_ratio >= 0.90
+        dark_ratio >= 0.90
         and mean <= 90.0
         and bright_ratio <= 0.002
     )
     pixel_visible = dark_ratio >= INPUT_TEXT_DARK_RATIO_MIN and not dark_theme_blank_like
     # OCR boxes can drift into the lower chat/input boundary on fresh captures.
-    # Treat OCR as draft evidence only when the crop also contains text-like
-    # dark pixels; otherwise a blank white input area would block safe typing.
-    ocr_visible = bool(ocr_hits > 0 and dark_ratio >= INPUT_TEXT_DARK_RATIO_MIN / 3.0)
+    # Treat OCR as draft evidence only when the crop is not a uniformly dark
+    # blank input box; otherwise dark-mode backgrounds with boundary OCR noise
+    # block safe typing in an empty box.
+    ocr_visible = bool(ocr_hits > 0 and not dark_theme_blank_like and dark_ratio >= INPUT_TEXT_DARK_RATIO_MIN / 3.0)
     has_visible_text = bool(pixel_visible or ocr_visible)
     return {
         "has_visible_text": has_visible_text,
@@ -5907,6 +6573,19 @@ def send_with_guarded_clicks(
             "paste": paste_result,
             "window_guard": focus_guard,
         }
+    input_point = paste_result.get("point")
+    if isinstance(input_point, list) and len(input_point) >= 2:
+        human_client_click(hwnd, int(input_point[0]), int(input_point[1]))
+        humanized_action_sleep(90, 210)
+        focus_guard = recover_send_window_guard(hwnd, max_attempts=1)
+        if not focus_guard.get("ok"):
+            return {
+                "ok": False,
+                "reason": "send_focus_guard_failed_after_input_refocus",
+                "error": "WeChat lost foreground focus after input refocus; abort before send trigger.",
+                "paste": paste_result,
+                "window_guard": focus_guard,
+            }
     trigger_mode = normalize_send_trigger_mode(os.getenv("WECHAT_WIN32_OCR_SEND_TRIGGER_MODE"))
     trigger_result = safe_send_trigger(
         hwnd,
@@ -6192,17 +6871,19 @@ def relative_rect(rect: dict[str, int], geometry: dict[str, Any]) -> dict[str, i
 def rect_in_input_area(rect: dict[str, int], geometry: dict[str, Any]) -> bool:
     rel = relative_rect(rect, geometry)
     width = int(geometry.get("width") or 0)
+    height = int(geometry.get("height") or 0)
     if rel["width"] <= 80 or rel["height"] <= 12:
         return False
     if rel["right"] <= session_split_x(width) + 100:
         return False
     bounds = input_text_region_bounds(geometry)
     left, top, right, bottom = bounds
+    draft_top = min(top, max(int(height * 0.79), height - 180))
     center_y = (rel["top"] + rel["bottom"]) / 2.0
     horizontal_overlap = min(rel["right"], right) - max(rel["left"], left)
     if horizontal_overlap <= 0:
         return False
-    return rel["top"] >= top - 6 and rel["bottom"] <= bottom + 10 and top <= center_y <= bottom
+    return rel["top"] >= draft_top - 6 and rel["bottom"] <= bottom + 10 and draft_top <= center_y <= bottom
 
 
 def rect_in_input_toolbar(rect: dict[str, int], geometry: dict[str, Any]) -> bool:
@@ -7046,6 +7727,93 @@ def get_window_geometry(hwnd: int) -> dict[str, int]:
     }
 
 
+def get_window_client_geometry(hwnd: int) -> dict[str, int]:
+    try:
+        left, top, right, bottom = win32gui.GetClientRect(hwnd)
+        screen_left, screen_top = win32gui.ClientToScreen(hwnd, (left, top))
+        screen_right, screen_bottom = win32gui.ClientToScreen(hwnd, (right, bottom))
+        return {
+            "left": int(left),
+            "top": int(top),
+            "right": int(right),
+            "bottom": int(bottom),
+            "width": int(right - left),
+            "height": int(bottom - top),
+            "screen_left": int(screen_left),
+            "screen_top": int(screen_top),
+            "screen_right": int(screen_right),
+            "screen_bottom": int(screen_bottom),
+        }
+    except Exception as exc:
+        return {"error": repr(exc)}
+
+
+def add_friend_device_profile(
+    hwnd: int,
+    *,
+    geometry: dict[str, Any] | None = None,
+    screenshot_size: tuple[int, int] | None = None,
+    route: str = "",
+) -> dict[str, Any]:
+    profile: dict[str, Any] = {
+        "platform": "windows",
+        "route": str(route or ""),
+        "window_rect": dict(geometry or {}),
+        "client_rect": {},
+        "screenshot_size": list(screenshot_size) if screenshot_size else [],
+        "dpi_scale": 1.0,
+        "dpi": 96,
+        "screen": {},
+        "virtual_screen": {},
+        "monitors": [],
+    }
+    try:
+        profile["client_rect"] = get_window_client_geometry(hwnd)
+    except Exception as exc:
+        profile["client_rect"] = {"error": repr(exc)}
+    try:
+        scale = window_dpi_scale(hwnd)
+        profile["dpi_scale"] = round(float(scale), 4)
+        profile["dpi"] = int(round(float(scale) * 96))
+    except Exception as exc:
+        profile["dpi_error"] = repr(exc)
+    try:
+        user32 = ctypes.windll.user32
+        profile["screen"] = {
+            "width": int(user32.GetSystemMetrics(0)),
+            "height": int(user32.GetSystemMetrics(1)),
+        }
+        profile["virtual_screen"] = {
+            "left": int(user32.GetSystemMetrics(76)),
+            "top": int(user32.GetSystemMetrics(77)),
+            "width": int(user32.GetSystemMetrics(78)),
+            "height": int(user32.GetSystemMetrics(79)),
+        }
+    except Exception as exc:
+        profile["screen_error"] = repr(exc)
+    try:
+        monitors = []
+        for monitor in win32api.EnumDisplayMonitors():
+            _handle, _hdc, rect = monitor
+            left, top, right, bottom = rect
+            monitors.append(
+                {
+                    "left": int(left),
+                    "top": int(top),
+                    "right": int(right),
+                    "bottom": int(bottom),
+                    "width": int(right - left),
+                    "height": int(bottom - top),
+                }
+            )
+        profile["monitors"] = monitors
+        profile["monitor_count"] = len(monitors)
+    except Exception as exc:
+        profile["monitor_error"] = repr(exc)
+        profile["monitor_count"] = 0
+    return profile
+
+
 def validate_capture_geometry(geometry: dict[str, Any]) -> dict[str, Any]:
     left = int(geometry.get("left") or 0)
     top = int(geometry.get("top") or 0)
@@ -7088,10 +7856,10 @@ def calculate_send_points(geometry: dict[str, Any]) -> dict[str, Any]:
     client_width = int(geometry["width"])
     client_height = int(geometry["height"])
     input_x = int(client_width * 0.65)
-    input_y = client_height - 145
+    input_y = client_height - 96
     send_x = client_width - 62
     send_y = client_height - 44
-    if input_y < client_height * 0.72 or send_y < client_height * 0.82:
+    if input_y < client_height * 0.80 or send_y < client_height * 0.82:
         return {
             "ok": False,
             "reason": "send_points_outside_input_area",
@@ -7156,8 +7924,8 @@ def input_click_candidate_points(geometry: dict[str, Any], *, min_points: int = 
     # not drift into the message area or session list on compact WeChat windows.
     left = max(split_x + 64, int(width * 0.55) + 1)
     right = min(width - 96, max(left + 120, int(width * 0.88)))
-    top = max(int(height * 0.74), height - 218)
-    bottom = min(height - 86, max(top + 36, height - 116))
+    top = max(int(height * 0.84), height - 126)
+    bottom = min(height - 76, max(top + 30, height - 86))
     return _spread_points_in_rect(left, top, right, bottom, min_points=min_points)
 
 
@@ -7197,8 +7965,8 @@ def jitter_input_click_point(x: int, y: int, geometry: dict[str, Any]) -> tuple[
     split_x = session_split_x(width)
     safe_min_x = max(split_x + 64, int(width * 0.55) + 1)
     safe_max_x = max(safe_min_x, width - 88)
-    safe_min_y = max(int(height * 0.74), height - 220)
-    safe_max_y = max(safe_min_y, height - 82)
+    safe_min_y = max(int(height * 0.84), height - 126)
+    safe_max_y = max(safe_min_y, height - 76)
     jittered_x = bounded_int(
         int(x) + random.randint(-jitter_x, jitter_x),
         default=int(x),
@@ -7362,12 +8130,23 @@ def jitter_window_image_click_surface_point(hwnd: int, x: int, y: int) -> tuple[
                 max_x = max(min_x, min(split_x - 22, original_x + max(jitter_x, 1)))
                 min_y = 34
                 max_y = max(min_y, min(98, original_y + max(jitter_y, 1)))
-                if original_x >= split_x - 34:
+                search_x, _search_y = search_box_point_for_geometry(geometry)
+                windows_plus_x, windows_plus_y = add_friend_windows_plus_button_point_for_geometry(geometry)
+                is_windows_plus_entry = (
+                    abs(original_x - windows_plus_x) <= 20
+                    and abs(original_y - windows_plus_y) <= 18
+                    and original_x >= search_x + 130
+                )
+                if original_x >= split_x - 34 or is_windows_plus_entry:
                     role = "plus_entry_button"
                     jitter_x = bounded_int(os.getenv("WECHAT_WIN32_OCR_PLUS_ENTRY_JITTER_X"), default=3, minimum=0, maximum=8)
                     jitter_y = bounded_int(os.getenv("WECHAT_WIN32_OCR_PLUS_ENTRY_JITTER_Y"), default=3, minimum=0, maximum=8)
-                    min_x = max(55, split_x - 34)
-                    max_x = max(min_x, min(split_x - 8, original_x + max(jitter_x, 1)))
+                    if is_windows_plus_entry:
+                        min_x = max(55, original_x - 10)
+                        max_x = min(split_x - 22, original_x + 10)
+                    else:
+                        min_x = max(55, split_x - 34)
+                        max_x = max(min_x, min(split_x - 8, original_x + max(jitter_x, 1)))
                     min_y = max(34, original_y - 8)
                     max_y = max(min_y, min(108, original_y + max(jitter_y, 1)))
             elif original_x < split_x:
@@ -8640,7 +9419,7 @@ def select_primary_visible_main_window(probe: dict[str, Any]) -> dict[str, Any] 
     if not visible:
         return None
     selected: dict[str, Any] | None = None
-    selected_score: tuple[int, int, int, int] = (-1, -1, -1, -1)
+    selected_score: tuple[int, int, int, int, int] = (-1, -1, -1, -1, -1)
     enable_content_probe = len(visible) > 1 and env_flag(
         "WECHAT_WIN32_OCR_MULTI_WINDOW_CONTENT_PROBE",
         default=True,
@@ -8656,7 +9435,8 @@ def select_primary_visible_main_window(probe: dict[str, Any]) -> dict[str, Any] 
         area = max(0, int(geometry.get("width") or 0)) * max(0, int(geometry.get("height") or 0))
         capture_ready = 1 if validate_capture_geometry(geometry).get("ok") else 0
         content_score = window_content_health_score(hwnd, geometry) if enable_content_probe and capture_ready else 0
-        score = (capture_ready, content_score, wechat_window_title_score(item), area)
+        safe_action_size = 1 if int(geometry.get("width") or 0) >= MIN_SEND_CLIENT_WIDTH and int(geometry.get("height") or 0) >= MIN_SEND_CLIENT_HEIGHT else 0
+        score = (capture_ready, content_score, safe_action_size, area, wechat_window_title_score(item))
         if selected is None or score > selected_score:
             selected = {**dict(item), "geometry_hint": geometry, "content_health_score": content_score}
             selected_score = score
@@ -9755,6 +10535,8 @@ def args_for_daemon_request(request: dict[str, Any]) -> list[str]:
             argv.extend([flag, value])
     if bool(request.get("skip_send_rate_guard")):
         argv.append("--skip-send-rate-guard")
+    if action in ADD_FRIEND_ROUTES and bool(request.get("calibration_only")):
+        argv.append("--calibration-only")
     if action == "messages":
         numeric_flags = (
             ("history_load_times", "--history-load-times"),
@@ -9850,6 +10632,7 @@ def run_sidecar_cli(argv: list[str] | None = None) -> dict[str, Any]:
     parser.add_argument("--verify-message", default="", help="Required add-friend verification message for the entry-click route.")
     parser.add_argument("--remark-name", default="", help="Required WeChat remark name for the entry-click route.")
     parser.add_argument("--remark-code", default="", help="Required system remark code that must be included in remark-name.")
+    parser.add_argument("--calibration-only", action="store_true", help="For add-friend routes, capture/OCR/locate/report without clicking.")
     parser.add_argument("--exact", action="store_true", help="Use exact chat name matching.")
     parser.add_argument(
         "--skip-send-rate-guard",

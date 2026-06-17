@@ -6,6 +6,11 @@
 
 当前 RPA 控制层优化说明：
 
+- [`add_friend_rpa_adaptive_delivery_plan_20260617.md`](add_friend_rpa_adaptive_delivery_plan_20260617.md)：本轮 add_friend 自适应改造交付文档，定义布局模型、设备画像、语义定位、校准模式和验收矩阵。
+- [`add_friend_rpa_adaptive_refactor_plan_20260617.md`](add_friend_rpa_adaptive_refactor_plan_20260617.md)：当前 add_friend RPA 自适应重构主文档，区分朋友 PR 原始路线、当前 Windows 主路线和后续重构方案。
+- [`wechat_rpa_adaptive_control_design.md`](wechat_rpa_adaptive_control_design.md)：微信聊天模块既有自适应操控思路说明，作为 add_friend 后续对齐的架构参考。
+- [`wechat_rpa_platform_resolution_audit_20260617.md`](wechat_rpa_platform_resolution_audit_20260617.md)：微信操控分系统与多分辨率适配审计。
+- [`add_friend_rpa_pr_readiness_20260616.md`](add_friend_rpa_pr_readiness_20260616.md)：朋友 PR #17 的历史 readiness 快照，仅用于追溯原始实现和回归口径，不作为当前主路线源-of-truth。
 - [`rpa_backend_state_machine_optimization.md`](rpa_backend_state_machine_optimization.md)
 - [`rpa_backend_state_machine_test_plan.md`](rpa_backend_state_machine_test_plan.md)
 - [`rpa_low_disturbance_listener_design.md`](rpa_low_disturbance_listener_design.md)

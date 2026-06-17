@@ -2,7 +2,19 @@
 
 更新时间：2026-06-16
 
-当前候选包：
+> 阅读说明（2026-06-17）：本文主体是朋友 PR #17 / commit `7199023` 的历史 readiness 快照，用于追溯原始实现和当时回归口径。当前 add_friend 后续开发的源-of-truth 是 [`add_friend_rpa_adaptive_refactor_plan_20260617.md`](add_friend_rpa_adaptive_refactor_plan_20260617.md)。本文中出现的 `add-friend-entry-click-plan`、`runtime/add_friend_entry_click_plan` 和旧脚本口径代表 PR 原始/参考路线，不代表当前 Windows 正式主路线。
+
+## 2026-06-17 Windows 多分辨率适配标记
+
+当前 OmniAuto 微信操控栈是 Windows 适配：Win32 窗口枚举、截图、OCR 区域、鼠标点击、键盘输入、发送、监听、加好友链路都按 Windows 微信桌面版实现。不同显示分辨率、DPI、窗口尺寸会改变微信窗口内布局，不能直接复用固定坐标。
+
+本 PR 原始入口 `add-friend-entry-click-plan` 保留为 Windows 1920x1080 固定布局参考/旧路线，用于对照朋友在 Windows 1920x1080 环境下的界面假设。Windows 自适应正式路线为 `add-friend-entry-click-plan-windows`，对应脚本为：
+
+```powershell
+.\apps\wechat_ai_customer_service\scripts\run_wechat_add_friend_entry_click_plan_windows.ps1
+```
+
+PR 原始候选包：
 
 ```text
 /Users/zhangwentao/Documents/车金/deliverables/omniauto-add-friend-rpa-pr-candidate-20260616.zip
@@ -12,7 +24,7 @@
 
 本阶段只包含 OmniAuto 仓库可独立 PR 的 add_friend RPA 能力，不接 Worker，不新增或修改车金服务端接口。
 
-正式主链路固定为：
+PR 原始正式主链路固定为：
 
 ```text
 add-friend-entry-click-plan
@@ -112,7 +124,7 @@ timing_ms
 result
 ```
 
-HTML/JSON 报告由 step event 生成，并保留：
+PR 原始 HTML/JSON 报告由 step event 生成，并保留：
 
 ```text
 runtime/add_friend_entry_click_plan/<timestamp>/
@@ -172,7 +184,7 @@ cd omniauto-add-friend-rpa
 python3 apps/wechat_ai_customer_service/tests/run_add_friend_package_smoke.py
 ```
 
-Windows 主链路：
+PR 原始 Windows 回归命令：
 
 ```powershell
 .\apps\wechat_ai_customer_service\scripts\run_wechat_add_friend_entry_click_plan.ps1 `

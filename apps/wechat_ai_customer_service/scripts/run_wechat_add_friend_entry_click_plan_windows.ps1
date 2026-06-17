@@ -5,7 +5,9 @@ param(
     [string]$Wechat = "",
     [string]$VerifyMessage = "",
     [string]$RemarkName = "",
-    [string]$RemarkCode = ""
+    [string]$RemarkCode = "",
+    [switch]$AllowRenderRecovery,
+    [switch]$NormalizeWindow
 )
 
 $ErrorActionPreference = "Stop"
@@ -13,7 +15,6 @@ $ErrorActionPreference = "Stop"
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $ProjectRoot = Resolve-Path (Join-Path $ScriptDir "..\..\..")
 Set-Location $ProjectRoot
-Write-Warning "This script is the historical Windows 1920x1080 reference route. Use run_wechat_add_friend_entry_click_plan_windows.ps1 for the current Windows main route."
 
 if ([string]::IsNullOrWhiteSpace($Python)) {
     $Python = Join-Path $ProjectRoot ".venv\Scripts\python.exe"
@@ -25,41 +26,44 @@ if (-not (Test-Path -LiteralPath $Python)) {
 }
 
 if ([string]::IsNullOrWhiteSpace($Phone) -and [string]::IsNullOrWhiteSpace($Wechat)) {
-    Write-Error "Phone or Wechat is required. Example: .\apps\wechat_ai_customer_service\scripts\run_wechat_add_friend_entry_click_plan.ps1 -Phone '17368746889' -VerifyMessage '我是车金二手车张伟' -RemarkName 'CJ-张伟-CJ8K2P-6889' -RemarkCode 'CJ8K2P'"
+    Write-Error "Phone or Wechat is required. Example: .\apps\wechat_ai_customer_service\scripts\run_wechat_add_friend_entry_click_plan_windows.ps1 -Phone '17368746889' -VerifyMessage '我是车金二手车张伟' -RemarkName 'CJ-张伟-CJ8K2P-6889' -RemarkCode 'CJ8K2P'"
     exit 2
 }
 
 if ([string]::IsNullOrWhiteSpace($VerifyMessage)) {
-    Write-Error "VerifyMessage is required for add-friend-entry-click-plan."
+    Write-Error "VerifyMessage is required for add-friend-entry-click-plan-windows."
     exit 2
 }
 
 if ([string]::IsNullOrWhiteSpace($RemarkName)) {
-    Write-Error "RemarkName is required for add-friend-entry-click-plan."
+    Write-Error "RemarkName is required for add-friend-entry-click-plan-windows."
     exit 2
 }
 
 if ([string]::IsNullOrWhiteSpace($RemarkCode)) {
-    Write-Error "RemarkCode is required for add-friend-entry-click-plan."
+    Write-Error "RemarkCode is required for add-friend-entry-click-plan-windows."
     exit 2
 }
 
 if (-not $RemarkName.Contains($RemarkCode)) {
-    Write-Error "RemarkName must include RemarkCode for add-friend-entry-click-plan."
+    Write-Error "RemarkName must include RemarkCode for add-friend-entry-click-plan-windows."
     exit 2
 }
 
 if ([string]::IsNullOrWhiteSpace($ArtifactDir)) {
     $Timestamp = Get-Date -Format "yyyyMMdd_HHmmss"
-    $ArtifactDir = Join-Path $ProjectRoot "runtime\add_friend_entry_click_plan\$Timestamp"
+    $ArtifactDir = Join-Path $ProjectRoot "runtime\add_friend_entry_click_plan_windows\$Timestamp"
 }
 New-Item -ItemType Directory -Force -Path $ArtifactDir | Out-Null
 
 $env:PYTHONUTF8 = "1"
 $env:PYTHONIOENCODING = "utf-8"
-$env:WECHAT_WIN32_OCR_PASSIVE_PROBE = "1"
-$env:WECHAT_WIN32_OCR_WINDOW_NORMALIZE = "0"
-$env:WECHAT_WIN32_OCR_RENDER_RECOVERY_AUTO = "0"
+$env:WECHAT_WIN32_OCR_PASSIVE_PROBE = "0"
+$env:WECHAT_WIN32_OCR_AGGRESSIVE_FOCUS = "1"
+$env:WECHAT_WIN32_OCR_ATTACH_THREAD_INPUT = "1"
+$env:WECHAT_WIN32_OCR_ACTIVATE_DEBOUNCE_SECONDS = "0"
+$env:WECHAT_WIN32_OCR_WINDOW_NORMALIZE = $(if ($NormalizeWindow) { "1" } else { "0" })
+$env:WECHAT_WIN32_OCR_RENDER_RECOVERY_AUTO = $(if ($AllowRenderRecovery) { "1" } else { "0" })
 
 $Sidecar = "apps\wechat_ai_customer_service\adapters\wechat_win32_ocr_sidecar.py"
 $StdoutPath = Join-Path $ArtifactDir "add_friend_entry_click_plan_stdout.json"
@@ -67,7 +71,7 @@ $StderrPath = Join-Path $ArtifactDir "add_friend_entry_click_plan_stderr.log"
 
 $Args = @(
     $Sidecar,
-    "add-friend-entry-click-plan",
+    "add-friend-entry-click-plan-windows",
     "--artifact-dir",
     $ArtifactDir
 )
@@ -83,8 +87,7 @@ $Args += @("--remark-code", $RemarkCode)
 
 Write-Host "ProjectRoot: $ProjectRoot"
 Write-Host "ArtifactDir: $ArtifactDir"
-Write-Host "Running Windows 1920x1080-reference add_friend entry click plan. On Windows, use run_wechat_add_friend_entry_click_plan_windows.ps1."
-Write-Host "It opens the add-friend entry, searches the contact, clicks add-contact, fills invite text and remark, clicks confirm, then writes the review report."
+Write-Host "Running Windows add_friend entry click plan. It focuses Windows WeChat, clicks the Windows sidebar + entry, searches the contact, clicks add-contact, fills invite text and remark, clicks confirm, then writes the review report."
 
 $NativeErrorActionPreference = "Continue"
 $PreviousErrorActionPreference = $ErrorActionPreference
@@ -99,18 +102,10 @@ Write-Host "Stderr: $StderrPath"
 Write-Host "PlanJson: $(Join-Path $ArtifactDir 'add_friend_entry_click_plan.json')"
 Write-Host "ReviewHtml: $(Join-Path $ArtifactDir 'add_friend_entry_click_review.html')"
 Write-Host "ReviewJson: $(Join-Path $ArtifactDir 'add_friend_entry_click_review.json')"
-Write-Host "BeforeAnnotatedImage: $(Join-Path $ArtifactDir 'add_friend_entry_before_click_screen_annotated.png')"
-Write-Host "AfterAnnotatedImages: $(Join-Path $ArtifactDir 'add_friend_entry_after_click_screen_attempt_*_annotated.png')"
-Write-Host "MenuClickAnnotatedImage: $(Join-Path $ArtifactDir 'add_friend_menu_entry_after_click_window_annotated.png')"
-Write-Host "QueryVerifyImages: $(Join-Path $ArtifactDir 'add_friend_query_verify_attempt_*_window_annotated.png')"
-Write-Host "SearchResultImage: $(Join-Path $ArtifactDir 'add_friend_search_result_window_annotated.png')"
-Write-Host "InviteBeforeImage: $(Join-Path $ArtifactDir 'add_friend_invite_form_before_fill_window_annotated.png')"
-Write-Host "InviteFilledImage: $(Join-Path $ArtifactDir 'add_friend_invite_form_filled_before_confirm_window_annotated.png')"
-Write-Host "InviteAfterImage: $(Join-Path $ArtifactDir 'add_friend_invite_form_after_confirm_window_annotated.png')"
 $ReviewHtml = Join-Path $ArtifactDir "add_friend_entry_click_review.html"
 Write-Host ("OpenReviewCommand: Start-Process -FilePath ""{0}""" -f $ReviewHtml)
 
-$LatestDir = Join-Path $ProjectRoot "runtime\add_friend_entry_click_plan\latest"
+$LatestDir = Join-Path $ProjectRoot "runtime\add_friend_entry_click_plan_windows\latest"
 if (Test-Path -LiteralPath $LatestDir) {
     Remove-Item -LiteralPath $LatestDir -Recurse -Force
 }
