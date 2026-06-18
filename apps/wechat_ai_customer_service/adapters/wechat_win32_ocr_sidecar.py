@@ -154,6 +154,7 @@ from apps.wechat_ai_customer_service.adapters.wechat_win32_ocr import device_pro
 from apps.wechat_ai_customer_service.adapters.wechat_win32_ocr import ocr_engine as win32_ocr_engine
 from apps.wechat_ai_customer_service.adapters.wechat_win32_ocr import render_diagnostics as win32_ocr_render
 from apps.wechat_ai_customer_service.adapters.wechat_win32_ocr import text_normalization as win32_ocr_text
+from apps.wechat_ai_customer_service.adapters.wechat_win32_ocr import window_activation as win32_ocr_window_activation
 from apps.wechat_ai_customer_service.adapters.wechat_win32_ocr import window_action_planning as win32_ocr_window_actions
 from apps.wechat_ai_customer_service.adapters.wechat_win32_ocr import window_action_state as win32_ocr_window_state
 from apps.wechat_ai_customer_service.adapters.wechat_win32_ocr import window_metrics as win32_ocr_window_metrics
@@ -8986,7 +8987,6 @@ def focus_wechat_window(probe: dict[str, Any]) -> dict[str, Any] | None:
 
 
 def activate_window(hwnd: int) -> None:
-    user32 = ctypes.windll.user32
     if not hwnd:
         return
     activation_settings = win32_ocr_window_state.activate_window_settings(
@@ -8994,133 +8994,26 @@ def activate_window(hwnd: int) -> None:
         attach_thread_input=env_flag("WECHAT_WIN32_OCR_ATTACH_THREAD_INPUT", default=False),
         debounce_seconds=env_float("WECHAT_WIN32_OCR_ACTIVATE_DEBOUNCE_SECONDS", 2.5),
     )
-    aggressive_focus = bool(activation_settings.get("aggressive_focus"))
-    attach_thread_input = bool(activation_settings.get("attach_thread_input"))
-    try:
-        if int(user32.IsIconic(hwnd)):
-            user32.ShowWindow(hwnd, 9)
-        elif not bool(user32.IsWindowVisible(hwnd)):
-            user32.ShowWindow(hwnd, 5)
-    except Exception:
-        pass
-    try:
-        focus_match = foreground_window_matches_target(hwnd)
-        if win32_ocr_window_state.foreground_guard_ready(focus_match):
-            return
-    except Exception:
-        pass
-    debounce_seconds = float(activation_settings.get("debounce_seconds") or 0.0)
-    if debounce_seconds > 0:
-        now_monotonic = time.monotonic()
-        last_monotonic = float(_LAST_ACTIVATE_MONOTONIC_BY_HWND.get(int(hwnd)) or 0.0)
-        if win32_ocr_window_state.activate_debounce_active(
-            now_monotonic=now_monotonic,
-            last_monotonic=last_monotonic,
-            debounce_seconds=debounce_seconds,
-        ):
-            try:
-                if bool(user32.IsWindow(hwnd)) and bool(user32.IsWindowVisible(hwnd)) and not bool(user32.IsIconic(hwnd)):
-                    # Only short-circuit when the target is already foreground.
-                    # Otherwise we still need to execute a real foreground raise.
-                    focus_match = foreground_window_matches_target(hwnd)
-                    if win32_ocr_window_state.foreground_guard_ready(focus_match):
-                        return
-            except Exception:
-                pass
-    require_active_ui_action_budget("activate_window", metadata={"hwnd": int(hwnd or 0)})
-    if aggressive_focus:
-        try:
-            user32.BringWindowToTop(hwnd)
-        except Exception:
-            pass
-    try:
-        user32.SetForegroundWindow(hwnd)
-    except Exception:
-        pass
-    fg_tid = 0
-    target_tid = 0
-    current_tid = 0
-    attached_fg = False
-    attached_current = False
-    try:
-        fg_hwnd = win32gui.GetForegroundWindow()
-        fg_tid = win32process.GetWindowThreadProcessId(fg_hwnd)[0] if fg_hwnd else 0
-        target_tid = win32process.GetWindowThreadProcessId(hwnd)[0]
-        current_tid = win32api.GetCurrentThreadId()
-        if attach_thread_input and fg_tid and target_tid and fg_tid != target_tid:
-            win32process.AttachThreadInput(fg_tid, target_tid, True)
-            attached_fg = True
-        if attach_thread_input and current_tid and target_tid and current_tid != target_tid:
-            win32process.AttachThreadInput(current_tid, target_tid, True)
-            attached_current = True
-        win32gui.SetForegroundWindow(hwnd)
-        win32gui.SetActiveWindow(hwnd)
-        if aggressive_focus:
-            win32gui.SetFocus(hwnd)
-        # Only use TOPMOST flip as a compatibility fallback when explicitly enabled.
-        if aggressive_focus:
-            try:
-                flags = win32con.SWP_NOMOVE | win32con.SWP_NOSIZE | win32con.SWP_SHOWWINDOW
-                win32gui.SetWindowPos(hwnd, win32con.HWND_TOPMOST, 0, 0, 0, 0, flags)
-                win32gui.SetWindowPos(hwnd, win32con.HWND_NOTOPMOST, 0, 0, 0, 0, flags)
-            except Exception:
-                pass
-        if aggressive_focus:
-            humanized_action_sleep(70, 125)
-        else:
-            humanized_action_sleep(55, 95)
-    except Exception:
-        pass
-    finally:
-        _LAST_ACTIVATE_MONOTONIC_BY_HWND[int(hwnd)] = time.monotonic()
-        if attached_fg:
-            try:
-                win32process.AttachThreadInput(fg_tid, target_tid, False)
-            except Exception:
-                pass
-        if attached_current:
-            try:
-                win32process.AttachThreadInput(current_tid, target_tid, False)
-            except Exception:
-                pass
-    if aggressive_focus:
-        try:
-            final_match = foreground_window_matches_target(hwnd)
-        except Exception:
-            final_match = {}
-        if not win32_ocr_window_state.foreground_guard_ready(final_match):
-            # Foreground lock fallback: synthesize a tiny ALT keystroke before
-            # SetForegroundWindow to satisfy Windows focus-stealing constraints.
-            try:
-                coordinate_rpa_action("key_press", metadata={"key": int(win32con.VK_MENU), "context": "focus_alt_down"})
-                win32api.keybd_event(win32con.VK_MENU, 0, 0, 0)
-                humanized_action_sleep(25, 55)
-                user32.SetForegroundWindow(hwnd)
-                win32gui.SetForegroundWindow(hwnd)
-                win32gui.SetActiveWindow(hwnd)
-            except Exception:
-                pass
-            finally:
-                try:
-                    coordinate_rpa_action("key_press", metadata={"key": int(win32con.VK_MENU), "context": "focus_alt_up"})
-                    win32api.keybd_event(win32con.VK_MENU, 0, win32con.KEYEVENTF_KEYUP, 0)
-                except Exception:
-                    pass
-            humanized_action_sleep(60, 120)
-            try:
-                final_match = foreground_window_matches_target(hwnd)
-            except Exception:
-                final_match = {}
-            if not win32_ocr_window_state.foreground_guard_ready(final_match) and focus_click_fallback_enabled():
-                try:
-                    left, top, right, _bottom = win32gui.GetWindowRect(hwnd)
-                    width = max(120, int(right - left))
-                    title_x = int(left + min(max(88, width // 3), max(88, width - 88)))
-                    title_y = int(top + 18)
-                    click(title_x, title_y)
-                    humanized_action_sleep(65, 130)
-                except Exception:
-                    pass
+    deps = win32_ocr_window_activation.ActivateWindowDependencies(
+        user32=ctypes.windll.user32,
+        win32gui=win32gui,
+        win32process=win32process,
+        win32api=win32api,
+        win32con=win32con,
+        foreground_window_matches_target=foreground_window_matches_target,
+        require_active_ui_action_budget=require_active_ui_action_budget,
+        humanized_action_sleep=humanized_action_sleep,
+        coordinate_rpa_action=coordinate_rpa_action,
+        focus_click_fallback_enabled=focus_click_fallback_enabled,
+        click=click,
+        monotonic=time.monotonic,
+    )
+    win32_ocr_window_activation.activate_window_with_dependencies(
+        int(hwnd),
+        settings=activation_settings,
+        last_activate_monotonic_by_hwnd=_LAST_ACTIVATE_MONOTONIC_BY_HWND,
+        deps=deps,
+    )
 
 
 def configure_dpi_awareness() -> None:

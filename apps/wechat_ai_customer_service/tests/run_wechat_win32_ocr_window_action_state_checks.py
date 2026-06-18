@@ -106,10 +106,14 @@ def test_activate_debounce_active_matches_sidecar_window() -> None:
 
 def test_sidecar_focus_ready_source_uses_extracted_helper() -> None:
     source_path = PROJECT_ROOT / "apps" / "wechat_ai_customer_service" / "adapters" / "wechat_win32_ocr_sidecar.py"
+    activation_path = PROJECT_ROOT / "apps" / "wechat_ai_customer_service" / "adapters" / "wechat_win32_ocr" / "window_activation.py"
     source = source_path.read_text(encoding="utf-8")
+    activation_source = activation_path.read_text(encoding="utf-8")
     activate_body = source[source.find("def activate_window") : source.find("def configure_dpi_awareness")]
+    activation_body = activation_source[activation_source.find("def activate_window_with_dependencies") :]
     focus_body = source[source.find("def focus_wechat_window") : source.find("def activate_window")]
-    assert_true("foreground_guard_ready" in activate_body, "activate_window should use extracted focus-ready helper")
+    assert_true("activate_window_with_dependencies" in activate_body, "activate_window should delegate execution helper")
+    assert_true("foreground_guard_ready" in activation_body, "activate_window execution should use extracted focus-ready helper")
     assert_true("foreground_guard_ready" in focus_body, "focus_wechat_window should use extracted focus-ready helper")
 
 

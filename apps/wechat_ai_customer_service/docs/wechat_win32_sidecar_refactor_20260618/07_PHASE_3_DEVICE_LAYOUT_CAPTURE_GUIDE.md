@@ -688,3 +688,31 @@ apps/wechat_ai_customer_service/tests/run_wechat_win32_ocr_capture_checks.py
 - `run_wechat_win32_ocr_ensure_visible_planning_checks.py` 通过 6 项。
 - `run_add_friend_package_smoke.py` 通过 34 项。
 - `run_customer_service_multi_session_scheduler_checks.py` 通过 123 项。
+
+## 执行记录 2026-06-19 Phase 3.5m
+
+已完成 `activate_window` 执行体迁移：
+
+调整：
+
+- 新增 `window_activation.py`，集中 `activate_window_with_dependencies` 和 `ActivateWindowDependencies`。
+- sidecar `activate_window(hwnd)` 保留旧入口，仍读取原环境变量、保留 `_LAST_ACTIVATE_MONOTONIC_BY_HWND`，并用当前 sidecar 变量组装依赖。
+- 真实 `ShowWindow`、`SetForegroundWindow`、`AttachThreadInput`、TOPMOST flip、ALT fallback、click fallback 的执行顺序迁入新模块。
+- 源码级 guard 改为检查 sidecar facade + 新执行模块，不放松 humanized sleep、foreground guard、focus click fallback 要求。
+
+边界：
+
+- 未修改 public CLI、JSON 字段、route、artifact scope 或 facade 函数名。
+- 未修改加好友入口契约，未改 `add-friend-entry-click-plan`。
+- 旧测试 monkeypatch sidecar 的 `ctypes.windll`、`win32gui`、`win32process`、`win32api`、`win32con`、`foreground_window_matches_target`、`click` 仍然生效。
+- 本阶段未做真实微信前台切换或键鼠实盘，只做 fake dependency execution 覆盖和离线回归。
+
+验证：
+
+- `run_wechat_win32_ocr_window_activation_checks.py` 通过 3 项。
+- `run_wechat_win32_ocr_compat_checks.py` 通过 135 项。
+- `run_wechat_win32_ocr_window_action_state_checks.py` 通过 6 项。
+- `run_wechat_win32_ocr_ensure_visible_planning_checks.py` 通过 6 项。
+- `run_wechat_win32_ocr_window_selection_planning_checks.py` 通过 4 项。
+- `run_add_friend_package_smoke.py` 通过 34 项。
+- `run_customer_service_multi_session_scheduler_checks.py` 通过 123 项。

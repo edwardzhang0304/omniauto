@@ -3177,13 +3177,19 @@ def test_send_rpa_env_enables_strict_focus_single_confirm_and_blank_retry() -> N
 
 def test_activate_window_debounces_aggressive_refocus() -> None:
     source_path = PROJECT_ROOT / "apps" / "wechat_ai_customer_service" / "adapters" / "wechat_win32_ocr_sidecar.py"
+    activation_path = PROJECT_ROOT / "apps" / "wechat_ai_customer_service" / "adapters" / "wechat_win32_ocr" / "window_activation.py"
     source = source_path.read_text(encoding="utf-8")
+    activation_source = activation_path.read_text(encoding="utf-8")
+    activate_body = source[source.find("def activate_window") : source.find("def configure_dpi_awareness")]
+    activation_body = activation_source[
+        activation_source.find("def activate_window_with_dependencies") :
+    ]
     assert_true(
         "WECHAT_WIN32_OCR_ACTIVATE_DEBOUNCE_SECONDS" in source,
         "activate_window should debounce repeated foreground activations",
     )
     assert_true(
-        'and not aggressive_focus' not in source[source.find("def activate_window") : source.find("def configure_dpi_awareness")],
+        'and not aggressive_focus' not in activate_body + activation_body,
         "aggressive focus must still skip when WeChat is already foreground",
     )
     assert_true(
@@ -3191,7 +3197,7 @@ def test_activate_window_debounces_aggressive_refocus() -> None:
         "activate_window should expose focus click fallback env switch for strict-focus lock scenarios",
     )
     assert_true(
-        "focus_click_fallback_enabled()" in source[source.find("def activate_window") : source.find("def configure_dpi_awareness")],
+        "focus_click_fallback_enabled()" in activation_body,
         "activate_window should optionally use click fallback when foreground lock blocks SetForegroundWindow",
     )
 
@@ -4106,10 +4112,10 @@ def test_sidebar_search_clear_uses_window_image_click() -> None:
 
 def test_rpa_action_layer_avoids_fixed_sleep_cadence() -> None:
     source_path = PROJECT_ROOT / "apps" / "wechat_ai_customer_service" / "adapters" / "wechat_win32_ocr_sidecar.py"
+    activation_path = PROJECT_ROOT / "apps" / "wechat_ai_customer_service" / "adapters" / "wechat_win32_ocr" / "window_activation.py"
     source = source_path.read_text(encoding="utf-8")
-    tree = ast.parse(source)
-    action_functions = {
-        "activate_window",
+    activation_source = activation_path.read_text(encoding="utf-8")
+    sidecar_action_functions = {
         "activate_session_candidate",
         "clear_sidebar_search_box_without_select_all",
         "client_click",
@@ -4125,27 +4131,36 @@ def test_rpa_action_layer_avoids_fixed_sleep_cadence() -> None:
         "scroll_chat_to_latest",
         "send_with_uia_controls",
     }
+    activation_action_functions = {"activate_window_with_dependencies"}
     fixed_sleeps: list[str] = []
     helper_hits: set[str] = set()
-    for node in ast.walk(tree):
-        if not isinstance(node, ast.FunctionDef) or node.name not in action_functions:
-            continue
-        for call in ast.walk(node):
-            if not isinstance(call, ast.Call):
+    sources = (
+        ("sidecar", ast.parse(source), sidecar_action_functions),
+        ("window_activation", ast.parse(activation_source), activation_action_functions),
+    )
+    for label, tree, action_functions in sources:
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.FunctionDef) or node.name not in action_functions:
                 continue
-            if isinstance(call.func, ast.Name) and call.func.id == "humanized_action_sleep":
-                helper_hits.add(node.name)
-            if (
-                isinstance(call.func, ast.Attribute)
-                and call.func.attr == "sleep"
-                and isinstance(call.func.value, ast.Name)
-                and call.func.value.id == "time"
-                and call.args
-                and isinstance(call.args[0], ast.Constant)
-                and isinstance(call.args[0].value, (int, float))
-            ):
-                fixed_sleeps.append(f"{node.name}:{call.lineno}:{call.args[0].value}")
+            for call in ast.walk(node):
+                if not isinstance(call, ast.Call):
+                    continue
+                if isinstance(call.func, ast.Name) and call.func.id == "humanized_action_sleep":
+                    helper_hits.add(node.name)
+                if isinstance(call.func, ast.Attribute) and call.func.attr == "humanized_action_sleep":
+                    helper_hits.add(node.name)
+                if (
+                    isinstance(call.func, ast.Attribute)
+                    and call.func.attr == "sleep"
+                    and isinstance(call.func.value, ast.Name)
+                    and call.func.value.id == "time"
+                    and call.args
+                    and isinstance(call.args[0], ast.Constant)
+                    and isinstance(call.args[0].value, (int, float))
+                ):
+                    fixed_sleeps.append(f"{label}:{node.name}:{call.lineno}:{call.args[0].value}")
     assert_true(not fixed_sleeps, f"RPA action functions should not use fixed sleep cadence: {fixed_sleeps}")
+    action_functions = sidecar_action_functions | activation_action_functions
     missing_helpers = sorted(action_functions - helper_hits - {"ensure_visible_wechat_window"})
     assert_true(not missing_helpers, f"RPA action functions should use humanized_action_sleep: {missing_helpers}")
 
