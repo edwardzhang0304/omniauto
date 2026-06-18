@@ -24,7 +24,7 @@
 默认验收客服链路时使用：
 
 ```powershell
-.\.venv\Scripts\python.exe runtime\two_visible_session_customer_service_live.py --skip-prompt-send --synthetic-input-only --rounds 1
+.\.venv\Scripts\python.exe workflows\verification\wechat_customer_service\two_visible_session_customer_service_live.py --skip-prompt-send --synthetic-input-only --rounds 1
 ```
 
 这个模式跳过“替客户发送提示语”的 RPA 前置动作，只把合成客户消息注入调度器，然后执行 Brain 规划和真实客服回复发送。它更适合判断客服模块有没有被改坏。
@@ -34,7 +34,7 @@
 低风险离线/预验收可以使用：
 
 ```powershell
-.\.venv\Scripts\python.exe runtime\two_visible_session_customer_service_live.py --skip-prompt-send --synthetic-input-only --dry-reply-send --rounds 1
+.\.venv\Scripts\python.exe workflows\verification\wechat_customer_service\two_visible_session_customer_service_live.py --skip-prompt-send --synthetic-input-only --dry-reply-send --rounds 1
 ```
 
 ## 失败分类
@@ -69,7 +69,7 @@
 
 本轮代码只改验收脚本的可观测性和失败归类：
 
-- 保持 `runtime\two_visible_session_customer_service_live.py` 的现有双会话测试流程。
+- 保持 `workflows\verification\wechat_customer_service\two_visible_session_customer_service_live.py` 的现有双会话测试流程。
 - prompt-send 失败时写入 `failure_category=prompt_send_rpa`。
 - reply 阶段失败时根据 tick 事件、已发送目标覆盖和缺失目标归类。
 - 自检覆盖 no-visible、partial no-visible、reply-send RPA 和 prompt-send RPA 摘要。

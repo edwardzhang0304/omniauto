@@ -19,9 +19,15 @@ outputs/
 screenshots/
 runtime/data/
 runtime/outputs/
+runtime/cleanup_archive/
 runtime/knowledge_runs/
 runtime/*.db
 runtime/*.sqlite
+runtime/*
+!runtime/
+!runtime/README.md
+!runtime/test_artifacts/
+!runtime/test_artifacts/README.md
 runtime/test_artifacts/*
 !runtime/test_artifacts/
 !runtime/test_artifacts/README.md

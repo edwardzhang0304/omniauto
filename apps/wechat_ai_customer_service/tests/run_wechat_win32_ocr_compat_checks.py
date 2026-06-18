@@ -17,6 +17,7 @@ from PIL import Image, ImageDraw
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
+SIDECAR_SCRIPT = PROJECT_ROOT / "apps" / "wechat_ai_customer_service" / "adapters" / "wechat_win32_ocr_sidecar.py"
 
 from apps.wechat_ai_customer_service.adapters.wechat_connector import (  # noqa: E402
     RPALockTimeoutError,
@@ -152,27 +153,138 @@ def assert_true(condition: bool, message: str) -> None:
         raise AssertionError(message)
 
 
-def test_sidecar_script_bootstraps_project_root_without_pythonpath() -> None:
-    script = PROJECT_ROOT / "apps" / "wechat_ai_customer_service" / "adapters" / "wechat_win32_ocr_sidecar.py"
+def run_sidecar_script_without_pythonpath(
+    args: list[str],
+    *,
+    cwd: Path | str,
+    timeout: int = 20,
+) -> subprocess.CompletedProcess[str]:
     env = dict(os.environ)
     env.pop("PYTHONPATH", None)
+    return subprocess.run(
+        [sys.executable, str(SIDECAR_SCRIPT), *args],
+        cwd=str(cwd),
+        env=env,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        timeout=timeout,
+        check=False,
+    )
+
+
+def test_sidecar_script_bootstraps_project_root_without_pythonpath() -> None:
     with tempfile.TemporaryDirectory() as temp:
-        result = subprocess.run(
-            [sys.executable, str(script), "--help"],
-            cwd=temp,
-            env=env,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            timeout=20,
-            check=False,
-        )
+        result = run_sidecar_script_without_pythonpath(["--help"], cwd=temp)
     assert_true(
         result.returncode == 0,
         f"sidecar script should bootstrap project root before absolute apps imports: rc={result.returncode}, stderr={result.stderr[-500:]}",
     )
+
+
+def test_sidecar_help_exposes_stable_actions_and_flags() -> None:
+    with tempfile.TemporaryDirectory() as temp:
+        result = run_sidecar_script_without_pythonpath(["--help"], cwd=temp)
+    assert_true(result.returncode == 0, f"sidecar --help failed: rc={result.returncode}, stderr={result.stderr[-500:]}")
+    help_text = result.stdout
+    for action in (
+        "status",
+        "capabilities",
+        "sessions",
+        "messages",
+        "send",
+        "recover-render",
+        "add-friend-entry-click-plan",
+        "add-friend-entry-click-plan-windows",
+        "add-friend-entry-click-plan-windows-1080p-reference",
+    ):
+        assert_true(action in help_text, f"sidecar --help should expose stable action {action}: {help_text[:800]}")
+    for flag in (
+        "--target",
+        "--session-key",
+        "--text",
+        "--phone",
+        "--wechat",
+        "--verify-message",
+        "--remark-name",
+        "--remark-code",
+        "--calibration-only",
+        "--history-load-times",
+        "--history-mode",
+        "--anchor-id",
+        "--anchor-content-key",
+        "--reply-content-key",
+        "--restore-to-latest",
+        "--no-restore-to-latest",
+        "--artifact-dir",
+        "--daemon",
+    ):
+        assert_true(flag in help_text, f"sidecar --help should expose stable flag {flag}: {help_text[:800]}")
+
+
+def test_sidecar_contract_validation_failure_is_json_without_window_probe() -> None:
+    with tempfile.TemporaryDirectory() as temp:
+        result = run_sidecar_script_without_pythonpath(
+            ["add-friend-entry-click-plan", "--phone", "17368746889", "--artifact-dir", temp],
+            cwd=temp,
+        )
+    assert_true(result.returncode == 1, f"invalid add_friend payload should fail with rc=1: rc={result.returncode}, stdout={result.stdout}")
+    try:
+        payload = json.loads(result.stdout)
+    except json.JSONDecodeError as exc:
+        raise AssertionError(f"sidecar failure stdout should remain JSON: {exc}; stdout={result.stdout!r}") from exc
+    assert_true(payload.get("ok") is False, f"invalid payload should fail: {payload}")
+    assert_true(payload.get("state") == "task_payload_invalid", f"invalid payload state mismatch: {payload}")
+    assert_true(payload.get("task_status") == "failed", f"invalid payload task_status mismatch: {payload}")
+    assert_true(payload.get("error_code") == "TASK_PAYLOAD_INVALID", f"invalid payload error_code mismatch: {payload}")
+    assert_true(payload.get("current_step") == "payload_validation", f"invalid payload current_step mismatch: {payload}")
+    assert_true(payload.get("wechat_ui_action_attempted") is False, f"validation failure must not touch WeChat UI: {payload}")
+    assert_true(
+        payload.get("window_probe", {}).get("reason") == "task_payload_invalid_before_window_probe",
+        f"validation failure should occur before window probe: {payload}",
+    )
+    assert_true(
+        payload.get("server_report_payload", {}).get("task.error_code") == "TASK_PAYLOAD_INVALID",
+        f"server report should keep invalid-payload error code: {payload}",
+    )
+
+
+def test_sidecar_facade_exports_contract_surface() -> None:
+    import apps.wechat_ai_customer_service.adapters.wechat_win32_ocr_sidecar as sidecar_module
+
+    for action in (
+        "status",
+        "capabilities",
+        "sessions",
+        "messages",
+        "send",
+        "recover-render",
+        "add-friend-entry-click-plan",
+        "add-friend-entry-click-plan-windows",
+        "add-friend-entry-click-plan-windows-1080p-reference",
+    ):
+        assert_true(action in sidecar_module.SIDECAR_ACTION_CHOICES, f"sidecar action choice missing: {action}")
+    required_exports = (
+        "main",
+        "run_action",
+        "run_sidecar_cli",
+        "args_for_daemon_request",
+        "parse_sessions_from_ocr",
+        "parse_messages_from_ocr",
+        "calculate_send_points",
+        "validate_capture_geometry",
+        "validate_send_geometry",
+        "validate_active_send_target",
+        "normalize_wechat_window",
+        "add_friend_surface_readiness",
+        "add_friend_entry_click_plan_payload",
+        "send_payload",
+    )
+    for name in required_exports:
+        exported = getattr(sidecar_module, name, None)
+        assert_true(callable(exported), f"sidecar facade should keep callable export {name}")
 
 
 def test_parse_sessions_from_ocr() -> None:
@@ -4058,6 +4170,9 @@ def test_scroll_actions_randomize_wheel_and_cursor_cadence() -> None:
 def main() -> int:
     tests = [
         test_sidecar_script_bootstraps_project_root_without_pythonpath,
+        test_sidecar_help_exposes_stable_actions_and_flags,
+        test_sidecar_contract_validation_failure_is_json_without_window_probe,
+        test_sidecar_facade_exports_contract_surface,
         test_parse_sessions_from_ocr,
         test_parse_sessions_detects_visual_unread_red_dot,
         test_parse_sessions_normalizes_truncated_file_transfer,
