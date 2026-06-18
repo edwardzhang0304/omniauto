@@ -265,6 +265,30 @@ apps/wechat_ai_customer_service/tests/run_wechat_win32_ocr_device_profile_checks
 - `run_wechat_win32_ocr_windowing_checks.py` 通过 4 项。
 - `run_workflow_logic_checks.py` 本轮在 `check_customer_service_console_switches_take_effect` 触发真实 LLM HTTPS 请求后超时；与本阶段窗口规划代码无直接路径关系，已用 faulthandler 定位并记录为环境性 runner 问题。
 
+## 执行记录 2026-06-19 Phase 3.5g
+
+已完成窗口动作状态判定小步抽取：
+
+调整：
+
+- 新增 `window_action_state.py`，集中 `FOREGROUND_READY_REASONS`、`foreground_guard_ready`、tray-hidden 判定。
+- sidecar `focus_wechat_window`、`activate_window`、`wechat_main_window_is_tray_hidden` 改为调用纯状态 helper。
+- 保留所有真实窗口动作在 sidecar 内，包括 `ShowWindow`、`SetForegroundWindow`、`AttachThreadInput`、ALT fallback、click fallback。
+
+边界：
+
+- 未移动真实聚焦/恢复执行层。
+- 未改变 `foreground_matches_target` / `foreground_root_matches_target` ready 语义。
+- 未把 `foreground_guard_unavailable` 或 `foreground_unknown_guard_degraded` 误当作已确认聚焦。
+
+验证：
+
+- `run_wechat_win32_ocr_window_action_state_checks.py` 通过 4 项。
+- `run_wechat_win32_ocr_compat_checks.py` 通过 135 项。
+- `run_add_friend_package_smoke.py` 通过 34 项。
+- `run_customer_service_multi_session_scheduler_checks.py` 通过 123 项。
+- `run_wechat_win32_ocr_window_action_planning_checks.py` 通过 9 项。
+
 ## 执行记录 2026-06-19 Phase 3.2
 
 已完成 windowing 纯 metadata helper 小步拆分：

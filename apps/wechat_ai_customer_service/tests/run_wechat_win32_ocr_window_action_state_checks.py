@@ -1,0 +1,86 @@
+"""Contract checks for pure Win32/OCR window action state helpers."""
+
+from __future__ import annotations
+
+from pathlib import Path
+import sys
+
+
+PROJECT_ROOT = Path(__file__).resolve().parents[3]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
+from apps.wechat_ai_customer_service.adapters import wechat_win32_ocr_sidecar as sidecar  # noqa: E402
+from apps.wechat_ai_customer_service.adapters.wechat_win32_ocr import window_action_state  # noqa: E402
+
+
+def assert_true(condition: bool, message: str) -> None:
+    if not condition:
+        raise AssertionError(message)
+
+
+def test_window_action_state_module_exports_expected_helpers() -> None:
+    for name in ("FOREGROUND_READY_REASONS", "foreground_guard_ready", "tray_hidden_from_probe", "tray_hidden_from_counts"):
+        assert_true(hasattr(window_action_state, name), f"window action state helper missing: {name}")
+
+
+def test_foreground_guard_ready_accepts_only_confirmed_target_reasons() -> None:
+    ready_cases = [
+        {"ok": True, "reason": "foreground_matches_target"},
+        {"ok": True, "reason": "foreground_root_matches_target"},
+    ]
+    blocked_cases = [
+        {},
+        None,
+        {"ok": False, "reason": "foreground_matches_target"},
+        {"ok": True, "reason": "foreground_guard_unavailable"},
+        {"ok": True, "reason": "foreground_unknown_guard_degraded"},
+        {"ok": False, "reason": "foreground_not_wechat_target"},
+    ]
+    for case in ready_cases:
+        assert_true(window_action_state.foreground_guard_ready(case), f"ready case should pass: {case}")
+    for case in blocked_cases:
+        assert_true(not window_action_state.foreground_guard_ready(case), f"blocked case should fail: {case}")
+
+
+def test_tray_hidden_from_probe_matches_sidecar() -> None:
+    probes = [
+        {"main_count": 1, "visible_main_count": 0},
+        {"main_count": 2, "visible_main_count": 1},
+        {"main_count": 0, "visible_main_count": 0},
+        {"main_count": "bad", "visible_main_count": 0},
+    ]
+    for probe in probes:
+        assert_true(
+            window_action_state.tray_hidden_from_probe(probe) == sidecar.wechat_main_window_is_tray_hidden(probe),
+            f"tray-hidden probe mismatch: {probe}",
+        )
+
+
+def test_sidecar_focus_ready_source_uses_extracted_helper() -> None:
+    source_path = PROJECT_ROOT / "apps" / "wechat_ai_customer_service" / "adapters" / "wechat_win32_ocr_sidecar.py"
+    source = source_path.read_text(encoding="utf-8")
+    activate_body = source[source.find("def activate_window") : source.find("def configure_dpi_awareness")]
+    focus_body = source[source.find("def focus_wechat_window") : source.find("def activate_window")]
+    assert_true("foreground_guard_ready" in activate_body, "activate_window should use extracted focus-ready helper")
+    assert_true("foreground_guard_ready" in focus_body, "focus_wechat_window should use extracted focus-ready helper")
+
+
+def main() -> int:
+    tests = [
+        test_window_action_state_module_exports_expected_helpers,
+        test_foreground_guard_ready_accepts_only_confirmed_target_reasons,
+        test_tray_hidden_from_probe_matches_sidecar,
+        test_sidecar_focus_ready_source_uses_extracted_helper,
+    ]
+    passed = 0
+    for test in tests:
+        test()
+        print(f"PASS {test.__name__}")
+        passed += 1
+    print(f"All {passed} WeChat Win32/OCR window action state checks passed.")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

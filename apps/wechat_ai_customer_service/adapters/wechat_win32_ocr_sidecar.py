@@ -155,6 +155,7 @@ from apps.wechat_ai_customer_service.adapters.wechat_win32_ocr import ocr_engine
 from apps.wechat_ai_customer_service.adapters.wechat_win32_ocr import render_diagnostics as win32_ocr_render
 from apps.wechat_ai_customer_service.adapters.wechat_win32_ocr import text_normalization as win32_ocr_text
 from apps.wechat_ai_customer_service.adapters.wechat_win32_ocr import window_action_planning as win32_ocr_window_actions
+from apps.wechat_ai_customer_service.adapters.wechat_win32_ocr import window_action_state as win32_ocr_window_state
 from apps.wechat_ai_customer_service.adapters.wechat_win32_ocr import window_metrics as win32_ocr_window_metrics
 from apps.wechat_ai_customer_service.adapters.wechat_win32_ocr import windowing as win32_ocr_windowing
 
@@ -8894,12 +8895,7 @@ def wechat_main_window_is_tray_hidden(probe: dict[str, Any]) -> bool:
     half-rendered shell and trigger blank-screen RPA failures. Prefer an
     explicit manual open by the operator before automation starts.
     """
-    try:
-        main_count = int(probe.get("main_count") or 0)
-        visible_main_count = int(probe.get("visible_main_count") or 0)
-    except Exception:
-        return False
-    return bool(main_count > 0 and visible_main_count <= 0)
+    return win32_ocr_window_state.tray_hidden_from_probe(probe)
 
 
 def probe_has_usable_visible_main_window(probe: dict[str, Any]) -> bool:
@@ -8944,10 +8940,7 @@ def focus_wechat_window(probe: dict[str, Any]) -> dict[str, Any] | None:
         activate_window(hwnd)
         try:
             focus_match = foreground_window_matches_target(hwnd)
-            if (
-                focus_match.get("ok")
-                and str(focus_match.get("reason") or "") in {"foreground_matches_target", "foreground_root_matches_target"}
-            ):
+            if win32_ocr_window_state.foreground_guard_ready(focus_match):
                 return dict(item)
         except Exception:
             pass
@@ -8969,10 +8962,7 @@ def activate_window(hwnd: int) -> None:
         pass
     try:
         focus_match = foreground_window_matches_target(hwnd)
-        if (
-            focus_match.get("ok")
-            and str(focus_match.get("reason") or "") in {"foreground_matches_target", "foreground_root_matches_target"}
-        ):
+        if win32_ocr_window_state.foreground_guard_ready(focus_match):
             return
     except Exception:
         pass
@@ -8986,10 +8976,7 @@ def activate_window(hwnd: int) -> None:
                     # Only short-circuit when the target is already foreground.
                     # Otherwise we still need to execute a real foreground raise.
                     focus_match = foreground_window_matches_target(hwnd)
-                    if (
-                        focus_match.get("ok")
-                        and str(focus_match.get("reason") or "") in {"foreground_matches_target", "foreground_root_matches_target"}
-                    ):
+                    if win32_ocr_window_state.foreground_guard_ready(focus_match):
                         return
             except Exception:
                 pass
@@ -9054,10 +9041,7 @@ def activate_window(hwnd: int) -> None:
             final_match = foreground_window_matches_target(hwnd)
         except Exception:
             final_match = {}
-        if not (
-            final_match.get("ok")
-            and str(final_match.get("reason") or "") in {"foreground_matches_target", "foreground_root_matches_target"}
-        ):
+        if not win32_ocr_window_state.foreground_guard_ready(final_match):
             # Foreground lock fallback: synthesize a tiny ALT keystroke before
             # SetForegroundWindow to satisfy Windows focus-stealing constraints.
             try:
@@ -9080,10 +9064,7 @@ def activate_window(hwnd: int) -> None:
                 final_match = foreground_window_matches_target(hwnd)
             except Exception:
                 final_match = {}
-            if not (
-                final_match.get("ok")
-                and str(final_match.get("reason") or "") in {"foreground_matches_target", "foreground_root_matches_target"}
-            ) and focus_click_fallback_enabled():
+            if not win32_ocr_window_state.foreground_guard_ready(final_match) and focus_click_fallback_enabled():
                 try:
                     left, top, right, _bottom = win32gui.GetWindowRect(hwnd)
                     width = max(120, int(right - left))
