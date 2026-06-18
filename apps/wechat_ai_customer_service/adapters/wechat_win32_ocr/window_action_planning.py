@@ -7,6 +7,12 @@ from typing import Any
 from apps.wechat_ai_customer_service.adapters.wechat_win32_ocr.geometry import bounded_int
 
 
+ENSURE_VISIBLE_ACTION_RETURN = "return_probe"
+ENSURE_VISIBLE_ACTION_FOCUS = "focus_visible"
+ENSURE_VISIBLE_ACTION_RESTORE = "restore_then_focus"
+ENSURE_VISIBLE_ACTION_MANUAL_TRAY = "manual_open_tray"
+
+
 def _geometry_int(geometry: dict[str, Any], key: str) -> int:
     try:
         return int(geometry.get(key) or 0)
@@ -104,4 +110,55 @@ def plan_normalize_wechat_window(
         "width": int(safe_width),
         "height": int(safe_height),
         "reason": "needs_normalize" if not already_near_target else "already_near_target",
+    }
+
+
+def plan_ensure_visible_wechat_window(
+    probe: dict[str, Any],
+    *,
+    interactive: bool,
+    usable_visible: bool,
+    tray_hidden: bool,
+) -> dict[str, Any]:
+    visible_main_windows = (probe or {}).get("visible_main_windows") or []
+    has_visible_main_window = bool(visible_main_windows)
+    if has_visible_main_window:
+        if usable_visible and interactive:
+            return {
+                "action": ENSURE_VISIBLE_ACTION_FOCUS,
+                "return_probe": False,
+                "visible_main_window_geometry_invalid": False,
+            }
+        if not usable_visible:
+            return {
+                "action": ENSURE_VISIBLE_ACTION_RESTORE if interactive else ENSURE_VISIBLE_ACTION_RETURN,
+                "return_probe": not interactive,
+                "visible_main_window_geometry_invalid": True,
+            }
+        return {
+            "action": ENSURE_VISIBLE_ACTION_RETURN,
+            "return_probe": True,
+            "visible_main_window_geometry_invalid": False,
+        }
+    if not interactive:
+        return {
+            "action": ENSURE_VISIBLE_ACTION_RETURN,
+            "return_probe": True,
+            "visible_main_window_geometry_invalid": False,
+        }
+    if tray_hidden:
+        return {
+            "action": ENSURE_VISIBLE_ACTION_MANUAL_TRAY,
+            "return_probe": True,
+            "visible_main_window_geometry_invalid": False,
+            "probe_updates": {
+                "main_window_in_tray": True,
+                "manual_action_required": "open_wechat_main_window",
+                "restore_skipped_reason": "manual_tray_restore_required",
+            },
+        }
+    return {
+        "action": ENSURE_VISIBLE_ACTION_RESTORE,
+        "return_probe": False,
+        "visible_main_window_geometry_invalid": False,
     }

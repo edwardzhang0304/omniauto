@@ -313,6 +313,32 @@ apps/wechat_ai_customer_service/tests/run_wechat_win32_ocr_device_profile_checks
 - `run_customer_service_multi_session_scheduler_checks.py` 通过 123 项。
 - `run_wechat_win32_ocr_window_action_state_checks.py` 通过 4 项。
 
+## 执行记录 2026-06-19 Phase 3.5i
+
+已完成 `ensure_visible_wechat_window` planning 层保守迁移：
+
+调整：
+
+- `window_action_planning.py` 增加 `plan_ensure_visible_wechat_window` 和动作常量。
+- sidecar `ensure_visible_wechat_window` 先生成 plan，再执行原有 focus/restore/sleep/re-probe 流程。
+- 新增 focused test 覆盖可见可用 focus、可见但几何不可用 restore、passive 不动作、托盘隐藏要求人工打开。
+
+边界：
+
+- 未移动 `focus_wechat_window`、`restore_wechat_window`、`activate_window` 的真实执行。
+- 未改变托盘隐藏时“要求人工打开，不自动 restore”的安全策略。
+- 未触碰真实微信窗口、真实鼠标或真实键盘。
+
+验证：
+
+- `run_wechat_win32_ocr_ensure_visible_planning_checks.py` 通过 6 项。
+- `run_wechat_win32_ocr_compat_checks.py` 通过 135 项。
+- `run_wechat_win32_ocr_window_activation_checks.py` 通过 3 项。
+- `run_add_friend_package_smoke.py` 通过 34 项。
+- `run_customer_service_multi_session_scheduler_checks.py` 通过 123 项。
+- `run_wechat_win32_ocr_window_action_state_checks.py` 通过 4 项。
+- `run_wechat_win32_ocr_window_action_planning_checks.py` 通过 9 项。
+
 ## 执行记录 2026-06-19 Phase 3.2
 
 已完成 windowing 纯 metadata helper 小步拆分：

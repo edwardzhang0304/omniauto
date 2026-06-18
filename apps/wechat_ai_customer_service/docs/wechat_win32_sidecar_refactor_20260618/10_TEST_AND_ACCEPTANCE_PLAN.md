@@ -804,3 +804,43 @@ manual/live test:
 rollback:
 
 - remove `run_wechat_win32_ocr_window_activation_checks.py` if a future lower-level activation executor test replaces it.
+
+## 阶段测试记录 2026-06-19 Phase 3.5i
+
+stage: Phase 3.5i ensure_visible_wechat_window planning helper
+
+files changed:
+
+- `apps/wechat_ai_customer_service/adapters/wechat_win32_ocr_sidecar.py`
+- `apps/wechat_ai_customer_service/adapters/wechat_win32_ocr/window_action_planning.py`
+- `apps/wechat_ai_customer_service/tests/run_wechat_win32_ocr_ensure_visible_planning_checks.py`
+- `apps/wechat_ai_customer_service/docs/wechat_win32_sidecar_refactor_20260618/07_PHASE_3_DEVICE_LAYOUT_CAPTURE_GUIDE.md`
+- `apps/wechat_ai_customer_service/docs/wechat_win32_sidecar_refactor_20260618/10_TEST_AND_ACCEPTANCE_PLAN.md`
+
+contract names touched:
+
+- public CLI changed: no
+- JSON fields changed: no
+- route constants changed: no
+- artifact scopes changed: no
+- facade callable names changed: no
+- focus/restore/foreground execution moved: no
+
+tests:
+
+- `.\.venv\Scripts\python.exe -m py_compile apps\wechat_ai_customer_service\adapters\wechat_win32_ocr_sidecar.py apps\wechat_ai_customer_service\adapters\wechat_win32_ocr\window_action_planning.py apps\wechat_ai_customer_service\tests\run_wechat_win32_ocr_ensure_visible_planning_checks.py` -> passed.
+- `.\.venv\Scripts\python.exe apps\wechat_ai_customer_service\tests\run_wechat_win32_ocr_ensure_visible_planning_checks.py` -> passed, 6 checks.
+- `.\.venv\Scripts\python.exe apps\wechat_ai_customer_service\tests\run_wechat_win32_ocr_compat_checks.py` -> passed, 135 checks.
+- `.\.venv\Scripts\python.exe apps\wechat_ai_customer_service\tests\run_wechat_win32_ocr_window_activation_checks.py` -> passed, 3 checks.
+- `.\.venv\Scripts\python.exe apps\wechat_ai_customer_service\tests\run_add_friend_package_smoke.py` -> passed, 34 checks.
+- `.\.venv\Scripts\python.exe apps\wechat_ai_customer_service\tests\run_customer_service_multi_session_scheduler_checks.py` -> passed, 123 checks.
+- `.\.venv\Scripts\python.exe apps\wechat_ai_customer_service\tests\run_wechat_win32_ocr_window_action_state_checks.py` -> passed, 4 checks.
+- `.\.venv\Scripts\python.exe apps\wechat_ai_customer_service\tests\run_wechat_win32_ocr_window_action_planning_checks.py` -> passed, 9 checks.
+
+manual/live test:
+
+- not run; this stage moved only planning and fake-tested sidecar execution choices.
+
+rollback:
+
+- restore inline branch selection in `ensure_visible_wechat_window`; keep `plan_ensure_visible_wechat_window` unused for review.

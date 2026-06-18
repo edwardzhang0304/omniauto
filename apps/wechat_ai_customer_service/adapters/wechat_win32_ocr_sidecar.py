@@ -8845,18 +8845,25 @@ def window_content_health_score(hwnd: int, geometry: dict[str, Any]) -> int:
 
 def ensure_visible_wechat_window(*, interactive: bool = True) -> dict[str, Any]:
     probe = probe_wechat_windows()
+    usable_visible = probe_has_usable_visible_main_window(probe) if probe["visible_main_windows"] else False
+    tray_hidden = wechat_main_window_is_tray_hidden(probe) if not probe["visible_main_windows"] else False
+    plan = win32_ocr_window_actions.plan_ensure_visible_wechat_window(
+        probe,
+        interactive=interactive,
+        usable_visible=usable_visible,
+        tray_hidden=tray_hidden,
+    )
+    action = str(plan.get("action") or "")
     if probe["visible_main_windows"]:
-        usable_visible = probe_has_usable_visible_main_window(probe)
-        if usable_visible and interactive:
+        if bool(plan.get("visible_main_window_geometry_invalid")):
+            probe["visible_main_window_geometry_invalid"] = True
+        if action == win32_ocr_window_actions.ENSURE_VISIBLE_ACTION_FOCUS:
             focused = focus_wechat_window(probe)
             if focused:
                 humanized_action_sleep(150, 280)
                 probe = probe_wechat_windows()
                 probe["focused_window"] = focused
-        elif not usable_visible:
-            probe["visible_main_window_geometry_invalid"] = True
-            if not interactive:
-                return probe
+        elif action == win32_ocr_window_actions.ENSURE_VISIBLE_ACTION_RESTORE:
             restored = restore_wechat_window(probe)
             if restored:
                 humanized_action_sleep(650, 980)
@@ -8868,12 +8875,10 @@ def ensure_visible_wechat_window(*, interactive: bool = True) -> dict[str, Any]:
                     probe = probe_wechat_windows()
                     probe["focused_window"] = focused
         return probe
-    if not interactive:
+    if action == win32_ocr_window_actions.ENSURE_VISIBLE_ACTION_RETURN:
         return probe
-    if wechat_main_window_is_tray_hidden(probe):
-        probe["main_window_in_tray"] = True
-        probe["manual_action_required"] = "open_wechat_main_window"
-        probe["restore_skipped_reason"] = "manual_tray_restore_required"
+    if action == win32_ocr_window_actions.ENSURE_VISIBLE_ACTION_MANUAL_TRAY:
+        probe.update(dict(plan.get("probe_updates") or {}))
         return probe
     restored = restore_wechat_window(probe)
     if restored:
