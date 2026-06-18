@@ -289,6 +289,30 @@ apps/wechat_ai_customer_service/tests/run_wechat_win32_ocr_device_profile_checks
 - `run_customer_service_multi_session_scheduler_checks.py` 通过 123 项。
 - `run_wechat_win32_ocr_window_action_planning_checks.py` 通过 9 项。
 
+## 执行记录 2026-06-19 Phase 3.5h
+
+已完成 `activate_window` 迁移前 fake execution 测试保护网：
+
+调整：
+
+- 新增 `run_wechat_win32_ocr_window_activation_checks.py`。
+- 通过 fake `user32`、`win32gui`、`win32process`、`win32api`、`win32con` 覆盖 `activate_window` 关键执行路径。
+- 覆盖已在前台直接返回、普通 foreground 设置、aggressive focus + AttachThreadInput 释放 + ALT fallback。
+
+边界：
+
+- 本阶段只加测试，不迁移 `activate_window`。
+- 未触碰真实微信窗口、真实鼠标或真实键盘。
+- 未改变 `ShowWindow`、`SetForegroundWindow`、`AttachThreadInput`、TOPMOST flip、ALT fallback 或 click fallback。
+
+验证：
+
+- `run_wechat_win32_ocr_window_activation_checks.py` 通过 3 项。
+- `run_wechat_win32_ocr_compat_checks.py` 通过 135 项。
+- `run_add_friend_package_smoke.py` 通过 34 项。
+- `run_customer_service_multi_session_scheduler_checks.py` 通过 123 项。
+- `run_wechat_win32_ocr_window_action_state_checks.py` 通过 4 项。
+
 ## 执行记录 2026-06-19 Phase 3.2
 
 已完成 windowing 纯 metadata helper 小步拆分：
