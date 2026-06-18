@@ -8320,12 +8320,14 @@ def image_information_score(image: Any) -> float:
 
 def run_ocr(image: Any) -> list[dict[str, Any]]:
     global _OCR_ENGINE
-    if RapidOCR is None:
-        raise RuntimeError(f"rapidocr_onnxruntime_unavailable: {_OCR_IMPORT_ERROR}")
-    if _OCR_ENGINE is None:
-        _OCR_ENGINE = RapidOCR()
-    result, _ = _OCR_ENGINE(image)
-    return win32_ocr_engine.normalize_ocr_rows(result, min_confidence=OCR_MIN_CONFIDENCE)
+    items, _OCR_ENGINE = win32_ocr_engine.run_ocr_with_cache(
+        image,
+        engine_factory=RapidOCR,
+        engine=_OCR_ENGINE,
+        import_error=_OCR_IMPORT_ERROR,
+        min_confidence=OCR_MIN_CONFIDENCE,
+    )
+    return items
 
 
 def likely_foreign_overlay_capture(ocr_items: list[dict[str, Any]]) -> bool:

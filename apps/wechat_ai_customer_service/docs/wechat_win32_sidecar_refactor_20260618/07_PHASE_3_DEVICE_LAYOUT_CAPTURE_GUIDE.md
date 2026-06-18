@@ -486,3 +486,28 @@ apps/wechat_ai_customer_service/tests/run_wechat_win32_ocr_capture_checks.py
 - `run_add_friend_package_smoke.py` 通过 34 项。
 - `run_customer_service_multi_session_scheduler_checks.py` 通过 123 项。
 - `run_workflow_logic_checks.py` 通过 114 项。
+
+## 执行记录 2026-06-19 Phase 3.5e
+
+已完成 OCR runner cache 保守迁移：
+
+调整：
+
+- `ocr_engine.py` 增加 `run_ocr_with_cache`。
+- sidecar `run_ocr` 保留同名 facade，并继续持有 `RapidOCR` 与 `_OCR_ENGINE` 兼容点。
+- 新测试确认 sidecar monkeypatch `RapidOCR` / `_OCR_ENGINE` 仍然生效。
+
+边界：
+
+- 未删除 sidecar 的 `RapidOCR` 变量。
+- 未删除 sidecar 的 `_OCR_ENGINE` cache。
+- `rapidocr_onnxruntime_unavailable: ...` 错误语义保持。
+- OCR row normalization 仍由 `ocr_engine.normalize_ocr_rows` 负责。
+
+验证：
+
+- `run_wechat_win32_ocr_ocr_engine_checks.py` 通过 6 项。
+- `run_wechat_win32_ocr_compat_checks.py` 通过 135 项。
+- `run_add_friend_package_smoke.py` 通过 34 项。
+- `run_customer_service_multi_session_scheduler_checks.py` 通过 123 项。
+- `run_workflow_logic_checks.py` 通过 114 项。

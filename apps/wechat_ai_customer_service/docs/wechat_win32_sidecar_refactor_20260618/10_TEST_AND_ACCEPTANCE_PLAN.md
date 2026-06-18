@@ -653,3 +653,40 @@ manual/live test:
 rollback:
 
 - restore sidecar inline `capture_window_image`; keep `capture.py` helpers unused for review.
+
+## 阶段测试记录 2026-06-19 Phase 3.5e
+
+stage: Phase 3.5e OCR runner cache helper
+
+files changed:
+
+- `apps/wechat_ai_customer_service/adapters/wechat_win32_ocr_sidecar.py`
+- `apps/wechat_ai_customer_service/adapters/wechat_win32_ocr/ocr_engine.py`
+- `apps/wechat_ai_customer_service/tests/run_wechat_win32_ocr_ocr_engine_checks.py`
+- `apps/wechat_ai_customer_service/docs/wechat_win32_sidecar_refactor_20260618/07_PHASE_3_DEVICE_LAYOUT_CAPTURE_GUIDE.md`
+- `apps/wechat_ai_customer_service/docs/wechat_win32_sidecar_refactor_20260618/10_TEST_AND_ACCEPTANCE_PLAN.md`
+
+contract names touched:
+
+- public CLI changed: no
+- JSON fields changed: no
+- route constants changed: no
+- artifact scopes changed: no
+- facade callable names changed: no
+
+tests:
+
+- `.\.venv\Scripts\python.exe -m py_compile apps\wechat_ai_customer_service\adapters\wechat_win32_ocr_sidecar.py apps\wechat_ai_customer_service\adapters\wechat_win32_ocr\ocr_engine.py apps\wechat_ai_customer_service\tests\run_wechat_win32_ocr_ocr_engine_checks.py` -> passed.
+- `.\.venv\Scripts\python.exe apps\wechat_ai_customer_service\tests\run_wechat_win32_ocr_ocr_engine_checks.py` -> passed, 6 checks.
+- `.\.venv\Scripts\python.exe apps\wechat_ai_customer_service\tests\run_wechat_win32_ocr_compat_checks.py` -> passed, 135 checks.
+- `.\.venv\Scripts\python.exe apps\wechat_ai_customer_service\tests\run_add_friend_package_smoke.py` -> passed, 34 checks.
+- `.\.venv\Scripts\python.exe apps\wechat_ai_customer_service\tests\run_customer_service_multi_session_scheduler_checks.py` -> passed, 123 checks.
+- `.\.venv\Scripts\python.exe apps\wechat_ai_customer_service\tests\run_workflow_logic_checks.py` -> passed, 114 checks.
+
+manual/live test:
+
+- not run; fake OCR engine tests covered the cache/facade migration.
+
+rollback:
+
+- restore sidecar inline `_OCR_ENGINE` initialization and direct `_OCR_ENGINE(image)` call; keep `ocr_engine.run_ocr_with_cache` unused for review.

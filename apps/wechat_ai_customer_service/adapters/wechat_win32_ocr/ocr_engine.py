@@ -71,5 +71,22 @@ class OcrEngineRunner:
         return normalize_ocr_rows(result)
 
 
+def run_ocr_with_cache(
+    image: Any,
+    *,
+    engine_factory: Callable[[], Any] | None,
+    engine: Any | None,
+    import_error: str = "",
+    min_confidence: float = OCR_MIN_CONFIDENCE,
+) -> tuple[list[dict[str, Any]], Any | None]:
+    if engine_factory is None:
+        raise RuntimeError(f"rapidocr_onnxruntime_unavailable: {import_error}")
+    cached_engine = engine
+    if cached_engine is None:
+        cached_engine = engine_factory()
+    result, _ = cached_engine(image)
+    return normalize_ocr_rows(result, min_confidence=min_confidence), cached_engine
+
+
 def create_ocr_runner(engine_factory: Callable[[], Any] | None, *, import_error: str = "") -> OcrEngineRunner:
     return OcrEngineRunner(engine_factory, import_error=import_error)
