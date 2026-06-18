@@ -154,6 +154,7 @@ from apps.wechat_ai_customer_service.adapters.wechat_win32_ocr import device_pro
 from apps.wechat_ai_customer_service.adapters.wechat_win32_ocr import ocr_engine as win32_ocr_engine
 from apps.wechat_ai_customer_service.adapters.wechat_win32_ocr import render_diagnostics as win32_ocr_render
 from apps.wechat_ai_customer_service.adapters.wechat_win32_ocr import text_normalization as win32_ocr_text
+from apps.wechat_ai_customer_service.adapters.wechat_win32_ocr import window_action_planning as win32_ocr_window_actions
 from apps.wechat_ai_customer_service.adapters.wechat_win32_ocr import window_metrics as win32_ocr_window_metrics
 from apps.wechat_ai_customer_service.adapters.wechat_win32_ocr import windowing as win32_ocr_windowing
 
@@ -9584,72 +9585,45 @@ def normalize_wechat_window(hwnd: int) -> dict[str, Any]:
     if not enabled:
         return {"ok": True, "enabled": False, "applied": False, "before": before}
 
-    target_width = bounded_int(
-        os.getenv("WECHAT_WIN32_OCR_WINDOW_WIDTH"),
-        default=DEFAULT_SAFE_WINDOW_WIDTH,
-        minimum=MIN_SAFE_WINDOW_WIDTH,
-        maximum=MAX_SAFE_WINDOW_WIDTH,
-    )
-    target_height = bounded_int(
-        os.getenv("WECHAT_WIN32_OCR_WINDOW_HEIGHT"),
-        default=DEFAULT_SAFE_WINDOW_HEIGHT,
-        minimum=MIN_SAFE_WINDOW_HEIGHT,
-        maximum=MAX_SAFE_WINDOW_HEIGHT,
-    )
-    requested_target = {"width": target_width, "height": target_height}
     enforce_recommended = env_flag("WECHAT_WIN32_OCR_ENFORCE_RECOMMENDED_WINDOW", default=True)
-    recommended_floor_applied = False
-    if enforce_recommended:
-        if target_width < DEFAULT_SAFE_WINDOW_WIDTH:
-            target_width = DEFAULT_SAFE_WINDOW_WIDTH
-            recommended_floor_applied = True
-        if target_height < DEFAULT_SAFE_WINDOW_HEIGHT:
-            target_height = DEFAULT_SAFE_WINDOW_HEIGHT
-            recommended_floor_applied = True
-    effective_target = {"width": target_width, "height": target_height}
+    fixed_origin = env_flag("WECHAT_WIN32_OCR_WINDOW_FIXED_ORIGIN", default=True)
     try:
         user32 = ctypes.windll.user32
         screen_width = int(user32.GetSystemMetrics(0) or 0)
         screen_height = int(user32.GetSystemMetrics(1) or 0)
-        safe_width = min(target_width, max(640, screen_width - 12))
-        safe_height = min(target_height, max(640, screen_height - 58))
-        fixed_origin = env_flag("WECHAT_WIN32_OCR_WINDOW_FIXED_ORIGIN", default=True)
-        if fixed_origin:
-            requested_left = bounded_int(
-                os.getenv("WECHAT_WIN32_OCR_WINDOW_LEFT"),
-                default=0,
-                minimum=0,
-                maximum=max(0, screen_width - safe_width),
-            )
-            requested_top = bounded_int(
-                os.getenv("WECHAT_WIN32_OCR_WINDOW_TOP"),
-                default=0,
-                minimum=0,
-                maximum=max(0, screen_height - safe_height),
-            )
-            left = requested_left
-            top = requested_top
-        else:
-            left = min(max(0, int(before.get("left") or 0)), max(0, screen_width - safe_width))
-            top = min(max(0, int(before.get("top") or 0)), max(0, screen_height - safe_height))
+        screen_metrics_available = True
     except Exception:
         screen_width = 0
         screen_height = 0
-        safe_width = target_width
-        safe_height = target_height
-        fixed_origin = env_flag("WECHAT_WIN32_OCR_WINDOW_FIXED_ORIGIN", default=True)
-        if fixed_origin:
-            left = bounded_int(os.getenv("WECHAT_WIN32_OCR_WINDOW_LEFT"), default=0, minimum=0, maximum=MAX_SAFE_WINDOW_WIDTH)
-            top = bounded_int(os.getenv("WECHAT_WIN32_OCR_WINDOW_TOP"), default=0, minimum=0, maximum=MAX_SAFE_WINDOW_HEIGHT)
-        else:
-            left = max(0, int(before.get("left") or 0))
-            top = max(0, int(before.get("top") or 0))
+        screen_metrics_available = False
 
-    width_diff = abs(int(before.get("width") or 0) - safe_width)
-    height_diff = abs(int(before.get("height") or 0) - safe_height)
-    left_diff = abs(int(before.get("left") or 0) - left)
-    top_diff = abs(int(before.get("top") or 0) - top)
-    if width_diff <= 6 and height_diff <= 6 and left_diff <= 4 and top_diff <= 4:
+    plan = win32_ocr_window_actions.plan_normalize_wechat_window(
+        before,
+        enabled=True,
+        requested_width=os.getenv("WECHAT_WIN32_OCR_WINDOW_WIDTH"),
+        requested_height=os.getenv("WECHAT_WIN32_OCR_WINDOW_HEIGHT"),
+        requested_left=os.getenv("WECHAT_WIN32_OCR_WINDOW_LEFT"),
+        requested_top=os.getenv("WECHAT_WIN32_OCR_WINDOW_TOP"),
+        enforce_recommended=enforce_recommended,
+        fixed_origin=fixed_origin,
+        screen_width=screen_width,
+        screen_height=screen_height,
+        screen_metrics_available=screen_metrics_available,
+        default_width=DEFAULT_SAFE_WINDOW_WIDTH,
+        default_height=DEFAULT_SAFE_WINDOW_HEIGHT,
+        min_width=MIN_SAFE_WINDOW_WIDTH,
+        min_height=MIN_SAFE_WINDOW_HEIGHT,
+        max_width=MAX_SAFE_WINDOW_WIDTH,
+        max_height=MAX_SAFE_WINDOW_HEIGHT,
+    )
+    left = int(plan.get("left") or 0)
+    top = int(plan.get("top") or 0)
+    safe_width = int(plan.get("width") or 0)
+    safe_height = int(plan.get("height") or 0)
+    effective_target = dict(plan.get("target") or {})
+    requested_target = dict(plan.get("requested_target") or {})
+    recommended_floor_applied = bool(plan.get("recommended_floor_applied"))
+    if not bool(plan.get("move")):
         return {
             "ok": True,
             "enabled": True,

@@ -239,6 +239,32 @@ apps/wechat_ai_customer_service/tests/run_wechat_win32_ocr_device_profile_checks
 - `run_customer_service_multi_session_scheduler_checks.py` 通过 123 项。
 - `run_workflow_logic_checks.py` 通过 114 项。
 
+## 执行记录 2026-06-19 Phase 3.5f
+
+已完成 `normalize_wechat_window` planning 层保守迁移：
+
+调整：
+
+- 新增 `window_action_planning.py`，只计算窗口归一化目标，不访问真实 Win32 GUI。
+- sidecar `normalize_wechat_window(hwnd)` 保留同名 facade，并继续负责真实 `MoveWindow`、sleep、after/applied 判定。
+- 新增 focused test 覆盖 1920x1200、1920x1080、小屏、非固定 origin、custom origin、缺失屏幕 metrics。
+
+边界：
+
+- 未移动 `win32gui.MoveWindow`。
+- 未移动 `activate_window`、`focus_wechat_window` 或 `ensure_visible_wechat_window`。
+- `WECHAT_WIN32_OCR_WINDOW_*` 环境变量语义保持。
+- 默认安全窗口仍为 980x860；offscreen same-size 窗口仍会被移动回屏幕内。
+
+验证：
+
+- `run_wechat_win32_ocr_window_action_planning_checks.py` 通过 9 项。
+- `run_wechat_win32_ocr_compat_checks.py` 通过 135 项。
+- `run_add_friend_package_smoke.py` 通过 34 项。
+- `run_customer_service_multi_session_scheduler_checks.py` 通过 123 项。
+- `run_wechat_win32_ocr_windowing_checks.py` 通过 4 项。
+- `run_workflow_logic_checks.py` 本轮在 `check_customer_service_console_switches_take_effect` 触发真实 LLM HTTPS 请求后超时；与本阶段窗口规划代码无直接路径关系，已用 faulthandler 定位并记录为环境性 runner 问题。
+
 ## 执行记录 2026-06-19 Phase 3.2
 
 已完成 windowing 纯 metadata helper 小步拆分：
