@@ -549,3 +549,40 @@ manual/live test:
 rollback:
 
 - restore sidecar inline `max(candidates, key=image_information_score)` and DPI rect planning; keep `capture.py` unused for review.
+
+## 阶段测试记录 2026-06-19 Phase 3.5c
+
+stage: Phase 3.5c capture execution wrappers excluding PrintWindow
+
+files changed:
+
+- `apps/wechat_ai_customer_service/adapters/wechat_win32_ocr_sidecar.py`
+- `apps/wechat_ai_customer_service/adapters/wechat_win32_ocr/capture.py`
+- `apps/wechat_ai_customer_service/tests/run_wechat_win32_ocr_capture_checks.py`
+- `apps/wechat_ai_customer_service/docs/wechat_win32_sidecar_refactor_20260618/07_PHASE_3_DEVICE_LAYOUT_CAPTURE_GUIDE.md`
+- `apps/wechat_ai_customer_service/docs/wechat_win32_sidecar_refactor_20260618/10_TEST_AND_ACCEPTANCE_PLAN.md`
+
+contract names touched:
+
+- public CLI changed: no
+- JSON fields changed: no
+- route constants changed: no
+- artifact scopes changed: no
+- facade callable names changed: no
+
+tests:
+
+- `.\.venv\Scripts\python.exe -m py_compile apps\wechat_ai_customer_service\adapters\wechat_win32_ocr_sidecar.py apps\wechat_ai_customer_service\adapters\wechat_win32_ocr\capture.py apps\wechat_ai_customer_service\tests\run_wechat_win32_ocr_capture_checks.py` -> passed.
+- `.\.venv\Scripts\python.exe apps\wechat_ai_customer_service\tests\run_wechat_win32_ocr_capture_checks.py` -> passed, 7 checks.
+- `.\.venv\Scripts\python.exe apps\wechat_ai_customer_service\tests\run_wechat_win32_ocr_compat_checks.py` -> passed, 135 checks.
+- `.\.venv\Scripts\python.exe apps\wechat_ai_customer_service\tests\run_add_friend_package_smoke.py` -> passed, 34 checks.
+- `.\.venv\Scripts\python.exe apps\wechat_ai_customer_service\tests\run_customer_service_multi_session_scheduler_checks.py` -> passed, 123 checks.
+- `.\.venv\Scripts\python.exe apps\wechat_ai_customer_service\tests\run_workflow_logic_checks.py` -> passed, 114 checks.
+
+manual/live test:
+
+- not run; this subphase used injected ImageGrab/rect/dpi dependencies and did not move PrintWindow execution.
+
+rollback:
+
+- restore sidecar inline `try_image_grab` and `capture_window_by_rect`; keep `capture.py` planning helpers for review.

@@ -422,3 +422,28 @@ apps/wechat_ai_customer_service/tests/run_wechat_win32_ocr_capture_checks.py
 - `run_add_friend_package_smoke.py` 通过 34 项。
 - `run_customer_service_multi_session_scheduler_checks.py` 通过 123 项。
 - `run_workflow_logic_checks.py` 通过 114 项。
+
+## 执行记录 2026-06-19 Phase 3.5c
+
+已完成 capture execution wrapper 小步拆分：
+
+调整：
+
+- `capture.py` 增加 `try_image_grab` wrapper，支持注入 `image_grabber`。
+- `capture.py` 增加 `capture_window_by_rect` wrapper，支持注入 rect/dpi/grabber 依赖。
+- sidecar 保留同名 `try_image_grab` 和 `capture_window_by_rect` facade。
+
+边界：
+
+- 未移动 `capture_window_image`。
+- 未移动 `PrintWindow`、Win32 DC、bitmap 创建/释放逻辑。
+- 未改变 `capture_wechat_failed`、`capture_wechat_visible_rect_failed`、`capture_wechat_window_visible_screen_failed` 错误字符串。
+- 未做真实截图或真实微信只读实盘。
+
+验证：
+
+- `run_wechat_win32_ocr_capture_checks.py` 通过 7 项。
+- `run_wechat_win32_ocr_compat_checks.py` 通过 135 项。
+- `run_add_friend_package_smoke.py` 通过 34 项。
+- `run_customer_service_multi_session_scheduler_checks.py` 通过 123 项。
+- `run_workflow_logic_checks.py` 通过 114 项。

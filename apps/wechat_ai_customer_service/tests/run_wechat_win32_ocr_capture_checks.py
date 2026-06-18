@@ -26,7 +26,13 @@ class FakeWin32Gui:
 
 
 def test_capture_module_exports_expected_helpers() -> None:
-    for name in ("capture_rect_candidates", "collect_capture_candidates", "select_best_capture_candidate"):
+    for name in (
+        "capture_rect_candidates",
+        "collect_capture_candidates",
+        "capture_window_by_rect",
+        "try_image_grab",
+        "select_best_capture_candidate",
+    ):
         assert_true(callable(getattr(capture, name, None)), f"capture helper missing: {name}")
 
 
@@ -82,6 +88,58 @@ def test_collect_capture_candidates_matches_sidecar_order_with_fake_grabber() ->
     )
 
 
+def test_capture_window_by_rect_wrapper_matches_sidecar_with_fake_dependencies() -> None:
+    original_win32gui = sidecar.win32gui
+    original_dpi = sidecar.window_dpi_scale
+    original_grab = sidecar.try_image_grab
+    try:
+        sidecar.win32gui = FakeWin32Gui()
+        sidecar.window_dpi_scale = lambda _hwnd: 1.25
+        sidecar.try_image_grab = lambda rect: None if rect == (80, 40, 865, 728) else f"image:{rect}"
+        sidecar_result = sidecar.capture_window_by_rect(1001)
+    finally:
+        sidecar.win32gui = original_win32gui
+        sidecar.window_dpi_scale = original_dpi
+        sidecar.try_image_grab = original_grab
+    extracted_result = capture.capture_window_by_rect(
+        1001,
+        rect_provider=lambda _hwnd: (100, 50, 1081, 910),
+        dpi_scale_provider=lambda _hwnd: 1.25,
+        grabber=lambda rect: None if rect == (80, 40, 865, 728) else f"image:{rect}",
+    )
+    assert_true(extracted_result == sidecar_result, f"capture_window_by_rect mismatch: {extracted_result} != {sidecar_result}")
+
+
+def test_try_image_grab_matches_sidecar_for_small_rect_success_and_failure() -> None:
+    original_grab = sidecar.ImageGrab.grab
+    calls: list[tuple[int, int, int, int]] = []
+
+    def fake_grab(*, bbox):
+        calls.append(bbox)
+        if bbox == (10, 10, 50, 50):
+            return "image-ok"
+        raise RuntimeError("grab boom")
+
+    try:
+        sidecar.ImageGrab.grab = fake_grab
+        assert_true(sidecar.try_image_grab((0, 0, 2, 50)) is None, "small width should not grab")
+        assert_true(sidecar.try_image_grab((0, 0, 50, 2)) is None, "small height should not grab")
+        assert_true(sidecar.try_image_grab((10, 10, 50, 50)) == "image-ok", "successful grab mismatch")
+        assert_true(sidecar.try_image_grab((20, 20, 60, 60)) is None, "grab exception should return None")
+    finally:
+        sidecar.ImageGrab.grab = original_grab
+
+    assert_true(calls == [(10, 10, 50, 50), (20, 20, 60, 60)], f"unexpected grab calls: {calls}")
+    assert_true(
+        capture.try_image_grab((0, 0, 2, 50), image_grabber=fake_grab) is None,
+        "extracted small width should not grab",
+    )
+    assert_true(
+        capture.try_image_grab((10, 10, 50, 50), image_grabber=fake_grab) == "image-ok",
+        "extracted successful grab mismatch",
+    )
+
+
 def test_select_best_capture_candidate_matches_sidecar_max_score_semantics() -> None:
     candidates = ["low", "high", "mid"]
     scores = {"low": 0.2, "high": 9.5, "mid": 3.0}
@@ -96,6 +154,8 @@ def main() -> int:
         test_capture_rect_candidates_preserve_base_only_when_scale_is_normal,
         test_capture_rect_candidates_preserve_scaled_order,
         test_collect_capture_candidates_matches_sidecar_order_with_fake_grabber,
+        test_capture_window_by_rect_wrapper_matches_sidecar_with_fake_dependencies,
+        test_try_image_grab_matches_sidecar_for_small_rect_success_and_failure,
         test_select_best_capture_candidate_matches_sidecar_max_score_semantics,
     ]
     passed = 0

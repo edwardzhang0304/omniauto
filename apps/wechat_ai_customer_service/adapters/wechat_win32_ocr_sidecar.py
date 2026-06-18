@@ -8355,22 +8355,16 @@ def capture_window_image(hwnd: int) -> Any | None:
 
 
 def capture_window_by_rect(hwnd: int) -> list[Any]:
-    rect = win32gui.GetWindowRect(hwnd)
-    return win32_ocr_capture.collect_capture_candidates(
-        rect,
-        dpi_scale=window_dpi_scale(hwnd),
+    return win32_ocr_capture.capture_window_by_rect(
+        hwnd,
+        rect_provider=lambda current_hwnd: win32gui.GetWindowRect(current_hwnd),
+        dpi_scale_provider=window_dpi_scale,
         grabber=try_image_grab,
     )
 
 
 def try_image_grab(rect: tuple[int, int, int, int]) -> Any | None:
-    left, top, right, bottom = rect
-    if int(right - left) <= 2 or int(bottom - top) <= 2:
-        return None
-    try:
-        return ImageGrab.grab(bbox=rect)
-    except Exception:
-        return None
+    return win32_ocr_capture.try_image_grab(rect, image_grabber=ImageGrab.grab)
 
 
 def window_dpi_scale(hwnd: int) -> float:

@@ -51,6 +51,35 @@ def collect_capture_candidates(
     return captures
 
 
+def capture_window_by_rect(
+    hwnd: int,
+    *,
+    rect_provider: Callable[[int], Any],
+    dpi_scale_provider: Callable[[int], float],
+    grabber: Callable[[Rect], Any | None],
+) -> list[Any]:
+    rect = rect_provider(hwnd)
+    return collect_capture_candidates(
+        rect,
+        dpi_scale=dpi_scale_provider(hwnd),
+        grabber=grabber,
+    )
+
+
+def try_image_grab(
+    rect: Rect,
+    *,
+    image_grabber: Callable[..., Any],
+) -> Any | None:
+    left, top, right, bottom = rect
+    if int(right - left) <= 2 or int(bottom - top) <= 2:
+        return None
+    try:
+        return image_grabber(bbox=rect)
+    except Exception:
+        return None
+
+
 def select_best_capture_candidate(
     candidates: list[Any],
     *,
