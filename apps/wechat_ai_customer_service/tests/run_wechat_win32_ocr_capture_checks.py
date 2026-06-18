@@ -25,6 +25,133 @@ class FakeWin32Gui:
         return (100, 50, 1081, 910)
 
 
+class PrintWindowFixture:
+    def __init__(
+        self,
+        *,
+        rect: tuple[int, int, int, int] = (0, 0, 4, 3),
+        hwnd_dc: int | None = 101,
+        print_results: list[int] | None = None,
+        fail_at: str = "",
+    ) -> None:
+        self.rect = rect
+        self.hwnd_dc = hwnd_dc
+        self.print_results = list(print_results if print_results is not None else [1])
+        self.fail_at = fail_at
+        self.events: list[str] = []
+        self.print_flags: list[int] = []
+        self.bitmap = FakeBitmap(self)
+        self.src_dc = FakeSrcDC(self)
+        self.mem_dc = FakeMemDC(self)
+        self.win32gui = FakePrintWindowGui(self)
+        self.win32ui = FakePrintWindowUi(self)
+        self.user32 = FakePrintWindowUser32(self)
+
+
+class FakePrintWindowGui:
+    def __init__(self, fixture: PrintWindowFixture) -> None:
+        self.fixture = fixture
+
+    def GetWindowRect(self, _hwnd: int) -> tuple[int, int, int, int]:
+        self.fixture.events.append("GetWindowRect")
+        return self.fixture.rect
+
+    def GetWindowDC(self, _hwnd: int) -> int | None:
+        self.fixture.events.append("GetWindowDC")
+        return self.fixture.hwnd_dc
+
+    def DeleteObject(self, handle: int) -> None:
+        self.fixture.events.append(f"DeleteObject:{handle}")
+
+    def ReleaseDC(self, _hwnd: int, hwnd_dc: int) -> None:
+        self.fixture.events.append(f"ReleaseDC:{hwnd_dc}")
+
+
+class FakePrintWindowUi:
+    def __init__(self, fixture: PrintWindowFixture) -> None:
+        self.fixture = fixture
+
+    def CreateDCFromHandle(self, _hwnd_dc: int) -> "FakeSrcDC":
+        self.fixture.events.append("CreateDCFromHandle")
+        return self.fixture.src_dc
+
+    def CreateBitmap(self) -> "FakeBitmap":
+        self.fixture.events.append("CreateBitmap")
+        return self.fixture.bitmap
+
+
+class FakeSrcDC:
+    def __init__(self, fixture: PrintWindowFixture) -> None:
+        self.fixture = fixture
+
+    def CreateCompatibleDC(self) -> "FakeMemDC":
+        self.fixture.events.append("CreateCompatibleDC")
+        return self.fixture.mem_dc
+
+    def DeleteDC(self) -> None:
+        self.fixture.events.append("src.DeleteDC")
+
+
+class FakeMemDC:
+    def __init__(self, fixture: PrintWindowFixture) -> None:
+        self.fixture = fixture
+
+    def SelectObject(self, _bitmap: "FakeBitmap") -> None:
+        self.fixture.events.append("SelectObject")
+
+    def GetSafeHdc(self) -> int:
+        self.fixture.events.append("GetSafeHdc")
+        return 202
+
+    def DeleteDC(self) -> None:
+        self.fixture.events.append("mem.DeleteDC")
+
+
+class FakeBitmap:
+    def __init__(self, fixture: PrintWindowFixture) -> None:
+        self.fixture = fixture
+
+    def CreateCompatibleBitmap(self, _src_dc: FakeSrcDC, width: int, height: int) -> None:
+        self.fixture.events.append(f"CreateCompatibleBitmap:{width}x{height}")
+        if self.fixture.fail_at == "CreateCompatibleBitmap":
+            raise RuntimeError("bitmap boom")
+
+    def GetInfo(self) -> dict[str, int]:
+        self.fixture.events.append("GetInfo")
+        return {"bmWidth": 4, "bmHeight": 3}
+
+    def GetBitmapBits(self, _signed: bool) -> bytes:
+        self.fixture.events.append("GetBitmapBits")
+        if self.fixture.fail_at == "GetBitmapBits":
+            raise RuntimeError("bits boom")
+        return b"\x00\x00\x00\x00" * 12
+
+    def GetHandle(self) -> int:
+        self.fixture.events.append("GetHandle")
+        return 303
+
+
+class FakePrintWindowUser32:
+    def __init__(self, fixture: PrintWindowFixture) -> None:
+        self.fixture = fixture
+
+    def PrintWindow(self, _hwnd: int, _hdc: int, flag: int) -> int:
+        self.fixture.events.append(f"PrintWindow:{flag}")
+        self.fixture.print_flags.append(flag)
+        if self.fixture.print_results:
+            return int(self.fixture.print_results.pop(0))
+        return 0
+
+
+class FakeImageFactory:
+    def __init__(self) -> None:
+        self.calls: list[tuple] = []
+
+    def frombuffer(self, *args):
+        self.calls.append(args)
+        return {"image": args[1]}
+
+
 def test_capture_module_exports_expected_helpers() -> None:
     for name in (
         "capture_rect_candidates",
@@ -140,6 +267,92 @@ def test_try_image_grab_matches_sidecar_for_small_rect_success_and_failure() -> 
     )
 
 
+def run_sidecar_capture_window_image_with_fixture(fixture: PrintWindowFixture, image_factory: FakeImageFactory):
+    original_win32gui = sidecar.win32gui
+    original_win32ui = sidecar.win32ui
+    original_windll = sidecar.ctypes.windll
+    original_frombuffer = sidecar.Image.frombuffer
+    try:
+        sidecar.win32gui = fixture.win32gui
+        sidecar.win32ui = fixture.win32ui
+        sidecar.ctypes.windll = type("FakeWindll", (), {"user32": fixture.user32})()
+        sidecar.Image.frombuffer = image_factory.frombuffer
+        return sidecar.capture_window_image(1001)
+    finally:
+        sidecar.win32gui = original_win32gui
+        sidecar.win32ui = original_win32ui
+        sidecar.ctypes.windll = original_windll
+        sidecar.Image.frombuffer = original_frombuffer
+
+
+def assert_resources_released(fixture: PrintWindowFixture, *, bitmap_created: bool = True, dc_created: bool = True) -> None:
+    if bitmap_created:
+        assert_true("DeleteObject:303" in fixture.events, f"bitmap handle should be deleted: {fixture.events}")
+    if dc_created:
+        assert_true("mem.DeleteDC" in fixture.events, f"memory DC should be deleted: {fixture.events}")
+        assert_true("src.DeleteDC" in fixture.events, f"source DC should be deleted: {fixture.events}")
+    if fixture.hwnd_dc:
+        assert_true(f"ReleaseDC:{fixture.hwnd_dc}" in fixture.events, f"window DC should be released: {fixture.events}")
+
+
+def test_capture_window_image_printwindow_full_content_success_releases_resources() -> None:
+    fixture = PrintWindowFixture(print_results=[1])
+    image_factory = FakeImageFactory()
+    result = run_sidecar_capture_window_image_with_fixture(fixture, image_factory)
+    assert_true(result == {"image": (4, 3)}, f"unexpected image result: {result}")
+    assert_true(fixture.print_flags == [0x2], f"full-content success should not call classic fallback: {fixture.print_flags}")
+    assert_resources_released(fixture)
+
+
+def test_capture_window_image_printwindow_classic_fallback_releases_resources() -> None:
+    fixture = PrintWindowFixture(print_results=[0, 1])
+    image_factory = FakeImageFactory()
+    result = run_sidecar_capture_window_image_with_fixture(fixture, image_factory)
+    assert_true(result == {"image": (4, 3)}, f"unexpected fallback image result: {result}")
+    assert_true(fixture.print_flags == [0x2, 0], f"classic fallback order mismatch: {fixture.print_flags}")
+    assert_resources_released(fixture)
+
+
+def test_capture_window_image_printwindow_failure_returns_none_and_releases_resources() -> None:
+    fixture = PrintWindowFixture(print_results=[0, 0])
+    image_factory = FakeImageFactory()
+    result = run_sidecar_capture_window_image_with_fixture(fixture, image_factory)
+    assert_true(result is None, f"print failure should return None: {result}")
+    assert_true(fixture.print_flags == [0x2, 0], f"print failure order mismatch: {fixture.print_flags}")
+    assert_resources_released(fixture)
+
+
+def test_capture_window_image_bitmap_exception_returns_none_and_releases_partial_resources() -> None:
+    fixture = PrintWindowFixture(fail_at="CreateCompatibleBitmap")
+    image_factory = FakeImageFactory()
+    result = run_sidecar_capture_window_image_with_fixture(fixture, image_factory)
+    assert_true(result is None, f"bitmap exception should return None: {result}")
+    assert_true("PrintWindow:2" not in fixture.events, f"should not print after bitmap setup failure: {fixture.events}")
+    assert_resources_released(fixture)
+
+
+def test_capture_window_image_get_bits_exception_returns_none_and_releases_resources() -> None:
+    fixture = PrintWindowFixture(print_results=[1], fail_at="GetBitmapBits")
+    image_factory = FakeImageFactory()
+    result = run_sidecar_capture_window_image_with_fixture(fixture, image_factory)
+    assert_true(result is None, f"bitmap bits exception should return None: {result}")
+    assert_true(fixture.print_flags == [0x2], f"unexpected print flags before bits failure: {fixture.print_flags}")
+    assert_resources_released(fixture)
+
+
+def test_capture_window_image_no_window_dc_or_tiny_rect_skips_resource_creation() -> None:
+    no_dc_fixture = PrintWindowFixture(hwnd_dc=None)
+    image_factory = FakeImageFactory()
+    result = run_sidecar_capture_window_image_with_fixture(no_dc_fixture, image_factory)
+    assert_true(result is None, f"missing window DC should return None: {result}")
+    assert_true("CreateDCFromHandle" not in no_dc_fixture.events, f"should not create DC without hwnd_dc: {no_dc_fixture.events}")
+
+    tiny_fixture = PrintWindowFixture(rect=(0, 0, 2, 50))
+    result = run_sidecar_capture_window_image_with_fixture(tiny_fixture, image_factory)
+    assert_true(result is None, f"tiny rect should return None: {result}")
+    assert_true("GetWindowDC" not in tiny_fixture.events, f"tiny rect should not get DC: {tiny_fixture.events}")
+
+
 def test_select_best_capture_candidate_matches_sidecar_max_score_semantics() -> None:
     candidates = ["low", "high", "mid"]
     scores = {"low": 0.2, "high": 9.5, "mid": 3.0}
@@ -156,6 +369,12 @@ def main() -> int:
         test_collect_capture_candidates_matches_sidecar_order_with_fake_grabber,
         test_capture_window_by_rect_wrapper_matches_sidecar_with_fake_dependencies,
         test_try_image_grab_matches_sidecar_for_small_rect_success_and_failure,
+        test_capture_window_image_printwindow_full_content_success_releases_resources,
+        test_capture_window_image_printwindow_classic_fallback_releases_resources,
+        test_capture_window_image_printwindow_failure_returns_none_and_releases_resources,
+        test_capture_window_image_bitmap_exception_returns_none_and_releases_partial_resources,
+        test_capture_window_image_get_bits_exception_returns_none_and_releases_resources,
+        test_capture_window_image_no_window_dc_or_tiny_rect_skips_resource_creation,
         test_select_best_capture_candidate_matches_sidecar_max_score_semantics,
     ]
     passed = 0
