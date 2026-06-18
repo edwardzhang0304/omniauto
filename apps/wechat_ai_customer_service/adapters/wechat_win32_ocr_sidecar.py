@@ -150,6 +150,7 @@ from apps.wechat_ai_customer_service.adapters.wechat_win32_ocr import geometry a
 from apps.wechat_ai_customer_service.adapters.wechat_win32_ocr import env_config as win32_ocr_env
 from apps.wechat_ai_customer_service.adapters.wechat_win32_ocr import humanized_input as win32_ocr_humanized
 from apps.wechat_ai_customer_service.adapters.wechat_win32_ocr import device_profile as win32_ocr_device_profile
+from apps.wechat_ai_customer_service.adapters.wechat_win32_ocr import ocr_engine as win32_ocr_engine
 from apps.wechat_ai_customer_service.adapters.wechat_win32_ocr import render_diagnostics as win32_ocr_render
 from apps.wechat_ai_customer_service.adapters.wechat_win32_ocr import text_normalization as win32_ocr_text
 from apps.wechat_ai_customer_service.adapters.wechat_win32_ocr import windowing as win32_ocr_windowing
@@ -8437,40 +8438,7 @@ def run_ocr(image: Any) -> list[dict[str, Any]]:
     if _OCR_ENGINE is None:
         _OCR_ENGINE = RapidOCR()
     result, _ = _OCR_ENGINE(image)
-    items: list[dict[str, Any]] = []
-    for row in result or []:
-        try:
-            box, text, confidence = row
-        except ValueError:
-            continue
-        clean = normalize_ocr_text(text)
-        if not clean:
-            continue
-        try:
-            conf = float(confidence)
-        except (TypeError, ValueError):
-            conf = 0.0
-        if conf < OCR_MIN_CONFIDENCE:
-            continue
-        xs = [float(point[0]) for point in box]
-        ys = [float(point[1]) for point in box]
-        items.append(
-            {
-                "text": clean,
-                "confidence": conf,
-                "box": box,
-                "left": min(xs),
-                "right": max(xs),
-                "top": min(ys),
-                "bottom": max(ys),
-                "center_x": sum(xs) / len(xs),
-                "center_y": sum(ys) / len(ys),
-            }
-        )
-    items.sort(key=lambda item: (float(item["top"]), float(item["left"])))
-    if likely_foreign_overlay_capture(items):
-        return []
-    return items
+    return win32_ocr_engine.normalize_ocr_rows(result, min_confidence=OCR_MIN_CONFIDENCE)
 
 
 def likely_foreign_overlay_capture(ocr_items: list[dict[str, Any]]) -> bool:

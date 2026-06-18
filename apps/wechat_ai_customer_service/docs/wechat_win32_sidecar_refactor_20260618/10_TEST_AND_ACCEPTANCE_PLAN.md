@@ -398,3 +398,41 @@ manual/live test:
 rollback:
 
 - restore sidecar inline implementations for `detect_blank_render`, `image_information_score`, and `likely_foreign_overlay_capture`.
+
+## 阶段测试记录 2026-06-19 Phase 3.4
+
+stage: Phase 3.4 OCR engine row normalization
+
+files changed:
+
+- `apps/wechat_ai_customer_service/adapters/wechat_win32_ocr_sidecar.py`
+- `apps/wechat_ai_customer_service/adapters/wechat_win32_ocr/ocr_engine.py`
+- `apps/wechat_ai_customer_service/tests/run_wechat_win32_ocr_ocr_engine_checks.py`
+- `apps/wechat_ai_customer_service/docs/wechat_win32_sidecar_refactor_20260618/07_PHASE_3_DEVICE_LAYOUT_CAPTURE_GUIDE.md`
+- `apps/wechat_ai_customer_service/docs/wechat_win32_sidecar_refactor_20260618/10_TEST_AND_ACCEPTANCE_PLAN.md`
+
+contract names touched:
+
+- public CLI changed: no
+- JSON fields changed: no
+- route constants changed: no
+- artifact scopes changed: no
+- facade callable names changed: no
+
+tests:
+
+- `.\.venv\Scripts\python.exe -m py_compile apps\wechat_ai_customer_service\adapters\wechat_win32_ocr_sidecar.py apps\wechat_ai_customer_service\adapters\wechat_win32_ocr\ocr_engine.py apps\wechat_ai_customer_service\tests\run_wechat_win32_ocr_ocr_engine_checks.py` -> passed.
+- `.\.venv\Scripts\python.exe apps\wechat_ai_customer_service\tests\run_wechat_win32_ocr_ocr_engine_checks.py` -> passed, 5 checks.
+- `.\.venv\Scripts\python.exe apps\wechat_ai_customer_service\tests\run_wechat_win32_ocr_render_diagnostics_checks.py` -> passed, 4 checks.
+- `.\.venv\Scripts\python.exe apps\wechat_ai_customer_service\tests\run_wechat_win32_ocr_compat_checks.py` -> passed, 135 checks.
+- `.\.venv\Scripts\python.exe apps\wechat_ai_customer_service\tests\run_add_friend_package_smoke.py` -> passed, 34 checks.
+- `.\.venv\Scripts\python.exe apps\wechat_ai_customer_service\tests\run_customer_service_multi_session_scheduler_checks.py` -> passed, 123 checks.
+- `.\.venv\Scripts\python.exe apps\wechat_ai_customer_service\tests\run_workflow_logic_checks.py` -> passed, 114 checks.
+
+manual/live test:
+
+- not run; fake OCR engine tests covered this non-live wrapper change.
+
+rollback:
+
+- restore sidecar inline OCR row normalization while keeping `ocr_engine.py` unused for review.

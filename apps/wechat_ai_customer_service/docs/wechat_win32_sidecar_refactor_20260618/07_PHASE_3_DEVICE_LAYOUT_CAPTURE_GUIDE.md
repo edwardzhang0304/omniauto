@@ -300,3 +300,35 @@ apps/wechat_ai_customer_service/tests/run_wechat_win32_ocr_render_diagnostics_ch
 下一步注意：
 
 - 继续 Phase 3 若要移动 `capture_*` 或 `run_ocr`，必须先单独形成更细方案，因为它们涉及真实截图、文件保存、OCR 引擎初始化和 pywin32/PIL 外部依赖。
+
+## 执行记录 2026-06-19 Phase 3.4
+
+已完成 OCR engine 小步拆分：
+
+新增：
+
+```text
+apps/wechat_ai_customer_service/adapters/wechat_win32_ocr/ocr_engine.py
+apps/wechat_ai_customer_service/tests/run_wechat_win32_ocr_ocr_engine_checks.py
+```
+
+已迁入：
+
+- OCR row 标准化：text 清洗、confidence 过滤、bbox/center 字段生成、排序、foreign overlay 过滤。
+- `OcrEngineRunner` / `create_ocr_runner`：用于后续把 RapidOCR 初始化从 sidecar 移出。
+
+边界：
+
+- sidecar 仍保留 `RapidOCR` import、`_OCR_ENGINE` 缓存和 `run_ocr` facade。
+- 本阶段 `run_ocr` 只把 RapidOCR 原始结果委托给 `ocr_engine.normalize_ocr_rows()`。
+- 未移动截图函数，不改变 `rapidocr_onnxruntime_unavailable` 错误语义。
+- 未做真实 OCR 或真实微信截图实盘。
+
+验证：
+
+- `run_wechat_win32_ocr_ocr_engine_checks.py` 通过 5 项，覆盖 fake engine、row normalization、engine cache、unavailable error、foreign overlay 过滤。
+- `run_wechat_win32_ocr_render_diagnostics_checks.py` 通过 4 项。
+- `run_wechat_win32_ocr_compat_checks.py` 通过 135 项。
+- `run_add_friend_package_smoke.py` 通过 34 项。
+- `run_customer_service_multi_session_scheduler_checks.py` 通过 123 项。
+- `run_workflow_logic_checks.py` 通过 114 项。
