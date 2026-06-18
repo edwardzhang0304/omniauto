@@ -66,6 +66,78 @@ def capture_window_by_rect(
     )
 
 
+def capture_window_image(
+    hwnd: int,
+    *,
+    win32gui_module: Any,
+    win32ui_module: Any,
+    user32: Any,
+    image_factory: Any,
+) -> Any | None:
+    if win32ui_module is None or win32gui_module is None:
+        return None
+    left, top, right, bottom = win32gui_module.GetWindowRect(hwnd)
+    width = max(0, int(right - left))
+    height = max(0, int(bottom - top))
+    if width <= 2 or height <= 2:
+        return None
+    hwnd_dc = None
+    src_dc = None
+    mem_dc = None
+    bitmap = None
+    try:
+        hwnd_dc = win32gui_module.GetWindowDC(hwnd)
+        if not hwnd_dc:
+            return None
+        src_dc = win32ui_module.CreateDCFromHandle(hwnd_dc)
+        mem_dc = src_dc.CreateCompatibleDC()
+        bitmap = win32ui_module.CreateBitmap()
+        bitmap.CreateCompatibleBitmap(src_dc, width, height)
+        mem_dc.SelectObject(bitmap)
+
+        rendered = int(user32.PrintWindow(hwnd, mem_dc.GetSafeHdc(), 0x2))
+        if rendered != 1:
+            rendered = int(user32.PrintWindow(hwnd, mem_dc.GetSafeHdc(), 0))
+        if rendered != 1:
+            return None
+
+        bmpinfo = bitmap.GetInfo()
+        bmpstr = bitmap.GetBitmapBits(True)
+        image = image_factory.frombuffer(
+            "RGB",
+            (int(bmpinfo["bmWidth"]), int(bmpinfo["bmHeight"])),
+            bmpstr,
+            "raw",
+            "BGRX",
+            0,
+            1,
+        )
+        return image
+    except Exception:
+        return None
+    finally:
+        if bitmap is not None:
+            try:
+                win32gui_module.DeleteObject(bitmap.GetHandle())
+            except Exception:
+                pass
+        if mem_dc is not None:
+            try:
+                mem_dc.DeleteDC()
+            except Exception:
+                pass
+        if src_dc is not None:
+            try:
+                src_dc.DeleteDC()
+            except Exception:
+                pass
+        if hwnd_dc is not None:
+            try:
+                win32gui_module.ReleaseDC(hwnd, hwnd_dc)
+            except Exception:
+                pass
+
+
 def try_image_grab(
     rect: Rect,
     *,

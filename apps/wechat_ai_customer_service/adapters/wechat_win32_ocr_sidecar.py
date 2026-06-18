@@ -8288,70 +8288,13 @@ def capture_wechat_window_visible_screen(hwnd: int, *, artifact_dir: str | None 
 
 
 def capture_window_image(hwnd: int) -> Any | None:
-    if win32ui is None or win32gui is None:
-        return None
-    left, top, right, bottom = win32gui.GetWindowRect(hwnd)
-    width = max(0, int(right - left))
-    height = max(0, int(bottom - top))
-    if width <= 2 or height <= 2:
-        return None
-    hwnd_dc = None
-    src_dc = None
-    mem_dc = None
-    bitmap = None
-    try:
-        hwnd_dc = win32gui.GetWindowDC(hwnd)
-        if not hwnd_dc:
-            return None
-        src_dc = win32ui.CreateDCFromHandle(hwnd_dc)
-        mem_dc = src_dc.CreateCompatibleDC()
-        bitmap = win32ui.CreateBitmap()
-        bitmap.CreateCompatibleBitmap(src_dc, width, height)
-        mem_dc.SelectObject(bitmap)
-
-        user32 = ctypes.windll.user32
-        # Prefer PW_RENDERFULLCONTENT(0x2), then fall back to classic mode.
-        rendered = int(user32.PrintWindow(hwnd, mem_dc.GetSafeHdc(), 0x2))
-        if rendered != 1:
-            rendered = int(user32.PrintWindow(hwnd, mem_dc.GetSafeHdc(), 0))
-        if rendered != 1:
-            return None
-
-        bmpinfo = bitmap.GetInfo()
-        bmpstr = bitmap.GetBitmapBits(True)
-        image = Image.frombuffer(
-            "RGB",
-            (int(bmpinfo["bmWidth"]), int(bmpinfo["bmHeight"])),
-            bmpstr,
-            "raw",
-            "BGRX",
-            0,
-            1,
-        )
-        return image
-    except Exception:
-        return None
-    finally:
-        if bitmap is not None:
-            try:
-                win32gui.DeleteObject(bitmap.GetHandle())
-            except Exception:
-                pass
-        if mem_dc is not None:
-            try:
-                mem_dc.DeleteDC()
-            except Exception:
-                pass
-        if src_dc is not None:
-            try:
-                src_dc.DeleteDC()
-            except Exception:
-                pass
-        if hwnd_dc is not None:
-            try:
-                win32gui.ReleaseDC(hwnd, hwnd_dc)
-            except Exception:
-                pass
+    return win32_ocr_capture.capture_window_image(
+        hwnd,
+        win32gui_module=win32gui,
+        win32ui_module=win32ui,
+        user32=getattr(getattr(ctypes, "windll", None), "user32", None),
+        image_factory=Image,
+    )
 
 
 def capture_window_by_rect(hwnd: int) -> list[Any]:

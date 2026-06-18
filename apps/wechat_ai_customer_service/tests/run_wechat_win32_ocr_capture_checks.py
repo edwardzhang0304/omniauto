@@ -156,6 +156,7 @@ def test_capture_module_exports_expected_helpers() -> None:
     for name in (
         "capture_rect_candidates",
         "collect_capture_candidates",
+        "capture_window_image",
         "capture_window_by_rect",
         "try_image_grab",
         "select_best_capture_candidate",
@@ -299,18 +300,40 @@ def test_capture_window_image_printwindow_full_content_success_releases_resource
     fixture = PrintWindowFixture(print_results=[1])
     image_factory = FakeImageFactory()
     result = run_sidecar_capture_window_image_with_fixture(fixture, image_factory)
+    extracted_fixture = PrintWindowFixture(print_results=[1])
+    extracted_image_factory = FakeImageFactory()
+    extracted_result = capture.capture_window_image(
+        1001,
+        win32gui_module=extracted_fixture.win32gui,
+        win32ui_module=extracted_fixture.win32ui,
+        user32=extracted_fixture.user32,
+        image_factory=extracted_image_factory,
+    )
     assert_true(result == {"image": (4, 3)}, f"unexpected image result: {result}")
+    assert_true(extracted_result == result, f"extracted full-content result mismatch: {extracted_result}")
     assert_true(fixture.print_flags == [0x2], f"full-content success should not call classic fallback: {fixture.print_flags}")
     assert_resources_released(fixture)
+    assert_resources_released(extracted_fixture)
 
 
 def test_capture_window_image_printwindow_classic_fallback_releases_resources() -> None:
     fixture = PrintWindowFixture(print_results=[0, 1])
     image_factory = FakeImageFactory()
     result = run_sidecar_capture_window_image_with_fixture(fixture, image_factory)
+    extracted_fixture = PrintWindowFixture(print_results=[0, 1])
+    extracted_result = capture.capture_window_image(
+        1001,
+        win32gui_module=extracted_fixture.win32gui,
+        win32ui_module=extracted_fixture.win32ui,
+        user32=extracted_fixture.user32,
+        image_factory=image_factory,
+    )
     assert_true(result == {"image": (4, 3)}, f"unexpected fallback image result: {result}")
+    assert_true(extracted_result == result, f"extracted fallback result mismatch: {extracted_result}")
     assert_true(fixture.print_flags == [0x2, 0], f"classic fallback order mismatch: {fixture.print_flags}")
+    assert_true(extracted_fixture.print_flags == [0x2, 0], f"extracted fallback order mismatch: {extracted_fixture.print_flags}")
     assert_resources_released(fixture)
+    assert_resources_released(extracted_fixture)
 
 
 def test_capture_window_image_printwindow_failure_returns_none_and_releases_resources() -> None:
