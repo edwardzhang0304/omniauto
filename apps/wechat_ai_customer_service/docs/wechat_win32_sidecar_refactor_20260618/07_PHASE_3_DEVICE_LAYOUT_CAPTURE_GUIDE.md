@@ -364,6 +364,32 @@ apps/wechat_ai_customer_service/tests/run_wechat_win32_ocr_device_profile_checks
 - `run_customer_service_multi_session_scheduler_checks.py` 通过 123 项。
 - `run_wechat_win32_ocr_ensure_visible_planning_checks.py` 通过 6 项。
 
+## 执行记录 2026-06-19 Phase 3.5k
+
+已完成可见主窗口候选选择 planning 小步抽取：
+
+调整：
+
+- `window_action_planning.py` 增加 `visible_window_candidate_score` 和 `select_best_visible_window_candidate`。
+- sidecar `select_primary_visible_main_window` 仍负责读取 window geometry、内容探针和 OCR；候选打分/选最优交给纯 helper。
+- 新增 focused test 覆盖小登录壳 vs 大可用窗口、可读窗口 vs 更大 blank 窗口。
+
+边界：
+
+- 未移动 `capture_wechat`、`run_ocr` 或 `window_content_health_score`。
+- 未移动真实聚焦或恢复动作。
+- 多窗口内容探针开关 `WECHAT_WIN32_OCR_MULTI_WINDOW_CONTENT_PROBE` 语义保持。
+
+验证：
+
+- `run_wechat_win32_ocr_window_selection_planning_checks.py` 通过 4 项。
+- `run_wechat_win32_ocr_compat_checks.py` 通过 135 项。
+- `run_wechat_win32_ocr_ensure_visible_planning_checks.py` 通过 6 项。
+- `run_add_friend_package_smoke.py` 通过 34 项。
+- `run_customer_service_multi_session_scheduler_checks.py` 通过 123 项。
+- `run_wechat_win32_ocr_window_activation_checks.py` 通过 3 项。
+- `run_wechat_win32_ocr_window_action_state_checks.py` 通过 6 项。
+
 ## 执行记录 2026-06-19 Phase 3.2
 
 已完成 windowing 纯 metadata helper 小步拆分：

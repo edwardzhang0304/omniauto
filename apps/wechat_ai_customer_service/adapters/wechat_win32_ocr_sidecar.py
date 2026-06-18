@@ -8793,8 +8793,7 @@ def select_primary_visible_main_window(probe: dict[str, Any]) -> dict[str, Any] 
     visible = probe.get("visible_main_windows") or []
     if not visible:
         return None
-    selected: dict[str, Any] | None = None
-    selected_score: tuple[int, int, int, int, int] = (-1, -1, -1, -1, -1)
+    candidates: list[dict[str, Any]] = []
     enable_content_probe = len(visible) > 1 and env_flag(
         "WECHAT_WIN32_OCR_MULTI_WINDOW_CONTENT_PROBE",
         default=True,
@@ -8807,14 +8806,24 @@ def select_primary_visible_main_window(probe: dict[str, Any]) -> dict[str, Any] 
             geometry = get_window_geometry(hwnd)
         except Exception:
             geometry = {"left": 0, "top": 0, "width": 0, "height": 0}
-        area = max(0, int(geometry.get("width") or 0)) * max(0, int(geometry.get("height") or 0))
-        capture_ready = 1 if validate_capture_geometry(geometry).get("ok") else 0
+        capture_ready = bool(validate_capture_geometry(geometry).get("ok"))
         content_score = window_content_health_score(hwnd, geometry) if enable_content_probe and capture_ready else 0
-        safe_action_size = 1 if int(geometry.get("width") or 0) >= MIN_SEND_CLIENT_WIDTH and int(geometry.get("height") or 0) >= MIN_SEND_CLIENT_HEIGHT else 0
-        score = (capture_ready, content_score, safe_action_size, area, wechat_window_title_score(item))
-        if selected is None or score > selected_score:
-            selected = {**dict(item), "geometry_hint": geometry, "content_health_score": content_score}
-            selected_score = score
+        candidates.append(
+            {
+                "item": item,
+                "geometry": geometry,
+                "content_health_score": content_score,
+                "score": win32_ocr_window_actions.visible_window_candidate_score(
+                    geometry,
+                    capture_ready=capture_ready,
+                    content_health_score=content_score,
+                    min_send_width=MIN_SEND_CLIENT_WIDTH,
+                    min_send_height=MIN_SEND_CLIENT_HEIGHT,
+                    title_score=wechat_window_title_score(item),
+                ),
+            }
+        )
+    selected = win32_ocr_window_actions.select_best_visible_window_candidate(candidates)
     if selected is not None:
         return selected
     return dict(visible[0])

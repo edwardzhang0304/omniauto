@@ -11,6 +11,7 @@ ENSURE_VISIBLE_ACTION_RETURN = "return_probe"
 ENSURE_VISIBLE_ACTION_FOCUS = "focus_visible"
 ENSURE_VISIBLE_ACTION_RESTORE = "restore_then_focus"
 ENSURE_VISIBLE_ACTION_MANUAL_TRAY = "manual_open_tray"
+WINDOW_SELECTION_EMPTY_SCORE = (-1, -1, -1, -1, -1)
 
 
 def _geometry_int(geometry: dict[str, Any], key: str) -> int:
@@ -162,3 +163,47 @@ def plan_ensure_visible_wechat_window(
         "return_probe": False,
         "visible_main_window_geometry_invalid": False,
     }
+
+
+def visible_window_candidate_score(
+    geometry: dict[str, Any],
+    *,
+    capture_ready: bool,
+    content_health_score: Any,
+    min_send_width: int,
+    min_send_height: int,
+    title_score: int,
+) -> tuple[int, int, int, int, int]:
+    width = max(0, _geometry_int(geometry, "width"))
+    height = max(0, _geometry_int(geometry, "height"))
+    area = width * height
+    try:
+        parsed_content_score = int(content_health_score or 0)
+    except (TypeError, ValueError):
+        parsed_content_score = 0
+    safe_action_size = 1 if width >= int(min_send_width) and height >= int(min_send_height) else 0
+    return (
+        1 if capture_ready else 0,
+        parsed_content_score,
+        safe_action_size,
+        area,
+        int(title_score or 0),
+    )
+
+
+def select_best_visible_window_candidate(candidates: list[dict[str, Any]]) -> dict[str, Any] | None:
+    selected: dict[str, Any] | None = None
+    selected_score = WINDOW_SELECTION_EMPTY_SCORE
+    for candidate in candidates:
+        item = candidate.get("item") if isinstance(candidate.get("item"), dict) else {}
+        if not item:
+            continue
+        score = tuple(candidate.get("score") or WINDOW_SELECTION_EMPTY_SCORE)
+        if selected is None or score > selected_score:
+            selected = {
+                **dict(item),
+                "geometry_hint": dict(candidate.get("geometry") or {}),
+                "content_health_score": int(candidate.get("content_health_score") or 0),
+            }
+            selected_score = score  # type: ignore[assignment]
+    return selected
