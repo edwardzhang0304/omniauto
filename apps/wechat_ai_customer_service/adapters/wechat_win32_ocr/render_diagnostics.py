@@ -26,6 +26,33 @@ FOREIGN_CAPTURE_TOKENS = (
     "serverchan",
     "要求后续变更",
 )
+WINDOW_HEALTH_CHAT_TOKENS = ("搜索", "文件传输助手", "发送", "聊天", "通讯录")
+
+
+def window_content_health_score_from_signals(
+    ocr_items: list[dict[str, Any]],
+    *,
+    blank_render_detected: bool,
+    quick_login_detected: bool,
+    auxiliary_shell_detected: bool,
+    blocking_reason: str,
+    text_normalizer: Any,
+) -> int:
+    if blank_render_detected:
+        return -100
+    if quick_login_detected:
+        return -20
+    if auxiliary_shell_detected:
+        return -50
+    if blocking_reason:
+        return -10
+    texts: list[str] = []
+    for item in ocr_items or []:
+        text = str(text_normalizer(item.get("text")) or "")
+        if text:
+            texts.append(text)
+    token_score = 15 if any(token in text for text in texts for token in WINDOW_HEALTH_CHAT_TOKENS) else 0
+    return min(80, 20 + min(len(texts), 30) + token_score)
 
 
 def detect_blank_render(

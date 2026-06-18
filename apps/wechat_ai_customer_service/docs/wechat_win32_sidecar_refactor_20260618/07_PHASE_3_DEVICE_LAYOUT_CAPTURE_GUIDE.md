@@ -662,3 +662,29 @@ apps/wechat_ai_customer_service/tests/run_wechat_win32_ocr_capture_checks.py
 - `run_add_friend_package_smoke.py` 通过 34 项。
 - `run_customer_service_multi_session_scheduler_checks.py` 通过 123 项。
 - `run_workflow_logic_checks.py` 通过 114 项。
+
+## 执行记录 2026-06-19 Phase 3.5l
+
+已完成 window content health scoring 纯判定抽取：
+
+调整：
+
+- `render_diagnostics.py` 增加 `window_content_health_score_from_signals`。
+- sidecar `window_content_health_score` 保留同名旧入口，继续负责 `capture_wechat`、`run_ocr`、blank/login/auxiliary/blocking 信号采样。
+- 最终分数判定迁入 render diagnostics：blank -> -100、quick login -> -20、auxiliary shell -> -50、blocking screen -> -10、正常聊天窗口按 OCR 行数和聊天 token 加分。
+- focused test 增加 sidecar 旧入口 monkeypatch 委托验证，确认无需真实微信截图也能覆盖旧调用面。
+
+边界：
+
+- 未移动真实截图、OCR、窗口选择执行、foreground/focus、鼠标键盘动作。
+- 未修改 CLI、JSON 字段、route、artifact scope 或 facade 函数名。
+- 保持原短路顺序，blank/login/auxiliary/blocking 优先级不变。
+
+验证：
+
+- `run_wechat_win32_ocr_render_diagnostics_checks.py` 通过 6 项。
+- `run_wechat_win32_ocr_compat_checks.py` 通过 135 项。
+- `run_wechat_win32_ocr_window_selection_planning_checks.py` 通过 4 项。
+- `run_wechat_win32_ocr_ensure_visible_planning_checks.py` 通过 6 项。
+- `run_add_friend_package_smoke.py` 通过 34 项。
+- `run_customer_service_multi_session_scheduler_checks.py` 通过 123 项。

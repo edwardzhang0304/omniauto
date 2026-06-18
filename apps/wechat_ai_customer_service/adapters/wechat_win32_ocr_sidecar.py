@@ -8837,19 +8837,43 @@ def window_content_health_score(hwnd: int, geometry: dict[str, Any]) -> int:
         return 0
     blank_render = detect_blank_render(screenshot, ocr_items, geometry=geometry)
     if blank_render.get("detected"):
-        return -100
-    if quick_login_like(ocr_items, geometry=geometry):
-        return -20
+        return win32_ocr_render.window_content_health_score_from_signals(
+            ocr_items,
+            blank_render_detected=True,
+            quick_login_detected=False,
+            auxiliary_shell_detected=False,
+            blocking_reason="",
+            text_normalizer=normalize_ocr_text,
+        )
+    quick_login_detected = quick_login_like(ocr_items, geometry=geometry)
+    if quick_login_detected:
+        return win32_ocr_render.window_content_health_score_from_signals(
+            ocr_items,
+            blank_render_detected=False,
+            quick_login_detected=True,
+            auxiliary_shell_detected=False,
+            blocking_reason="",
+            text_normalizer=normalize_ocr_text,
+        )
     auxiliary_shell = auxiliary_wechat_shell_like(ocr_items, geometry=geometry)
     if auxiliary_shell.get("detected"):
-        return -50
+        return win32_ocr_render.window_content_health_score_from_signals(
+            ocr_items,
+            blank_render_detected=False,
+            quick_login_detected=False,
+            auxiliary_shell_detected=True,
+            blocking_reason="",
+            text_normalizer=normalize_ocr_text,
+        )
     blocking_reason = blocking_screen_reason(ocr_items)
-    if blocking_reason:
-        return -10
-    texts = [normalize_ocr_text(item.get("text")) for item in ocr_items if normalize_ocr_text(item.get("text"))]
-    chat_tokens = ("搜索", "文件传输助手", "发送", "聊天", "通讯录")
-    token_score = 15 if any(token in text for text in texts for token in chat_tokens) else 0
-    return min(80, 20 + min(len(texts), 30) + token_score)
+    return win32_ocr_render.window_content_health_score_from_signals(
+        ocr_items,
+        blank_render_detected=False,
+        quick_login_detected=False,
+        auxiliary_shell_detected=False,
+        blocking_reason=blocking_reason,
+        text_normalizer=normalize_ocr_text,
+    )
 
 
 def ensure_visible_wechat_window(*, interactive: bool = True) -> dict[str, Any]:
