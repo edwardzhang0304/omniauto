@@ -360,3 +360,34 @@ apps/wechat_ai_customer_service/docs/wechat_win32_sidecar_refactor_20260618/12_P
 
 - 本章只更新开发材料，不改变运行代码。
 - 未移动真实截图、窗口聚焦、窗口调整或 OCR 初始化。
+
+## 执行记录 2026-06-19 Phase 3.5a
+
+已完成 read-only window metrics 小步拆分：
+
+新增：
+
+```text
+apps/wechat_ai_customer_service/adapters/wechat_win32_ocr/window_metrics.py
+apps/wechat_ai_customer_service/tests/run_wechat_win32_ocr_window_metrics_checks.py
+```
+
+已迁入：
+
+- `get_window_geometry`
+- `get_window_client_geometry`
+- `window_dpi_scale`
+
+边界：
+
+- sidecar 保留同名 facade wrapper。
+- 新模块只读取传入的 `win32gui` / `user32` / `windll` 依赖，不激活窗口、不移动窗口、不截图。
+- 未移动 `probe_wechat_windows`、`select_primary_visible_main_window`、`capture_*`、`activate_window`、`normalize_wechat_window`。
+
+验证：
+
+- `run_wechat_win32_ocr_window_metrics_checks.py` 通过 6 项。
+- `run_wechat_win32_ocr_compat_checks.py` 通过 135 项。
+- `run_add_friend_package_smoke.py` 通过 34 项。
+- `run_customer_service_multi_session_scheduler_checks.py` 通过 123 项。
+- `run_workflow_logic_checks.py` 通过 114 项。

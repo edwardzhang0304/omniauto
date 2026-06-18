@@ -153,6 +153,7 @@ from apps.wechat_ai_customer_service.adapters.wechat_win32_ocr import device_pro
 from apps.wechat_ai_customer_service.adapters.wechat_win32_ocr import ocr_engine as win32_ocr_engine
 from apps.wechat_ai_customer_service.adapters.wechat_win32_ocr import render_diagnostics as win32_ocr_render
 from apps.wechat_ai_customer_service.adapters.wechat_win32_ocr import text_normalization as win32_ocr_text
+from apps.wechat_ai_customer_service.adapters.wechat_win32_ocr import window_metrics as win32_ocr_window_metrics
 from apps.wechat_ai_customer_service.adapters.wechat_win32_ocr import windowing as win32_ocr_windowing
 
 try:
@@ -7352,36 +7353,11 @@ def validate_post_send_target(
 
 
 def get_window_geometry(hwnd: int) -> dict[str, int]:
-    left, top, right, bottom = win32gui.GetWindowRect(hwnd)
-    return {
-        "left": int(left),
-        "top": int(top),
-        "right": int(right),
-        "bottom": int(bottom),
-        "width": int(right - left),
-        "height": int(bottom - top),
-    }
+    return win32_ocr_window_metrics.get_window_geometry(hwnd, win32gui_module=win32gui)
 
 
 def get_window_client_geometry(hwnd: int) -> dict[str, int]:
-    try:
-        left, top, right, bottom = win32gui.GetClientRect(hwnd)
-        screen_left, screen_top = win32gui.ClientToScreen(hwnd, (left, top))
-        screen_right, screen_bottom = win32gui.ClientToScreen(hwnd, (right, bottom))
-        return {
-            "left": int(left),
-            "top": int(top),
-            "right": int(right),
-            "bottom": int(bottom),
-            "width": int(right - left),
-            "height": int(bottom - top),
-            "screen_left": int(screen_left),
-            "screen_top": int(screen_top),
-            "screen_right": int(screen_right),
-            "screen_bottom": int(screen_bottom),
-        }
-    except Exception as exc:
-        return {"error": repr(exc)}
+    return win32_ocr_window_metrics.get_window_client_geometry(hwnd, win32gui_module=win32gui)
 
 
 def add_friend_device_profile(
@@ -8417,14 +8393,7 @@ def try_image_grab(rect: tuple[int, int, int, int]) -> Any | None:
 
 
 def window_dpi_scale(hwnd: int) -> float:
-    try:
-        user32 = ctypes.windll.user32
-        dpi = int(user32.GetDpiForWindow(hwnd))
-        if dpi > 0:
-            return max(1.0, float(dpi) / 96.0)
-    except Exception:
-        pass
-    return 1.0
+    return win32_ocr_window_metrics.window_dpi_scale(hwnd, windll=getattr(ctypes, "windll", None))
 
 
 def image_information_score(image: Any) -> float:
