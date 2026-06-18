@@ -199,3 +199,104 @@ profile_summary(profile)
 - 先恢复 `windowing.py` 委托点。
 - 保留纯 profile 模块也可以。
 - 如果 pywin32 import 顺序出问题，恢复 sidecar 直接 imports。
+
+## 执行记录 2026-06-19
+
+Phase 3.1 已完成低风险只读诊断层拆分：
+
+新增：
+
+```text
+apps/wechat_ai_customer_service/adapters/wechat_win32_ocr/device_profile.py
+apps/wechat_ai_customer_service/tests/run_wechat_win32_ocr_device_profile_checks.py
+```
+
+调整：
+
+- `validate_capture_geometry` 已迁入 `geometry.py`，sidecar 保留同名 wrapper。
+- `add_friend_device_profile` 仍留在 sidecar 采集 Win32/DPI/显示器信息，但最终结构由 `device_profile.build_device_profile()` 组装。
+
+未做：
+
+- 未移动 `get_window_geometry`、`get_window_client_geometry`、`window_dpi_scale`。
+- 未移动截图、OCR、窗口激活、窗口归一化、鼠标点击函数。
+- 未改变 profile 输出字段或 add_friend 执行分支。
+- 未做真实微信只读/实盘探针。
+
+验证：
+
+- `run_wechat_win32_ocr_device_profile_checks.py` 通过，覆盖 profile builder/summary/change detection 和 capture geometry guard 对照。
+- `run_wechat_win32_ocr_compat_checks.py` 通过 135 项。
+- `run_add_friend_package_smoke.py` 通过 34 项。
+- `run_customer_service_multi_session_scheduler_checks.py` 通过 123 项。
+- `run_workflow_logic_checks.py` 通过 114 项。
+
+## 执行记录 2026-06-19 Phase 3.2
+
+已完成 windowing 纯 metadata helper 小步拆分：
+
+新增：
+
+```text
+apps/wechat_ai_customer_service/adapters/wechat_win32_ocr/windowing.py
+apps/wechat_ai_customer_service/tests/run_wechat_win32_ocr_windowing_checks.py
+```
+
+已迁入：
+
+- `normalize_wechat_title`
+- `is_wechat_main_window`
+- `wechat_window_title_score`
+
+边界：
+
+- 只处理窗口枚举结果中的 `title` / `class_name` 字段。
+- 未移动 `probe_wechat_windows`、`select_primary_visible_main_window`、`restore_wechat_window`、`focus_wechat_window`、`activate_window`。
+- 未改变窗口选择排序和真实窗口动作行为。
+
+验证：
+
+- `run_wechat_win32_ocr_windowing_checks.py` 通过 4 项。
+- `run_wechat_win32_ocr_device_profile_checks.py` 通过 4 项。
+- `run_wechat_win32_ocr_compat_checks.py` 通过 135 项。
+- `run_add_friend_package_smoke.py` 通过 34 项。
+- `run_customer_service_multi_session_scheduler_checks.py` 通过 123 项。
+- `run_workflow_logic_checks.py` 通过 114 项。
+
+## 执行记录 2026-06-19 Phase 3.3
+
+已完成 render/capture diagnostics 小步拆分：
+
+新增：
+
+```text
+apps/wechat_ai_customer_service/adapters/wechat_win32_ocr/render_diagnostics.py
+apps/wechat_ai_customer_service/tests/run_wechat_win32_ocr_render_diagnostics_checks.py
+```
+
+已迁入：
+
+- `detect_blank_render`
+- `image_information_score`
+- `likely_foreign_overlay_capture`
+
+边界：
+
+- 只处理已有截图对象和 OCR item 列表。
+- 未移动 `capture_wechat`、`capture_window_image`、`capture_window_by_rect`、`try_image_grab`。
+- 未移动 `run_ocr` 或 RapidOCR 初始化。
+- 未改变 blank render 阻断、foreign overlay 过滤、capabilities/status 错误语义。
+
+验证：
+
+- `run_wechat_win32_ocr_render_diagnostics_checks.py` 通过 4 项。
+- `run_wechat_win32_ocr_windowing_checks.py` 通过 4 项。
+- `run_wechat_win32_ocr_device_profile_checks.py` 通过 4 项。
+- `run_wechat_win32_ocr_compat_checks.py` 通过 135 项。
+- `run_add_friend_package_smoke.py` 通过 34 项。
+- `run_customer_service_multi_session_scheduler_checks.py` 通过 123 项。
+- `run_workflow_logic_checks.py` 通过 114 项。
+
+下一步注意：
+
+- 继续 Phase 3 若要移动 `capture_*` 或 `run_ocr`，必须先单独形成更细方案，因为它们涉及真实截图、文件保存、OCR 引擎初始化和 pywin32/PIL 外部依赖。

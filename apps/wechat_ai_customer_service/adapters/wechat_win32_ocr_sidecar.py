@@ -146,6 +146,13 @@ from apps.wechat_ai_customer_service.wechat_message_envelope import (
     apply_message_envelope_to_record,
     build_message_envelope,
 )
+from apps.wechat_ai_customer_service.adapters.wechat_win32_ocr import geometry as win32_ocr_geometry
+from apps.wechat_ai_customer_service.adapters.wechat_win32_ocr import env_config as win32_ocr_env
+from apps.wechat_ai_customer_service.adapters.wechat_win32_ocr import humanized_input as win32_ocr_humanized
+from apps.wechat_ai_customer_service.adapters.wechat_win32_ocr import device_profile as win32_ocr_device_profile
+from apps.wechat_ai_customer_service.adapters.wechat_win32_ocr import render_diagnostics as win32_ocr_render
+from apps.wechat_ai_customer_service.adapters.wechat_win32_ocr import text_normalization as win32_ocr_text
+from apps.wechat_ai_customer_service.adapters.wechat_win32_ocr import windowing as win32_ocr_windowing
 
 try:
     from rapidocr_onnxruntime import RapidOCR
@@ -614,77 +621,7 @@ def detect_blank_render(
     *,
     geometry: dict[str, Any],
 ) -> dict[str, Any]:
-    ocr_count = len(ocr_items or [])
-    if ocr_count > 0:
-        return {
-            "detected": False,
-            "reason": "",
-            "ocr_count": ocr_count,
-            "metrics": {},
-        }
-    try:
-        gray = screenshot.convert("L")
-        stat = ImageStat.Stat(gray)
-        mean = float((stat.mean or [0.0])[0])
-        stddev = float((stat.stddev or [0.0])[0])
-        histogram = gray.histogram()
-        total = max(1, int(sum(histogram)))
-        bright_ratio = float(sum(histogram[245:])) / total
-        dark_ratio = float(sum(histogram[:10])) / total
-    except Exception as exc:
-        return {
-            "detected": False,
-            "reason": "render_metric_probe_failed",
-            "error": repr(exc),
-            "ocr_count": ocr_count,
-            "metrics": {},
-        }
-    bright_blank = (
-        mean >= BLANK_RENDER_BRIGHT_MIN
-        and stddev <= BLANK_RENDER_STDDEV_MAX
-        and bright_ratio >= BLANK_RENDER_DENSE_RATIO_MIN
-    )
-    dark_blank = (
-        mean <= BLANK_RENDER_DARK_MAX
-        and stddev <= BLANK_RENDER_STDDEV_MAX
-        and dark_ratio >= BLANK_RENDER_DENSE_RATIO_MIN
-    )
-    bordered_bright_blank = (
-        mean >= BLANK_RENDER_BORDERED_BRIGHT_MIN
-        and bright_ratio >= BLANK_RENDER_BORDERED_DENSE_RATIO_MIN
-        and int(geometry.get("width") or screenshot.size[0]) >= MIN_CAPTURE_WINDOW_WIDTH
-        and int(geometry.get("height") or screenshot.size[1]) >= MIN_CAPTURE_WINDOW_HEIGHT
-    )
-    detected = bool(bright_blank or dark_blank or bordered_bright_blank)
-    if bright_blank:
-        reason = "blank_white_like"
-    elif dark_blank:
-        reason = "blank_dark_like"
-    elif bordered_bright_blank:
-        reason = "blank_bordered_white_like"
-    else:
-        reason = ""
-    return {
-        "detected": detected,
-        "reason": reason,
-        "ocr_count": ocr_count,
-        "metrics": {
-            "mean": round(mean, 3),
-            "stddev": round(stddev, 3),
-            "bright_ratio": round(bright_ratio, 4),
-            "dark_ratio": round(dark_ratio, 4),
-            "width": int(geometry.get("width") or screenshot.size[0]),
-            "height": int(geometry.get("height") or screenshot.size[1]),
-        },
-        "thresholds": {
-            "bright_min": BLANK_RENDER_BRIGHT_MIN,
-            "dark_max": BLANK_RENDER_DARK_MAX,
-            "stddev_max": BLANK_RENDER_STDDEV_MAX,
-            "dense_ratio_min": BLANK_RENDER_DENSE_RATIO_MIN,
-            "bordered_bright_min": BLANK_RENDER_BORDERED_BRIGHT_MIN,
-            "bordered_dense_ratio_min": BLANK_RENDER_BORDERED_DENSE_RATIO_MIN,
-        },
-    }
+    return win32_ocr_render.detect_blank_render(screenshot, ocr_items, geometry=geometry)
 
 
 def auxiliary_wechat_shell_like(ocr_items: list[dict[str, Any]], *, geometry: dict[str, Any]) -> dict[str, Any]:
@@ -1719,9 +1656,7 @@ def add_friend_item_center(item: dict[str, Any]) -> tuple[int, int]:
 
 
 def center_of_bounds(bounds: list[int]) -> tuple[int, int]:
-    if len(bounds) < 4:
-        return 0, 0
-    return int((int(bounds[0]) + int(bounds[2])) / 2), int((int(bounds[1]) + int(bounds[3])) / 2)
+    return win32_ocr_geometry.center_of_bounds(bounds)
 
 
 def add_friend_zone_bounds(image_size: tuple[int, int]) -> list[dict[str, Any]]:
@@ -1743,16 +1678,11 @@ def add_friend_zone_bounds(image_size: tuple[int, int]) -> list[dict[str, Any]]:
 
 
 def point_in_bounds(x: int, y: int, bounds: list[int]) -> bool:
-    left, top, right, bottom = [int(value) for value in bounds]
-    return left <= x <= right and top <= y <= bottom
+    return win32_ocr_geometry.point_in_bounds(x, y, bounds)
 
 
 def clamp_point_to_bounds(x: int, y: int, bounds: list[int]) -> tuple[int, int]:
-    left, top, right, bottom = [int(value) for value in bounds]
-    return (
-        bounded_int(x, default=x, minimum=min(left, right), maximum=max(left, right)),
-        bounded_int(y, default=y, minimum=min(top, bottom), maximum=max(top, bottom)),
-    )
+    return win32_ocr_geometry.clamp_point_to_bounds(x, y, bounds)
 
 
 def add_friend_region_for_point(x: int, y: int, image_size: tuple[int, int]) -> str:
@@ -5116,306 +5046,19 @@ def send_payload(
 
 
 def normalize_humanized_input_method(raw_method: str | None, *, default: str = DEFAULT_HUMANIZED_INPUT_METHOD) -> str:
-    method = str(raw_method or default).strip().lower()
-    if method not in {"auto", "sendinput_unicode", "uia_chunks", "clipboard_chunks", "clipboard_once"}:
-        method = default
-    enforce_intermittent = env_flag(
-        "WECHAT_WIN32_OCR_ENFORCE_INTERMITTENT_TYPING",
-        default=DEFAULT_HUMANIZED_INPUT_ENFORCE_INTERMITTENT,
-    )
-    allow_clipboard_once = env_flag(
-        "WECHAT_WIN32_OCR_ALLOW_CLIPBOARD_ONCE",
-        default=DEFAULT_HUMANIZED_ALLOW_CLIPBOARD_ONCE,
-    )
-    if enforce_intermittent and method == "clipboard_once" and not allow_clipboard_once:
-        return "clipboard_chunks"
-    return method
+    return win32_ocr_env.normalize_humanized_input_method(raw_method, default=default)
 
 
 def normalize_send_trigger_mode(raw_mode: str | None, *, default: str = DEFAULT_SEND_TRIGGER_MODE) -> str:
-    mode = str(raw_mode or default).strip().lower()
-    if mode not in {"click_only", "enter_only", "enter_then_click"}:
-        return default
-    if mode == "enter_then_click":
-        # Dual triggering is too easy to classify as mechanical, and can also
-        # double-send when WeChat is slow. Keep the trigger single-path.
-        return "enter_only"
-    if mode == "click_only" and not env_flag("WECHAT_WIN32_OCR_ALLOW_CLICK_SEND_TRIGGER", default=False):
-        return "enter_only"
-    return mode
+    return win32_ocr_env.normalize_send_trigger_mode(raw_mode, default=default)
 
 
 def humanized_input_settings() -> dict[str, Any]:
-    enabled = env_flag("WECHAT_WIN32_OCR_HUMANIZED_INPUT_ENABLED", default=DEFAULT_HUMANIZED_INPUT_ENABLED)
-    method = normalize_humanized_input_method(
-        os.getenv("WECHAT_WIN32_OCR_HUMANIZED_INPUT_METHOD", DEFAULT_HUMANIZED_INPUT_METHOD),
-        default=DEFAULT_HUMANIZED_INPUT_METHOD,
-    )
-    chunk_min = bounded_int(
-        os.getenv("WECHAT_WIN32_OCR_HUMANIZED_TYPING_CHUNK_MIN_CHARS"),
-        default=DEFAULT_HUMANIZED_TYPING_CHUNK_MIN_CHARS,
-        minimum=1,
-        maximum=24,
-    )
-    chunk_max = bounded_int(
-        os.getenv("WECHAT_WIN32_OCR_HUMANIZED_TYPING_CHUNK_MAX_CHARS"),
-        default=DEFAULT_HUMANIZED_TYPING_CHUNK_MAX_CHARS,
-        minimum=chunk_min,
-        maximum=36,
-    )
-    char_delay_min_ms = bounded_int(
-        os.getenv("WECHAT_WIN32_OCR_HUMANIZED_TYPING_CHAR_DELAY_MIN_MS"),
-        default=DEFAULT_HUMANIZED_TYPING_CHAR_DELAY_MIN_MS,
-        minimum=0,
-        maximum=1200,
-    )
-    char_delay_max_ms = bounded_int(
-        os.getenv("WECHAT_WIN32_OCR_HUMANIZED_TYPING_CHAR_DELAY_MAX_MS"),
-        default=DEFAULT_HUMANIZED_TYPING_CHAR_DELAY_MAX_MS,
-        minimum=char_delay_min_ms,
-        maximum=1600,
-    )
-    micro_pause_every_chars = bounded_int(
-        os.getenv("WECHAT_WIN32_OCR_HUMANIZED_TYPING_MICRO_PAUSE_EVERY_CHARS"),
-        default=DEFAULT_HUMANIZED_TYPING_MICRO_PAUSE_EVERY_CHARS,
-        minimum=0,
-        maximum=300,
-    )
-    micro_pause_min_ms = bounded_int(
-        os.getenv("WECHAT_WIN32_OCR_HUMANIZED_TYPING_MICRO_PAUSE_MIN_MS"),
-        default=DEFAULT_HUMANIZED_TYPING_MICRO_PAUSE_MIN_MS,
-        minimum=0,
-        maximum=5000,
-    )
-    micro_pause_max_ms = bounded_int(
-        os.getenv("WECHAT_WIN32_OCR_HUMANIZED_TYPING_MICRO_PAUSE_MAX_MS"),
-        default=DEFAULT_HUMANIZED_TYPING_MICRO_PAUSE_MAX_MS,
-        minimum=micro_pause_min_ms,
-        maximum=7000,
-    )
-    typo_probability = max(
-        0.0,
-        min(
-            1.0,
-            env_float(
-                "WECHAT_WIN32_OCR_HUMANIZED_TYPING_TYPO_PROBABILITY",
-                default=DEFAULT_HUMANIZED_TYPING_TYPO_PROBABILITY,
-            ),
-        ),
-    )
-    typo_max = bounded_int(
-        os.getenv("WECHAT_WIN32_OCR_HUMANIZED_TYPING_TYPO_MAX"),
-        default=DEFAULT_HUMANIZED_TYPING_TYPO_MAX,
-        minimum=0,
-        maximum=6,
-    )
-    pre_delay_min_ms = bounded_int(
-        os.getenv("WECHAT_WIN32_OCR_HUMANIZED_SEND_PRE_DELAY_MIN_MS"),
-        default=DEFAULT_HUMANIZED_SEND_PRE_DELAY_MIN_MS,
-        minimum=0,
-        maximum=6000,
-    )
-    pre_delay_max_ms = bounded_int(
-        os.getenv("WECHAT_WIN32_OCR_HUMANIZED_SEND_PRE_DELAY_MAX_MS"),
-        default=DEFAULT_HUMANIZED_SEND_PRE_DELAY_MAX_MS,
-        minimum=pre_delay_min_ms,
-        maximum=8000,
-    )
-    post_delay_min_ms = bounded_int(
-        os.getenv("WECHAT_WIN32_OCR_HUMANIZED_SEND_POST_INPUT_DELAY_MIN_MS"),
-        default=DEFAULT_HUMANIZED_SEND_POST_INPUT_DELAY_MIN_MS,
-        minimum=0,
-        maximum=4000,
-    )
-    post_delay_max_ms = bounded_int(
-        os.getenv("WECHAT_WIN32_OCR_HUMANIZED_SEND_POST_INPUT_DELAY_MAX_MS"),
-        default=DEFAULT_HUMANIZED_SEND_POST_INPUT_DELAY_MAX_MS,
-        minimum=post_delay_min_ms,
-        maximum=6000,
-    )
-    trigger_delay_min_ms = bounded_int(
-        os.getenv("WECHAT_WIN32_OCR_HUMANIZED_SEND_TRIGGER_DELAY_MIN_MS"),
-        default=DEFAULT_HUMANIZED_SEND_TRIGGER_DELAY_MIN_MS,
-        minimum=0,
-        maximum=6000,
-    )
-    trigger_delay_max_ms = bounded_int(
-        os.getenv("WECHAT_WIN32_OCR_HUMANIZED_SEND_TRIGGER_DELAY_MAX_MS"),
-        default=DEFAULT_HUMANIZED_SEND_TRIGGER_DELAY_MAX_MS,
-        minimum=trigger_delay_min_ms,
-        maximum=8000,
-    )
-    after_trigger_delay_min_ms = bounded_int(
-        os.getenv("WECHAT_WIN32_OCR_HUMANIZED_SEND_AFTER_TRIGGER_DELAY_MIN_MS"),
-        default=DEFAULT_HUMANIZED_SEND_AFTER_TRIGGER_DELAY_MIN_MS,
-        minimum=0,
-        maximum=4000,
-    )
-    after_trigger_delay_max_ms = bounded_int(
-        os.getenv("WECHAT_WIN32_OCR_HUMANIZED_SEND_AFTER_TRIGGER_DELAY_MAX_MS"),
-        default=DEFAULT_HUMANIZED_SEND_AFTER_TRIGGER_DELAY_MAX_MS,
-        minimum=after_trigger_delay_min_ms,
-        maximum=6000,
-    )
-    inter_chunk_delay_scale = max(
-        0.35,
-        min(
-            1.2,
-            env_float("WECHAT_WIN32_OCR_HUMANIZED_INTER_CHUNK_DELAY_SCALE", default=1.0),
-        ),
-    )
-    return {
-        "enabled": enabled,
-        "method": method,
-        "chunk_min_chars": chunk_min,
-        "chunk_max_chars": chunk_max,
-        "char_delay_min_ms": char_delay_min_ms,
-        "char_delay_max_ms": char_delay_max_ms,
-        "micro_pause_every_chars": micro_pause_every_chars,
-        "micro_pause_min_ms": micro_pause_min_ms,
-        "micro_pause_max_ms": micro_pause_max_ms,
-        "typo_probability": typo_probability,
-        "typo_max": typo_max,
-        "send_pre_delay_min_ms": pre_delay_min_ms,
-        "send_pre_delay_max_ms": pre_delay_max_ms,
-        "send_post_input_delay_min_ms": post_delay_min_ms,
-        "send_post_input_delay_max_ms": post_delay_max_ms,
-        "send_trigger_delay_min_ms": trigger_delay_min_ms,
-        "send_trigger_delay_max_ms": trigger_delay_max_ms,
-        "send_after_trigger_delay_min_ms": after_trigger_delay_min_ms,
-        "send_after_trigger_delay_max_ms": after_trigger_delay_max_ms,
-        "inter_chunk_delay_scale": inter_chunk_delay_scale,
-        "adaptive_speed_enabled": env_flag(
-            "WECHAT_WIN32_OCR_HUMANIZED_ADAPTIVE_SPEED_ENABLED",
-            default=DEFAULT_HUMANIZED_ADAPTIVE_SPEED_ENABLED,
-        ),
-    }
+    return win32_ocr_humanized.humanized_input_settings()
 
 
 def adapt_humanized_input_settings(settings: dict[str, Any], text: str) -> dict[str, Any]:
-    """Adapt typing pace by reply length without becoming superhuman fast."""
-    active = dict(settings or {})
-    if not active.get("enabled") or not active.get("adaptive_speed_enabled", True):
-        return active
-    text_len = len(sendinput_safe_text(text))
-    if text_len <= DEFAULT_HUMANIZED_SHORT_TEXT_CHARS:
-        profile = {
-            "speed_profile": "short_natural",
-            "chunk_min_chars": 4,
-            "chunk_max_chars": 10,
-            "char_delay_min_ms": 45,
-            "char_delay_max_ms": 95,
-            "micro_pause_every_chars": 34,
-            "micro_pause_min_ms": 90,
-            "micro_pause_max_ms": 260,
-            "typo_probability": 0.10,
-            "typo_max": 1,
-            "send_pre_delay_min_ms": 120,
-            "send_pre_delay_max_ms": 360,
-            "send_post_input_delay_min_ms": 180,
-            "send_post_input_delay_max_ms": 360,
-            "send_trigger_delay_min_ms": 520,
-            "send_trigger_delay_max_ms": 1500,
-            "send_after_trigger_delay_min_ms": 260,
-            "send_after_trigger_delay_max_ms": 820,
-            "inter_chunk_delay_scale": 0.58,
-        }
-    elif text_len <= DEFAULT_HUMANIZED_LONG_TEXT_CHARS:
-        profile = {
-            "speed_profile": "medium_natural",
-            "chunk_min_chars": 4,
-            "chunk_max_chars": 10,
-            "char_delay_min_ms": 42,
-            "char_delay_max_ms": 88,
-            "micro_pause_every_chars": 38,
-            "micro_pause_min_ms": 85,
-            "micro_pause_max_ms": 240,
-            "typo_probability": 0.08,
-            "typo_max": 1,
-            "send_pre_delay_min_ms": 110,
-            "send_pre_delay_max_ms": 320,
-            "send_post_input_delay_min_ms": 160,
-            "send_post_input_delay_max_ms": 340,
-            "send_trigger_delay_min_ms": 560,
-            "send_trigger_delay_max_ms": 1650,
-            "send_after_trigger_delay_min_ms": 280,
-            "send_after_trigger_delay_max_ms": 880,
-            "inter_chunk_delay_scale": 0.62,
-        }
-    else:
-        profile = {
-            "speed_profile": "long_natural_capped",
-            "chunk_min_chars": 5,
-            "chunk_max_chars": 11,
-            "char_delay_min_ms": 32,
-            "char_delay_max_ms": 78,
-            "micro_pause_every_chars": 44,
-            "micro_pause_min_ms": 70,
-            "micro_pause_max_ms": 220,
-            "typo_probability": 0.06,
-            "typo_max": 1,
-            "send_pre_delay_min_ms": 100,
-            "send_pre_delay_max_ms": 280,
-            "send_post_input_delay_min_ms": 150,
-            "send_post_input_delay_max_ms": 320,
-            "send_trigger_delay_min_ms": 680,
-            "send_trigger_delay_max_ms": 2200,
-            "send_after_trigger_delay_min_ms": 320,
-            "send_after_trigger_delay_max_ms": 1100,
-            "inter_chunk_delay_scale": 0.68,
-        }
-    active["speed_profile"] = profile["speed_profile"]
-    for key in (
-        "char_delay_min_ms",
-        "char_delay_max_ms",
-        "micro_pause_min_ms",
-        "micro_pause_max_ms",
-        "send_pre_delay_min_ms",
-        "send_pre_delay_max_ms",
-        "send_post_input_delay_min_ms",
-        "send_post_input_delay_max_ms",
-        "send_trigger_delay_min_ms",
-        "send_trigger_delay_max_ms",
-        "send_after_trigger_delay_min_ms",
-        "send_after_trigger_delay_max_ms",
-    ):
-        current = int(active.get(key) or 0)
-        target = int(profile[key])
-        if key.startswith("send_trigger") or key.startswith("send_after_trigger"):
-            active[key] = max(current, target)
-        else:
-            active[key] = 0 if current <= 0 else min(current, target)
-    active["chunk_min_chars"] = max(int(active.get("chunk_min_chars") or 1), int(profile["chunk_min_chars"]))
-    active["chunk_max_chars"] = max(int(active.get("chunk_max_chars") or 1), int(profile["chunk_max_chars"]))
-    current_micro_every = int(active.get("micro_pause_every_chars") or 0)
-    active["micro_pause_every_chars"] = (
-        max(current_micro_every, int(profile["micro_pause_every_chars"])) if current_micro_every > 0 else 0
-    )
-    if active["chunk_max_chars"] < active["chunk_min_chars"]:
-        active["chunk_max_chars"] = active["chunk_min_chars"]
-    if int(active.get("char_delay_max_ms") or 0) < int(active.get("char_delay_min_ms") or 0):
-        active["char_delay_max_ms"] = active["char_delay_min_ms"]
-    if int(active.get("micro_pause_max_ms") or 0) < int(active.get("micro_pause_min_ms") or 0):
-        active["micro_pause_max_ms"] = active["micro_pause_min_ms"]
-    if int(active.get("send_trigger_delay_max_ms") or 0) < int(active.get("send_trigger_delay_min_ms") or 0):
-        active["send_trigger_delay_max_ms"] = active["send_trigger_delay_min_ms"]
-    if int(active.get("send_after_trigger_delay_max_ms") or 0) < int(active.get("send_after_trigger_delay_min_ms") or 0):
-        active["send_after_trigger_delay_max_ms"] = active["send_after_trigger_delay_min_ms"]
-    active["typo_probability"] = min(float(active.get("typo_probability") or 0.0), float(profile["typo_probability"]))
-    active["typo_max"] = min(int(active.get("typo_max") or 0), int(profile["typo_max"]))
-    try:
-        current_scale = float(active.get("inter_chunk_delay_scale") or 1.0)
-    except (TypeError, ValueError):
-        current_scale = 1.0
-    active["inter_chunk_delay_scale"] = max(
-        0.35,
-        min(
-            1.2,
-            min(current_scale, float(profile["inter_chunk_delay_scale"])),
-        ),
-    )
-    active["adaptive_text_chars"] = text_len
-    return active
+    return win32_ocr_humanized.adapt_humanized_input_settings(settings, text)
 
 
 def humanized_sleep_ms(min_ms: int, max_ms: int) -> float:
@@ -5441,49 +5084,19 @@ def humanized_action_sleep(min_ms: int, max_ms: int | None = None) -> float:
 
 
 def humanized_chunk_text(text: str, *, min_chars: int, max_chars: int) -> list[str]:
-    clean = str(text or "")
-    if not clean:
-        return []
-    chunks: list[str] = []
-    cursor = 0
-    lower = max(1, int(min_chars))
-    upper = max(lower, int(max_chars))
-    while cursor < len(clean):
-        step = random.randint(lower, upper)
-        next_cursor = min(len(clean), cursor + step)
-        chunks.append(clean[cursor:next_cursor])
-        cursor = next_cursor
-    return chunks
+    return win32_ocr_humanized.humanized_chunk_text(text, min_chars=min_chars, max_chars=max_chars)
 
 
 def choose_humanized_typo_char() -> str:
-    return random.choice(HUMANIZED_TYPO_CANDIDATES)
+    return win32_ocr_humanized.choose_humanized_typo_char()
 
 
 def typed_text_delay_ms(segment: str, settings: dict[str, Any]) -> tuple[int, int]:
-    char_count = max(1, len(str(segment or "")))
-    per_char_low = int(settings.get("char_delay_min_ms") or DEFAULT_HUMANIZED_TYPING_CHAR_DELAY_MIN_MS)
-    per_char_high = int(settings.get("char_delay_max_ms") or DEFAULT_HUMANIZED_TYPING_CHAR_DELAY_MAX_MS)
-    low = max(0, per_char_low * char_count)
-    high = max(low, per_char_high * char_count)
-    try:
-        delay_scale = float(settings.get("inter_chunk_delay_scale") or 1.0)
-    except (TypeError, ValueError):
-        delay_scale = 1.0
-    delay_scale = max(0.35, min(1.2, delay_scale))
-    if abs(delay_scale - 1.0) > 1e-6:
-        low = max(0, int(round(low * delay_scale)))
-        high = max(low, int(round(high * delay_scale)))
-    return low, high
+    return win32_ocr_humanized.typed_text_delay_ms(segment, settings)
 
 
 def maybe_humanized_typo_allowed(settings: dict[str, Any], *, typo_count: int, text: str) -> bool:
-    if typo_count >= int(settings.get("typo_max") or 0):
-        return False
-    if len(str(text or "")) < 6:
-        return False
-    probability = float(settings.get("typo_probability") or 0.0)
-    return random.random() < max(0.0, min(1.0, probability))
+    return win32_ocr_humanized.maybe_humanized_typo_allowed(settings, typo_count=typo_count, text=text)
 
 
 def message_probe_tokens(text: str) -> list[str]:
@@ -5579,21 +5192,11 @@ def input_area_contains_any_token(
 
 
 def input_text_region_bounds(geometry: dict[str, Any]) -> tuple[int, int, int, int]:
-    width = int(geometry.get("width") or 0)
-    height = int(geometry.get("height") or 0)
-    left = max(session_split_x(width) + 24, int(width * 0.36))
-    top = max(int(height * 0.79), height - 180)
-    right = max(left + 20, width - 95)
-    bottom = min(height - 58, height)
-    if bottom <= top:
-        top = max(0, int(height * 0.84))
-        bottom = max(top + 1, height - 58)
-    return (left, top, right, bottom)
+    return win32_ocr_geometry.input_text_region_bounds(geometry)
 
 
 def rect_overlaps_region(rect: dict[str, int], bounds: tuple[int, int, int, int]) -> bool:
-    left, top, right, bottom = bounds
-    return int(rect.get("right") or 0) > left and int(rect.get("left") or 0) < right and int(rect.get("bottom") or 0) > top and int(rect.get("top") or 0) < bottom
+    return win32_ocr_geometry.rect_overlaps_region(rect, bounds)
 
 
 def input_text_region_state(
@@ -5820,9 +5423,7 @@ def paste_text_once(text: str) -> None:
 
 
 def sendinput_safe_text(text: str) -> str:
-    clean = str(text or "")
-    clean = clean.replace("\r\n", " ").replace("\n", " ").replace("\r", " ").replace("\t", " ")
-    return re.sub(r" {2,}", " ", clean).strip()
+    return win32_ocr_humanized.sendinput_safe_text(text)
 
 
 def sendinput_utf16_units(text: str) -> list[int]:
@@ -6024,15 +5625,15 @@ def type_text_with_sendinput_unicode(
 
 
 def strict_send_focus_guard_enabled() -> bool:
-    return env_flag("WECHAT_WIN32_OCR_STRICT_SEND_FOCUS_GUARD", default=DEFAULT_STRICT_SEND_FOCUS_GUARD)
+    return win32_ocr_env.strict_send_focus_guard_enabled()
 
 
 def focus_click_fallback_enabled() -> bool:
-    return env_flag("WECHAT_WIN32_OCR_FOCUS_CLICK_FALLBACK", default=DEFAULT_FOCUS_CLICK_FALLBACK)
+    return win32_ocr_env.env_flag("WECHAT_WIN32_OCR_FOCUS_CLICK_FALLBACK", default=DEFAULT_FOCUS_CLICK_FALLBACK)
 
 
 def allow_unknown_foreground_guard() -> bool:
-    return env_flag("WECHAT_WIN32_OCR_ALLOW_UNKNOWN_FOREGROUND", default=DEFAULT_ALLOW_UNKNOWN_FOREGROUND_GUARD)
+    return win32_ocr_env.allow_unknown_foreground_guard()
 
 
 def process_executable_path(pid: int) -> str:
@@ -6491,22 +6092,7 @@ def paste_text_with_confirmation(
 
 
 def send_input_confirm_attempt_count(total_attempts: int) -> int:
-    requested = bounded_int(
-        os.getenv("WECHAT_WIN32_OCR_SEND_INPUT_CONFIRM_ATTEMPTS"),
-        default=DEFAULT_SEND_INPUT_CONFIRM_ATTEMPTS,
-        minimum=1,
-        maximum=max(1, int(total_attempts)),
-    )
-    if (
-        requested == 1
-        and total_attempts > 1
-        and env_flag("WECHAT_WIN32_OCR_BLANK_INPUT_FOCUS_RETRY", default=True)
-    ):
-        # Preserve the product-level "one confirmed input attempt" rule, but
-        # allow one extra focus point when the first attempt leaves the input
-        # region visibly blank. Visible or uncertain drafts still stop.
-        return 2
-    return requested
+    return win32_ocr_env.send_input_confirm_attempt_count(total_attempts)
 
 
 def _probe_tokens_normalized(tokens: list[str] | str) -> list[str]:
@@ -6979,99 +6565,23 @@ def uia_rect_to_dict(rect: Any) -> dict[str, int]:
 
 
 def relative_rect(rect: dict[str, int], geometry: dict[str, Any]) -> dict[str, int]:
-    left = int(rect.get("left") or 0) - int(geometry.get("left") or 0)
-    top = int(rect.get("top") or 0) - int(geometry.get("top") or 0)
-    right = int(rect.get("right") or 0) - int(geometry.get("left") or 0)
-    bottom = int(rect.get("bottom") or 0) - int(geometry.get("top") or 0)
-    return {
-        "left": left,
-        "top": top,
-        "right": right,
-        "bottom": bottom,
-        "width": max(0, right - left),
-        "height": max(0, bottom - top),
-    }
+    return win32_ocr_geometry.relative_rect(rect, geometry)
 
 
 def rect_in_input_area(rect: dict[str, int], geometry: dict[str, Any]) -> bool:
-    rel = relative_rect(rect, geometry)
-    width = int(geometry.get("width") or 0)
-    height = int(geometry.get("height") or 0)
-    if rel["width"] <= 80 or rel["height"] <= 12:
-        return False
-    if rel["right"] <= session_split_x(width) + 100:
-        return False
-    bounds = input_text_region_bounds(geometry)
-    left, top, right, bottom = bounds
-    draft_top = min(top, max(int(height * 0.79), height - 180))
-    center_y = (rel["top"] + rel["bottom"]) / 2.0
-    horizontal_overlap = min(rel["right"], right) - max(rel["left"], left)
-    if horizontal_overlap <= 0:
-        return False
-    return rel["top"] >= draft_top - 6 and rel["bottom"] <= bottom + 10 and draft_top <= center_y <= bottom
+    return win32_ocr_geometry.rect_in_input_area(rect, geometry)
 
 
 def rect_in_input_toolbar(rect: dict[str, int], geometry: dict[str, Any]) -> bool:
-    rel = relative_rect(rect, geometry)
-    width = int(geometry.get("width") or 0)
-    height = int(geometry.get("height") or 0)
-    if rel["width"] <= 20 or rel["height"] <= 15:
-        return False
-    if rel["right"] <= session_split_x(width) + 60:
-        return False
-    return rel["top"] >= int(height * 0.78) and rel["bottom"] <= height + 8
+    return win32_ocr_geometry.rect_in_input_toolbar(rect, geometry)
 
 
 def session_name_matches(name: str, target: str, *, exact: bool) -> bool:
-    normalized_name = normalize_session_name(name)
-    normalized_target = normalize_session_name(target)
-    if not normalized_name or not normalized_target:
-        return False
-    stripped_name = strip_session_time_suffix(normalized_name)
-    canonical_name = canonical_session_name(normalized_name)
-    canonical_target = canonical_session_name(normalized_target)
-    if canonical_name and canonical_target and canonical_name == canonical_target:
-        return True
-    stripped_canonical_name = canonical_session_name(stripped_name)
-    if stripped_canonical_name and canonical_target and stripped_canonical_name == canonical_target:
-        return True
-    if exact:
-        if normalized_name == normalized_target or stripped_name == normalized_target:
-            return True
-        wrapped_name = normalize_chat_title_for_match(normalized_name)
-        stripped_wrapped_name = normalize_chat_title_for_match(stripped_name)
-        wrapped_target = normalize_chat_title_for_match(normalized_target)
-        return bool(
-            wrapped_target
-            and (
-                (wrapped_name and wrapped_name == wrapped_target)
-                or (stripped_wrapped_name and stripped_wrapped_name == wrapped_target)
-            )
-        )
-    return normalized_target in normalized_name or normalized_name in normalized_target
+    return win32_ocr_text.session_name_matches(name, target, exact=exact)
 
 
 def strip_session_time_suffix(name: str) -> str:
-    normalized = normalize_session_name(name)
-    if not normalized:
-        return ""
-    patterns = (
-        r"(?:今天|昨天|前天)?\d{1,2}:\d{2}$",
-        r"(?:今天|昨天|前天)$",
-        r"(?:星期|周)[一二三四五六日天]$",
-        r"\d{4}[/-]\d{1,2}[/-]\d{1,2}$",
-        r"\d{1,2}[/-]\d{1,2}$",
-    )
-    stripped = normalized
-    changed = True
-    while changed:
-        changed = False
-        for pattern in patterns:
-            updated = re.sub(pattern, "", stripped).strip()
-            if updated != stripped:
-                stripped = updated
-                changed = True
-    return stripped or normalized
+    return win32_ocr_text.strip_session_time_suffix(name)
 
 
 def session_row_click_x(
@@ -7880,44 +7390,35 @@ def add_friend_device_profile(
     screenshot_size: tuple[int, int] | None = None,
     route: str = "",
 ) -> dict[str, Any]:
-    profile: dict[str, Any] = {
-        "platform": "windows",
-        "route": str(route or ""),
-        "window_rect": dict(geometry or {}),
-        "client_rect": {},
-        "screenshot_size": list(screenshot_size) if screenshot_size else [],
-        "dpi_scale": 1.0,
-        "dpi": 96,
-        "screen": {},
-        "virtual_screen": {},
-        "monitors": [],
-    }
+    client_rect: dict[str, Any] = {}
+    dpi_scale = 1.0
+    screen: dict[str, Any] = {}
+    virtual_screen: dict[str, Any] = {}
+    monitors: list[dict[str, Any]] = []
+    errors: dict[str, Any] = {}
     try:
-        profile["client_rect"] = get_window_client_geometry(hwnd)
+        client_rect = get_window_client_geometry(hwnd)
     except Exception as exc:
-        profile["client_rect"] = {"error": repr(exc)}
+        client_rect = {"error": repr(exc)}
     try:
-        scale = window_dpi_scale(hwnd)
-        profile["dpi_scale"] = round(float(scale), 4)
-        profile["dpi"] = int(round(float(scale) * 96))
+        dpi_scale = window_dpi_scale(hwnd)
     except Exception as exc:
-        profile["dpi_error"] = repr(exc)
+        errors["dpi_error"] = repr(exc)
     try:
         user32 = ctypes.windll.user32
-        profile["screen"] = {
+        screen = {
             "width": int(user32.GetSystemMetrics(0)),
             "height": int(user32.GetSystemMetrics(1)),
         }
-        profile["virtual_screen"] = {
+        virtual_screen = {
             "left": int(user32.GetSystemMetrics(76)),
             "top": int(user32.GetSystemMetrics(77)),
             "width": int(user32.GetSystemMetrics(78)),
             "height": int(user32.GetSystemMetrics(79)),
         }
     except Exception as exc:
-        profile["screen_error"] = repr(exc)
+        errors["screen_error"] = repr(exc)
     try:
-        monitors = []
         for monitor in win32api.EnumDisplayMonitors():
             _handle, _hdc, rect = monitor
             left, top, right, bottom = rect
@@ -7931,83 +7432,32 @@ def add_friend_device_profile(
                     "height": int(bottom - top),
                 }
             )
-        profile["monitors"] = monitors
-        profile["monitor_count"] = len(monitors)
     except Exception as exc:
-        profile["monitor_error"] = repr(exc)
-        profile["monitor_count"] = 0
-    return profile
+        errors["monitor_error"] = repr(exc)
+        monitors = []
+    return win32_ocr_device_profile.build_device_profile(
+        route=route,
+        geometry=geometry,
+        screenshot_size=screenshot_size,
+        client_rect=client_rect,
+        dpi_scale=dpi_scale,
+        screen=screen,
+        virtual_screen=virtual_screen,
+        monitors=monitors,
+        errors=errors,
+    )
 
 
 def validate_capture_geometry(geometry: dict[str, Any]) -> dict[str, Any]:
-    left = int(geometry.get("left") or 0)
-    top = int(geometry.get("top") or 0)
-    width = int(geometry.get("width") or 0)
-    height = int(geometry.get("height") or 0)
-    if left <= OFFSCREEN_GEOMETRY_BOUNDARY or top <= OFFSCREEN_GEOMETRY_BOUNDARY:
-        return {
-            "ok": False,
-            "reason": "window_offscreen_or_minimized",
-            "geometry": geometry,
-            "error": f"WeChat window is offscreen/minimized: left={left}, top={top}, size={width}x{height}.",
-        }
-    if width < MIN_CAPTURE_WINDOW_WIDTH or height < MIN_CAPTURE_WINDOW_HEIGHT:
-        return {
-            "ok": False,
-            "reason": "window_too_small_for_capture",
-            "geometry": geometry,
-            "error": f"WeChat window is too small for reliable capture: {width}x{height}.",
-        }
-    return {"ok": True, "reason": "capture_geometry_ok", "geometry": geometry}
+    return win32_ocr_geometry.validate_capture_geometry(geometry)
 
 
 def validate_send_geometry(geometry: dict[str, Any]) -> dict[str, Any]:
-    width = int(geometry.get("width") or 0)
-    height = int(geometry.get("height") or 0)
-    if width < MIN_SEND_CLIENT_WIDTH or height < MIN_SEND_CLIENT_HEIGHT:
-        return {
-            "ok": False,
-            "reason": "window_too_small_for_safe_send",
-            "geometry": geometry,
-            "error": f"WeChat window is too small for safe send: {width}x{height}.",
-        }
-    return {"ok": True, "reason": "geometry_ok", "geometry": geometry}
+    return win32_ocr_geometry.validate_send_geometry(geometry)
 
 
 def calculate_send_points(geometry: dict[str, Any]) -> dict[str, Any]:
-    geometry_check = validate_send_geometry(geometry)
-    if not geometry_check.get("ok"):
-        return geometry_check
-    client_width = int(geometry["width"])
-    client_height = int(geometry["height"])
-    input_x = int(client_width * 0.65)
-    input_y = client_height - 96
-    send_x = client_width - 62
-    send_y = client_height - 44
-    if input_y < client_height * 0.80 or send_y < client_height * 0.82:
-        return {
-            "ok": False,
-            "reason": "send_points_outside_input_area",
-            "geometry": geometry,
-            "error": "Calculated send points are outside the expected input area.",
-        }
-    if input_x <= session_split_x(client_width) or send_x <= session_split_x(client_width):
-        return {
-            "ok": False,
-            "reason": "send_points_inside_session_list",
-            "geometry": geometry,
-            "error": "Calculated send points overlap the session list.",
-        }
-    input_candidates = input_click_candidate_points(geometry, min_points=10)
-    send_candidates = send_click_candidate_points(geometry, min_points=10)
-    return {
-        "ok": True,
-        "input_point": [input_x, input_y],
-        "send_point": [send_x, send_y],
-        "input_candidate_points": [list(point) for point in input_candidates],
-        "send_candidate_points": [list(point) for point in send_candidates],
-        "geometry": geometry,
-    }
+    return win32_ocr_geometry.calculate_send_points(geometry)
 
 
 def _spread_points_in_rect(
@@ -8018,53 +7468,15 @@ def _spread_points_in_rect(
     *,
     min_points: int = 10,
 ) -> list[tuple[int, int]]:
-    if right <= left or bottom <= top:
-        return []
-    x_fracs = (0.12, 0.24, 0.38, 0.52, 0.66, 0.80, 0.90, 0.30, 0.46, 0.72)
-    y_fracs = (0.22, 0.48, 0.74, 0.34, 0.62, 0.82, 0.42, 0.68, 0.18, 0.56)
-    points: list[tuple[int, int]] = []
-    for x_frac, y_frac in zip(x_fracs, y_fracs):
-        point = (
-            bounded_int(int(left + (right - left) * x_frac), default=left, minimum=left, maximum=right),
-            bounded_int(int(top + (bottom - top) * y_frac), default=top, minimum=top, maximum=bottom),
-        )
-        if point not in points:
-            points.append(point)
-    while len(points) < max(1, int(min_points or 1)):
-        point = (random.randint(left, right), random.randint(top, bottom))
-        if point not in points:
-            points.append(point)
-    random.shuffle(points)
-    return points
+    return win32_ocr_geometry._spread_points_in_rect(left, top, right, bottom, min_points=min_points)
 
 
 def input_click_candidate_points(geometry: dict[str, Any], *, min_points: int = 10) -> list[tuple[int, int]]:
-    width = int(geometry.get("width") or 0)
-    height = int(geometry.get("height") or 0)
-    if width <= 0 or height <= 0:
-        return []
-    split_x = session_split_x(width)
-    # Keep randomized focus clicks safely inside the input pane.  A wider
-    # candidate pool is useful for anti-repeat behavior, but the left edge must
-    # not drift into the message area or session list on compact WeChat windows.
-    left = max(split_x + 64, int(width * 0.55) + 1)
-    right = min(width - 96, max(left + 120, int(width * 0.88)))
-    top = max(int(height * 0.84), height - 126)
-    bottom = min(height - 76, max(top + 30, height - 86))
-    return _spread_points_in_rect(left, top, right, bottom, min_points=min_points)
+    return win32_ocr_geometry.input_click_candidate_points(geometry, min_points=min_points)
 
 
 def send_click_candidate_points(geometry: dict[str, Any], *, min_points: int = 10) -> list[tuple[int, int]]:
-    width = int(geometry.get("width") or 0)
-    height = int(geometry.get("height") or 0)
-    if width <= 0 or height <= 0:
-        return []
-    split_x = session_split_x(width)
-    left = max(split_x + 80, width - 132)
-    right = max(left + 24, width - 24)
-    top = max(int(height * 0.80), height - 88)
-    bottom = max(top + 18, height - 18)
-    return _spread_points_in_rect(left, top, right, bottom, min_points=min_points)
+    return win32_ocr_geometry.send_click_candidate_points(geometry, min_points=min_points)
 
 
 def jitter_input_click_point(x: int, y: int, geometry: dict[str, Any]) -> tuple[int, int]:
@@ -8500,28 +7912,19 @@ def write_send_guard_state(payload: dict[str, Any]) -> None:
 
 
 def env_int(name: str, default: int) -> int:
-    try:
-        return int(str(os.getenv(name) or "").strip() or default)
-    except ValueError:
-        return default
+    return win32_ocr_env.env_int(name, default)
 
 
 def env_float(name: str, default: float) -> float:
-    try:
-        return float(str(os.getenv(name) or "").strip() or default)
-    except ValueError:
-        return default
+    return win32_ocr_env.env_float(name, default)
 
 
 def env_flag(name: str, *, default: bool) -> bool:
-    raw = os.getenv(name)
-    if raw is None:
-        return default
-    return str(raw).strip().lower() not in {"0", "false", "no", "off"}
+    return win32_ocr_env.env_flag(name, default=default)
 
 
 def rpa_action_pacing_enabled() -> bool:
-    return env_flag("WECHAT_WIN32_OCR_UI_ACTION_PACING_ENABLED", default=True)
+    return win32_ocr_env.rpa_action_pacing_enabled()
 
 
 def ui_action_kind(action: str) -> str:
@@ -9024,15 +8427,7 @@ def window_dpi_scale(hwnd: int) -> float:
 
 
 def image_information_score(image: Any) -> float:
-    try:
-        gray = image.convert("L")
-        stat = ImageStat.Stat(gray)
-        std = float(stat.stddev[0]) if stat.stddev else 0.0
-        extrema = stat.extrema[0] if stat.extrema else (0, 0)
-        contrast = float(extrema[1] - extrema[0])
-        return std + contrast * 0.02
-    except Exception:
-        return 0.0
+    return win32_ocr_render.image_information_score(image)
 
 
 def run_ocr(image: Any) -> list[dict[str, Any]]:
@@ -9079,11 +8474,7 @@ def run_ocr(image: Any) -> list[dict[str, Any]]:
 
 
 def likely_foreign_overlay_capture(ocr_items: list[dict[str, Any]]) -> bool:
-    if not ocr_items:
-        return False
-    joined = "\n".join(str(item.get("text") or "").lower() for item in ocr_items)
-    hits = sum(1 for token in FOREIGN_CAPTURE_TOKENS if token in joined)
-    return hits >= 2
+    return win32_ocr_render.likely_foreign_overlay_capture(ocr_items)
 
 
 def allow_blind_target_confirmation(target: str) -> bool:
@@ -10203,146 +9594,48 @@ def key_press(key: int) -> None:
 
 
 def is_wechat_main_window(item: dict[str, Any]) -> bool:
-    title = normalize_wechat_title(str(item.get("title") or ""))
-    class_name = str(item.get("class_name") or "").lower()
-    if not title:
-        return False
-    if "qwindowicon" not in class_name and "wechatmainwndforpc" not in class_name:
-        return False
-    lowered = title.lower()
-    if any(token in lowered for token in ("login", "qr", "update")) or any(token in title for token in ("登录", "扫码", "更新")):
-        return False
-    return any(token in title for token in ("微信", "Weixin", "WeChat")) or any(token in lowered for token in ("weixin", "wechat"))
+    return win32_ocr_windowing.is_wechat_main_window(item)
 
 
 def wechat_window_title_score(item: dict[str, Any]) -> int:
-    title = normalize_wechat_title(str(item.get("title") or ""))
-    lowered = title.lower()
-    if title == "微信" or title.startswith("微信"):
-        return 40
-    if "微信" in title:
-        return 35
-    if lowered.startswith("wechat"):
-        return 25
-    if lowered.startswith("weixin"):
-        return 10
-    return 0
+    return win32_ocr_windowing.wechat_window_title_score(item)
 
 
 def normalize_wechat_title(title: str) -> str:
-    text = str(title or "").strip()
-    text = re.sub(r"^\(\d+\)\s*", "", text).strip()
-    text = re.sub(r"^（\d+）\s*", "", text).strip()
-    return text
+    return win32_ocr_windowing.normalize_wechat_title(title)
 
 
 def normalize_ocr_text(text: Any) -> str:
-    clean = str(text or "").replace("\u3000", " ").strip()
-    clean = re.sub(r"\s+", " ", clean)
-    return clean
+    return win32_ocr_text.normalize_ocr_text(text)
 
 
 def normalize_session_name(text: str) -> str:
-    clean = normalize_ocr_text(text)
-    clean = re.sub(r"^[：:.\s]+", "", clean).strip()
-    return clean
+    return win32_ocr_text.normalize_session_name(text)
 
 
 def strip_chat_unread_suffix(text: str) -> str:
-    clean = normalize_ocr_text(text)
-    if not clean:
-        return ""
-    return re.sub(r"\s*[\(（]\s*\d{1,4}\s*[\)）]\s*$", "", clean).strip()
+    return win32_ocr_text.strip_chat_unread_suffix(text)
 
 
 def normalize_chat_title_for_match(text: str) -> str:
-    clean = strip_chat_unread_suffix(normalize_session_name(text))
-    if not clean:
-        return ""
-    compact = re.sub(r"[\s:：\-_·|]+", "", clean).strip().lower()
-    if not compact:
-        return ""
-    prefixes = (
-        "当前会话",
-        "聊天对象",
-        "与",
-        "和",
-        "跟",
-        "chatwith",
-        "conversationwith",
-        "with",
-    )
-    suffixes = (
-        "的聊天",
-        "聊天窗口",
-        "聊天",
-        "会话",
-        "对话",
-        "chatwindow",
-        "conversation",
-        "chat",
-    )
-    changed = True
-    while changed and compact:
-        changed = False
-        for token in prefixes:
-            if compact.startswith(token) and len(compact) > len(token):
-                compact = compact[len(token) :]
-                changed = True
-        for token in suffixes:
-            if compact.endswith(token) and len(compact) > len(token):
-                compact = compact[: -len(token)]
-                changed = True
-    return compact.strip()
+    return win32_ocr_text.normalize_chat_title_for_match(text)
 
 
 def canonical_session_name(text: str) -> str:
-    clean = normalize_session_name(text)
-    if not clean:
-        return ""
-    collapsed = re.sub(r"[\s_\-:：()\[\]（）]+", "", clean).lower()
-    if is_file_transfer_session_alias(clean, collapsed=collapsed):
-        return "__file_transfer_assistant__"
-    return collapsed
+    return win32_ocr_text.canonical_session_name(text)
 
 
 def is_file_transfer_session_alias(text: str, *, collapsed: str | None = None) -> bool:
-    clean = normalize_session_name(text)
-    if not clean:
-        return False
-    compact = re.sub(r"\s+", "", clean)
-    if compact.startswith("文件传输助"):
-        return True
-    if compact.startswith("文件传输") and re.search(r"(\.{1,3}|…|今天|昨天|前天|\d{1,2}:\d{2})", compact):
-        return True
-    if compact in {"文件传输助手", "仅传输文件"}:
-        return True
-    english = collapsed
-    if english is None:
-        english = re.sub(r"[^a-z]", "", clean.lower())
-    if not english:
-        return False
-    return english in {
-        "filetransferassistant",
-        "filetransfer",
-        "transferassistant",
-    }
+    return win32_ocr_text.is_file_transfer_session_alias(text, collapsed=collapsed)
 
 
 def normalize_message_content(text: str) -> str:
-    return str(text or "").strip()
+    return win32_ocr_text.normalize_message_content(text)
 
 
 
 def quick_login_like(ocr_items: list[dict[str, Any]], *, geometry: dict[str, Any]) -> bool:
-    width = int(geometry.get("width") or 0)
-    height = int(geometry.get("height") or 0)
-    texts = [normalize_ocr_text(item.get("text")) for item in ocr_items if normalize_ocr_text(item.get("text"))]
-    joined = "\\n".join(texts)
-    login_tokens = ("进入微信", "切换账号", "仅传输文件")
-    has_login_tokens = sum(1 for token in login_tokens if token in joined) >= 2
-    likely_login_size = width <= LOGIN_WINDOW_MAX_WIDTH and height <= LOGIN_WINDOW_MAX_HEIGHT
-    return bool(has_login_tokens and likely_login_size)
+    return win32_ocr_text.quick_login_like(ocr_items, geometry=geometry)
 
 
 def ensure_quick_login_if_available(
@@ -10389,58 +9682,43 @@ def ensure_quick_login_if_available(
         "reason": "quick_login_enter_clicked",
     }
 def session_split_x(width: int) -> int:
-    return max(300, min(370, int(width * 0.52)))
+    return win32_ocr_geometry.session_split_x(width)
 
 
 def chat_header_cutoff_y(height: int) -> int:
-    return max(CHAT_HEADER_MAX_Y, min(150, int(height * 0.12)))
+    return win32_ocr_geometry.chat_header_cutoff_y(height)
 
 
 def active_chat_title_cutoff_y(height: int) -> int:
-    return max(120, min(170, int(height * 0.18)))
+    return win32_ocr_geometry.active_chat_title_cutoff_y(height)
 
 
 def active_chat_title_top_cutoff_y(height: int) -> int:
-    return max(92, min(122, int(height * 0.14)))
+    return win32_ocr_geometry.active_chat_title_top_cutoff_y(height)
 
 
 def active_chat_title_left_x(width: int) -> int:
-    split_x = session_split_x(width)
-    # Some WeChat builds keep the conversation body split near x=335 even
-    # when the historical split heuristic caps at 370.  Use a left-tolerant
-    # header ROI while relying on the title Y band to reject body speaker labels.
-    return max(300, min(split_x + 24, int(width * 0.37)))
+    return win32_ocr_geometry.active_chat_title_left_x(width)
 
 
 def active_chat_title_right_x(width: int) -> int:
-    return min(width - 90, session_split_x(width) + max(330, int(width * 0.48)))
+    return win32_ocr_geometry.active_chat_title_right_x(width)
 
 
 def active_chat_title_top_y(height: int) -> int:
-    return max(44, min(68, int(height * 0.075)))
+    return win32_ocr_geometry.active_chat_title_top_y(height)
 
 
 def active_chat_title_bottom_y(height: int) -> int:
-    return max(102, min(140, int(height * 0.155)))
+    return win32_ocr_geometry.active_chat_title_bottom_y(height)
 
 
 def search_box_point_for_geometry(geometry: dict[str, Any]) -> tuple[int, int]:
-    width = int(geometry.get("width") or 0)
-    height = int(geometry.get("height") or 0)
-    split_x = session_split_x(width)
-    fallback_x, fallback_y = SEARCH_BOX_REL
-    # WeChat's left sidebar keeps a relatively stable pixel layout across
-    # window widths, so anchor search X to sidebar split instead of full width.
-    search_x = bounded_int(int(split_x * 0.33), default=fallback_x, minimum=90, maximum=min(170, max(100, split_x - 48)))
-    search_y = bounded_int(int(height * 0.075), default=fallback_y, minimum=48, maximum=130)
-    return search_x, search_y
+    return win32_ocr_geometry.search_box_point_for_geometry(geometry)
 
 
 def session_click_x_for_geometry(geometry: dict[str, Any]) -> int:
-    width = int(geometry.get("width") or 0)
-    split_x = session_split_x(width)
-    center_hint = int(split_x * 0.72)
-    return bounded_int(center_hint, default=SESSION_CLICK_X, minimum=180, maximum=max(220, split_x - 40))
+    return win32_ocr_geometry.session_click_x_for_geometry(geometry)
 
 
 def normalize_wechat_window(hwnd: int) -> dict[str, Any]:
@@ -10571,60 +9849,27 @@ def normalize_wechat_window(hwnd: int) -> dict[str, Any]:
 
 
 def is_session_name_candidate(text: str) -> bool:
-    if not text:
-        return False
-    if len(text) > 28:
-        return False
-    if text.startswith("["):
-        return False
-    if "搜索" in text or text in {"?", "？", "+", "..."}:
-        return False
-    if re.fullmatch(r"(\d{1,2}:\d{2}|\d{1,2}/\d{1,2}|星期.|(今天|昨天|前天)\s*\d{1,2}:\d{2})", text):
-        return False
-    if "..." in text or "…" in text:
-        return False
-    return True
+    return win32_ocr_text.is_session_name_candidate(text)
 
 
 def is_session_time_text(text: str) -> bool:
-    return bool(
-        re.fullmatch(
-            r"(\d{1,2}:\d{2}|\d{1,2}/\d{1,2}|星期.|(今天|昨天|前天)\s*\d{1,2}:\d{2})",
-            str(text or "").strip(),
-        )
-    )
+    return win32_ocr_text.is_session_time_text(text)
 
 
 def is_message_noise(text: str) -> bool:
-    if re.fullmatch(r"(\d{1,2}:\d{2}|\d{1,2}/\d{1,2}|(今天|昨天|前天)\s*\d{1,2}:\d{2}|星期.\s*\d{1,2}:\d{2}|星期.)", text):
-        return True
-    if text in {"发送", "按住 Alt 说话"}:
-        return True
-    return False
+    return win32_ocr_text.is_message_noise(text)
 
 
 def infer_conversation_type(name: str) -> str:
-    if is_file_transfer_session_alias(name):
-        return "file_transfer"
-    if re.search(r"(群|群聊|测试|chatroom|room)", name, re.IGNORECASE):
-        return "group"
-    return "private"
+    return win32_ocr_text.infer_conversation_type(name)
 
 
 def bounded_int(value: Any, *, default: int, minimum: int, maximum: int) -> int:
-    try:
-        parsed = int(value)
-    except (TypeError, ValueError):
-        parsed = default
-    return max(minimum, min(maximum, parsed))
+    return win32_ocr_geometry.bounded_int(value, default=default, minimum=minimum, maximum=maximum)
 
 
 def bounded_float(value: Any, *, default: float, minimum: float, maximum: float) -> float:
-    try:
-        parsed = float(value)
-    except (TypeError, ValueError):
-        parsed = default
-    return max(minimum, min(maximum, parsed))
+    return win32_ocr_geometry.bounded_float(value, default=default, minimum=minimum, maximum=maximum)
 
 
 def args_for_daemon_request(request: dict[str, Any]) -> list[str]:

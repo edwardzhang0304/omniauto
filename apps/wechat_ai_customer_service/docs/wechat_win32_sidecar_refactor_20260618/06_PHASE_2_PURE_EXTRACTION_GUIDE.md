@@ -200,3 +200,48 @@ def calculate_send_points(*args, **kwargs):
 - 优先恢复 sidecar 原函数体。
 - 保留新模块也可以，但不要让 sidecar 使用它。
 - 不要继续 Phase 3。
+
+## 执行记录 2026-06-19
+
+本次 Phase 2 已按“小步抽取 + facade 保持 + 对照测试”的方式完成第一轮纯函数拆分。
+
+已新增：
+
+```text
+apps/wechat_ai_customer_service/adapters/wechat_win32_ocr/__init__.py
+apps/wechat_ai_customer_service/adapters/wechat_win32_ocr/geometry.py
+apps/wechat_ai_customer_service/adapters/wechat_win32_ocr/text_normalization.py
+apps/wechat_ai_customer_service/adapters/wechat_win32_ocr/env_config.py
+apps/wechat_ai_customer_service/adapters/wechat_win32_ocr/humanized_input.py
+apps/wechat_ai_customer_service/tests/run_wechat_win32_ocr_geometry_extraction_checks.py
+apps/wechat_ai_customer_service/tests/run_wechat_win32_ocr_text_normalization_checks.py
+apps/wechat_ai_customer_service/tests/run_wechat_win32_ocr_env_config_checks.py
+apps/wechat_ai_customer_service/tests/run_wechat_win32_ocr_humanized_input_checks.py
+```
+
+已接入 sidecar facade wrapper：
+
+- geometry：窗口几何、输入区/发送点、候选点击点、bounds helper。
+- text normalization：会话名、聊天标题、文件传输助手别名、消息噪声和 quick-login 判断。
+- env config：env int/float/flag、发送触发模式、焦点守卫开关、输入确认次数。
+- humanized input：输入设置归一化、文本安全归一化、随机分块、typo 判断、延迟范围计算。
+
+明确未拆：
+
+- `humanized_sleep_ms` / `humanized_action_sleep`：会真实 sleep，仍归 sidecar 执行节奏层。
+- `activate_window` / `client_click` / `human_screen_click`：窗口与鼠标动作层留给后续阶段。
+- `parse_sessions_from_ocr` / `parse_messages_from_ocr`：高影响 parser 留给单独阶段。
+- `send_payload` / `open_chat` / `ensure_target_ready_for_send`：发送和会话切换执行层不在本阶段改。
+
+一次中间失败与修复：
+
+- `run_wechat_win32_ocr_compat_checks.py` 首轮在 `test_activate_window_debounces_aggressive_refocus` 失败。
+- 原因：`WECHAT_WIN32_OCR_FOCUS_CLICK_FALLBACK` 被抽到 env module 后，sidecar 源码失去静态可审计锚点。
+- 修复：保留 sidecar `focus_click_fallback_enabled()` wrapper 中显式 env 名，同时实际解析仍走 `win32_ocr_env.env_flag`。
+
+验证结论：
+
+- 新模块均可独立 import。
+- sidecar facade 旧函数名保持可导入。
+- `add-friend-entry-click-plan` CLI/JSON/route/artifact 契约未改。
+- 未做真实微信点击、发送或加好友实盘。
