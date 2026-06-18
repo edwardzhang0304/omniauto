@@ -391,3 +391,34 @@ apps/wechat_ai_customer_service/tests/run_wechat_win32_ocr_window_metrics_checks
 - `run_add_friend_package_smoke.py` 通过 34 项。
 - `run_customer_service_multi_session_scheduler_checks.py` 通过 123 项。
 - `run_workflow_logic_checks.py` 通过 114 项。
+
+## 执行记录 2026-06-19 Phase 3.5b
+
+已完成 capture planning 小步拆分：
+
+新增：
+
+```text
+apps/wechat_ai_customer_service/adapters/wechat_win32_ocr/capture.py
+apps/wechat_ai_customer_service/tests/run_wechat_win32_ocr_capture_checks.py
+```
+
+已迁入：
+
+- `capture_rect_candidates`
+- `collect_capture_candidates`
+- `select_best_capture_candidate`
+
+边界：
+
+- sidecar 仍保留 `try_image_grab`、`capture_window_image`、`capture_window_by_rect`、`capture_wechat`、`capture_wechat_visible_rect`、截图保存和错误字符串。
+- 本阶段只迁移 bbox 候选顺序和最高信息量候选选择。
+- 未移动 `ImageGrab.grab`、`PrintWindow`、Win32 DC/bitmap 资源管理。
+
+验证：
+
+- `run_wechat_win32_ocr_capture_checks.py` 通过 5 项。
+- `run_wechat_win32_ocr_compat_checks.py` 通过 135 项。
+- `run_add_friend_package_smoke.py` 通过 34 项。
+- `run_customer_service_multi_session_scheduler_checks.py` 通过 123 项。
+- `run_workflow_logic_checks.py` 通过 114 项。

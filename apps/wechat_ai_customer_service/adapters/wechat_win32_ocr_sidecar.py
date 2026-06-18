@@ -147,6 +147,7 @@ from apps.wechat_ai_customer_service.wechat_message_envelope import (
     build_message_envelope,
 )
 from apps.wechat_ai_customer_service.adapters.wechat_win32_ocr import geometry as win32_ocr_geometry
+from apps.wechat_ai_customer_service.adapters.wechat_win32_ocr import capture as win32_ocr_capture
 from apps.wechat_ai_customer_service.adapters.wechat_win32_ocr import env_config as win32_ocr_env
 from apps.wechat_ai_customer_service.adapters.wechat_win32_ocr import humanized_input as win32_ocr_humanized
 from apps.wechat_ai_customer_service.adapters.wechat_win32_ocr import device_profile as win32_ocr_device_profile
@@ -8251,7 +8252,7 @@ def capture_wechat(hwnd: int, *, artifact_dir: str | None = None, label: str = "
         candidates = capture_window_by_rect(hwnd)
         if not candidates:
             raise RuntimeError("capture_wechat_failed: no screenshot candidate is available")
-        image = max(candidates, key=image_information_score)
+        image = win32_ocr_capture.select_best_capture_candidate(candidates, score=image_information_score)
     saved = save_screenshot_artifact(image, artifact_dir=artifact_dir, label=label)
     return image, saved
 
@@ -8259,7 +8260,7 @@ def capture_wechat(hwnd: int, *, artifact_dir: str | None = None, label: str = "
 def capture_wechat_visible_rect(hwnd: int, *, artifact_dir: str | None = None, label: str = "wechat_visible") -> tuple[Any, str]:
     candidates = capture_window_by_rect(hwnd)
     if candidates:
-        image = max(candidates, key=image_information_score)
+        image = win32_ocr_capture.select_best_capture_candidate(candidates, score=image_information_score)
     else:
         image = capture_window_image(hwnd)
     if image is None:
@@ -8355,31 +8356,11 @@ def capture_window_image(hwnd: int) -> Any | None:
 
 def capture_window_by_rect(hwnd: int) -> list[Any]:
     rect = win32gui.GetWindowRect(hwnd)
-    captures: list[Any] = []
-    base = try_image_grab(rect)
-    if base is not None:
-        captures.append(base)
-    scale = window_dpi_scale(hwnd)
-    if scale > 1.05:
-        scaled_down_rect = (
-            int(round(float(rect[0]) / scale)),
-            int(round(float(rect[1]) / scale)),
-            int(round(float(rect[2]) / scale)),
-            int(round(float(rect[3]) / scale)),
-        )
-        scaled_down = try_image_grab(scaled_down_rect)
-        if scaled_down is not None:
-            captures.append(scaled_down)
-        scaled_rect = (
-            int(round(float(rect[0]) * scale)),
-            int(round(float(rect[1]) * scale)),
-            int(round(float(rect[2]) * scale)),
-            int(round(float(rect[3]) * scale)),
-        )
-        scaled = try_image_grab(scaled_rect)
-        if scaled is not None:
-            captures.append(scaled)
-    return captures
+    return win32_ocr_capture.collect_capture_candidates(
+        rect,
+        dpi_scale=window_dpi_scale(hwnd),
+        grabber=try_image_grab,
+    )
 
 
 def try_image_grab(rect: tuple[int, int, int, int]) -> Any | None:
