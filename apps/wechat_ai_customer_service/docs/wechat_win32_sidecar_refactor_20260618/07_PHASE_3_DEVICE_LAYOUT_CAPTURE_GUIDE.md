@@ -716,3 +716,28 @@ apps/wechat_ai_customer_service/tests/run_wechat_win32_ocr_capture_checks.py
 - `run_wechat_win32_ocr_window_selection_planning_checks.py` 通过 4 项。
 - `run_add_friend_package_smoke.py` 通过 34 项。
 - `run_customer_service_multi_session_scheduler_checks.py` 通过 123 项。
+
+## 执行记录 2026-06-19 Phase 3.5n
+
+已完成 `ensure_visible_wechat_window` 可见性编排迁移：
+
+调整：
+
+- 新增 `window_visibility.py`，集中 `ensure_visible_wechat_window_with_dependencies` 和 `EnsureVisibleDependencies`。
+- sidecar `ensure_visible_wechat_window(interactive=True)` 保留旧入口，仍负责 probe、usable_visible/tray_hidden 判定和 planner 调用。
+- focus/restore/probe/sleep 编排迁入新 helper，实际动作仍通过 sidecar 注入依赖执行，旧 monkeypatch 测试面保持。
+
+边界：
+
+- 未改真实 `focus_wechat_window`、`restore_wechat_window`、`activate_window`、键鼠动作或截图/OCR。
+- 未修改 public CLI、JSON 字段、route、artifact scope、facade 函数名或 add-friend 命令。
+- 本阶段只做离线/fake dependency 验证，未做真实微信窗口实盘。
+
+验证：
+
+- `run_wechat_win32_ocr_ensure_visible_planning_checks.py` 通过 6 项。
+- `run_wechat_win32_ocr_compat_checks.py` 通过 135 项。
+- `run_add_friend_package_smoke.py` 通过 34 项。
+- `run_customer_service_multi_session_scheduler_checks.py` 通过 123 项。
+- `run_wechat_win32_ocr_window_activation_checks.py` 通过 3 项。
+- `run_wechat_win32_ocr_window_action_state_checks.py` 通过 6 项。

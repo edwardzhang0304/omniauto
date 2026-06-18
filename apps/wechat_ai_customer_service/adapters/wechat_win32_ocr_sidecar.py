@@ -157,6 +157,7 @@ from apps.wechat_ai_customer_service.adapters.wechat_win32_ocr import text_norma
 from apps.wechat_ai_customer_service.adapters.wechat_win32_ocr import window_activation as win32_ocr_window_activation
 from apps.wechat_ai_customer_service.adapters.wechat_win32_ocr import window_action_planning as win32_ocr_window_actions
 from apps.wechat_ai_customer_service.adapters.wechat_win32_ocr import window_action_state as win32_ocr_window_state
+from apps.wechat_ai_customer_service.adapters.wechat_win32_ocr import window_visibility as win32_ocr_window_visibility
 from apps.wechat_ai_customer_service.adapters.wechat_win32_ocr import window_metrics as win32_ocr_window_metrics
 from apps.wechat_ai_customer_service.adapters.wechat_win32_ocr import windowing as win32_ocr_windowing
 
@@ -8887,44 +8888,17 @@ def ensure_visible_wechat_window(*, interactive: bool = True) -> dict[str, Any]:
         usable_visible=usable_visible,
         tray_hidden=tray_hidden,
     )
-    action = str(plan.get("action") or "")
-    if probe["visible_main_windows"]:
-        if bool(plan.get("visible_main_window_geometry_invalid")):
-            probe["visible_main_window_geometry_invalid"] = True
-        if action == win32_ocr_window_actions.ENSURE_VISIBLE_ACTION_FOCUS:
-            focused = focus_wechat_window(probe)
-            if focused:
-                humanized_action_sleep(150, 280)
-                probe = probe_wechat_windows()
-                probe["focused_window"] = focused
-        elif action == win32_ocr_window_actions.ENSURE_VISIBLE_ACTION_RESTORE:
-            restored = restore_wechat_window(probe)
-            if restored:
-                humanized_action_sleep(650, 980)
-                probe = probe_wechat_windows()
-                probe["restored_window"] = restored
-                focused = focus_wechat_window(probe)
-                if focused:
-                    humanized_action_sleep(150, 280)
-                    probe = probe_wechat_windows()
-                    probe["focused_window"] = focused
-        return probe
-    if action == win32_ocr_window_actions.ENSURE_VISIBLE_ACTION_RETURN:
-        return probe
-    if action == win32_ocr_window_actions.ENSURE_VISIBLE_ACTION_MANUAL_TRAY:
-        probe.update(dict(plan.get("probe_updates") or {}))
-        return probe
-    restored = restore_wechat_window(probe)
-    if restored:
-        humanized_action_sleep(650, 980)
-        probe = probe_wechat_windows()
-        probe["restored_window"] = restored
-        focused = focus_wechat_window(probe)
-        if focused:
-            humanized_action_sleep(150, 280)
-            probe = probe_wechat_windows()
-            probe["focused_window"] = focused
-    return probe
+    deps = win32_ocr_window_visibility.EnsureVisibleDependencies(
+        probe_wechat_windows=probe_wechat_windows,
+        focus_wechat_window=focus_wechat_window,
+        restore_wechat_window=restore_wechat_window,
+        humanized_action_sleep=humanized_action_sleep,
+    )
+    return win32_ocr_window_visibility.ensure_visible_wechat_window_with_dependencies(
+        probe,
+        plan=plan,
+        deps=deps,
+    )
 
 
 def wechat_main_window_is_tray_hidden(probe: dict[str, Any]) -> bool:

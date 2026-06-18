@@ -12,6 +12,7 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from apps.wechat_ai_customer_service.adapters import wechat_win32_ocr_sidecar as sidecar  # noqa: E402
 from apps.wechat_ai_customer_service.adapters.wechat_win32_ocr import window_action_planning  # noqa: E402
+from apps.wechat_ai_customer_service.adapters.wechat_win32_ocr import window_visibility  # noqa: E402
 
 
 def assert_true(condition: bool, message: str) -> None:
@@ -28,6 +29,8 @@ def test_ensure_visible_planning_exports_expected_helpers() -> None:
         "plan_ensure_visible_wechat_window",
     ):
         assert_true(hasattr(window_action_planning, name), f"ensure-visible planner missing: {name}")
+    for name in ("EnsureVisibleDependencies", "ensure_visible_wechat_window_with_dependencies"):
+        assert_true(hasattr(window_visibility, name), f"ensure-visible executor missing: {name}")
 
 
 def test_plan_focuses_usable_visible_window_only_when_interactive() -> None:
