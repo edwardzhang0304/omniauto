@@ -586,3 +586,33 @@ manual/live test:
 rollback:
 
 - restore sidecar inline `try_image_grab` and `capture_window_by_rect`; keep `capture.py` planning helpers for review.
+
+## 阶段测试记录 2026-06-19 Phase 3.5d 准备
+
+stage: Phase 3.5d PrintWindow migration test design
+
+files changed:
+
+- `apps/wechat_ai_customer_service/docs/wechat_win32_sidecar_refactor_20260618/12_PHASE_3_5_CAPTURE_WINDOW_ACTION_LAYER_PLAN.md`
+- `apps/wechat_ai_customer_service/docs/wechat_win32_sidecar_refactor_20260618/07_PHASE_3_DEVICE_LAYOUT_CAPTURE_GUIDE.md`
+- `apps/wechat_ai_customer_service/docs/wechat_win32_sidecar_refactor_20260618/10_TEST_AND_ACCEPTANCE_PLAN.md`
+
+contract names touched:
+
+- public CLI changed: no
+- JSON fields changed: no
+- route constants changed: no
+- artifact scopes changed: no
+- facade callable names changed: no
+
+tests:
+
+- documentation-only chapter; run `git diff --check` and runtime staged guard before commit.
+
+manual/live test:
+
+- not run; no runtime code changed.
+
+rollback:
+
+- remove the Phase 3.5d preparation notes if the fake resource test design is replaced by a more complete design.

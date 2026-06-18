@@ -447,3 +447,17 @@ apps/wechat_ai_customer_service/tests/run_wechat_win32_ocr_capture_checks.py
 - `run_add_friend_package_smoke.py` 通过 34 项。
 - `run_customer_service_multi_session_scheduler_checks.py` 通过 123 项。
 - `run_workflow_logic_checks.py` 通过 114 项。
+
+## 执行记录 2026-06-19 Phase 3.5d 准备
+
+已补 `capture_window_image` / `PrintWindow` 迁移前测试设计：
+
+- 明确 fake `win32gui`、`win32ui`、`user32`、DC、bitmap 和 image factory 依赖。
+- 明确 `PrintWindow` full-content -> classic fallback 顺序必须测试。
+- 明确所有异常路径必须验证 bitmap/mem_dc/src_dc/hwnd_dc 已释放。
+- 明确 `capture_window_image` sidecar facade 签名不变。
+
+边界：
+
+- 本阶段只更新文档，不迁移 `capture_window_image`。
+- 未移动真实 Win32 DC、bitmap、`PrintWindow` 或 `Image.frombuffer` 执行代码。

@@ -201,6 +201,78 @@ normalize_wechat_window
 - 无法用 fake module 覆盖资源清理路径。
 - 代码为了好测而改变 fallback 顺序。
 
+#### Phase 3.5d 落代码前测试设计
+
+迁移 `capture_window_image` 前必须先在 `run_wechat_win32_ocr_capture_checks.py` 里补 fake resource test。最小 fake 对象：
+
+```text
+FakeWin32Gui:
+  GetWindowRect
+  GetWindowDC
+  DeleteObject
+  ReleaseDC
+
+FakeWin32Ui:
+  CreateDCFromHandle
+  CreateBitmap
+
+FakeSrcDC:
+  CreateCompatibleDC
+  DeleteDC
+
+FakeMemDC:
+  SelectObject
+  GetSafeHdc
+  DeleteDC
+
+FakeBitmap:
+  CreateCompatibleBitmap
+  GetInfo
+  GetBitmapBits
+  GetHandle
+
+FakeUser32:
+  PrintWindow
+
+FakeImage:
+  frombuffer hook or injected image_factory
+```
+
+必须覆盖：
+
+- `PrintWindow(hwnd, hdc, 0x2)` 成功时，不调用 classic `PrintWindow(..., 0)`。
+- full content 失败但 classic 成功时，调用顺序为 `[0x2, 0]`。
+- 两次 `PrintWindow` 都失败时返回 `None`，并释放 bitmap/mem_dc/src_dc/hwnd_dc。
+- `CreateCompatibleBitmap` 或 `GetBitmapBits` 抛错时返回 `None`，并释放已经创建的资源。
+- `GetWindowDC` 返回空值时返回 `None`，不得创建 DC/bitmap。
+- 窗口宽高小于等于 2 时直接返回 `None`，不得获取 DC。
+
+迁移时允许给 `capture.capture_window_image()` 传入这些依赖：
+
+```python
+capture_window_image(
+    hwnd,
+    win32gui_module=...,
+    win32ui_module=...,
+    user32=...,
+    image_factory=...,
+)
+```
+
+sidecar wrapper 仍必须保持：
+
+```python
+def capture_window_image(hwnd: int) -> Any | None:
+    ...
+```
+
+不允许：
+
+- 在 `capture.py` import 时访问真实 Win32 DC 或屏幕。
+- 为了测试方便移除 finally 清理。
+- 改变 `PrintWindow` fallback 顺序。
+- 改变失败返回 `None` 的语义。
+
 ### Phase 3.5e: OCR runner cache migration
 
 目标：
