@@ -50,6 +50,8 @@ stable sidecar CLI facade
     - 每阶段必须跑的静态、契约、smoke、实盘验收矩阵。
 11. [11_DEVELOPER_PRECODE_CHECKLIST.md](11_DEVELOPER_PRECODE_CHECKLIST.md)
     - 每次落代码前必须复制使用的变更说明模板、回滚说明和审计清单。
+12. [12_PHASE_3_5_CAPTURE_WINDOW_ACTION_LAYER_PLAN.md](12_PHASE_3_5_CAPTURE_WINDOW_ACTION_LAYER_PLAN.md)
+    - 真实截图、窗口动作、DPI、OCR 初始化迁移前的细化方案和回滚边界。
 
 ## 推荐执行顺序
 
@@ -59,6 +61,7 @@ stable sidecar CLI facade
   -> Phase 1 补契约 guard
   -> Phase 2 提取纯函数
   -> Phase 3 提取窗口/截图/OCR/布局
+  -> Phase 3.5 按动作层细化方案小步迁移窗口/截图/OCR执行边界
   -> Phase 4 提取发送/会话/动作风控
   -> Phase 5 收束 add_friend adapter 边界
   -> 最后一轮完整 smoke + 必要实盘

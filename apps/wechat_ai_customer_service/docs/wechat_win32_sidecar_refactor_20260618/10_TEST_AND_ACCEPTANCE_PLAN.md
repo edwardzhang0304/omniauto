@@ -136,8 +136,47 @@
 | Phase 1 guards | add_friend smoke, win32 compat, runtime guard |
 | Phase 2 pure extraction | py_compile, win32 compat, add_friend smoke; 改文本/session 时加 multi-session |
 | Phase 3 window/capture/OCR/profile | py_compile, win32 compat, add_friend smoke, multi-session |
+| Phase 3.5 capture/window action layer | focused fake dependency tests, py_compile, win32 compat, add_friend smoke, multi-session; 触碰 action execution 时加只读实盘 |
 | Phase 4 send/session/action | win32 compat, multi-session, workflow logic, add_friend smoke |
 | Phase 5 add_friend adapter | add_friend smoke, win32 compat, runtime guard |
+
+## Phase 3.5 专项测试要求
+
+Phase 3.5 必须按子阶段选择测试，不允许用“win32 compat 通过”替代 focused fake dependency test。
+
+read-only window metrics:
+
+```powershell
+.\.venv\Scripts\python.exe apps\wechat_ai_customer_service\tests\run_wechat_win32_ocr_window_metrics_checks.py
+.\.venv\Scripts\python.exe apps\wechat_ai_customer_service\tests\run_wechat_win32_ocr_compat_checks.py
+.\.venv\Scripts\python.exe apps\wechat_ai_customer_service\tests\run_add_friend_package_smoke.py
+```
+
+capture planning/ImageGrab:
+
+```powershell
+.\.venv\Scripts\python.exe apps\wechat_ai_customer_service\tests\run_wechat_win32_ocr_capture_checks.py
+.\.venv\Scripts\python.exe apps\wechat_ai_customer_service\tests\run_wechat_win32_ocr_compat_checks.py
+.\.venv\Scripts\python.exe apps\wechat_ai_customer_service\tests\run_add_friend_package_smoke.py
+```
+
+PrintWindow execution:
+
+```powershell
+.\.venv\Scripts\python.exe apps\wechat_ai_customer_service\tests\run_wechat_win32_ocr_capture_checks.py
+.\.venv\Scripts\python.exe apps\wechat_ai_customer_service\tests\run_wechat_win32_ocr_compat_checks.py
+.\.venv\Scripts\python.exe apps\wechat_ai_customer_service\tests\run_customer_service_multi_session_scheduler_checks.py
+```
+
+normalize/action planning:
+
+```powershell
+.\.venv\Scripts\python.exe apps\wechat_ai_customer_service\tests\run_wechat_win32_ocr_window_action_planning_checks.py
+.\.venv\Scripts\python.exe apps\wechat_ai_customer_service\tests\run_wechat_win32_ocr_compat_checks.py
+.\.venv\Scripts\python.exe apps\wechat_ai_customer_service\tests\run_workflow_logic_checks.py
+```
+
+只读实盘只在触碰真实截图或真实窗口动作 execution 后执行，且必须由用户确认微信窗口可被操作；真实发送/加好友仍需单独确认。
 
 ## 实盘验收分层
 

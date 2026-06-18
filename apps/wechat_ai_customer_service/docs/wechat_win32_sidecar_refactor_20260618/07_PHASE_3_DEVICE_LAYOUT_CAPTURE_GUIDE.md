@@ -4,6 +4,8 @@
 
 Phase 3 处理中风险区域：窗口、DPI、截图、OCR、布局和设备 profile。目标是让“不同分辨率客户电脑如何适配”有清晰代码边界，但本阶段仍尽量不改变动作行为。
 
+迁移 `capture_*`、`activate_window`、`normalize_wechat_window`、`run_ocr` 执行层前，必须先阅读并按 [12_PHASE_3_5_CAPTURE_WINDOW_ACTION_LAYER_PLAN.md](12_PHASE_3_5_CAPTURE_WINDOW_ACTION_LAYER_PLAN.md) 执行。本文早期的 Step 3.2/3.3/3.4 是粗粒度方向，不应被理解为可以直接搬真实截图或真实窗口动作。
+
 ## 目标
 
 新增或准备以下模块：
@@ -137,6 +139,8 @@ profile_summary(profile)
 
 把截图函数迁到 `capture.py`，sidecar re-export。
 
+注意：这是长期方向。真实迁移必须按 Phase 3.5 细化方案分为 bbox planning、ImageGrab wrapper、PrintWindow wrapper 三批执行，不能一次性搬完整 `capture_*` 链路。
+
 测试重点：
 
 - 无真实微信时 import 不失败。
@@ -145,6 +149,8 @@ profile_summary(profile)
 ### Step 3.3 提取 OCR engine
 
 把 RapidOCR 初始化移到 `ocr_engine.py`。
+
+注意：Phase 3.4 只迁移了 OCR row normalization；RapidOCR 初始化和 `_OCR_ENGINE` 缓存仍暂留 sidecar。整体迁移必须先确认 monkeypatch 兼容。
 
 测试重点：
 
@@ -160,6 +166,8 @@ profile_summary(profile)
 1. 先移动 `is_wechat_main_window`、title normalization 等纯函数。
 2. 再移动 `probe_wechat_windows`。
 3. 最后移动 `activate_window`、`normalize_wechat_window`。
+
+注意：`activate_window`、`normalize_wechat_window` 属于真实窗口动作，不与只读 window metrics 放在同一章提交。
 
 ## 测试命令
 
@@ -332,3 +340,23 @@ apps/wechat_ai_customer_service/tests/run_wechat_win32_ocr_ocr_engine_checks.py
 - `run_add_friend_package_smoke.py` 通过 34 项。
 - `run_customer_service_multi_session_scheduler_checks.py` 通过 123 项。
 - `run_workflow_logic_checks.py` 通过 114 项。
+
+## 执行记录 2026-06-19 Phase 3.5 文档准备
+
+新增：
+
+```text
+apps/wechat_ai_customer_service/docs/wechat_win32_sidecar_refactor_20260618/12_PHASE_3_5_CAPTURE_WINDOW_ACTION_LAYER_PLAN.md
+```
+
+已明确：
+
+- `capture_*` 迁移要拆成 bbox planning、ImageGrab wrapper、PrintWindow wrapper。
+- `normalize_wechat_window` 先拆 planning，再动 execution。
+- `run_ocr` 的 RapidOCR cache 迁移必须保护 sidecar monkeypatch 兼容。
+- 下一步代码只能从 Phase 3.5a read-only window metrics helper 开始。
+
+边界：
+
+- 本章只更新开发材料，不改变运行代码。
+- 未移动真实截图、窗口聚焦、窗口调整或 OCR 初始化。
