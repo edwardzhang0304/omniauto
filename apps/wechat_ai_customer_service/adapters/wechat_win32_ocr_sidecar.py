@@ -8956,8 +8956,13 @@ def activate_window(hwnd: int) -> None:
     user32 = ctypes.windll.user32
     if not hwnd:
         return
-    aggressive_focus = env_flag("WECHAT_WIN32_OCR_AGGRESSIVE_FOCUS", default=False)
-    attach_thread_input = aggressive_focus or env_flag("WECHAT_WIN32_OCR_ATTACH_THREAD_INPUT", default=False)
+    activation_settings = win32_ocr_window_state.activate_window_settings(
+        aggressive_focus=env_flag("WECHAT_WIN32_OCR_AGGRESSIVE_FOCUS", default=False),
+        attach_thread_input=env_flag("WECHAT_WIN32_OCR_ATTACH_THREAD_INPUT", default=False),
+        debounce_seconds=env_float("WECHAT_WIN32_OCR_ACTIVATE_DEBOUNCE_SECONDS", 2.5),
+    )
+    aggressive_focus = bool(activation_settings.get("aggressive_focus"))
+    attach_thread_input = bool(activation_settings.get("attach_thread_input"))
     try:
         if int(user32.IsIconic(hwnd)):
             user32.ShowWindow(hwnd, 9)
@@ -8971,11 +8976,15 @@ def activate_window(hwnd: int) -> None:
             return
     except Exception:
         pass
-    debounce_seconds = max(0.0, min(10.0, env_float("WECHAT_WIN32_OCR_ACTIVATE_DEBOUNCE_SECONDS", 2.5)))
+    debounce_seconds = float(activation_settings.get("debounce_seconds") or 0.0)
     if debounce_seconds > 0:
         now_monotonic = time.monotonic()
         last_monotonic = float(_LAST_ACTIVATE_MONOTONIC_BY_HWND.get(int(hwnd)) or 0.0)
-        if now_monotonic - last_monotonic <= debounce_seconds:
+        if win32_ocr_window_state.activate_debounce_active(
+            now_monotonic=now_monotonic,
+            last_monotonic=last_monotonic,
+            debounce_seconds=debounce_seconds,
+        ):
             try:
                 if bool(user32.IsWindow(hwnd)) and bool(user32.IsWindowVisible(hwnd)) and not bool(user32.IsIconic(hwnd)):
                     # Only short-circuit when the target is already foreground.

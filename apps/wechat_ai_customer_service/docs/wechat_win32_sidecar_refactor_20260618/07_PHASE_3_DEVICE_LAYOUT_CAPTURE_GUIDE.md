@@ -339,6 +339,31 @@ apps/wechat_ai_customer_service/tests/run_wechat_win32_ocr_device_profile_checks
 - `run_wechat_win32_ocr_window_action_state_checks.py` 通过 4 项。
 - `run_wechat_win32_ocr_window_action_planning_checks.py` 通过 9 项。
 
+## 执行记录 2026-06-19 Phase 3.5j
+
+已完成 `activate_window` 配置/节流判定小步抽取：
+
+调整：
+
+- `window_action_state.py` 增加 `activate_window_settings` 和 `activate_debounce_active`。
+- sidecar `activate_window` 使用纯 helper 计算 aggressive focus、AttachThreadInput、debounce 秒数和 debounce 命中。
+- 真实 `ShowWindow`、`SetForegroundWindow`、`AttachThreadInput`、TOPMOST flip、ALT fallback、click fallback 仍留在 sidecar。
+
+边界：
+
+- 未迁移真实焦点执行层。
+- 未改变 aggressive focus 自动启用 attach-thread-input 的语义。
+- 未改变 debounce 上限 10 秒、下限 0 秒。
+
+验证：
+
+- `run_wechat_win32_ocr_window_action_state_checks.py` 通过 6 项。
+- `run_wechat_win32_ocr_window_activation_checks.py` 通过 3 项。
+- `run_wechat_win32_ocr_compat_checks.py` 通过 135 项。
+- `run_add_friend_package_smoke.py` 通过 34 项。
+- `run_customer_service_multi_session_scheduler_checks.py` 通过 123 项。
+- `run_wechat_win32_ocr_ensure_visible_planning_checks.py` 通过 6 项。
+
 ## 执行记录 2026-06-19 Phase 3.2
 
 已完成 windowing 纯 metadata helper 小步拆分：
