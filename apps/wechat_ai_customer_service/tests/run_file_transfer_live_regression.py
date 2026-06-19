@@ -258,6 +258,7 @@ def run_scenario(args: argparse.Namespace, scenario: dict[str, Any], *, index: i
         outbound_args = Namespace(
             config=args.config,
             target=FILE_TRANSFER_ASSISTANT,
+            session_key="",
             text=send_text,
             send=bool(args.send),
             reason=f"live_regression:{index}:{scenario.get('name')}:{message_index}",
@@ -284,6 +285,7 @@ def run_scenario(args: argparse.Namespace, scenario: dict[str, Any], *, index: i
             bootstrap=False,
             write_data=True,
             target=None,
+            session_key="",
         )
     )
     event = (workflow.get("events") or [{}])[0]

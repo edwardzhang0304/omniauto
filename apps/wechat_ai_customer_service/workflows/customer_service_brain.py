@@ -406,6 +406,13 @@ def low_authority_fast_profile_decision(
     if clean in LOW_AUTHORITY_FAST_AMBIGUOUS_ACKS and target_context_has_active_business_state(target_state):
         return {"enabled": False, "reason": "ambiguous_ack_needs_business_context"}
     if target_state_has_delay_followup_context(target_state):
+        if social_message_requires_visible_brain_reply(combined):
+            return {
+                "enabled": True,
+                "reason": "delay_followup_social_short_turn",
+                "char_count": len(clean),
+                "requires_interaction_context": True,
+            }
         return {"enabled": False, "reason": "delay_followup_needs_context"}
     if social_message_requires_visible_brain_reply(combined):
         return {"enabled": True, "reason": "social_short_turn", "char_count": len(clean)}

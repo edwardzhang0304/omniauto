@@ -36,7 +36,68 @@ HIGH_RISK_CAPTURE_FLAGS = {
 LEARNING_BLOCKING_QUALITY_FLAGS = HIGH_RISK_CAPTURE_FLAGS | {
     "quote_preview_removed",
     "ocr_low_confidence",
+    "visual_ocr_non_text",
 }
+VISUAL_OCR_BLOCKING_QUALITY_FLAGS = {
+    "visual_ocr_non_text",
+    "visual_media_ocr",
+    "image_ocr_text",
+    "media_ocr_text",
+    "non_text_visual_ocr",
+    "ocr_from_image",
+    "ocr_visual_only",
+}
+NON_TEXT_MESSAGE_TYPES = {
+    "image",
+    "picture",
+    "photo",
+    "video",
+    "audio",
+    "voice",
+    "file",
+    "attachment",
+    "sticker",
+    "emoji",
+    "card",
+    "link_card",
+    "mini_program",
+    "location",
+    "contact_card",
+    "media",
+}
+VISUAL_OCR_SOURCE_VALUES = {
+    "image_ocr",
+    "photo_ocr",
+    "picture_ocr",
+    "media_ocr",
+    "visual_ocr",
+    "visual_media_ocr",
+    "screenshot_ocr",
+    "poster_ocr",
+    "thumbnail_ocr",
+    "attachment_ocr",
+    "card_ocr",
+}
+VISUAL_OCR_SOURCE_KEYS = (
+    "source_type",
+    "source_kind",
+    "content_source",
+    "ocr_source",
+    "capture_source",
+    "payload_type",
+    "message_source",
+    "semantic_source",
+    "surface_type",
+)
+VISUAL_OCR_NESTED_SOURCE_KEYS = (
+    "source",
+    "metadata",
+    "capture_metadata",
+    "message_metadata",
+    "ocr_metadata",
+    "classification",
+    "source_payload",
+)
 
 
 def now_iso() -> str:
@@ -45,6 +106,129 @@ def now_iso() -> str:
 
 def stable_digest(value: Any, length: int = 16) -> str:
     return hashlib.sha256(str(value).encode("utf-8")).hexdigest()[:length]
+
+
+def visual_ocr_noise_reason(record: dict[str, Any]) -> str:
+    """Return why a record is non-text visual OCR, or an empty string.
+
+    The rule is source/metadata based. It must not depend on product words such
+    as a specific brand, model, SKU, or industry term.
+    """
+
+    if not isinstance(record, dict):
+        return ""
+    flags = message_quality_flag_set(record)
+    if flags & VISUAL_OCR_BLOCKING_QUALITY_FLAGS:
+        return "visual_ocr_non_text"
+    for payload in iter_message_payload_layers(record):
+        for key in ("type", "content_type", "message_type", "media_type"):
+            value = normalize_marker_value(payload.get(key))
+            if value in NON_TEXT_MESSAGE_TYPES:
+                return "non_text_message"
+        for key in VISUAL_OCR_SOURCE_KEYS:
+            value = normalize_marker_value(payload.get(key))
+            if value in VISUAL_OCR_SOURCE_VALUES:
+                return "visual_ocr_non_text"
+        nested_reason = nested_visual_ocr_source_reason(payload)
+        if nested_reason:
+            return nested_reason
+        ocr_items_reason = visual_ocr_items_noise_reason(payload.get("ocr_items"))
+        if ocr_items_reason:
+            return ocr_items_reason
+        if bool(payload.get("visual_ocr_non_text") or payload.get("visual_media_ocr") or payload.get("media_ocr")):
+            return "visual_ocr_non_text"
+    return ""
+
+
+def nested_visual_ocr_source_reason(payload: dict[str, Any], *, _depth: int = 0) -> str:
+    if _depth > 2 or not isinstance(payload, dict):
+        return ""
+    for container_key in VISUAL_OCR_NESTED_SOURCE_KEYS:
+        nested = payload.get(container_key)
+        if not isinstance(nested, dict):
+            continue
+        for key in VISUAL_OCR_SOURCE_KEYS:
+            if normalize_marker_value(nested.get(key)) in VISUAL_OCR_SOURCE_VALUES:
+                return "visual_ocr_non_text"
+        flags = set(normalize_flags(nested.get("quality_flags")))
+        if flags & VISUAL_OCR_BLOCKING_QUALITY_FLAGS:
+            return "visual_ocr_non_text"
+        if bool(nested.get("visual_ocr_non_text") or nested.get("visual_media_ocr") or nested.get("media_ocr")):
+            return "visual_ocr_non_text"
+        reason = nested_visual_ocr_source_reason(nested, _depth=_depth + 1)
+        if reason:
+            return reason
+    return ""
+
+
+def visual_ocr_items_noise_reason(items: Any) -> str:
+    if not isinstance(items, list):
+        return ""
+    text_items = [
+        item
+        for item in items
+        if isinstance(item, dict) and str(item.get("text") or item.get("content") or "").strip()
+    ]
+    if not text_items:
+        return ""
+    marked = [item for item in text_items if ocr_item_has_visual_source_marker(item)]
+    if marked and len(marked) == len(text_items):
+        return "visual_ocr_non_text"
+    return ""
+
+
+def ocr_item_has_visual_source_marker(item: dict[str, Any]) -> bool:
+    flags = set(normalize_flags(item.get("quality_flags")))
+    if flags & VISUAL_OCR_BLOCKING_QUALITY_FLAGS:
+        return True
+    for key in VISUAL_OCR_SOURCE_KEYS:
+        if normalize_marker_value(item.get(key)) in VISUAL_OCR_SOURCE_VALUES:
+            return True
+    return bool(item.get("visual_ocr_non_text") or item.get("visual_media_ocr") or item.get("media_ocr"))
+
+
+def message_is_visual_or_media_ocr_noise(record: dict[str, Any]) -> bool:
+    return bool(visual_ocr_noise_reason(record))
+
+
+def message_quality_flag_set(record: dict[str, Any]) -> set[str]:
+    flags = set(normalize_flags(record.get("quality_flags")))
+    envelope = existing_message_envelope(record)
+    flags.update(normalize_flags(envelope.get("quality_flags")))
+    raw_payload = record.get("raw_payload") if isinstance(record.get("raw_payload"), dict) else {}
+    flags.update(normalize_flags(raw_payload.get("quality_flags")))
+    raw_envelope = raw_payload.get("message_envelope") if isinstance(raw_payload.get("message_envelope"), dict) else {}
+    flags.update(normalize_flags(raw_envelope.get("quality_flags")))
+    return flags
+
+
+def iter_message_payload_layers(record: dict[str, Any]) -> list[dict[str, Any]]:
+    layers: list[dict[str, Any]] = []
+    for payload in (record, existing_message_envelope(record)):
+        if isinstance(payload, dict) and payload:
+            layers.append(payload)
+    raw_payload = record.get("raw_payload") if isinstance(record.get("raw_payload"), dict) else {}
+    if raw_payload:
+        layers.append(raw_payload)
+        original = raw_payload.get("_original_raw_payload") if isinstance(raw_payload.get("_original_raw_payload"), dict) else {}
+        if original:
+            layers.append(original)
+        raw_envelope = raw_payload.get("message_envelope") if isinstance(raw_payload.get("message_envelope"), dict) else {}
+        if raw_envelope:
+            layers.append(raw_envelope)
+    deduped: list[dict[str, Any]] = []
+    seen: set[int] = set()
+    for payload in layers:
+        marker = id(payload)
+        if marker in seen:
+            continue
+        seen.add(marker)
+        deduped.append(payload)
+    return deduped
+
+
+def normalize_marker_value(value: Any) -> str:
+    return re.sub(r"[^a-z0-9_]+", "_", str(value or "").strip().lower()).strip("_")
 
 
 def build_message_envelope(
@@ -100,6 +284,9 @@ def build_message_envelope(
     excluded_fragments = list_fragments(record.get("excluded_fragments") or existing.get("excluded_fragments"))
     quoted_fragments = list_fragments(record.get("quoted_fragments") or existing.get("quoted_fragments"))
     quality_flags = normalize_flags(record.get("quality_flags") or existing.get("quality_flags"))
+    visual_reason = visual_ocr_noise_reason(record)
+    if visual_reason == "visual_ocr_non_text":
+        quality_flags.append("visual_ocr_non_text")
 
     if body_source and source_adapter in OCR_RPA_ADAPTERS:
         split = split_wechat_ocr_speaker_prefix(

@@ -316,6 +316,7 @@ def run_checks() -> dict[str, Any]:
         check_scheduler_capture_preserves_reference_context_separately,
         check_empty_or_prefix_only_reply_is_guarded,
         check_continuous_customer_messages_are_batched_with_overflow_guard,
+        check_visual_ocr_text_is_skipped_by_direct_batch_selection,
         check_repeatable_short_probe_is_not_suppressed_by_prior_same_text,
         check_canonical_input_signal_allows_repeated_long_text_after_prior_same_content,
         check_missing_original_batch_is_treated_as_stale_when_new_messages_visible,
@@ -599,6 +600,54 @@ def check_continuous_customer_messages_are_batched_with_overflow_guard() -> None
         "older same-burst messages should be tracked as overflow instead of being replied later",
     )
     assert_true(selection.truncated, "selection should mark overflow as truncated")
+
+
+def check_visual_ocr_text_is_skipped_by_direct_batch_selection() -> None:
+    messages = [
+        {
+            "id": "visual-ocr-direct-1",
+            "type": "text",
+            "content": "poster headline ABC 123",
+            "sender": "customer",
+            "quality_flags": ["visual_ocr_non_text"],
+        },
+        {
+            "id": "normal-direct-1",
+            "type": "text",
+            "content": "你好",
+            "sender": "customer",
+        },
+    ]
+    selection = select_batch_details(
+        messages,
+        target_state={"processed_message_ids": [], "handoff_message_ids": []},
+        allow_self_for_test=False,
+        max_batch_messages=3,
+        config={},
+    )
+    assert_equal([item["id"] for item in selection.batch], ["normal-direct-1"], "direct workflow batch must skip visual OCR text")
+    assert_equal(selection.eligible_count, 1, "visual OCR text should not count as reply-eligible")
+
+    normal_same_content = select_batch_details(
+        [
+            {
+                "id": "normal-direct-same-content",
+                "type": "text",
+                "content": "poster headline ABC 123",
+                "sender": "customer",
+                "source_type": "chat_text",
+            }
+        ],
+        target_state={"processed_message_ids": [], "handoff_message_ids": []},
+        allow_self_for_test=False,
+        max_batch_messages=3,
+        config={},
+    )
+    assert_equal(
+        [item["id"] for item in normal_same_content.batch],
+        ["normal-direct-same-content"],
+        "direct workflow guard must be source-based, not content-keyword-based",
+    )
 
 
 def check_repeatable_short_probe_is_not_suppressed_by_prior_same_text() -> None:
@@ -2035,9 +2084,23 @@ def check_live_safety_guard_enforces_single_allowed_target() -> None:
             guarded.get("rpa_humanized_send", {}).get("adaptive_speed_enabled") is True,
             "live guard should keep adaptive typing but use natural profiles",
         )
-        assert_equal(guarded.get("rpa_humanized_send", {}).get("typing_typo_max"), 1, "live guard should keep sparse typo/backspace behavior")
+        assert_equal(
+            guarded.get("rpa_humanized_send", {}).get("input_method"),
+            "clipboard_chunks",
+            "live guard should use low-frequency clipboard chunks instead of slow per-character SendInput",
+        )
+        assert_equal(guarded.get("rpa_humanized_send", {}).get("typing_typo_max"), 0, "live guard should avoid deliberate typo/backspace behavior")
+        assert_equal(
+            guarded.get("rpa_humanized_send", {}).get("typing_typo_probability"),
+            0.0,
+            "live guard should avoid random typo injection in customer-service sends",
+        )
         assert_equal(guarded.get("rpa_humanized_send", {}).get("send_trigger_mode"), "enter_only", "live guard should avoid clicking the send button")
         assert_equal(guarded.get("rpa_humanized_send", {}).get("send_input_confirm_attempts"), 1, "live guard should avoid repeated input attempts")
+        assert_true(
+            guarded.get("rpa_humanized_send", {}).get("input_fast_visual_confirm_enabled") is True,
+            "live guard should enable fast visual input confirmation with OCR fallback",
+        )
         assert_equal(
             guarded.get("rpa_reply_safety", {}).get("max_auto_reply_chars"),
             150,

@@ -83,6 +83,7 @@ def main() -> int:
         check_reply_normalization_avoids_forbidden_commitment_echo(),
         check_nonsemantic_runtime_markers_do_not_break_social_classification(),
         check_quality_gate_rejects_social_closing_stale_business_context(),
+        check_quality_gate_rejects_social_greeting_reviving_unbacked_visual_entity(),
         check_quality_gate_rejects_high_risk_commitment_echo(),
         check_quality_gate_rejects_overconfident_sales_pressure(),
         check_normalizes_brain_schema_aliases_without_authorizing_style_facts(),
@@ -269,6 +270,8 @@ def main() -> int:
         check_brain_adoption_gate(),
         check_brain_adoption_gate_rejects_nonadoptable_or_blocked_payloads(),
         check_process_target_brain_first_adopts(),
+        check_process_target_brain_first_low_authority_fast_precheck_skips_legacy_prework(),
+        check_process_target_brain_first_low_authority_fast_precheck_rejects_business_turn(),
         check_process_target_brain_first_exception_blocks_visible_reply(),
         check_process_target_brain_first_nonadoptable_blocks_legacy_takeover(),
         check_process_target_brain_first_skips_legacy_expression_adapter(),
@@ -530,6 +533,86 @@ def check_quality_gate_rejects_social_closing_stale_business_context() -> CaseRe
         f"closing should not revive stale business context: {quality}",
     )
     return CaseResult("quality_gate_rejects_social_closing_stale_business_context", True, {"quality": quality})
+
+
+def check_quality_gate_rejects_social_greeting_reviving_unbacked_visual_entity() -> CaseResult:
+    polluted_plan = normalize_brain_plan(
+        {
+            "can_answer": True,
+            "answer_mode": "soft_social_reply",
+            "reply_segments": ["在的，我去帮您查一下 GOLD SERIES 的配置资料。"],
+            "recommended_action": "send_reply",
+            "confidence": 0.86,
+        }
+    )
+    polluted_quality = verify_brain_reply_quality(
+        polluted_plan,
+        current_message="在吗",
+        evidence_pack={},
+        settings={},
+    )
+    assert_true(
+        "social_turn_revived_unsupported_business_context" in polluted_quality.get("errors", []),
+        f"social greeting should not revive unbacked visual/entity context: {polluted_quality}",
+    )
+
+    chinese_stale_plan = normalize_brain_plan(
+        {
+            "can_answer": True,
+            "answer_mode": "soft_social_reply",
+            "reply_segments": ["在的，我继续给您看这款配置资料。"],
+            "recommended_action": "send_reply",
+            "confidence": 0.84,
+        }
+    )
+    chinese_stale_quality = verify_brain_reply_quality(
+        chinese_stale_plan,
+        current_message="你好",
+        evidence_pack={},
+        settings={},
+    )
+    assert_true(
+        "social_turn_revived_unsupported_business_context" in chinese_stale_quality.get("errors", []),
+        f"social greeting should not revive generic stale business context in Chinese: {chinese_stale_quality}",
+    )
+
+    explicit_continue_quality = verify_brain_reply_quality(
+        chinese_stale_plan,
+        current_message="那继续说刚才这款",
+        evidence_pack={},
+        settings={},
+    )
+    assert_true(
+        "social_turn_revived_unsupported_business_context" not in explicit_continue_quality.get("errors", []),
+        f"explicit customer continuation should not be blocked by social stale-context guard: {explicit_continue_quality}",
+    )
+
+    normal_plan = normalize_brain_plan(
+        {
+            "can_answer": True,
+            "answer_mode": "soft_social_reply",
+            "reply_segments": ["在的，您说。"],
+            "recommended_action": "send_reply",
+            "confidence": 0.9,
+        }
+    )
+    normal_quality = verify_brain_reply_quality(
+        normal_plan,
+        current_message="在吗",
+        evidence_pack={},
+        settings={},
+    )
+    assert_true(normal_quality.get("ok"), f"plain social acknowledgement should still pass: {normal_quality}")
+    return CaseResult(
+        "quality_gate_rejects_social_greeting_reviving_unbacked_visual_entity",
+        True,
+        {
+            "polluted_quality": polluted_quality,
+            "chinese_stale_quality": chinese_stale_quality,
+            "explicit_continue_quality": explicit_continue_quality,
+            "normal_quality": normal_quality,
+        },
+    )
 
 
 def check_quality_gate_rejects_high_risk_commitment_echo() -> CaseResult:
@@ -1170,8 +1253,48 @@ def check_brain_input_includes_delay_followup_interaction_hint() -> CaseResult:
         batch=[{"id": "msg-chase", "sender": "许聪", "content": "人呢"}],
         target_state=state,
     )
-    assert_true(not fast_decision.get("enabled"), f"delay follow-up must not use too-lean social profile: {fast_decision}")
-    assert_true(fast_decision.get("reason") == "delay_followup_needs_context", f"expected context reason: {fast_decision}")
+    assert_true(fast_decision.get("enabled"), f"delay follow-up social turn can use low-authority Brain profile with interaction hint: {fast_decision}")
+    assert_true(
+        fast_decision.get("reason") == "delay_followup_social_short_turn",
+        f"expected delay social fast reason: {fast_decision}",
+    )
+    assert_true(
+        fast_decision.get("requires_interaction_context") is True,
+        f"delay social fast profile must retain interaction context: {fast_decision}",
+    )
+    fast_settings = brain_module.apply_low_authority_fast_brain_settings(
+        brain_module.effective_brain_settings(base_config(base_plan(), include_product=False)),
+        fast_decision,
+    )
+    fast_evidence = brain_module.build_low_authority_fast_evidence_pack(
+        target_name="新数据测试",
+        target_state=state,
+        batch=[{"id": "msg-chase", "sender": "许聪", "content": "人呢"}],
+        combined="人呢",
+        raw_capture={"conversation": {"conversation_id": "conv-delay-followup", "chat_type": "private"}},
+        profile=fast_decision,
+    )
+    brain_module.attach_conversation_runtime_hints_to_evidence_pack(fast_evidence, state)
+    fast_brain_input = brain_module.build_brain_input(
+        settings=fast_settings,
+        target_name="新数据测试",
+        target_state=state,
+        batch=[{"id": "msg-chase", "sender": "许聪", "content": "人呢"}],
+        combined="人呢",
+        raw_capture={"conversation": {"conversation_id": "conv-delay-followup", "chat_type": "private"}},
+        evidence_pack=fast_evidence,
+    )
+    fast_prompt_pack, _fast_user_content, fast_estimate = brain_module.build_sized_brain_prompt(
+        settings=fast_settings,
+        brain_input=fast_brain_input,
+    )
+    fast_prompt_input = (fast_prompt_pack.get("user") or {}).get("brain_input") or {}
+    fast_prompt_hint = fast_prompt_input.get("conversation_interaction_state") or {}
+    assert_true(str(fast_estimate.get("profile") or "") == "low_authority_fast", f"delay social turn should stay in fast profile: {fast_estimate}")
+    assert_true(
+        fast_prompt_hint.get("suggested_reply_posture") == "acknowledge_delay_then_continue",
+        f"fast delay social prompt must keep interaction hint: {fast_prompt_hint}",
+    )
     return CaseResult("brain_input_includes_delay_followup_interaction_hint", True, {"hint": prompt_hint})
 
 
@@ -8236,7 +8359,7 @@ def check_brain_adoption_gate_rejects_nonadoptable_or_blocked_payloads() -> Case
 def check_process_target_brain_first_adopts() -> CaseResult:
     with patched_workflow_brain(mode="brain_first"):
         event = process_target(
-            connector=FakeConnector([{"id": "p1", "type": "text", "sender": "customer", "content": "你好"}]),
+            connector=FakeConnector([{"id": "p1", "type": "text", "sender": "customer", "content": "秦PLUS多少钱"}]),
             target=TargetConfig("许聪", True, True, False, 3),
             config=workflow_config("brain_first"),
             rules={"default_reply": "旧链路回复", "rules": []},
@@ -8262,6 +8385,61 @@ def check_process_target_brain_first_adopts() -> CaseResult:
     assert_true(realtime_reply.get("applied") is False, f"Brain-owned reply must not apply local realtime reply: {event}")
     assert_true(llm_synthesis.get("reason") == "llm_reply_synthesis_disabled", f"Brain-owned reply must not be rewritten by legacy synthesis: {event}")
     return CaseResult("process_target_brain_first_adopts", True, {"action": event.get("action")})
+
+
+def check_process_target_brain_first_low_authority_fast_precheck_skips_legacy_prework() -> CaseResult:
+    config = workflow_config("brain_first")
+    config["intent_assist"] = {"enabled": True}
+    config["rag_response"] = {"enabled": True}
+    config["llm_reply_synthesis"] = {"enabled": True}
+    with patched_workflow_brain(mode="brain_first"):
+        event = process_target(
+            connector=FakeConnector([{"id": "p1fast", "type": "text", "sender": "customer", "content": "你好"}]),
+            target=TargetConfig("许聪", True, True, False, 3),
+            config=config,
+            rules={"default_reply": "旧链路回复", "rules": []},
+            state={"targets": {}},
+            send=False,
+            write_data=False,
+            allow_fallback_send=True,
+            mark_dry_run=True,
+        )
+    precheck = event.get("brain_first_low_authority_fast_precheck") if isinstance(event.get("brain_first_low_authority_fast_precheck"), dict) else {}
+    intent_assist = event.get("intent_assist") if isinstance(event.get("intent_assist"), dict) else {}
+    assert_true(precheck.get("enabled") is True, f"pure greeting should use Brain First low-authority precheck: {event}")
+    assert_true(event.get("customer_service_brain_adopted", {}).get("applied") is True, f"Brain reply should still be adopted: {event}")
+    assert_true((event.get("decision") or {}).get("raw_reply_text") == "Brain回复", f"visible reply must remain Brain-authored: {event}")
+    assert_true(
+        intent_assist.get("reason") == "skipped_for_brain_first_low_authority_fast_precheck",
+        f"legacy intent assist should be skipped for pure greeting fast precheck: {event}",
+    )
+    assert_true("rag_reply" not in event, f"legacy RAG should not run in low-authority Brain precheck path: {event}")
+    assert_true("llm_reply_synthesis" not in event, f"legacy synthesis should not run in low-authority Brain precheck path: {event}")
+    return CaseResult("process_target_brain_first_low_authority_fast_precheck_skips_legacy_prework", True, {"precheck": precheck})
+
+
+def check_process_target_brain_first_low_authority_fast_precheck_rejects_business_turn() -> CaseResult:
+    config = workflow_config("brain_first")
+    config["intent_assist"] = {"enabled": False}
+    with patched_workflow_brain(mode="brain_first"):
+        event = process_target(
+            connector=FakeConnector([{"id": "p1biz", "type": "text", "sender": "customer", "content": "秦PLUS多少钱"}]),
+            target=TargetConfig("许聪", True, True, False, 3),
+            config=config,
+            rules={"default_reply": "旧链路回复", "rules": []},
+            state={"targets": {}},
+            send=False,
+            write_data=False,
+            allow_fallback_send=True,
+            mark_dry_run=True,
+        )
+    assert_true(
+        "brain_first_low_authority_fast_precheck" not in event,
+        f"business short turn must keep normal evidence/routing path: {event}",
+    )
+    runtime_route = event.get("runtime_route") if isinstance(event.get("runtime_route"), dict) else {}
+    assert_true(runtime_route.get("reason") == "realtime_reply_disabled", f"normal Brain path should still reach legacy-disabled audit fields: {event}")
+    return CaseResult("process_target_brain_first_low_authority_fast_precheck_rejects_business_turn", True, {"action": event.get("action")})
 
 
 def check_process_target_brain_first_exception_blocks_visible_reply() -> CaseResult:

@@ -24,6 +24,7 @@ ARTIFACT_ROOT = (
     / "test_artifacts"
     / "two_visible_session_customer_service_live"
 )
+RPA_INPUT_METHODS = {"auto", "sendinput_unicode", "uia_chunks", "clipboard_chunks", "clipboard_once"}
 PROMPT_SCENARIOS = [
     {
         "新数据测试": "你好，我想看看10万左右的电车或混动，给老婆开，别太大，有合适的吗？",
@@ -84,10 +85,36 @@ BOUNDARY_PROMPT_SCENARIOS = [
         "许聪": "还有个问题，最低价能不能直接给到底？别让我来回砍。",
     },
 ]
+SHORT_GREETING_PROMPT_SCENARIOS = [
+    {
+        "新数据测试": "你好",
+        "许聪": "在吗",
+    },
+    {
+        "新数据测试": "您好",
+        "许聪": "还在吗",
+    },
+    {
+        "新数据测试": "有空吗",
+        "许聪": "你好",
+    },
+]
+SHORT_BUSINESS_PROMPT_SCENARIOS = [
+    {
+        "新数据测试": "秦PLUS多少钱？",
+        "许聪": "能贷款吗？",
+    },
+    {
+        "新数据测试": "周末能看车吗？",
+        "许聪": "车况怎么样？",
+    },
+]
 
 SCENARIO_SETS = {
     "default": PROMPT_SCENARIOS,
     "boundary": BOUNDARY_PROMPT_SCENARIOS,
+    "short_greeting": SHORT_GREETING_PROMPT_SCENARIOS,
+    "short_business": SHORT_BUSINESS_PROMPT_SCENARIOS,
 }
 
 for candidate in (PROJECT_ROOT, APP_ROOT, APP_ROOT / "workflows", APP_ROOT / "adapters"):
@@ -133,6 +160,55 @@ from apps.wechat_ai_customer_service.scripts.run_customer_service_listener impor
 
 def now_text() -> str:
     return datetime.now().isoformat(timespec="seconds")
+
+
+def _parse_time(value: Any) -> datetime | None:
+    text = str(value or "").strip()
+    if not text:
+        return None
+    if text.endswith("Z"):
+        text = text[:-1] + "+00:00"
+    try:
+        return datetime.fromisoformat(text)
+    except (TypeError, ValueError):
+        return None
+
+
+def _seconds_between(start: Any, finish: Any) -> float | None:
+    started_at = _parse_time(start)
+    finished_at = _parse_time(finish)
+    if started_at is None or finished_at is None:
+        return None
+    if started_at.tzinfo is None and finished_at.tzinfo is not None:
+        finished_at = finished_at.replace(tzinfo=None)
+    elif started_at.tzinfo is not None and finished_at.tzinfo is None:
+        started_at = started_at.replace(tzinfo=None)
+    seconds = (finished_at - started_at).total_seconds()
+    if seconds < 0:
+        return None
+    return round(seconds, 4)
+
+
+def compact_latency_breakdown(trace: dict[str, Any]) -> dict[str, Any]:
+    if not isinstance(trace, dict):
+        return {}
+    pairs = {
+        "signal_to_capture_start_seconds": ("session_signal_detected_at", "capture_started_at"),
+        "capture_seconds": ("capture_started_at", "capture_finished_at"),
+        "capture_to_brain_start_seconds": ("capture_finished_at", "brain_started_at"),
+        "brain_seconds": ("brain_started_at", "brain_finished_at"),
+        "final_polish_seconds": ("final_polish_started_at", "final_polish_finished_at"),
+        "ready_queue_wait_seconds": ("send_queue_entered_at", "send_started_at"),
+        "send_seconds": ("send_started_at", "send_finished_at"),
+        "send_rpa_seconds": ("send_rpa_started_at", "send_rpa_finished_at"),
+        "end_to_end_seconds": ("session_signal_detected_at", "send_finished_at"),
+    }
+    compact: dict[str, Any] = {}
+    for name, (start_key, finish_key) in pairs.items():
+        seconds = _seconds_between(trace.get(start_key), trace.get(finish_key))
+        if seconds is not None:
+            compact[name] = seconds
+    return compact
 
 
 def safe_name(value: str) -> str:
@@ -294,6 +370,8 @@ def compact_send(payload: dict[str, Any]) -> dict[str, Any]:
             "error": wxauto4_reserve.get("error"),
         } if wxauto4_reserve else {},
         "rpa_lock": send.get("rpa_lock") if isinstance(send.get("rpa_lock"), dict) else {},
+        "timing": payload.get("timing") if isinstance(payload.get("timing"), dict) else {},
+        "send_timing": send.get("timing") if isinstance(send.get("timing"), dict) else {},
         "error": payload.get("error") or send.get("error") or send_result.get("error"),
     }
 
@@ -520,14 +598,17 @@ def build_config(run_dir: Path) -> Path:
         }
     )
     base.setdefault("rpa_humanized_send", {})
+    input_method = str(os.getenv("WECHAT_LIVE_TEST_RPA_INPUT_METHOD") or "clipboard_chunks").strip().lower()
+    if input_method not in RPA_INPUT_METHODS:
+        input_method = "clipboard_chunks"
     base["rpa_humanized_send"].update(
         {
             "enabled": True,
-            "input_method": "sendinput_unicode",
+            "input_method": input_method,
             "send_trigger_mode": "enter_only",
             "send_input_confirm_attempts": 1,
-            "typing_typo_probability": 0.06,
-            "typing_typo_max": 1,
+            "typing_typo_probability": 0.0,
+            "typing_typo_max": 0,
             "send_pre_delay_min_ms": 500,
             "send_pre_delay_max_ms": 1300,
             "send_post_input_delay_min_ms": 450,
@@ -536,6 +617,7 @@ def build_config(run_dir: Path) -> Path:
             "send_trigger_delay_max_ms": 2100,
             "send_after_trigger_delay_min_ms": 420,
             "send_after_trigger_delay_max_ms": 1250,
+            "input_fast_visual_confirm_enabled": True,
         }
     )
     base.setdefault("rpa_operator_guard", {})
@@ -776,6 +858,7 @@ class SyntheticInboundConnector:
 
     def _dry_send_result(self, target: str, text: str, exact: bool = True, **kwargs: Any) -> dict[str, Any]:
         session_key = str(kwargs.get("session_key") or "")
+        started_at = now_text()
         return {
             "ok": True,
             "verified": True,
@@ -810,6 +893,16 @@ class SyntheticInboundConnector:
                         }
                     },
                 },
+            },
+            "timing": {
+                "send_started_at": started_at,
+                "send_finished_at": now_text(),
+                "send_duration_seconds": 0.0,
+                "send_verify_started_at": started_at,
+                "send_verify_finished_at": now_text(),
+                "send_verify_duration_seconds": 0.0,
+                "verification_attempts": 0,
+                "adapter_stage": "dry_reply_send",
             },
         }
 
@@ -901,6 +994,12 @@ def compact_tick(tick: dict[str, Any]) -> dict[str, Any]:
                 "session_key": item.get("session_key"),
                 "send_result": _compact_event_send_result(item),
                 "send_observability": item.get("send_observability") if isinstance(item.get("send_observability"), dict) else {},
+                "latency_trace": item.get("latency_trace") if isinstance(item.get("latency_trace"), dict) else {},
+                "latency_breakdown": (
+                    item.get("latency_breakdown")
+                    if isinstance(item.get("latency_breakdown"), dict)
+                    else compact_latency_breakdown(item.get("latency_trace") if isinstance(item.get("latency_trace"), dict) else {})
+                ),
             }
             for item in (tick.get("events") or [])[-12:]
             if isinstance(item, dict)
@@ -1531,6 +1630,40 @@ def run_self_check() -> bool:
         return False
     if len(scenario_prompts("boundary")) < 8:
         return False
+    if round_prompts("unit", len(SHORT_GREETING_PROMPT_SCENARIOS) + 1, scenario_set="short_greeting") != round_prompts("unit", 1, scenario_set="short_greeting"):
+        return False
+    if scenario_prompts("short_greeting")[0].get("新数据测试") != "你好":
+        return False
+    if round_prompts("unit", len(SHORT_BUSINESS_PROMPT_SCENARIOS) + 1, scenario_set="short_business") != round_prompts("unit", 1, scenario_set="short_business"):
+        return False
+    if scenario_prompts("short_business")[0].get("新数据测试") != "秦PLUS多少钱？":
+        return False
+    config_check_dir = ARTIFACT_ROOT / "_self_check_config"
+    previous_input_method = os.environ.get("WECHAT_LIVE_TEST_RPA_INPUT_METHOD")
+    try:
+        os.environ.pop("WECHAT_LIVE_TEST_RPA_INPUT_METHOD", None)
+        default_config_path = build_config(config_check_dir)
+        default_config = json.loads(default_config_path.read_text(encoding="utf-8"))
+        default_rpa = default_config.get("rpa_humanized_send") or {}
+        if default_rpa.get("input_method") != "clipboard_chunks":
+            return False
+        if default_rpa.get("typing_typo_probability") != 0.0 or default_rpa.get("typing_typo_max") != 0:
+            return False
+        os.environ["WECHAT_LIVE_TEST_RPA_INPUT_METHOD"] = "sendinput_unicode"
+        override_config_path = build_config(config_check_dir)
+        override_config = json.loads(override_config_path.read_text(encoding="utf-8"))
+        if (override_config.get("rpa_humanized_send") or {}).get("input_method") != "sendinput_unicode":
+            return False
+        os.environ["WECHAT_LIVE_TEST_RPA_INPUT_METHOD"] = "invalid"
+        fallback_config_path = build_config(config_check_dir)
+        fallback_config = json.loads(fallback_config_path.read_text(encoding="utf-8"))
+        if (fallback_config.get("rpa_humanized_send") or {}).get("input_method") != "clipboard_chunks":
+            return False
+    finally:
+        if previous_input_method is None:
+            os.environ.pop("WECHAT_LIVE_TEST_RPA_INPUT_METHOD", None)
+        else:
+            os.environ["WECHAT_LIVE_TEST_RPA_INPUT_METHOD"] = previous_input_method
 
     prompt_failure = prompt_failure_summary(
         "新数据测试",

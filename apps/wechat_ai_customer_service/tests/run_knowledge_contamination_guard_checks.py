@@ -30,6 +30,7 @@ from apps.wechat_ai_customer_service.admin_backend.services.raw_message_learning
     RawMessageLearningService,
 )
 from apps.wechat_ai_customer_service.admin_backend.services.raw_message_store import RawMessageStore  # noqa: E402
+from apps.wechat_ai_customer_service.admin_backend.services.conversation_history import assemble_conversation_history  # noqa: E402
 from apps.wechat_ai_customer_service.admin_backend.services.knowledge_contamination_guard import text_has_test_marker  # noqa: E402
 from apps.wechat_ai_customer_service.admin_backend.services.candidate_store import CandidateStore  # noqa: E402
 from apps.wechat_ai_customer_service.admin_backend.services.rag_admin_service import build_candidate_from_experience  # noqa: E402
@@ -156,6 +157,89 @@ def check_smart_recorder_review_only_learning() -> None:
     assert_equal(status.get("chunk_count"), 0, "raw recorder learning should not create direct rag chunk")
     experiences = RagExperienceStore().list(status="all", limit=20)
     assert_true(any(item.get("experience_id") == learned.get("rag_experience_id") for item in experiences), "RAG experience should be stored")
+
+
+def check_visual_ocr_text_is_record_only_and_skipped_by_history() -> None:
+    store = RawMessageStore()
+    result = store.upsert_messages(
+        {
+            "target_name": "真实客户视觉OCR",
+            "display_name": "真实客户视觉OCR",
+            "conversation_type": "private",
+            "learning_enabled": True,
+            "selected_by_user": True,
+            "source": {"type": "smart_recorder"},
+        },
+        [
+            {
+                "id": "visual-ocr-learning-1",
+                "type": "text",
+                "sender": "客户",
+                "content": "visual direct banner XQZ917",
+                "time": "2026-06-20 09:04:00",
+                "source_type": "image_ocr",
+                "ocr_items": [
+                    {"text": "visual direct banner XQZ917", "source_type": "image_ocr"},
+                ],
+            },
+            {
+                "id": "visual-ocr-learning-nested-1",
+                "type": "text",
+                "sender": "客户",
+                "content": "visual nested poster ZRM402",
+                "time": "2026-06-20 09:07:30",
+                "source": {"metadata": {"source_type": "poster_ocr"}},
+            },
+            {
+                "id": "normal-chat-learning-1",
+                "type": "text",
+                "sender": "客户",
+                "content": "我想了解一下置换流程。",
+                "time": "2026-06-20 09:05:00",
+                "source_type": "chat_text",
+            },
+        ],
+        source_module="smart_recorder",
+        learning_enabled=True,
+        batch_reason="recorder_capture",
+    )
+    assert_true(result.get("batch"), "normal trusted recorder text should still create a review-only learning batch")
+    stored = store.list_messages(query="visual", limit=5)
+    assert_true(stored, "visual OCR text should remain auditable in raw messages")
+    visual_records = {str(item.get("content") or ""): item for item in stored}
+    direct_visual = visual_records.get("visual direct banner XQZ917")
+    nested_visual = visual_records.get("visual nested poster ZRM402")
+    assert_true(direct_visual is not None, "direct visual OCR record should be present")
+    assert_true(nested_visual is not None, "nested visual OCR record should be present")
+    assert_equal(direct_visual.get("learning_enabled"), False, "visual OCR text must be non-learnable")
+    assert_equal(direct_visual.get("excluded_reason"), "visual_ocr_non_text", "visual OCR exclusion reason should be explicit")
+    assert_equal(nested_visual.get("learning_enabled"), False, "nested visual OCR metadata must be non-learnable")
+    assert_equal(nested_visual.get("excluded_reason"), "visual_ocr_non_text", "nested visual OCR exclusion reason should be explicit")
+
+    history = assemble_conversation_history(
+        target_name="真实客户视觉OCR",
+        conversation_id=str((result.get("conversation") or {}).get("conversation_id") or ""),
+        current_batch=[
+            {
+                "id": "visual-ocr-current-1",
+                "type": "text",
+                "sender": "客户",
+                "content": "visual current poster YKT631",
+                "quality_flags": ["visual_ocr_non_text"],
+            },
+            {
+                "id": "normal-current-1",
+                "type": "text",
+                "sender": "客户",
+                "content": "你好",
+            },
+        ],
+    )
+    history_text = str(history.get("history_text") or "")
+    current_text = str(history.get("current_batch_text") or "")
+    assert_true("visual " not in history_text + current_text, "visual OCR text should not be assembled into Brain history/current text")
+    assert_true("我想了解一下置换流程" in history_text, "normal stored chat text should remain in conversation history")
+    assert_true("你好" in current_text, "normal current chat text should remain in Brain current batch text")
 
 
 def check_rag_retrieval_filters_raw_and_product_chunks() -> None:
@@ -451,6 +535,7 @@ CHECKS = [
     check_customer_service_file_transfer_never_batches,
     check_customer_service_private_defaults_to_record_only,
     check_smart_recorder_review_only_learning,
+    check_visual_ocr_text_is_record_only_and_skipped_by_history,
     check_rag_retrieval_filters_raw_and_product_chunks,
     check_candidate_apply_enforces_source_authority_guard,
     check_legacy_target_file_apply_enforces_source_authority_guard,

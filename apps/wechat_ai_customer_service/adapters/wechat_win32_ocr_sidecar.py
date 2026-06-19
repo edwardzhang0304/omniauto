@@ -303,6 +303,22 @@ FOREIGN_CAPTURE_TOKENS = (
 _OCR_ENGINE: RapidOCR | None = None
 
 
+def _sidecar_timing_now_iso() -> str:
+    return time.strftime("%Y-%m-%dT%H:%M:%S", time.localtime())
+
+
+def _sidecar_timing_start(timing: dict[str, Any], prefix: str) -> float:
+    timing[f"{prefix}_started_at"] = _sidecar_timing_now_iso()
+    return time.perf_counter()
+
+
+def _sidecar_timing_finish(timing: dict[str, Any], prefix: str, started_perf: float | None) -> None:
+    if started_perf is None:
+        return
+    timing[f"{prefix}_finished_at"] = _sidecar_timing_now_iso()
+    timing[f"{prefix}_duration_seconds"] = round(max(0.0, time.perf_counter() - started_perf), 4)
+
+
 def clipboard_copy(text: str) -> None:
     if _pyperclip is not None:
         _pyperclip.copy(text)
@@ -563,6 +579,8 @@ def run_action(args: argparse.Namespace) -> dict[str, Any]:
             raise ValueError("--target is required for send")
         if args.text is None:
             raise ValueError("--text is required for send")
+        target_ready_timing: dict[str, Any] = {}
+        target_ready_started = _sidecar_timing_start(target_ready_timing, "target_ready")
         target_ready = ensure_target_ready_for_send(
             hwnd,
             args.target,
@@ -570,6 +588,10 @@ def run_action(args: argparse.Namespace) -> dict[str, Any]:
             artifact_dir=args.artifact_dir,
             session_key=str(args.session_key or ""),
         )
+        _sidecar_timing_finish(target_ready_timing, "target_ready", target_ready_started)
+        if isinstance(target_ready.get("timing"), dict):
+            for key, value in target_ready["timing"].items():
+                target_ready_timing.setdefault(str(key), value)
         if not target_ready.get("ok"):
             validation = target_ready.get("validation") or validate_active_send_target(
                 hwnd,
@@ -586,9 +608,10 @@ def run_action(args: argparse.Namespace) -> dict[str, Any]:
                 "target": args.target,
                 "attempts": target_ready.get("attempts"),
                 "guard": validation,
+                "timing": target_ready_timing,
                 "error": "The target chat was not confirmed before sending.",
             }
-        return send_payload(
+        send_result_payload = send_payload(
             hwnd,
             probe,
             target=args.target,
@@ -598,6 +621,13 @@ def run_action(args: argparse.Namespace) -> dict[str, Any]:
             artifact_dir=args.artifact_dir,
             validated_guard=target_ready.get("validation") if isinstance(target_ready.get("validation"), dict) else None,
         )
+        if isinstance(send_result_payload, dict):
+            existing_timing = send_result_payload.get("timing")
+            merged_timing = dict(target_ready_timing)
+            if isinstance(existing_timing, dict):
+                merged_timing.update(existing_timing)
+            send_result_payload["timing"] = merged_timing
+        return send_result_payload
     if action in ADD_FRIEND_ROUTES:
         return add_friend_entry_click_plan_payload(
             hwnd,
@@ -2107,7 +2137,23 @@ def send_payload(
     artifact_dir: str | None = None,
     validated_guard: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
+    timing: dict[str, Any] = {}
+    send_payload_started = _sidecar_timing_start(timing, "send_payload")
+
+    def finish(payload: dict[str, Any]) -> dict[str, Any]:
+        _sidecar_timing_finish(timing, "send_payload", send_payload_started)
+        payload["timing"] = dict(timing)
+        send_result = payload.get("send_result")
+        if isinstance(send_result, dict):
+            existing = send_result.get("timing")
+            send_result_timing = dict(timing)
+            if isinstance(existing, dict):
+                send_result_timing.update(existing)
+            send_result["timing"] = send_result_timing
+        return payload
+
     reused_prevalidated_guard = bool(isinstance(validated_guard, dict) and validated_guard.get("ok"))
+    pre_send_guard_started = _sidecar_timing_start(timing, "pre_send_guard")
     if reused_prevalidated_guard:
         validation = dict(validated_guard or {})
         # Re-check foreground/visibility quickly before using the cached target
@@ -2122,7 +2168,8 @@ def send_payload(
             validation = validate_active_send_target(hwnd, target, exact=exact, artifact_dir=artifact_dir)
             reused_prevalidated_guard = False
             if not validation.get("ok"):
-                return {
+                _sidecar_timing_finish(timing, "pre_send_guard", pre_send_guard_started)
+                return finish({
                     "ok": False,
                     "online": bool(validation.get("online", True)),
                     "adapter": "win32_ocr",
@@ -2131,12 +2178,13 @@ def send_payload(
                     "target": target,
                     "guard": {**validation, "window_guard": focus_guard},
                     "error": str(validation.get("error") or validation.get("reason") or "send guard blocked"),
-                }
+                })
             geometry = validation["geometry"]
         else:
             strict_validation = validate_active_send_target(hwnd, target, exact=exact, artifact_dir=artifact_dir)
             if not strict_validation.get("ok") or not active_send_guard_is_strong(strict_validation):
-                return {
+                _sidecar_timing_finish(timing, "pre_send_guard", pre_send_guard_started)
+                return finish({
                     "ok": False,
                     "online": bool(strict_validation.get("online", True)),
                     "adapter": "win32_ocr",
@@ -2150,7 +2198,7 @@ def send_payload(
                         "strict_recheck": True,
                     },
                     "error": str(strict_validation.get("error") or strict_validation.get("reason") or "send guard blocked"),
-                }
+                })
             validation = {
                 **strict_validation,
                 "cached_prevalidated_guard": validation,
@@ -2160,7 +2208,8 @@ def send_payload(
             geometry = get_window_geometry(hwnd)
             geometry_check = validate_send_geometry(geometry)
             if not geometry_check.get("ok"):
-                return {
+                _sidecar_timing_finish(timing, "pre_send_guard", pre_send_guard_started)
+                return finish({
                     "ok": False,
                     "online": True,
                     "adapter": "win32_ocr",
@@ -2169,12 +2218,13 @@ def send_payload(
                     "target": target,
                     "guard": {**validation, "geometry": geometry, "geometry_check": geometry_check},
                     "error": str(geometry_check.get("error") or "send geometry guard blocked"),
-                }
+                })
             validation["geometry"] = geometry
     else:
         validation = validate_active_send_target(hwnd, target, exact=exact, artifact_dir=artifact_dir)
         if not validation.get("ok") or not active_send_guard_is_strong(validation):
-            return {
+            _sidecar_timing_finish(timing, "pre_send_guard", pre_send_guard_started)
+            return finish({
                 "ok": False,
                 "online": validation.get("online", True),
                 "adapter": "win32_ocr",
@@ -2183,11 +2233,12 @@ def send_payload(
                 "target": target,
                 "guard": validation,
                 "error": str(validation.get("error") or validation.get("reason") or "send guard blocked"),
-            }
+            })
         geometry = validation["geometry"]
+    _sidecar_timing_finish(timing, "pre_send_guard", pre_send_guard_started)
     points = calculate_send_points(geometry)
     if not points.get("ok"):
-        return {
+        return finish({
             "ok": False,
             "online": True,
             "adapter": "win32_ocr",
@@ -2196,7 +2247,7 @@ def send_payload(
             "target": target,
             "guard": {**validation, "points": points},
             "error": str(points.get("error") or "send points were unsafe"),
-        }
+        })
     requested_send_mode = str(os.getenv("WECHAT_WIN32_OCR_SEND_MODE") or DEFAULT_SEND_MODE).strip().lower()
     settings = adapt_humanized_input_settings(humanized_input_settings(), text)
     send_mode = requested_send_mode
@@ -2209,15 +2260,19 @@ def send_payload(
     ):
         send_mode = "click_only"
     if skip_send_rate_guard:
+        rate_guard_started = _sidecar_timing_start(timing, "rate_guard")
         rate = {
             "ok": True,
             "reason": "rate_guard_skipped_for_loopback",
             "skip_send_rate_guard": True,
         }
+        _sidecar_timing_finish(timing, "rate_guard", rate_guard_started)
     else:
+        rate_guard_started = _sidecar_timing_start(timing, "rate_guard")
         rate = reserve_send_rate(target=target, text=text)
+        _sidecar_timing_finish(timing, "rate_guard", rate_guard_started)
     if not rate.get("ok"):
-        return {
+        return finish({
             "ok": False,
             "online": True,
             "adapter": "win32_ocr",
@@ -2226,14 +2281,16 @@ def send_payload(
             "target": target,
             "guard": {**validation, "points": points, "rate": rate},
             "error": str(rate.get("error") or "win32_ocr fallback send is rate limited"),
-        }
+        })
     uia_result = {"ok": False, "reason": "not_attempted", "mode": send_mode}
     click_result: dict[str, Any] = {"ok": False, "reason": "not_attempted", "mode": send_mode}
     if send_mode in {"uia_first", "uia_only"}:
+        uia_send_started = _sidecar_timing_start(timing, "uia_send")
         uia_result = send_with_uia_controls(hwnd, text, geometry=geometry, settings=settings)
+        _sidecar_timing_finish(timing, "uia_send", uia_send_started)
     if not uia_result.get("ok"):
         if send_mode == "uia_only":
-            return {
+            return finish({
                 "ok": False,
                 "online": True,
                 "adapter": "win32_ocr",
@@ -2242,7 +2299,8 @@ def send_payload(
                 "target": target,
                 "guard": {**validation, "points": points, "rate": rate, "uia": uia_result},
                 "error": str(uia_result.get("error") or "UIA controls are unavailable for safe send."),
-            }
+            })
+        guarded_click_started = _sidecar_timing_start(timing, "guarded_click_send")
         click_result = send_with_guarded_clicks(
             hwnd,
             text,
@@ -2252,8 +2310,12 @@ def send_payload(
             artifact_dir=artifact_dir,
             settings=settings,
         )
+        _sidecar_timing_finish(timing, "guarded_click_send", guarded_click_started)
+        if isinstance(click_result.get("timing"), dict):
+            for key, value in click_result["timing"].items():
+                timing.setdefault(str(key), value)
     if not uia_result.get("ok") and not click_result.get("ok"):
-        return {
+        return finish({
             "ok": False,
             "online": True,
             "adapter": "win32_ocr",
@@ -2268,11 +2330,13 @@ def send_payload(
                 "click": click_result,
             },
             "error": str(click_result.get("error") or uia_result.get("error") or "send input could not be confirmed"),
-        }
+        })
     humanized_action_sleep(200, 420)
+    post_send_guard_started = _sidecar_timing_start(timing, "post_send_guard")
     post_validation = validate_post_send_target(hwnd, target, exact=exact, artifact_dir=artifact_dir)
+    _sidecar_timing_finish(timing, "post_send_guard", post_send_guard_started)
     if str(post_validation.get("reason") or "") == "blank_render":
-        return {
+        return finish({
             "ok": False,
             "online": False,
             "adapter": "win32_ocr",
@@ -2288,9 +2352,9 @@ def send_payload(
                 "post_send_guard": post_validation,
             },
             "error": "WeChat render became blank after input/send; stop before any further RPA action.",
-        }
+        })
     active_result = uia_result if uia_result.get("ok") else click_result
-    return {
+    return finish({
         "ok": True,
         "online": True,
         "adapter": "win32_ocr",
@@ -2313,7 +2377,7 @@ def send_payload(
             "click": click_result,
             "post_send_guard": post_validation,
         },
-    }
+    })
 
 
 def normalize_humanized_input_method(raw_method: str | None, *, default: str = DEFAULT_HUMANIZED_INPUT_METHOD) -> str:
@@ -3114,6 +3178,14 @@ def paste_text_with_confirmation(
     artifact_dir: str | None = None,
     settings: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
+    timing: dict[str, Any] = {}
+    paste_started = _sidecar_timing_start(timing, "paste_text_with_confirmation")
+
+    def finish(payload: dict[str, Any]) -> dict[str, Any]:
+        _sidecar_timing_finish(timing, "paste_text_with_confirmation", paste_started)
+        payload["timing"] = dict(timing)
+        return payload
+
     input_x = int(points["input_point"][0])
     input_y = int(points["input_point"][1])
     probe_tokens = message_probe_tokens(text)
@@ -3142,11 +3214,16 @@ def paste_text_with_confirmation(
             # Guarded-click mode is Win32-centric; prefer chunked pacing here.
             input_method = "clipboard_chunks"
     for attempt, (x, y, mode) in enumerate(attempts, start=1):
+        timing["attempts_observed"] = attempt
+        activate_started = _sidecar_timing_start(timing, "activate_input_window")
         activate_window(hwnd)
         time.sleep(random.uniform(0.08, 0.18))
+        _sidecar_timing_finish(timing, "activate_input_window", activate_started)
+        focus_guard_started = _sidecar_timing_start(timing, "focus_guard_before_input")
         focus_guard = recover_send_window_guard(hwnd, max_attempts=1)
+        _sidecar_timing_finish(timing, "focus_guard_before_input", focus_guard_started)
         if not focus_guard.get("ok"):
-            return {
+            return finish({
                 "ok": False,
                 "reason": "send_focus_guard_failed_before_input",
                 "probe_token": probe_token,
@@ -3157,21 +3234,28 @@ def paste_text_with_confirmation(
                 "input_mode": input_method,
                 "input_result": last_input_result,
                 "window_guard": focus_guard,
-            }
+            })
         try:
+            before_capture_started = _sidecar_timing_start(timing, "before_capture")
             before_screenshot, _before_path = capture_wechat(
                 hwnd,
                 artifact_dir=artifact_dir,
                 label=f"send_input_before_{attempt}",
             )
-            before_ocr_items = [] if fast_visual_confirm else run_ocr(before_screenshot)
+            _sidecar_timing_finish(timing, "before_capture", before_capture_started)
+            before_ocr_started = _sidecar_timing_start(timing, "before_ocr")
+            before_ocr_items = run_ocr(before_screenshot)
+            _sidecar_timing_finish(timing, "before_ocr", before_ocr_started)
+            before_region_started = _sidecar_timing_start(timing, "before_region")
             before_input_region = input_text_region_state(before_screenshot, before_ocr_items, geometry=geometry)
+            _sidecar_timing_finish(timing, "before_region", before_region_started)
         except Exception as exc:
             before_input_region = {
                 "has_visible_text": True,
                 "reason": "input_region_before_probe_failed",
                 "error": repr(exc),
             }
+        clear_draft_started = _sidecar_timing_start(timing, "clear_draft")
         clear_result = clear_existing_input_draft(
             hwnd,
             points=points,
@@ -3180,8 +3264,9 @@ def paste_text_with_confirmation(
             artifact_dir=artifact_dir,
             attempt=attempt,
         )
+        _sidecar_timing_finish(timing, "clear_draft", clear_draft_started)
         if not clear_result.get("ok"):
-            return {
+            return finish({
                 "ok": False,
                 "reason": "input_region_not_clear_before_type",
                 "probe_token": probe_token,
@@ -3192,17 +3277,21 @@ def paste_text_with_confirmation(
                 "clear_result": clear_result,
                 "input_mode": input_method,
                 "input_result": last_input_result,
-            }
+            })
         before_input_region = clear_result.get("after") or before_input_region
         click_x, click_y = jitter_input_click_point(int(x), int(y), geometry)
+        input_click_started = _sidecar_timing_start(timing, "input_click")
         if mode == "human":
             human_client_click(hwnd, click_x, click_y)
         else:
             client_click(hwnd, click_x, click_y)
         time.sleep(random.uniform(0.12, 0.28))
+        _sidecar_timing_finish(timing, "input_click", input_click_started)
+        focus_guard_started = _sidecar_timing_start(timing, "focus_guard_after_input_click")
         focus_guard = recover_send_window_guard(hwnd, max_attempts=1)
+        _sidecar_timing_finish(timing, "focus_guard_after_input_click", focus_guard_started)
         if not focus_guard.get("ok"):
-            return {
+            return finish({
                 "ok": False,
                 "reason": "send_focus_guard_failed_after_input_click",
                 "probe_token": probe_token,
@@ -3213,8 +3302,9 @@ def paste_text_with_confirmation(
                 "input_mode": input_method,
                 "input_result": last_input_result,
                 "window_guard": focus_guard,
-            }
+            })
         input_result: dict[str, Any]
+        input_operation_started = _sidecar_timing_start(timing, "input_operation")
         if settings.get("enabled") and input_method == "sendinput_unicode":
             input_result = type_text_with_sendinput_unicode(
                 text,
@@ -3222,9 +3312,12 @@ def paste_text_with_confirmation(
                 window_guard_func=lambda hwnd=hwnd: basic_send_window_guard(hwnd),
             )
         elif settings.get("enabled") and input_method == "clipboard_chunks":
+            focus_guard_started = _sidecar_timing_start(timing, "focus_guard_before_clipboard_input")
             focus_guard = recover_send_window_guard(hwnd, max_attempts=1)
+            _sidecar_timing_finish(timing, "focus_guard_before_clipboard_input", focus_guard_started)
             if not focus_guard.get("ok"):
-                return {
+                _sidecar_timing_finish(timing, "input_operation", input_operation_started)
+                return finish({
                     "ok": False,
                     "reason": "send_focus_guard_failed_before_clipboard_input",
                     "probe_token": probe_token,
@@ -3235,12 +3328,15 @@ def paste_text_with_confirmation(
                     "input_mode": input_method,
                     "input_result": last_input_result,
                     "window_guard": focus_guard,
-                }
+                })
             input_result = paste_text_in_chunks_with_humanized_pacing(text, settings)
         else:
+            focus_guard_started = _sidecar_timing_start(timing, "focus_guard_before_clipboard_input")
             focus_guard = recover_send_window_guard(hwnd, max_attempts=1)
+            _sidecar_timing_finish(timing, "focus_guard_before_clipboard_input", focus_guard_started)
             if not focus_guard.get("ok"):
-                return {
+                _sidecar_timing_finish(timing, "input_operation", input_operation_started)
+                return finish({
                     "ok": False,
                     "reason": "send_focus_guard_failed_before_clipboard_input",
                     "probe_token": probe_token,
@@ -3251,14 +3347,15 @@ def paste_text_with_confirmation(
                     "input_mode": input_method,
                     "input_result": last_input_result,
                     "window_guard": focus_guard,
-                }
+                })
             paste_text_once(text)
             time.sleep(random.uniform(0.18, 0.42))
             input_result = {"ok": True, "method": "clipboard_once"}
+        _sidecar_timing_finish(timing, "input_operation", input_operation_started)
         last_input_result = input_result
         if not input_result.get("ok"):
             if non_retryable_input_failure(input_result):
-                return {
+                return finish({
                     "ok": False,
                     "reason": "input_aborted_without_retry",
                     "probe_token": probe_token,
@@ -3268,12 +3365,14 @@ def paste_text_with_confirmation(
                     "input_region": last_input_region,
                     "input_mode": input_method,
                     "input_result": last_input_result,
-                }
+                })
             continue
         try:
+            after_capture_started = _sidecar_timing_start(timing, "after_capture")
             screenshot, _path = capture_wechat(hwnd, artifact_dir=artifact_dir, label=f"send_input_probe_{attempt}")
+            _sidecar_timing_finish(timing, "after_capture", after_capture_started)
         except Exception as exc:
-            return {
+            return finish({
                 "ok": False,
                 "reason": "window_lost_after_input",
                 "error": repr(exc),
@@ -3283,11 +3382,15 @@ def paste_text_with_confirmation(
                 "copyback_enabled": allow_copyback,
                 "input_mode": input_method,
                 "input_result": last_input_result,
-            }
+            })
+        fast_region_started = _sidecar_timing_start(timing, "fast_region")
         fast_after_region = input_text_region_state(screenshot, [], geometry=geometry)
+        _sidecar_timing_finish(timing, "fast_region", fast_region_started)
+        fast_visual_confirm_started = _sidecar_timing_start(timing, "fast_visual_confirm")
         visual_confirm_fast = input_region_visual_delta_confirms(before_input_region, fast_after_region, input_result)
+        _sidecar_timing_finish(timing, "fast_visual_confirm", fast_visual_confirm_started)
         if fast_visual_confirm and visual_confirm_fast.get("ok"):
-            return {
+            return finish({
                 "ok": True,
                 "attempt": attempt,
                 "click_mode": mode,
@@ -3299,10 +3402,12 @@ def paste_text_with_confirmation(
                 "input_clear": clear_result,
                 "input_mode": input_method,
                 "input_result": input_result,
-            }
+            })
+        after_ocr_started = _sidecar_timing_start(timing, "after_ocr")
         ocr_items = run_ocr(screenshot)
+        _sidecar_timing_finish(timing, "after_ocr", after_ocr_started)
         if input_area_contains_any_token(ocr_items, geometry=geometry, tokens=probe_tokens):
-            return {
+            return finish({
                 "ok": True,
                 "attempt": attempt,
                 "click_mode": mode,
@@ -3313,11 +3418,15 @@ def paste_text_with_confirmation(
                 "input_clear": clear_result,
                 "input_mode": input_method,
                 "input_result": input_result,
-            }
+            })
+        after_region_started = _sidecar_timing_start(timing, "after_region")
         last_input_region = input_text_region_state(screenshot, ocr_items, geometry=geometry)
+        _sidecar_timing_finish(timing, "after_region", after_region_started)
+        visual_confirm_started = _sidecar_timing_start(timing, "visual_confirm")
         visual_confirm = input_region_visual_delta_confirms(before_input_region, last_input_region, input_result)
+        _sidecar_timing_finish(timing, "visual_confirm", visual_confirm_started)
         if visual_confirm.get("ok"):
-            return {
+            return finish({
                 "ok": True,
                 "attempt": attempt,
                 "click_mode": mode,
@@ -3329,11 +3438,13 @@ def paste_text_with_confirmation(
                 "input_clear": clear_result,
                 "input_mode": input_method,
                 "input_result": input_result,
-            }
+            })
         if allow_copyback:
+            copyback_confirm_started = _sidecar_timing_start(timing, "copyback_confirm")
             clipboard_confirm = confirm_input_token_via_clipboard(probe_tokens)
+            _sidecar_timing_finish(timing, "copyback_confirm", copyback_confirm_started)
             if clipboard_confirm.get("ok"):
-                return {
+                return finish({
                     "ok": True,
                     "attempt": attempt,
                     "click_mode": mode,
@@ -3345,11 +3456,13 @@ def paste_text_with_confirmation(
                     "input_clear": clear_result,
                     "input_mode": input_method,
                     "input_result": input_result,
-                }
+                })
         if last_input_region.get("has_visible_text"):
             break
+        retry_pause_started = _sidecar_timing_start(timing, "retry_pause")
         time.sleep(random.uniform(0.16, 0.34))
-    return {
+        _sidecar_timing_finish(timing, "retry_pause", retry_pause_started)
+    return finish({
         "ok": False,
         "reason": "input_token_not_detected_after_paste",
         "probe_token": probe_token,
@@ -3359,7 +3472,7 @@ def paste_text_with_confirmation(
         "input_region": last_input_region,
         "input_mode": input_method,
         "input_result": last_input_result,
-    }
+    })
 
 
 def send_input_confirm_attempt_count(total_attempts: int) -> int:
@@ -3509,6 +3622,12 @@ def send_with_guarded_clicks(
 ) -> dict[str, Any]:
     # WeChat 4.1.x keeps the attachment toolbar near the bottom. Paste first
     # and confirm OCR can see the token in the input area before sending.
+    timing: dict[str, Any] = {}
+
+    def finish(payload: dict[str, Any]) -> dict[str, Any]:
+        payload["timing"] = dict(timing)
+        return payload
+
     send_x = int(points["send_point"][0])
     send_y = int(points["send_point"][1])
     send_click_x, send_click_y = jitter_send_click_point(send_x, send_y, geometry)
@@ -3518,6 +3637,8 @@ def send_with_guarded_clicks(
             int(settings.get("send_pre_delay_min_ms") or DEFAULT_HUMANIZED_SEND_PRE_DELAY_MIN_MS),
             int(settings.get("send_pre_delay_max_ms") or DEFAULT_HUMANIZED_SEND_PRE_DELAY_MAX_MS),
         )
+    input_focus_started = _sidecar_timing_start(timing, "input_focus")
+    typing_started = _sidecar_timing_start(timing, "typing")
     paste_result = paste_text_with_confirmation(
         hwnd,
         text,
@@ -3526,6 +3647,8 @@ def send_with_guarded_clicks(
         artifact_dir=artifact_dir,
         settings=settings,
     )
+    _sidecar_timing_finish(timing, "typing", typing_started)
+    _sidecar_timing_finish(timing, "input_focus", input_focus_started)
     if not paste_result.get("ok"):
         if allow_unconfirmed_paste and str(paste_result.get("reason") or "") == "input_token_not_detected_after_paste":
             paste_result = {
@@ -3535,12 +3658,12 @@ def send_with_guarded_clicks(
                 "degraded_reason": "blind_send_unconfirmed_input_allowed",
             }
         else:
-            return {
+            return finish({
                 "ok": False,
                 "reason": "paste_not_confirmed",
                 "error": "Could not confirm pasted text in WeChat input box before send.",
                 "paste": paste_result,
-            }
+            })
     if settings.get("enabled"):
         humanized_sleep_ms(
             int(settings.get("send_post_input_delay_min_ms") or DEFAULT_HUMANIZED_SEND_POST_INPUT_DELAY_MIN_MS),
@@ -3548,18 +3671,19 @@ def send_with_guarded_clicks(
         )
     focus_guard = recover_send_window_guard(hwnd, max_attempts=1)
     if not focus_guard.get("ok"):
-        return {
+        return finish({
             "ok": False,
             "reason": "send_focus_guard_failed_before_trigger",
             "error": "WeChat lost foreground focus before send trigger; abort without retrying.",
             "paste": paste_result,
             "window_guard": focus_guard,
-        }
+        })
     input_refocus = {
         "skipped": True,
         "reason": "input_already_confirmed_before_send_trigger",
     }
     trigger_mode = normalize_send_trigger_mode(os.getenv("WECHAT_WIN32_OCR_SEND_TRIGGER_MODE"))
+    send_trigger_started = _sidecar_timing_start(timing, "send_trigger")
     trigger_result = safe_send_trigger(
         hwnd,
         trigger_mode=trigger_mode,
@@ -3567,17 +3691,18 @@ def send_with_guarded_clicks(
         settings=settings,
         focus_guard_func=lambda hwnd=hwnd: recover_send_window_guard(hwnd, max_attempts=1),
     )
+    _sidecar_timing_finish(timing, "send_trigger", send_trigger_started)
     if not trigger_result.get("ok"):
-        return {
+        return finish({
             "ok": False,
             "reason": str(trigger_result.get("reason") or "send_trigger_failed"),
             "error": str(trigger_result.get("error") or "Could not safely trigger WeChat send."),
             "paste": paste_result,
             "window_guard": trigger_result.get("window_guard") if isinstance(trigger_result.get("window_guard"), dict) else focus_guard,
             "trigger": trigger_result,
-        }
+        })
     paste_method = str(paste_result.get("input_mode") or paste_result.get("method") or "clipboard_once")
-    return {
+    return finish({
         "ok": True,
         "method": f"win32.human_click_input+{paste_method}+send_trigger:{trigger_mode}",
         "input_point": [int(points["input_point"][0]), int(points["input_point"][1])],
@@ -3588,7 +3713,7 @@ def send_with_guarded_clicks(
         "input_refocus": input_refocus,
         "degraded": bool(paste_result.get("degraded")),
         "humanized_input": settings,
-    }
+    })
 
 
 def send_with_uia_controls(
@@ -4315,64 +4440,88 @@ def ensure_target_ready_for_send(
     max_attempts: int | None = None,
     session_key: str = "",
 ) -> dict[str, Any]:
+    timing: dict[str, Any] = {}
+    target_ready_internal_started = _sidecar_timing_start(timing, "target_ready_internal")
+
+    def finish(payload: dict[str, Any]) -> dict[str, Any]:
+        _sidecar_timing_finish(timing, "target_ready_internal", target_ready_internal_started)
+        payload["timing"] = dict(timing)
+        return payload
+
     attempts = target_ready_attempt_count(max_attempts)
     last_validation: dict[str, Any] = {}
     clean_session_key = str(session_key or "").strip()
     for attempt in range(1, attempts + 1):
+        timing["target_ready_attempts_observed"] = attempt
         # Fast path: when we are already on the correct chat, avoid the extra
         # open-chat traversal and send immediately after a strong title guard.
         # Weak/sidebar/body matches are not enough to authorize typing because
         # multi-session/group chats may show the target name inside the body.
+        pre_validation_started = _sidecar_timing_start(timing, "target_ready_pre_validation")
         pre_validation = validate_active_send_target(hwnd, target, exact=exact, artifact_dir=artifact_dir)
+        _sidecar_timing_finish(timing, "target_ready_pre_validation", pre_validation_started)
         if pre_validation.get("ok") and active_send_guard_is_strong(pre_validation):
             opened_by_session_confirm = False
             if clean_session_key:
                 cached_session_match = str(_LAST_RPA_ACTION_STATE.get("active_session_key") or "") == clean_session_key
+                timing["target_ready_session_cache_match"] = bool(cached_session_match)
                 if not cached_session_match:
+                    session_open_started = _sidecar_timing_start(timing, "target_ready_session_open_chat")
                     opened = open_chat(hwnd, target, exact=exact, artifact_dir=artifact_dir, session_key=clean_session_key)
+                    _sidecar_timing_finish(timing, "target_ready_session_open_chat", session_open_started)
                     if not opened:
-                        return {
+                        return finish({
                             "ok": False,
                             "attempts": attempt,
                             "validation": pre_validation,
                             "opened": False,
                             "reason": "session_key_not_confirmed_by_active_cache",
-                        }
+                        })
                     opened_by_session_confirm = bool(opened)
+                    session_pause_started = _sidecar_timing_start(timing, "target_ready_session_confirm_pause")
                     humanized_action_sleep(180, 320)
+                    _sidecar_timing_finish(timing, "target_ready_session_confirm_pause", session_pause_started)
+                    session_validation_started = _sidecar_timing_start(timing, "target_ready_session_post_validation")
                     validation = validate_active_send_target(hwnd, target, exact=exact, artifact_dir=artifact_dir)
+                    _sidecar_timing_finish(timing, "target_ready_session_post_validation", session_validation_started)
                     if not validation.get("ok") or not active_send_guard_is_strong(validation):
-                        return {"ok": False, "attempts": attempt, "validation": validation, "opened": True}
+                        return finish({"ok": False, "attempts": attempt, "validation": validation, "opened": True})
                     pre_validation = validation
                 _LAST_RPA_ACTION_STATE["active_session_key"] = clean_session_key
                 _LAST_RPA_ACTION_STATE["active_target"] = target
-            return {"ok": True, "attempts": attempt, "validation": pre_validation, "opened": opened_by_session_confirm}
+            return finish({"ok": True, "attempts": attempt, "validation": pre_validation, "opened": opened_by_session_confirm})
         last_validation = pre_validation
         if target_switch_validation_is_hard_stop(pre_validation):
-            return {"ok": False, "attempts": attempt, "validation": pre_validation, "hard_stop": True}
+            return finish({"ok": False, "attempts": attempt, "validation": pre_validation, "hard_stop": True})
 
+        open_chat_started = _sidecar_timing_start(timing, "target_ready_open_chat")
         opened = open_chat(hwnd, target, exact=exact, artifact_dir=artifact_dir, session_key=clean_session_key)
+        _sidecar_timing_finish(timing, "target_ready_open_chat", open_chat_started)
+        post_open_pause_started = _sidecar_timing_start(timing, "target_ready_post_open_pause")
         humanized_action_sleep(280 + attempt * 90, 440 + attempt * 150)
+        _sidecar_timing_finish(timing, "target_ready_post_open_pause", post_open_pause_started)
+        post_open_validation_started = _sidecar_timing_start(timing, "target_ready_post_open_validation")
         validation = validate_active_send_target(hwnd, target, exact=exact, artifact_dir=artifact_dir)
+        _sidecar_timing_finish(timing, "target_ready_post_open_validation", post_open_validation_started)
         if validation.get("ok") and active_send_guard_is_strong(validation):
-            return {"ok": True, "attempts": attempt, "validation": validation, "opened": bool(opened)}
+            return finish({"ok": True, "attempts": attempt, "validation": validation, "opened": bool(opened)})
         last_validation = validation
         if target_switch_validation_is_hard_stop(validation):
-            return {"ok": False, "attempts": attempt, "validation": validation, "hard_stop": True}
+            return finish({"ok": False, "attempts": attempt, "validation": validation, "hard_stop": True})
         # Do not loop back into another open_chat/candidate click after a
         # failed target switch.  In recent WeChat builds, clicking the already
         # selected left-session row a second time can collapse/hide the chat
         # bubble pane.  Treat the first unconfirmed switch as a safe failure and
         # let the scheduler retry in a later low-frequency round.
-        return {
+        return finish({
             "ok": False,
             "attempts": attempt,
             "validation": last_validation,
             "opened": bool(opened),
             "reason": "target_not_confirmed_after_single_switch_attempt",
             "double_click_guard": True,
-        }
-    return {"ok": False, "attempts": attempts, "validation": last_validation}
+        })
+    return finish({"ok": False, "attempts": attempts, "validation": last_validation})
 
 
 def active_send_guard_is_strong(validation: dict[str, Any] | None) -> bool:

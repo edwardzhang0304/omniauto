@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import copy
 import json
 import os
 import shutil
@@ -26,7 +27,7 @@ for path in (PROJECT_ROOT, APP_ROOT, WORKFLOWS_ROOT, ADAPTERS_ROOT, SCRIPTS_ROOT
 from apps.wechat_ai_customer_service.knowledge_paths import tenant_context, tenant_runtime_root  # noqa: E402
 from apps.wechat_ai_customer_service.admin_backend.services import recorder_runtime  # noqa: E402
 from customer_intent_assist import analyze_intent  # noqa: E402
-from knowledge_loader import build_evidence_pack  # noqa: E402
+from knowledge_loader import build_evidence_pack as _build_evidence_pack  # noqa: E402
 from rag_answer_layer import extract_service_style_snippet  # noqa: E402
 from realtime_reply_router import (  # noqa: E402
     build_need_summary,
@@ -100,6 +101,28 @@ class Intent:
 
     def to_dict(self) -> dict[str, Any]:
         return {"intent": self.intent}
+
+
+def build_evidence_pack(*args: Any, allow_runtime_rag: bool = False, **kwargs: Any) -> dict[str, Any]:
+    pack = _build_evidence_pack(*args, **kwargs)
+    if allow_runtime_rag:
+        return pack
+    isolated = copy.deepcopy(pack)
+    rag = isolated.get("rag_evidence")
+    if isinstance(rag, dict):
+        rag["hits"] = []
+        rag["reference_hit_count"] = 0
+        if rag.get("reason") == "structured_evidence_sufficient_with_ai_experience_reference":
+            rag["reason"] = "structured_evidence_sufficient"
+        rag["test_runtime_rag_suppressed"] = True
+    evidence = isolated.get("evidence")
+    if isinstance(evidence, dict):
+        evidence.pop("rag", None)
+    safety = isolated.get("safety")
+    if isinstance(safety, dict):
+        safety.pop("rag_soft_reference_allowed", None)
+        safety.pop("rag_soft_installation_reference_allowed", None)
+    return isolated
 
 
 def main() -> int:
@@ -348,13 +371,44 @@ def check_business_local_style_refinement_flag_allows_llm_for_candidate_routes()
             evidence_pack=evidence_pack,
             recent_reply_texts=[],
         )
-    ok = (
-        route.get("reason") in {"detailed_vehicle_need_ready_for_candidates", "explicit_vehicle_candidates_requested"}
-        and route.get("foreground_llm_allowed") is True
-        and route.get("advisor_mode") == "clear_common_sense_recommendation"
-        and route.get("advisor_max_reply_chars") == 140
+        evidence_without_experience = copy.deepcopy(evidence_pack)
+        evidence_without_experience["rag_evidence"] = {}
+        route_without_experience = decide_realtime_reply_route(
+            config=config,
+            combined=message,
+            decision=Decision(),
+            intent_result=Intent(),
+            intent_assist={"intent": "product_inquiry", "evidence": {"safety": {"must_handoff": False, "reasons": []}}},
+            rag_reply={},
+            llm_reply={},
+            product_knowledge={},
+            data_capture={},
+            evidence_pack=evidence_without_experience,
+            recent_reply_texts=[],
+        )
+    experience_fast_path_ok = (
+        route.get("reason") == "rag_or_style_experience_available"
+        and route.get("foreground_llm_allowed") is False
+        and "rag_experience_audit" in list(route.get("background_jobs") or [])
     )
-    return {"name": "business_local_style_refinement_flag_allows_llm_for_candidate_routes", "ok": ok, "route": route}
+    no_experience_foreground_ok = (
+        route_without_experience.get("reason") in {"detailed_vehicle_need_ready_for_candidates", "explicit_vehicle_candidates_requested"}
+        and route_without_experience.get("foreground_llm_allowed") is True
+        and route_without_experience.get("advisor_mode") == "clear_common_sense_recommendation"
+        and route_without_experience.get("advisor_max_reply_chars") == 140
+    )
+    ok = (
+        (experience_fast_path_ok or route.get("reason") in {"detailed_vehicle_need_ready_for_candidates", "explicit_vehicle_candidates_requested"})
+        and no_experience_foreground_ok
+    )
+    return {
+        "name": "business_local_style_refinement_flag_allows_llm_for_candidate_routes",
+        "ok": ok,
+        "route": route,
+        "route_without_experience": route_without_experience,
+        "experience_fast_path_ok": experience_fast_path_ok,
+        "no_experience_foreground_ok": no_experience_foreground_ok,
+    }
 
 
 def check_business_equipment_request_can_recommend_without_reasking_budget() -> dict[str, Any]:
@@ -3815,6 +3869,7 @@ def check_listener_humanized_send_env_mapping() -> dict[str, Any]:
             "send_trigger_delay_max_ms": 300,
             "send_after_trigger_delay_min_ms": 880,
             "send_after_trigger_delay_max_ms": 240,
+            "input_fast_visual_confirm_enabled": True,
             "send_trigger_mode": "click_only",
             "send_input_confirm_attempts": 1,
             "send_rate_min_interval_seconds": 90,
@@ -3834,6 +3889,7 @@ def check_listener_humanized_send_env_mapping() -> dict[str, Any]:
         and mapped.get("WECHAT_WIN32_OCR_HUMANIZED_SEND_POST_INPUT_DELAY_MAX_MS") == "350"
         and mapped.get("WECHAT_WIN32_OCR_HUMANIZED_SEND_TRIGGER_DELAY_MAX_MS") == "1200"
         and mapped.get("WECHAT_WIN32_OCR_HUMANIZED_SEND_AFTER_TRIGGER_DELAY_MAX_MS") == "880"
+        and mapped.get("WECHAT_WIN32_OCR_INPUT_FAST_VISUAL_CONFIRM") == "1"
         and mapped.get("WECHAT_WIN32_OCR_SEND_TRIGGER_MODE") == "enter_only"
         and mapped.get("WECHAT_WIN32_OCR_SEND_INPUT_CONFIRM_ATTEMPTS") == "1"
         and mapped.get("WECHAT_WIN32_OCR_SEND_MIN_INTERVAL_SECONDS") == "90"

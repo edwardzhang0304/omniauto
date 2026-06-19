@@ -432,6 +432,22 @@ class WeChatConnector:
             raise WeChatConnectorError("target is required")
         if not text:
             raise WeChatConnectorError("text is required")
+        send_started_at = time.time()
+        send_started_iso = time.strftime("%Y-%m-%dT%H:%M:%S", time.localtime(send_started_at))
+
+        def _finish_send(payload: dict[str, Any], *, adapter_stage: str) -> dict[str, Any]:
+            finished_at = time.time()
+            if isinstance(payload, dict):
+                timing = payload.get("timing") if isinstance(payload.get("timing"), dict) else {}
+                payload["timing"] = {
+                    **timing,
+                    "send_started_at": send_started_iso,
+                    "send_finished_at": time.strftime("%Y-%m-%dT%H:%M:%S", time.localtime(finished_at)),
+                    "send_duration_seconds": round(max(0.0, finished_at - send_started_at), 4),
+                    "adapter_stage": adapter_stage,
+                }
+            return payload
+
         args = ["send", "--target", target, "--text", text]
         clean_session_key = str(session_key or "").strip()
         if clean_session_key:
@@ -451,7 +467,7 @@ class WeChatConnector:
                     primary.setdefault("adapter", "win32_ocr")
                     primary.setdefault("transport_priority", "rpa_first")
                     attach_rpa_lock_meta(primary, lock_meta)
-                    return primary
+                    return _finish_send(primary, adapter_stage="win32_ocr_primary")
                 if rpa_payload_has_invalid_window_handle(primary):
                     primary["risk_stop_recommended"] = True
                     primary["risk_stop_reason"] = "win32_invalid_window_handle"
@@ -467,25 +483,25 @@ class WeChatConnector:
                     )
                     primary.setdefault("transport_priority", "rpa_first")
                     attach_rpa_lock_meta(primary, lock_meta)
-                    return primary
+                    return _finish_send(primary, adapter_stage="win32_invalid_window_handle")
                 if rpa_render_fault_should_stop(primary):
                     primary.setdefault("adapter", "win32_ocr")
                     primary.setdefault("transport_priority", "rpa_first")
                     attach_rpa_lock_meta(primary, lock_meta)
-                    return primary
+                    return _finish_send(primary, adapter_stage="win32_render_fault_stop")
                 reserve = self.call_reserve_sidecar(args, allow_failure=True, primary_payload=snapshot_payload(primary))
                 if reserve.get("ok"):
                     reserve.setdefault("adapter", "wxauto4")
                     reserve.setdefault("transport_priority", "rpa_first")
                     reserve.setdefault("reserve_reason", "rpa_primary_unavailable")
                     attach_rpa_lock_meta(reserve, lock_meta)
-                    return reserve
+                    return _finish_send(reserve, adapter_stage="wxauto4_reserve")
                 primary.setdefault("wxauto4_reserve_status", reserve)
                 primary.setdefault("transport_priority", "rpa_first")
                 attach_rpa_lock_meta(primary, lock_meta)
-                return primary
+                return _finish_send(primary, adapter_stage="win32_ocr_primary_failed")
         except TimeoutError as exc:
-            return {
+            return _finish_send({
                 "ok": False,
                 "online": bool(any_weixin_process()),
                 "adapter": "win32_ocr",
@@ -495,7 +511,7 @@ class WeChatConnector:
                 "error": repr(exc),
                 "transport_priority": "rpa_first",
                 "rpa_lock": rpa_lock_timeout_payload(exc, action="send", timeout_seconds=lock_timeout),
-            }
+            }, adapter_stage="rpa_lock_timeout")
 
     def send_text_and_verify(
         self,
@@ -508,6 +524,22 @@ class WeChatConnector:
         artifact_dir: str | None = None,
         session_key: str = "",
     ) -> dict[str, Any]:
+        verify_started_at = time.time()
+        verify_started_iso = time.strftime("%Y-%m-%dT%H:%M:%S", time.localtime(verify_started_at))
+
+        def _finish_verified(payload: dict[str, Any], *, verification_attempts: int = 0) -> dict[str, Any]:
+            finished_at = time.time()
+            if isinstance(payload, dict):
+                timing = payload.get("timing") if isinstance(payload.get("timing"), dict) else {}
+                payload["timing"] = {
+                    **timing,
+                    "send_verify_started_at": verify_started_iso,
+                    "send_verify_finished_at": time.strftime("%Y-%m-%dT%H:%M:%S", time.localtime(finished_at)),
+                    "send_verify_duration_seconds": round(max(0.0, finished_at - verify_started_at), 4),
+                    "verification_attempts": max(0, int(verification_attempts or 0)),
+                }
+            return payload
+
         loopback_inbound = bool(simulate_inbound_file_transfer and is_simulated_inbound_loopback_target(target))
         send_kwargs: dict[str, Any] = {
             "exact": exact,
@@ -524,7 +556,7 @@ class WeChatConnector:
             **send_kwargs,
         )
         if not send_result.get("ok"):
-            return {"ok": False, "send": send_result, "verified": False}
+            return _finish_verified({"ok": False, "send": send_result, "verified": False})
         messages: dict[str, Any] = {}
         verified = False
         verification_mode = "messages"
@@ -534,14 +566,16 @@ class WeChatConnector:
         ):
             if loopback_inbound:
                 enqueue_simulated_inbound_message(target=target, text=text)
-            return {
+            return _finish_verified({
                 "ok": True,
                 "send": send_result,
                 "messages": {"ok": True, "state": "send_guard_confirmed_fast", "messages_skipped": True},
                 "verified": True,
                 "verification_mode": "send_guard_confirmed_fast",
-            }
+            })
+        verification_attempts = 0
         for attempt in range(6):
+            verification_attempts = attempt + 1
             if attempt:
                 time.sleep(1)
             messages = self.get_messages(target, exact=exact, session_key=clean_session_key)
@@ -558,13 +592,13 @@ class WeChatConnector:
             verification_mode = "send_guard_confirmed"
         if verified and loopback_inbound:
             enqueue_simulated_inbound_message(target=target, text=text)
-        return {
+        return _finish_verified({
             "ok": bool(verified),
             "send": send_result,
             "messages": messages,
             "verified": bool(verified),
             "verification_mode": verification_mode,
-        }
+        }, verification_attempts=verification_attempts)
 
     def add_friend(
         self,
@@ -1291,6 +1325,9 @@ def send_rpa_env() -> dict[str, str]:
         env["WECHAT_WIN32_OCR_BLANK_INPUT_FOCUS_RETRY"] = "1"
     if not str(os.getenv("WECHAT_WIN32_OCR_SEND_INPUT_CONFIRM_ATTEMPTS") or "").strip():
         env["WECHAT_WIN32_OCR_SEND_INPUT_CONFIRM_ATTEMPTS"] = "1"
+    input_fast_visual_confirm = str(os.getenv("WECHAT_WIN32_OCR_INPUT_FAST_VISUAL_CONFIRM") or "").strip()
+    if input_fast_visual_confirm:
+        env["WECHAT_WIN32_OCR_INPUT_FAST_VISUAL_CONFIRM"] = input_fast_visual_confirm
     return env
 
 

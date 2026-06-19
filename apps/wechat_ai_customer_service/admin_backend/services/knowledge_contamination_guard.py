@@ -11,7 +11,7 @@ from __future__ import annotations
 import re
 from typing import Any
 
-from apps.wechat_ai_customer_service.wechat_message_envelope import message_has_learning_blocking_quality
+from apps.wechat_ai_customer_service.wechat_message_envelope import message_has_learning_blocking_quality, visual_ocr_noise_reason
 
 
 FILE_TRANSFER_ASSISTANT_NAME = "文件传输助手"
@@ -62,6 +62,9 @@ def message_learning_exclusion_reason(
     content_type = str(message.get("content_type") or message.get("type") or "text").strip().lower()
     if content_type and content_type != "text":
         return "non_text_message"
+    visual_reason = visual_ocr_noise_reason(message)
+    if visual_reason:
+        return visual_reason
     quality_reason = message_has_learning_blocking_quality(message)
     if quality_reason:
         return quality_reason

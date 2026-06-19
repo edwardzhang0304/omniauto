@@ -57,6 +57,7 @@ from apps.wechat_ai_customer_service.platform_safety_rules import guard_term_set
 from apps.wechat_ai_customer_service.wechat_message_envelope import (
     apply_message_envelope_to_record,
     build_message_envelope,
+    message_is_visual_or_media_ocr_noise,
 )
 from apps.wechat_ai_customer_service.message_identity import (
     apply_canonical_identity_fields,
@@ -71,6 +72,7 @@ from llm_reply_synthesis import maybe_synthesize_reply, normalize_visible_reply_
 from customer_service_brain import (
     build_brain_no_visible_reply_payload,
     effective_brain_settings,
+    low_authority_fast_profile_decision,
     maybe_run_customer_service_brain,
 )
 from customer_service_conversation_strategy import (
@@ -854,6 +856,168 @@ def process_target(
         target=target.name,
         **strategy_state_public_audit(strategy_state),
     )
+    low_authority_fast_precheck = brain_first_low_authority_fast_plan_precheck(
+        config=config,
+        combined=combined,
+        batch=batch,
+        target_state=target_state,
+    )
+    if low_authority_fast_precheck.get("enabled") and not send:
+        write_workflow_phase(
+            "brain_first_low_authority_fast_precheck",
+            target=target.name,
+            enabled=True,
+            reason=low_authority_fast_precheck.get("reason"),
+        )
+        decision = ReplyDecision(
+            reply_text="",
+            rule_name="brain_first_low_authority_fast_precheck",
+            matched=True,
+            need_handoff=False,
+            reason=str(low_authority_fast_precheck.get("reason") or "brain_first_low_authority_fast_precheck"),
+        )
+        reply_text = ""
+        data_capture = {"enabled": False, "reason": "skipped_for_brain_first_low_authority_fast_precheck"}
+        product_knowledge = {"enabled": False, "reason": "skipped_for_brain_first_low_authority_fast_precheck"}
+        intent_assist = skipped_intent_assist(config, "skipped_for_brain_first_low_authority_fast_precheck")
+        event = base_event(
+            target,
+            "planned",
+            {
+                "message_ids": message_ids,
+                "message_count": len(batch),
+                "combined_content": combined,
+                "decision": {
+                    **decision.__dict__,
+                    "raw_reply_text": decision.reply_text,
+                    "reply_text": reply_text,
+                },
+                "data_capture": data_capture,
+                "raw_capture": raw_capture,
+                "batch_selection": {
+                    **batch_selection_payload(selection),
+                    "scheduler_authoritative_selection_used": bool(payload.get("_scheduler_authoritative_selection_used")),
+                },
+                "semantic_batch_plan": semantic_batch_plan,
+                "reply_routing_normalization": batch_routing_normalization_payload(batch, routing_batch),
+                "history_backfill": payload.get("_history_backfill", {}),
+                "product_knowledge": product_knowledge,
+                "conversation_context_update": dict(preference_context_update),
+                "conversation_context_update_source": "customer_preference_capture" if preference_context_update else "",
+                "intent_result": {
+                    "intent": "greeting",
+                    "confidence": 0.95,
+                    "reasoning": "brain_first_low_authority_fast_precheck",
+                    "entities": {},
+                    "source": "brain_first_low_authority_fast_precheck",
+                },
+                "intent_assist": intent_assist,
+                "dry_run": not send,
+                "brain_first_low_authority_fast_precheck": low_authority_fast_precheck,
+            },
+        )
+        write_workflow_phase("customer_service_brain_start", target=target.name)
+        try:
+            event["customer_service_brain"] = maybe_run_customer_service_brain(
+                config=config,
+                target_name=target.name,
+                target_state=target_state,
+                batch=batch,
+                combined=combined,
+                decision=decision,
+                reply_text=reply_text,
+                intent_assist=intent_assist,
+                rag_reply={},
+                llm_reply={},
+                product_knowledge=product_knowledge,
+                data_capture=data_capture,
+                raw_capture=raw_capture,
+                customer_profile=profile,
+            )
+        except Exception as exc:
+            brain_settings = effective_brain_settings(config)
+            event["customer_service_brain"] = {
+                "enabled": bool(brain_settings.get("enabled", False)),
+                "mode": str(brain_settings.get("mode") or "off"),
+                "applied": False,
+                "adoptable": False,
+                "reason": "customer_service_brain_exception",
+                "error": repr(exc),
+            }
+            if (
+                event["customer_service_brain"]["enabled"]
+                and event["customer_service_brain"]["mode"] == "brain_first"
+                and brain_settings.get("fallback_to_legacy_on_error", False) is False
+            ):
+                event["customer_service_brain"] = build_brain_no_visible_reply_payload(
+                    event["customer_service_brain"],
+                    combined=combined,
+                    reason="customer_service_brain_exception",
+                )
+        write_workflow_phase(
+            "customer_service_brain_done",
+            target=target.name,
+            enabled=bool(event["customer_service_brain"].get("enabled")),
+            applied=bool(event["customer_service_brain"].get("applied")),
+            adoptable=bool(event["customer_service_brain"].get("adoptable")),
+            reason=event["customer_service_brain"].get("reason"),
+        )
+        event["customer_service_brain_failure_alert"] = maybe_record_customer_service_brain_failure_alert(
+            config=config,
+            target_state=target_state,
+            target=target,
+            batch=batch,
+            combined=combined,
+            brain_result=event["customer_service_brain"],
+            product_knowledge=product_knowledge,
+        )
+        if customer_service_brain_controls_reply(event["customer_service_brain"]):
+            event["customer_service_brain_legacy_generators"] = {
+                "disabled": True,
+                "reason": "brain_first_authoritative_control",
+                "disabled_modules": ["rag_response", "realtime_reply", "llm_reply_synthesis"],
+            }
+            if not should_adopt_customer_service_brain(event["customer_service_brain"]):
+                return block_for_customer_service_brain_no_visible_reply(
+                    event=event,
+                    target=target,
+                    target_state=target_state,
+                    batch=batch,
+                    combined=combined,
+                    config=config,
+                    brain_result=event["customer_service_brain"],
+                    product_knowledge=product_knowledge,
+                )
+        brain_result = event.get("customer_service_brain") if isinstance(event.get("customer_service_brain"), dict) else {}
+        if should_adopt_customer_service_brain(brain_result):
+            decision, reply_text = adopt_customer_service_brain_reply_event(
+                event=event,
+                brain_result=brain_result,
+                config=config,
+            )
+            if decision.need_handoff and not decision.reply_text:
+                return block_for_customer_service_brain_no_visible_reply(
+                    event=event,
+                    target=target,
+                    target_state=target_state,
+                    batch=batch,
+                    combined=combined,
+                    config=config,
+                    brain_result=brain_result,
+                    product_knowledge=product_knowledge,
+                )
+            clear_no_relevant_handoff_after_safe_brain_reply(event["intent_assist"], brain_result)
+            reply_text = normalize_brain_owned_customer_visible_reply_text(reply_text, config=config)
+            event["decision"]["reply_text"] = reply_text
+            event["reply_text"] = reply_text
+            event["reply_style_adapter"] = {
+                "applied": False,
+                "reason": "skipped_for_customer_service_brain",
+                "reply_text": reply_text,
+                "source_channel": "brain",
+            }
+            event["brain_first_reply_audit"] = build_brain_first_reply_audit(event, reply_text=reply_text)
+            return event
     if send:
         backoff = get_rate_limit_backoff(target_state, message_ids)
         if backoff:
@@ -1329,12 +1493,10 @@ def process_target(
         }
     brain_result = event.get("customer_service_brain") if isinstance(event.get("customer_service_brain"), dict) else {}
     if should_adopt_customer_service_brain(brain_result):
-        decision = ReplyDecision(
-            reply_text=str(brain_result.get("raw_reply_text") or ""),
-            rule_name=str(brain_result.get("rule_name") or "customer_service_brain_reply"),
-            matched=True,
-            need_handoff=bool(brain_result.get("needs_handoff")),
-            reason=str(brain_result.get("reason") or "customer_service_brain_adopted"),
+        decision, reply_text = adopt_customer_service_brain_reply_event(
+            event=event,
+            brain_result=brain_result,
+            config=config,
         )
         if decision.need_handoff and not decision.reply_text:
             return block_for_customer_service_brain_no_visible_reply(
@@ -1347,18 +1509,6 @@ def process_target(
                 brain_result=brain_result,
                 product_knowledge=product_knowledge,
             )
-        reply_text = format_reply(decision.reply_text, configured_reply_prefix(config))
-        event["customer_service_brain_adopted"] = {
-            "applied": True,
-            "mode": brain_result.get("mode"),
-            "rule_name": decision.rule_name,
-            "reason": decision.reason,
-        }
-        event["decision"] = {
-            **decision.__dict__,
-            "raw_reply_text": decision.reply_text,
-            "reply_text": reply_text,
-        }
         clear_no_relevant_handoff_after_safe_brain_reply(event["intent_assist"], brain_result)
     visible_reply_before_context = reply_text
     if customer_visible_reply_is_brain_owned(event=event, decision=decision):
@@ -4240,6 +4390,34 @@ def block_for_customer_service_brain_no_visible_reply(
     return event
 
 
+def adopt_customer_service_brain_reply_event(
+    *,
+    event: dict[str, Any],
+    brain_result: dict[str, Any],
+    config: dict[str, Any],
+) -> tuple[ReplyDecision, str]:
+    decision = ReplyDecision(
+        reply_text=str(brain_result.get("raw_reply_text") or ""),
+        rule_name=str(brain_result.get("rule_name") or "customer_service_brain_reply"),
+        matched=True,
+        need_handoff=bool(brain_result.get("needs_handoff")),
+        reason=str(brain_result.get("reason") or "customer_service_brain_adopted"),
+    )
+    reply_text = format_reply(decision.reply_text, configured_reply_prefix(config))
+    event["customer_service_brain_adopted"] = {
+        "applied": True,
+        "mode": brain_result.get("mode"),
+        "rule_name": decision.rule_name,
+        "reason": decision.reason,
+    }
+    event["decision"] = {
+        **decision.__dict__,
+        "raw_reply_text": decision.reply_text,
+        "reply_text": reply_text,
+    }
+    return decision, reply_text
+
+
 def maybe_record_customer_service_brain_failure_alert(
     *,
     config: dict[str, Any],
@@ -5201,6 +5379,29 @@ def product_ids_mentioned_in_visible_reply(text: str) -> list[str]:
         if len(result) >= 5:
             break
     return result
+
+
+def brain_first_low_authority_fast_plan_precheck(
+    *,
+    config: dict[str, Any],
+    combined: str,
+    batch: list[dict[str, Any]],
+    target_state: dict[str, Any],
+) -> dict[str, Any]:
+    """Detect low-authority short turns that can skip legacy pre-Brain work."""
+
+    settings = effective_brain_settings(config)
+    if not bool(settings.get("enabled")) or str(settings.get("mode") or "") != "brain_first":
+        return {"enabled": False, "reason": "brain_first_not_enabled"}
+    decision = low_authority_fast_profile_decision(
+        settings=settings,
+        combined=combined,
+        batch=batch,
+        target_state=target_state,
+    )
+    if not bool(decision.get("enabled")):
+        return {"enabled": False, "reason": str(decision.get("reason") or "not_low_authority_fast"), "profile": decision}
+    return {"enabled": True, "reason": "brain_first_low_authority_fast_precheck", "profile": decision}
 
 
 def visible_reply_product_preference_rank(clean: str, aliases: list[str], first_index: int) -> int:
@@ -7660,6 +7861,8 @@ def scheduler_authoritative_message_is_reply_candidate(
         return False
     if message.get("type") != "text" or not content:
         return False
+    if message_is_visual_or_media_ocr_noise(message):
+        return False
     if is_bot_reply_content(content, config):
         return False
     if sender == "self" and not allow_self_for_test:
@@ -7696,6 +7899,8 @@ def message_is_reply_candidate(
     ):
         return False
     if message.get("type") != "text" or not content:
+        return False
+    if message_is_visual_or_media_ocr_noise(message):
         return False
     if is_bot_reply_content(content, config):
         return False

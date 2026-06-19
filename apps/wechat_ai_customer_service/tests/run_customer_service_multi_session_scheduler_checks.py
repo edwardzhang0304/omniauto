@@ -1542,6 +1542,111 @@ def check_polish_latency_trace_is_inherited_by_ready_reply() -> None:
     assert_true(trace.get("final_polish_llm_duration_seconds") == 1.4, f"polish LLM trace should be recorded: {trace}")
 
 
+def check_runtime_future_latency_trace_exposes_external_overhead() -> None:
+    with tempfile.TemporaryDirectory() as temp:
+        path = Path(temp) / "scheduler_state.json"
+        store = SchedulerStateStore(tenant_id="unit_future_latency", path=path)
+
+        def capture_fn(session: dict[str, Any]) -> dict[str, Any]:
+            return {"messages": [message("A", 1, content="你好")], "batch": [message("A", 1, content="你好")]}
+
+        def planner(capture: dict[str, Any], task: dict[str, Any]) -> dict[str, Any]:
+            time.sleep(0.02)
+            return {
+                "ok": True,
+                "reply_text": "你好，在的。",
+                "decision": {"rule_name": "unit_future_latency"},
+                "duration_seconds": 0.02,
+                "latency_trace": {"brain_llm_duration_seconds": 0.01},
+            }
+
+        def polish(planner_task: dict[str, Any], task: dict[str, Any]) -> dict[str, Any]:
+            time.sleep(0.02)
+            return {
+                "ok": True,
+                "reply_text": str(planner_task.get("result", {}).get("reply_text") or "你好，在的。"),
+                "decision": {"rule_name": "unit_future_latency_polish"},
+                "duration_seconds": 0.02,
+                "latency_trace": {"final_polish_llm_duration_seconds": 0.01},
+            }
+
+        def sender(reply: dict[str, Any]) -> dict[str, Any]:
+            return {"ok": True, "verified": True, "send_result": {"send": {"state": "sent"}}}
+
+        runtime = CustomerServiceSchedulerRuntime(
+            store=store,
+            config=SchedulerConfig(enabled=True, capture_max_sessions_per_round=1, llm_max_concurrency=1, send_max_replies_per_round=1),
+            capture_fn=capture_fn,
+            plan_reply_fn=planner,
+            polish_reply_fn=polish,
+            send_fn=sender,
+        )
+        try:
+            runtime.tick(
+                session_signals=[{"name": "客户A", "content": "你好", "time": "10:00", "unread_detected": True, "unread_badge": "visual_red_dot"}],
+                allow_send=False,
+                now="2026-06-06T10:00:00",
+            )
+            time.sleep(0.04)
+            runtime.tick(allow_send=False, now="2026-06-06T10:00:01")
+            time.sleep(0.04)
+            runtime.tick(allow_send=True, now="2026-06-06T10:00:02")
+            state = store.load()
+            reply = next(iter((state.get("ready_replies") or {}).values()))
+            trace = reply.get("latency_trace") if isinstance(reply.get("latency_trace"), dict) else {}
+            for key in (
+                "planner_future_submitted_at",
+                "planner_future_finished_at",
+                "planner_worker_started_at",
+                "planner_worker_finished_at",
+                "planner_worker_duration_seconds",
+                "polish_future_submitted_at",
+                "polish_future_finished_at",
+                "polish_worker_started_at",
+                "polish_worker_finished_at",
+                "polish_worker_duration_seconds",
+            ):
+                assert_true(trace.get(key) is not None, f"future latency trace missing {key}: {trace}")
+            assert_true(float(trace.get("planner_worker_duration_seconds") or 0.0) >= 0.02, f"planner worker duration should include callback wall time: {trace}")
+            assert_true(float(trace.get("polish_worker_duration_seconds") or 0.0) >= 0.02, f"polish worker duration should include callback wall time: {trace}")
+            breakdown = scheduler_module._latency_breakdown_from_trace(trace)
+            assert_true("planner_future_seconds" in breakdown, f"planner future breakdown missing: {breakdown}")
+            assert_true("planner_worker_seconds" in breakdown, f"planner worker breakdown missing: {breakdown}")
+            assert_true("polish_future_seconds" in breakdown, f"polish future breakdown missing: {breakdown}")
+            assert_true("polish_worker_seconds" in breakdown, f"polish worker breakdown missing: {breakdown}")
+            assert_true(float(breakdown.get("planner_external_overhead_seconds", 0.0)) >= 0.0, f"planner overhead should be nonnegative: {breakdown}")
+            assert_true(float(breakdown.get("polish_external_overhead_seconds", 0.0)) >= 0.0, f"polish overhead should be nonnegative: {breakdown}")
+        finally:
+            runtime.shutdown()
+
+
+def check_planner_event_internal_latency_trace_is_extracted() -> None:
+    event = {
+        "customer_service_brain": {
+            "latency_trace": {
+                "evidence_pack_started_at": "2026-06-06T10:00:01",
+                "evidence_pack_finished_at": "2026-06-06T10:00:02",
+                "evidence_pack_duration_seconds": 1.0,
+                "brain_llm_duration_seconds": 2.5,
+                "semantic_review_duration_seconds": 0.2,
+            }
+        },
+        "final_visible_llm_polish": {
+            "duration_seconds": 0.7,
+            "latency_trace": {
+                "final_visible_llm_started_at": "2026-06-06T10:00:03",
+                "final_visible_llm_finished_at": "2026-06-06T10:00:04",
+            },
+        },
+    }
+    trace = scheduler_module._planner_event_latency_trace(event)
+    assert_equal(trace.get("evidence_pack_duration_seconds"), 1.0, "Brain evidence timing should be extracted")
+    assert_equal(trace.get("brain_llm_duration_seconds"), 2.5, "Brain LLM timing should be extracted")
+    assert_equal(trace.get("semantic_review_duration_seconds"), 0.2, "semantic review timing should be extracted")
+    assert_equal(trace.get("final_polish_llm_duration_seconds"), 0.7, "final polish duration should be extracted")
+    assert_equal(trace.get("final_visible_llm_started_at"), "2026-06-06T10:00:03", "final polish trace should be preserved")
+
+
 def check_scheduler_fast_followup_treats_unread_and_capture_as_urgent() -> None:
     signal_result = {
         "scheduler_enabled": True,
@@ -2754,6 +2859,72 @@ def check_scheduler_capture_filters_non_text_messages_for_normal_customer_sessio
     assert_equal(capture.get("filtered_non_customer_message_count"), 1, "filtered non-text message should be observable")
 
 
+def check_scheduler_capture_filters_visual_ocr_text_without_keyword_blocking() -> None:
+    state = empty_state()
+    visual_message = {
+        "id": "visual-ocr-text-1",
+        "type": "text",
+        "sender": "customer",
+        "content": "poster headline ABC 123",
+        "source_type": "image_ocr",
+        "time": "2026-06-20T09:02:00",
+    }
+    capture = record_capture_result(
+        state,
+        "许聪",
+        messages=[visual_message],
+        batch=[visual_message],
+        conversation_type="private",
+        session_key="wx:rpa:v1:visual-ocr-filter",
+        now="2026-06-20T09:02:01",
+    )
+    assert_equal(capture.get("status"), "empty", "visual OCR text must not become a customer-service Brain task")
+    assert_equal(capture.get("batch"), [], "visual OCR text should be excluded from reply input batch")
+    assert_equal(capture.get("filtered_non_customer_message_count"), 1, "visual OCR filter should be observable")
+
+    normal_message = {
+        **visual_message,
+        "id": "normal-text-same-content-1",
+        "source_type": "chat_text",
+        "time": "2026-06-20T09:03:00",
+    }
+    normal_capture = record_capture_result(
+        state,
+        "许聪",
+        messages=[normal_message],
+        batch=[normal_message],
+        conversation_type="private",
+        session_key="wx:rpa:v1:normal-text-same-content",
+        now="2026-06-20T09:03:01",
+    )
+    assert_equal(normal_capture.get("status"), "captured", "same content should remain reply-eligible when it is real chat text")
+    assert_equal(
+        [item.get("id") for item in normal_capture.get("batch") or []],
+        ["normal-text-same-content-1"],
+        "visual OCR guard must be source-based, not keyword-based",
+    )
+
+    nested_visual_message = {
+        "id": "visual-ocr-text-nested-1",
+        "type": "text",
+        "sender": "customer",
+        "content": "poster headline nested ABC 123",
+        "metadata": {"source_type": "poster_ocr"},
+        "time": "2026-06-20T09:04:00",
+    }
+    nested_capture = record_capture_result(
+        state,
+        "许聪",
+        messages=[nested_visual_message],
+        batch=[nested_visual_message],
+        conversation_type="private",
+        session_key="wx:rpa:v1:visual-ocr-nested-filter",
+        now="2026-06-20T09:04:01",
+    )
+    assert_equal(nested_capture.get("status"), "empty", "nested visual OCR metadata should also be reply-ineligible")
+    assert_equal(nested_capture.get("batch"), [], "nested visual OCR message should not enter reply batch")
+
+
 def check_scheduler_capture_allows_self_for_file_transfer_self_test() -> None:
     state = empty_state()
     self_message = {
@@ -3456,6 +3627,7 @@ def check_listener_rpa_send_rate_zero_is_preserved() -> None:
 def check_managed_bridge_applies_rpa_fast_send_confirmation_env() -> None:
     keys = [
         "WECHAT_WIN32_OCR_FAST_SEND_CONFIRMATION",
+        "WECHAT_WIN32_OCR_INPUT_FAST_VISUAL_CONFIRM",
         "WECHAT_WIN32_OCR_SEND_INPUT_CONFIRM_ATTEMPTS",
         "WECHAT_WIN32_OCR_SEND_TRIGGER_MODE",
         "WECHAT_WIN32_OCR_HUMANIZED_SEND_TRIGGER_DELAY_MIN_MS",
@@ -3478,6 +3650,7 @@ def check_managed_bridge_applies_rpa_fast_send_confirmation_env() -> None:
                 "rpa_humanized_send": {
                     "enabled": True,
                     "fast_send_confirmation_enabled": True,
+                    "input_fast_visual_confirm_enabled": True,
                     "send_input_confirm_attempts": 1,
                     "send_trigger_mode": "enter_only",
                     "send_trigger_delay_min_ms": 520,
@@ -3498,6 +3671,11 @@ def check_managed_bridge_applies_rpa_fast_send_confirmation_env() -> None:
                 os.environ.get("WECHAT_WIN32_OCR_FAST_SEND_CONFIRMATION"),
                 "1",
                 "bridge reload should enable fast send confirmation for in-process sends",
+            )
+            assert_equal(
+                os.environ.get("WECHAT_WIN32_OCR_INPUT_FAST_VISUAL_CONFIRM"),
+                "1",
+                "bridge reload should enable fast visual input confirmation for in-process sends",
             )
             assert_equal(
                 os.environ.get("WECHAT_WIN32_OCR_SEND_INPUT_CONFIRM_ATTEMPTS"),
@@ -5988,6 +6166,8 @@ def run_checks() -> dict[str, Any]:
         check_select_capture_sessions_preserves_recoverable_llm_pending_messages,
         check_runtime_latency_trace_flows_through_reply_lifecycle,
         check_polish_latency_trace_is_inherited_by_ready_reply,
+        check_runtime_future_latency_trace_exposes_external_overhead,
+        check_planner_event_internal_latency_trace_is_extracted,
         check_scheduler_fast_followup_treats_unread_and_capture_as_urgent,
         check_runtime_repeated_unread_signal_does_not_stale_same_batch,
         check_runtime_send_runner_stales_before_send,
@@ -6014,6 +6194,7 @@ def run_checks() -> dict[str, Any]:
         check_scheduler_capture_filters_self_only_normal_customer_session,
         check_scheduler_capture_allows_new_occurrence_of_same_short_probe,
         check_scheduler_capture_filters_non_text_messages_for_normal_customer_session,
+        check_scheduler_capture_filters_visual_ocr_text_without_keyword_blocking,
         check_scheduler_capture_allows_self_for_file_transfer_self_test,
         check_runtime_self_only_capture_does_not_submit_llm,
         check_scheduler_planner_reuses_capture_history_backfill_verdict,

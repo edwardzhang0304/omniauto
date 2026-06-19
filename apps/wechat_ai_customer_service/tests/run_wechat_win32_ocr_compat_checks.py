@@ -952,6 +952,106 @@ def test_input_region_visual_delta_confirmation() -> None:
     assert_true(stale["ok"] is False, f"pre-existing input text must not be blindly sent: {stale}")
 
 
+def test_input_fast_visual_confirm_keeps_before_ocr_and_skips_after_ocr() -> None:
+    sidecar_mod = sys.modules["apps.wechat_ai_customer_service.adapters.wechat_win32_ocr_sidecar"]
+    previous_env = {
+        "WECHAT_WIN32_OCR_INPUT_FAST_VISUAL_CONFIRM": os.environ.get("WECHAT_WIN32_OCR_INPUT_FAST_VISUAL_CONFIRM"),
+        "WECHAT_WIN32_OCR_SEND_INPUT_CONFIRM_ATTEMPTS": os.environ.get("WECHAT_WIN32_OCR_SEND_INPUT_CONFIRM_ATTEMPTS"),
+    }
+    originals = {
+        "activate_window": sidecar_mod.activate_window,
+        "capture_wechat": sidecar_mod.capture_wechat,
+        "run_ocr": sidecar_mod.run_ocr,
+        "input_text_region_state": sidecar_mod.input_text_region_state,
+        "clear_existing_input_draft": sidecar_mod.clear_existing_input_draft,
+        "jitter_input_click_point": sidecar_mod.jitter_input_click_point,
+        "human_client_click": sidecar_mod.human_client_click,
+        "client_click": sidecar_mod.client_click,
+        "recover_send_window_guard": sidecar_mod.recover_send_window_guard,
+        "type_text_with_sendinput_unicode": sidecar_mod.type_text_with_sendinput_unicode,
+        "input_region_visual_delta_confirms": sidecar_mod.input_region_visual_delta_confirms,
+        "time_sleep": sidecar_mod.time.sleep,
+    }
+    calls = {"capture": [], "ocr": 0, "region": [], "click": 0}
+    geometry = {"left": 0, "top": 0, "right": 980, "bottom": 860, "width": 980, "height": 860}
+    try:
+        os.environ["WECHAT_WIN32_OCR_INPUT_FAST_VISUAL_CONFIRM"] = "1"
+        os.environ["WECHAT_WIN32_OCR_SEND_INPUT_CONFIRM_ATTEMPTS"] = "1"
+        sidecar_mod.activate_window = lambda *_args, **_kwargs: True
+        sidecar_mod.time.sleep = lambda _seconds: None
+        sidecar_mod.recover_send_window_guard = lambda *_args, **_kwargs: {"ok": True, "reason": "window_valid"}
+
+        def fake_capture(_hwnd, artifact_dir=None, label="capture"):
+            calls["capture"].append(label)
+            return Image.new("RGB", (980, 860), "white"), f"{label}.png"
+
+        def fake_run_ocr(_screenshot):
+            calls["ocr"] += 1
+            return []
+
+        def fake_region(_screenshot, ocr_items, *, geometry):
+            calls["region"].append(len(ocr_items))
+            if len(calls["region"]) == 1:
+                return {"has_visible_text": False, "ocr_hits": len(ocr_items), "dark_ratio": 0.001}
+            return {"has_visible_text": True, "ocr_hits": len(ocr_items), "dark_ratio": 0.025}
+
+        def fake_clear(_hwnd, *, points, geometry, before_state, artifact_dir=None, attempt=1):
+            assert_true(before_state.get("has_visible_text") is False, f"before OCR state should be checked: {before_state}")
+            return {"ok": True, "after": before_state, "reason": "already_blank"}
+
+        sidecar_mod.capture_wechat = fake_capture
+        sidecar_mod.run_ocr = fake_run_ocr
+        sidecar_mod.input_text_region_state = fake_region
+        sidecar_mod.clear_existing_input_draft = fake_clear
+        sidecar_mod.jitter_input_click_point = lambda x, y, _geometry: (int(x), int(y))
+        sidecar_mod.human_client_click = lambda *_args, **_kwargs: calls.__setitem__("click", calls["click"] + 1)
+        sidecar_mod.client_click = lambda *_args, **_kwargs: calls.__setitem__("click", calls["click"] + 1)
+        sidecar_mod.type_text_with_sendinput_unicode = lambda *_args, **_kwargs: {
+            "ok": True,
+            "method": "sendinput_unicode",
+            "typed_chars": 8,
+            "chunks": 1,
+        }
+        sidecar_mod.input_region_visual_delta_confirms = lambda before, after, input_result: {
+            "ok": True,
+            "reason": "input_area_visual_delta",
+            "before": before,
+            "after": after,
+            "typed_chars": input_result.get("typed_chars"),
+        }
+        result = sidecar_mod.paste_text_with_confirmation(
+            1001,
+            "你好呀",
+            points={"input_point": [637, 715], "send_point": [919, 816]},
+            geometry=geometry,
+            settings={"enabled": True, "method": "sendinput_unicode"},
+        )
+        assert_true(result.get("ok") is True, f"fast visual input confirmation should pass: {result}")
+        assert_true(result.get("confirmed_by") == "input_area_visual_delta_fast", f"should use fast visual confirm: {result}")
+        assert_true(calls["ocr"] == 1, f"before-input OCR should remain, after-input OCR should be skipped: {calls}")
+        assert_true(calls["click"] == 1, f"single input click expected: {calls}")
+        timing = result.get("timing") if isinstance(result.get("timing"), dict) else {}
+        assert_true(
+            "paste_text_with_confirmation_duration_seconds" in timing,
+            f"paste timing should expose total confirmation duration: {result}",
+        )
+        assert_true("before_ocr_duration_seconds" in timing, f"before-input OCR timing should be present: {timing}")
+        assert_true("input_operation_duration_seconds" in timing, f"input operation timing should be present: {timing}")
+        assert_true("fast_visual_confirm_duration_seconds" in timing, f"fast visual timing should be present: {timing}")
+        assert_true("after_ocr_duration_seconds" not in timing, f"fast visual path should skip after OCR timing: {timing}")
+    finally:
+        for key, value in previous_env.items():
+            if value is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = value
+        for name, value in originals.items():
+            if name == "time_sleep":
+                sidecar_mod.time.sleep = value
+            else:
+                setattr(sidecar_mod, name, value)
+
+
 def test_input_region_soft_blank_noise_allows_post_clear_progress() -> None:
     noise_after_clear = {
         "has_visible_text": True,
@@ -2970,11 +3070,11 @@ def test_adaptive_humanized_input_speed_profiles() -> None:
     assert_true(18 <= int(short.get("micro_pause_every_chars") or 0) <= 40, f"short pauses should remain natural: {short}")
     assert_true(
         int(short.get("send_post_input_delay_min_ms") or 0) >= 120,
-        f"adaptive profile must not shorten configured post-input pause: {short}",
+        f"short profile should keep a non-zero post-input pause: {short}",
     )
     assert_true(
-        int(short.get("send_post_input_delay_max_ms") or 0) >= 460,
-        f"adaptive profile must not shorten configured post-input pause: {short}",
+        int(short.get("send_post_input_delay_max_ms") or 0) == 360,
+        f"short profile should not inherit overly wide default post-input pause: {short}",
     )
 
     long_text = "这边先帮您确认几个点。" * 40
@@ -2987,6 +3087,43 @@ def test_adaptive_humanized_input_speed_profiles() -> None:
     disabled["adaptive_speed_enabled"] = False
     unchanged = adapt_humanized_input_settings(disabled, "这台车今天能看吗？")
     assert_true(unchanged.get("speed_profile") is None, f"disabled adaptive profile should not mutate speed: {unchanged}")
+
+
+def test_adaptive_humanized_input_clamps_live_wide_waits_by_profile() -> None:
+    live_wide = {
+        "enabled": True,
+        "method": "sendinput_unicode",
+        "chunk_min_chars": 2,
+        "chunk_max_chars": 7,
+        "char_delay_min_ms": 45,
+        "char_delay_max_ms": 145,
+        "micro_pause_every_chars": 18,
+        "micro_pause_min_ms": 180,
+        "micro_pause_max_ms": 480,
+        "typo_probability": 0.12,
+        "typo_max": 1,
+        "send_pre_delay_min_ms": 500,
+        "send_pre_delay_max_ms": 1300,
+        "send_post_input_delay_min_ms": 450,
+        "send_post_input_delay_max_ms": 1200,
+        "send_trigger_delay_min_ms": 720,
+        "send_trigger_delay_max_ms": 2100,
+        "send_after_trigger_delay_min_ms": 420,
+        "send_after_trigger_delay_max_ms": 1250,
+        "adaptive_speed_enabled": True,
+    }
+    short = adapt_humanized_input_settings(live_wide, "你好呀，有什么可以帮您的吗？")
+    assert_true(short.get("speed_profile") == "short_natural", f"short reply should use short profile: {short}")
+    assert_true(short.get("send_post_input_delay_min_ms") == 180, f"short post-input min should be profiled: {short}")
+    assert_true(short.get("send_post_input_delay_max_ms") == 360, f"short post-input max should be profiled: {short}")
+    assert_true(short.get("send_trigger_delay_min_ms") == 520, f"short trigger min should be profiled: {short}")
+    assert_true(short.get("send_trigger_delay_max_ms") == 1500, f"short trigger max should be profiled: {short}")
+    assert_true(short.get("send_after_trigger_delay_min_ms") == 260, f"short after-trigger min should be profiled: {short}")
+    assert_true(short.get("send_after_trigger_delay_max_ms") == 820, f"short after-trigger max should be profiled: {short}")
+
+    long_profile = adapt_humanized_input_settings(live_wide, "这边先帮您确认几个点。" * 40)
+    assert_true(long_profile.get("speed_profile") == "long_natural_capped", f"long reply should use long profile: {long_profile}")
+    assert_true(long_profile.get("send_trigger_delay_max_ms") == 2200, f"long trigger window should stay wider: {long_profile}")
 
 
 def test_set_uia_control_value_humanized_progressive_updates() -> None:
@@ -3248,10 +3385,12 @@ def test_send_rpa_env_enables_strict_focus_single_confirm_and_blank_retry() -> N
     previous = os.environ.get("WECHAT_WIN32_OCR_SEND_INPUT_CONFIRM_ATTEMPTS")
     previous_retry = os.environ.get("WECHAT_WIN32_OCR_BLANK_INPUT_FOCUS_RETRY")
     previous_strict = os.environ.get("WECHAT_WIN32_OCR_STRICT_SEND_FOCUS_GUARD")
+    previous_fast_visual = os.environ.get("WECHAT_WIN32_OCR_INPUT_FAST_VISUAL_CONFIRM")
     try:
         os.environ.pop("WECHAT_WIN32_OCR_SEND_INPUT_CONFIRM_ATTEMPTS", None)
         os.environ.pop("WECHAT_WIN32_OCR_BLANK_INPUT_FOCUS_RETRY", None)
         os.environ.pop("WECHAT_WIN32_OCR_STRICT_SEND_FOCUS_GUARD", None)
+        os.environ["WECHAT_WIN32_OCR_INPUT_FAST_VISUAL_CONFIRM"] = "1"
         env = send_rpa_env()
         assert_true(env.get("WECHAT_WIN32_OCR_AGGRESSIVE_FOCUS") == "1", f"send env should force focus: {env}")
         assert_true(env.get("WECHAT_WIN32_OCR_ATTACH_THREAD_INPUT") == "1", f"send env should attach input: {env}")
@@ -3262,6 +3401,7 @@ def test_send_rpa_env_enables_strict_focus_single_confirm_and_blank_retry() -> N
             f"send env should allow one blank-input focus recovery without row reclicks: {env}",
         )
         assert_true(env.get("WECHAT_WIN32_OCR_SEND_INPUT_CONFIRM_ATTEMPTS") == "1", f"send env should use one confirmed input attempt: {env}")
+        assert_true(env.get("WECHAT_WIN32_OCR_INPUT_FAST_VISUAL_CONFIRM") == "1", f"send env should propagate fast visual input confirm: {env}")
     finally:
         if previous is None:
             os.environ.pop("WECHAT_WIN32_OCR_SEND_INPUT_CONFIRM_ATTEMPTS", None)
@@ -3275,6 +3415,10 @@ def test_send_rpa_env_enables_strict_focus_single_confirm_and_blank_retry() -> N
             os.environ.pop("WECHAT_WIN32_OCR_STRICT_SEND_FOCUS_GUARD", None)
         else:
             os.environ["WECHAT_WIN32_OCR_STRICT_SEND_FOCUS_GUARD"] = previous_strict
+        if previous_fast_visual is None:
+            os.environ.pop("WECHAT_WIN32_OCR_INPUT_FAST_VISUAL_CONFIRM", None)
+        else:
+            os.environ["WECHAT_WIN32_OCR_INPUT_FAST_VISUAL_CONFIRM"] = previous_fast_visual
 
 
 def test_activate_window_debounces_aggressive_refocus() -> None:
@@ -3564,6 +3708,10 @@ def test_target_ready_short_circuits_when_active_target_already_confirmed() -> N
         result = sidecar_mod.ensure_target_ready_for_send(1001, "新数据测试", exact=True)
         assert_true(result.get("ok") is True, f"pre-validated active target should pass immediately: {result}")
         assert_true(calls["open"] == 0 and calls["validate"] == 1, f"open_chat should be skipped on pre-validation pass: {calls}")
+        timing = result.get("timing") if isinstance(result.get("timing"), dict) else {}
+        assert_true("target_ready_pre_validation_duration_seconds" in timing, f"pre-validation timing should be present: {timing}")
+        assert_true("target_ready_internal_duration_seconds" in timing, f"target_ready total timing should be present: {timing}")
+        assert_true("target_ready_open_chat_duration_seconds" not in timing, f"fast path should not open chat: {timing}")
     finally:
         for name, value in originals.items():
             setattr(sidecar_mod, name, value)
@@ -3649,6 +3797,10 @@ def test_target_ready_with_session_key_confirms_before_send_when_cache_empty() -
         result = sidecar_mod.ensure_target_ready_for_send(1001, "新数据测试", exact=True, session_key="wx:rpa:v1:test-session")
         assert_true(result.get("ok") is True, f"cache-miss keyed target should confirm through open_chat: {result}")
         assert_true(calls["open"] == 1 and calls["validate"] == 2, f"cache-miss path should do one confirmation, not repeated clicks: {calls}")
+        timing = result.get("timing") if isinstance(result.get("timing"), dict) else {}
+        assert_true(timing.get("target_ready_session_cache_match") is False, f"cache miss should be explicit: {timing}")
+        assert_true("target_ready_session_open_chat_duration_seconds" in timing, f"session open timing should be present: {timing}")
+        assert_true("target_ready_session_post_validation_duration_seconds" in timing, f"session post-validation timing should be present: {timing}")
     finally:
         sidecar_mod._LAST_RPA_ACTION_STATE.clear()
         sidecar_mod._LAST_RPA_ACTION_STATE.update(previous_state)
@@ -3792,6 +3944,99 @@ def test_send_payload_rechecks_prevalidated_guard_before_typing() -> None:
         assert_true(pre_guard.get("strict_recheck") is True, f"pre-send guard should record strict recheck: {pre_guard}")
         assert_true(isinstance(pre_guard.get("cached_prevalidated_guard"), dict), f"cached guard should remain auditable: {pre_guard}")
     finally:
+        for name, value in originals.items():
+            setattr(sidecar_mod, name, value)
+
+
+def test_send_payload_exposes_optional_timing_without_contract_changes() -> None:
+    sidecar_mod = sys.modules["apps.wechat_ai_customer_service.adapters.wechat_win32_ocr_sidecar"]
+    geometry = {"left": 0, "top": 0, "right": 980, "bottom": 860, "width": 980, "height": 860}
+    originals = {
+        "validate_active_send_target": sidecar_mod.validate_active_send_target,
+        "recover_send_window_guard": sidecar_mod.recover_send_window_guard,
+        "get_window_geometry": sidecar_mod.get_window_geometry,
+        "validate_send_geometry": sidecar_mod.validate_send_geometry,
+        "calculate_send_points": sidecar_mod.calculate_send_points,
+        "reserve_send_rate": sidecar_mod.reserve_send_rate,
+        "send_with_guarded_clicks": sidecar_mod.send_with_guarded_clicks,
+        "validate_post_send_target": sidecar_mod.validate_post_send_target,
+        "humanized_action_sleep": sidecar_mod.humanized_action_sleep,
+    }
+    previous_send_mode = os.environ.get("WECHAT_WIN32_OCR_SEND_MODE")
+    try:
+        os.environ["WECHAT_WIN32_OCR_SEND_MODE"] = "click_only"
+        sidecar_mod.validate_active_send_target = lambda *_args, **_kwargs: {
+            "ok": True,
+            "online": True,
+            "reason": "target_confirmed",
+            "confirmation_confidence": "active_title_strict",
+            "geometry": dict(geometry),
+            "screenshot_path": "send_guard.png",
+        }
+        sidecar_mod.recover_send_window_guard = lambda *_args, **_kwargs: {"ok": True, "reason": "window_valid"}
+        sidecar_mod.get_window_geometry = lambda _hwnd: dict(geometry)
+        sidecar_mod.validate_send_geometry = lambda _geometry: {"ok": True}
+        sidecar_mod.calculate_send_points = lambda _geometry: {
+            "ok": True,
+            "input_point": [640, 715],
+            "send_point": [915, 816],
+        }
+        sidecar_mod.reserve_send_rate = lambda **_kwargs: {"ok": True, "reason": "rate_ok"}
+        sidecar_mod.send_with_guarded_clicks = lambda *_args, **_kwargs: {
+            "ok": True,
+            "method": "win32.human_click_input+sendinput_unicode+send_trigger:enter_only",
+            "timing": {
+                "input_focus_started_at": "2026-06-19T00:00:00",
+                "input_focus_finished_at": "2026-06-19T00:00:00",
+                "input_focus_duration_seconds": 0.01,
+                "typing_started_at": "2026-06-19T00:00:00",
+                "typing_finished_at": "2026-06-19T00:00:00",
+                "typing_duration_seconds": 0.02,
+                "send_trigger_started_at": "2026-06-19T00:00:00",
+                "send_trigger_finished_at": "2026-06-19T00:00:00",
+                "send_trigger_duration_seconds": 0.03,
+            },
+        }
+        sidecar_mod.validate_post_send_target = lambda *_args, **_kwargs: {
+            "ok": True,
+            "online": True,
+            "reason": "send_window_readable_after_send",
+            "geometry": dict(geometry),
+            "post_send_fast_guard": True,
+        }
+        sidecar_mod.humanized_action_sleep = lambda *_args, **_kwargs: 0.0
+
+        payload = sidecar_mod.send_payload(
+            1001,
+            {"windows": [], "visible_main_windows": []},
+            target="新数据测试",
+            text="您好",
+            exact=True,
+        )
+        assert_true(payload.get("ok") is True, f"send payload should still succeed: {payload}")
+        timing = payload.get("timing") if isinstance(payload.get("timing"), dict) else {}
+        send_result = payload.get("send_result") if isinstance(payload.get("send_result"), dict) else {}
+        nested_timing = send_result.get("timing") if isinstance(send_result.get("timing"), dict) else {}
+        for field in [
+            "pre_send_guard_duration_seconds",
+            "rate_guard_duration_seconds",
+            "guarded_click_send_duration_seconds",
+            "input_focus_duration_seconds",
+            "typing_duration_seconds",
+            "send_trigger_duration_seconds",
+            "post_send_guard_duration_seconds",
+            "send_payload_duration_seconds",
+        ]:
+            assert_true(field in timing, f"top-level timing should expose {field}: {timing}")
+            assert_true(field in nested_timing, f"send_result timing should expose {field}: {nested_timing}")
+        assert_true(str(payload.get("state") or "") == "send_win32_rpa", f"state contract changed unexpectedly: {payload}")
+        assert_true(isinstance(send_result.get("pre_send_guard"), dict), f"pre_send_guard contract missing: {send_result}")
+        assert_true(isinstance(send_result.get("post_send_guard"), dict), f"post_send_guard contract missing: {send_result}")
+    finally:
+        if previous_send_mode is None:
+            os.environ.pop("WECHAT_WIN32_OCR_SEND_MODE", None)
+        else:
+            os.environ["WECHAT_WIN32_OCR_SEND_MODE"] = previous_send_mode
         for name, value in originals.items():
             setattr(sidecar_mod, name, value)
 
@@ -4387,6 +4632,7 @@ def main() -> int:
         test_blind_target_confirmation_uses_sidebar_match_when_title_missing,
         test_humanized_chunk_text_and_settings,
         test_adaptive_humanized_input_speed_profiles,
+        test_adaptive_humanized_input_clamps_live_wide_waits_by_profile,
         test_set_uia_control_value_humanized_progressive_updates,
         test_sendinput_unicode_text_entry_helpers,
         test_sendinput_unicode_aborts_when_window_guard_fails,
@@ -4395,6 +4641,7 @@ def main() -> int:
         test_send_with_guarded_clicks_skips_input_refocus_after_confirmed_paste,
         test_input_text_region_state_distinguishes_blank_and_text,
         test_input_region_visual_delta_confirmation,
+        test_input_fast_visual_confirm_keeps_before_ocr_and_skips_after_ocr,
         test_input_region_soft_blank_noise_allows_post_clear_progress,
         test_input_area_token_confirmation_excludes_recent_chat_bubble,
         test_clear_existing_input_draft_noops_when_blank,
@@ -4413,6 +4660,7 @@ def main() -> int:
         test_target_ready_with_session_key_confirms_before_send_when_cache_empty,
         test_target_ready_reopens_when_prevalidation_is_weak,
         test_send_payload_rechecks_prevalidated_guard_before_typing,
+        test_send_payload_exposes_optional_timing_without_contract_changes,
         test_send_payload_blocks_stale_prevalidated_guard_when_active_target_changed,
         test_activate_session_candidate_single_click_on_unconfirmed_target,
         test_activate_session_candidate_passive_confirm_without_second_click,

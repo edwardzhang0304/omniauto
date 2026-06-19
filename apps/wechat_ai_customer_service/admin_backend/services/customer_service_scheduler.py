@@ -101,6 +101,7 @@ _RPA_HUMANIZED_SEND_ENV_MAPPING = {
     "WECHAT_WIN32_OCR_HUMANIZED_SEND_AFTER_TRIGGER_DELAY_MAX_MS": "send_after_trigger_delay_max_ms",
     "WECHAT_WIN32_OCR_HUMANIZED_ADAPTIVE_SPEED_ENABLED": "adaptive_speed_enabled",
     "WECHAT_WIN32_OCR_FAST_SEND_CONFIRMATION": "fast_send_confirmation_enabled",
+    "WECHAT_WIN32_OCR_INPUT_FAST_VISUAL_CONFIRM": "input_fast_visual_confirm_enabled",
     "WECHAT_WIN32_OCR_SEND_TRIGGER_MODE": "send_trigger_mode",
     "WECHAT_WIN32_OCR_SEND_INPUT_CONFIRM_ATTEMPTS": "send_input_confirm_attempts",
     "WECHAT_WIN32_OCR_SEND_MIN_INTERVAL_SECONDS": "send_rate_min_interval_seconds",
@@ -126,6 +127,39 @@ def safe_json_roundtrip(value: Any) -> Any:
         return json.loads(json.dumps(value, ensure_ascii=False, default=str))
     except Exception:
         return {"unserializable": repr(value)}
+
+
+def _planner_event_latency_trace(event: dict[str, Any]) -> dict[str, Any]:
+    """Extract optional planner/polish timing already recorded inside workflow events."""
+
+    if not isinstance(event, dict):
+        return {}
+    trace: dict[str, Any] = {}
+    brain = event.get("customer_service_brain") if isinstance(event.get("customer_service_brain"), dict) else {}
+    brain_trace = brain.get("latency_trace") if isinstance(brain.get("latency_trace"), dict) else {}
+    if isinstance(brain_trace, dict):
+        trace.update(copy.deepcopy(brain_trace))
+    final_polish = event.get("final_visible_llm_polish") if isinstance(event.get("final_visible_llm_polish"), dict) else {}
+    final_trace = final_polish.get("latency_trace") if isinstance(final_polish.get("latency_trace"), dict) else {}
+    if isinstance(final_trace, dict):
+        trace.update(copy.deepcopy(final_trace))
+    final_duration = final_polish.get("duration_seconds")
+    if final_duration is not None:
+        trace["final_polish_llm_duration_seconds"] = final_duration
+    return trace
+
+
+def _merge_result_latency_trace(result: dict[str, Any], extra_trace: dict[str, Any]) -> dict[str, Any]:
+    """Append optional timing fields without replacing workflow-owned values."""
+
+    if not isinstance(result, dict):
+        return result
+    clean_extra = {key: value for key, value in (extra_trace or {}).items() if value is not None}
+    if not clean_extra:
+        return result
+    trace = result.get("latency_trace") if isinstance(result.get("latency_trace"), dict) else {}
+    result["latency_trace"] = {**clean_extra, **trace}
+    return result
 
 
 def polish_failure_retry_instruction(task: dict[str, Any]) -> str:
@@ -169,6 +203,74 @@ def _parse_iso_datetime(value: Any) -> datetime | None:
         return datetime.fromisoformat(text)
     except (TypeError, ValueError):
         return None
+
+
+def _latency_seconds_between(start: Any, finish: Any) -> float | None:
+    started_at = _parse_iso_datetime(start)
+    finished_at = _parse_iso_datetime(finish)
+    if started_at is None or finished_at is None:
+        return None
+    if started_at.tzinfo is None and finished_at.tzinfo is not None:
+        finished_at = finished_at.replace(tzinfo=None)
+    elif started_at.tzinfo is not None and finished_at.tzinfo is None:
+        started_at = started_at.replace(tzinfo=None)
+    seconds = (finished_at - started_at).total_seconds()
+    if seconds < 0:
+        return None
+    return round(seconds, 4)
+
+
+def _latency_breakdown_from_trace(trace: dict[str, Any]) -> dict[str, Any]:
+    if not isinstance(trace, dict):
+        return {}
+    pairs = {
+        "signal_to_capture_start_seconds": ("session_signal_detected_at", "capture_started_at"),
+        "capture_seconds": ("capture_started_at", "capture_finished_at"),
+        "capture_to_brain_start_seconds": ("capture_finished_at", "brain_started_at"),
+        "brain_queue_seconds": ("brain_queued_at", "brain_started_at"),
+        "brain_seconds": ("brain_started_at", "brain_finished_at"),
+        "planner_future_seconds": ("planner_future_submitted_at", "planner_future_finished_at"),
+        "planner_worker_seconds": ("planner_worker_started_at", "planner_worker_finished_at"),
+        "brain_to_polish_start_seconds": ("brain_finished_at", "final_polish_started_at"),
+        "final_polish_queue_seconds": ("final_polish_queued_at", "final_polish_started_at"),
+        "final_polish_seconds": ("final_polish_started_at", "final_polish_finished_at"),
+        "polish_future_seconds": ("polish_future_submitted_at", "polish_future_finished_at"),
+        "polish_worker_seconds": ("polish_worker_started_at", "polish_worker_finished_at"),
+        "ready_queue_wait_seconds": ("send_queue_entered_at", "send_started_at"),
+        "send_seconds": ("send_started_at", "send_finished_at"),
+        "send_rpa_seconds": ("send_rpa_started_at", "send_rpa_finished_at"),
+        "freshness_check_seconds": ("freshness_check_started_at", "freshness_check_finished_at"),
+        "end_to_end_seconds": ("session_signal_detected_at", "send_finished_at"),
+        "capture_to_sent_seconds": ("capture_started_at", "send_finished_at"),
+        "brain_to_sent_seconds": ("brain_started_at", "send_finished_at"),
+        "ready_to_sent_seconds": ("ready_at", "send_finished_at"),
+    }
+    breakdown: dict[str, Any] = {}
+    for name, (start_key, finish_key) in pairs.items():
+        seconds = _latency_seconds_between(trace.get(start_key), trace.get(finish_key))
+        if seconds is not None:
+            breakdown[name] = seconds
+    planner_future_seconds = breakdown.get("planner_future_seconds")
+    planner_worker_seconds = trace.get("planner_worker_duration_seconds")
+    if planner_future_seconds is not None and planner_worker_seconds is not None:
+        try:
+            breakdown["planner_external_overhead_seconds"] = round(
+                max(0.0, float(planner_future_seconds) - float(planner_worker_seconds)),
+                4,
+            )
+        except (TypeError, ValueError):
+            pass
+    polish_future_seconds = breakdown.get("polish_future_seconds")
+    polish_worker_seconds = trace.get("polish_worker_duration_seconds")
+    if polish_future_seconds is not None and polish_worker_seconds is not None:
+        try:
+            breakdown["polish_external_overhead_seconds"] = round(
+                max(0.0, float(polish_future_seconds) - float(polish_worker_seconds)),
+                4,
+            )
+        except (TypeError, ValueError):
+            pass
+    return breakdown
 
 
 def _short_pending_signal_is_fresh(
@@ -702,6 +804,38 @@ class CustomerServiceSchedulerRuntime:
         grace_seconds = max(1.0, float(os.getenv("WECHAT_CUSTOMER_SERVICE_LLM_TIMEOUT_GRACE_SECONDS", "6") or 6))
         return (now_dt - started_at).total_seconds() > timeout_seconds + grace_seconds
 
+    def _run_planner_future(self, capture: dict[str, Any], task: dict[str, Any]) -> dict[str, Any]:
+        started = time.perf_counter()
+        started_at = datetime.now().isoformat(timespec="seconds")
+        result = self.plan_reply_fn(capture, task)
+        finished_at = datetime.now().isoformat(timespec="seconds")
+        if isinstance(result, dict):
+            return _merge_result_latency_trace(
+                result,
+                {
+                    "planner_worker_started_at": started_at,
+                    "planner_worker_finished_at": finished_at,
+                    "planner_worker_duration_seconds": round(max(0.0, time.perf_counter() - started), 4),
+                },
+            )
+        return result
+
+    def _run_polish_future(self, planner_task: dict[str, Any], task: dict[str, Any]) -> dict[str, Any]:
+        started = time.perf_counter()
+        started_at = datetime.now().isoformat(timespec="seconds")
+        result = self.polish_reply_fn(planner_task, task) if self.polish_reply_fn is not None else {}
+        finished_at = datetime.now().isoformat(timespec="seconds")
+        if isinstance(result, dict):
+            return _merge_result_latency_trace(
+                result,
+                {
+                    "polish_worker_started_at": started_at,
+                    "polish_worker_finished_at": finished_at,
+                    "polish_worker_duration_seconds": round(max(0.0, time.perf_counter() - started), 4),
+                },
+            )
+        return result
+
     def tick(
         self,
         *,
@@ -884,7 +1018,12 @@ class CustomerServiceSchedulerRuntime:
                 continue
             mark_llm_started(state, task_id, now=now)
             self._planner_task_snapshots[task_id] = copy.deepcopy(task)
-            self._planner_futures[task_id] = self._planner_executor.submit(self.plan_reply_fn, copy.deepcopy(capture), copy.deepcopy(task))
+            planner_future_submitted_at = datetime.now().isoformat(timespec="seconds")
+            live_task = (state.get("llm_tasks", {}) or {}).get(task_id)
+            if isinstance(live_task, dict):
+                trace = live_task.get("latency_trace") if isinstance(live_task.get("latency_trace"), dict) else {}
+                live_task["latency_trace"] = {**trace, "planner_future_submitted_at": planner_future_submitted_at}
+            self._planner_futures[task_id] = self._planner_executor.submit(self._run_planner_future, copy.deepcopy(capture), copy.deepcopy(task))
             events.append({"event": "llm_task_submitted", "task_id": task_id, "target_name": task.get("target_name")})
         return events
 
@@ -937,6 +1076,14 @@ class CustomerServiceSchedulerRuntime:
                 self._planner_task_snapshots.pop(task_id, None)
                 events.append({"event": "llm_task_failed", "task_id": task_id, "error": error, "traceback": trace})
                 continue
+            planner_future_finished_at = datetime.now().isoformat(timespec="seconds")
+            if isinstance(result, dict):
+                result = _merge_result_latency_trace(
+                    result,
+                    {
+                        "planner_future_finished_at": planner_future_finished_at,
+                    },
+                )
             if result.get("ok") is False:
                 failure_reason = str(result.get("reason") or result.get("error") or "planner_failed")
                 if not self._restore_missing_llm_task_from_snapshot(state, task_id):
@@ -1108,7 +1255,12 @@ class CustomerServiceSchedulerRuntime:
                 continue
             mark_polish_started(state, task_id, now=now)
             self._polish_task_snapshots[task_id] = copy.deepcopy(task)
-            self._polish_futures[task_id] = self._polish_executor.submit(self.polish_reply_fn, copy.deepcopy(planner_task), copy.deepcopy(task))
+            polish_future_submitted_at = datetime.now().isoformat(timespec="seconds")
+            live_task = (state.get("polish_tasks", {}) or {}).get(task_id)
+            if isinstance(live_task, dict):
+                trace = live_task.get("latency_trace") if isinstance(live_task.get("latency_trace"), dict) else {}
+                live_task["latency_trace"] = {**trace, "polish_future_submitted_at": polish_future_submitted_at}
+            self._polish_futures[task_id] = self._polish_executor.submit(self._run_polish_future, copy.deepcopy(planner_task), copy.deepcopy(task))
             events.append({"event": "polish_task_submitted", "task_id": task_id, "target_name": task.get("target_name")})
         return events
 
@@ -1155,6 +1307,14 @@ class CustomerServiceSchedulerRuntime:
                 self._polish_task_snapshots.pop(task_id, None)
                 events.append({"event": "polish_task_failed", "task_id": task_id, "error": error, "traceback": trace})
                 continue
+            polish_future_finished_at = datetime.now().isoformat(timespec="seconds")
+            if isinstance(result, dict):
+                result = _merge_result_latency_trace(
+                    result,
+                    {
+                        "polish_future_finished_at": polish_future_finished_at,
+                    },
+                )
             if result.get("ok") is False:
                 if not self._restore_missing_polish_task_from_snapshot(state, task_id):
                     events.append(
@@ -1319,12 +1479,23 @@ class CustomerServiceSchedulerRuntime:
                 events.append(failed_event)
                 continue
             mark_reply_sent(state, reply_id, send_result=send_result, now=now)
+            sent_reply = (state.get("ready_replies", {}) or {}).get(reply_id)
+            latency_trace = (
+                sent_reply.get("latency_trace")
+                if isinstance(sent_reply, dict) and isinstance(sent_reply.get("latency_trace"), dict)
+                else {}
+            )
+            latency_breakdown = _latency_breakdown_from_trace(latency_trace)
             self._clear_stale_reply_context(state, reply)
             completed_event = {
                 "event": "send_completed",
                 "reply_id": reply_id,
                 "target_name": reply.get("target_name"),
             }
+            if latency_trace:
+                completed_event["latency_trace"] = copy.deepcopy(latency_trace)
+            if latency_breakdown:
+                completed_event["latency_breakdown"] = latency_breakdown
             if send_observability:
                 completed_event["send_observability"] = send_observability
             events.append(completed_event)
@@ -1433,6 +1604,12 @@ class CustomerServiceSchedulerRuntime:
         rpa_lock = send_meta.get("rpa_lock")
         if isinstance(rpa_lock, dict):
             observability["rpa_lock"] = copy.deepcopy(rpa_lock)
+        timing = send_payload.get("timing")
+        if isinstance(timing, dict):
+            observability["timing"] = copy.deepcopy(timing)
+        send_timing = send_meta.get("timing") if isinstance(send_meta, dict) else {}
+        if isinstance(send_timing, dict):
+            observability["send_timing"] = copy.deepcopy(send_timing)
         return observability
 
 
@@ -1746,6 +1923,7 @@ def plan_reply_with_listen_workflow(
     if not reply_text:
         return {"ok": False, "reason": "empty_planned_reply", "event": event}
     conversation_context_update = event.get("conversation_context_update") if isinstance(event.get("conversation_context_update"), dict) else {}
+    latency_trace = _planner_event_latency_trace(event)
     return {
         "ok": True,
         "target_name": str(target_config.name),
@@ -1760,6 +1938,7 @@ def plan_reply_with_listen_workflow(
         "task_id": task.get("task_id"),
         "capture_id": capture.get("capture_id"),
         "conversation_context_update": conversation_context_update,
+        "latency_trace": latency_trace,
     }
 
 
@@ -1831,12 +2010,15 @@ def polish_reply_with_listen_workflow(
         decision["visible_reply_owner"] = str(decision.get("visible_reply_owner") or "brain")
     decision["final_visible_llm_polish"] = final_polish
     decision["final_visible_llm_polish_degraded"] = degraded
+    latency_trace = _planner_event_latency_trace(event)
     return {
         "ok": True,
         "reply_text": reply_text,
         "decision": decision,
         "event": event,
         "degraded": degraded,
+        "duration_seconds": final_polish.get("duration_seconds"),
+        "latency_trace": latency_trace,
     }
 
 
@@ -3210,14 +3392,29 @@ class ManagedListenerSchedulerBridge:
         return freshness
 
     def _send_reply(self, reply: dict[str, Any]) -> dict[str, Any]:
+        send_reply_started_at = time.time()
+        send_reply_started_iso = time.strftime("%Y-%m-%dT%H:%M:%S", time.localtime(send_reply_started_at))
+
+        def _finish(payload: dict[str, Any]) -> dict[str, Any]:
+            finished_at = time.time()
+            if isinstance(payload, dict):
+                timing = payload.get("timing") if isinstance(payload.get("timing"), dict) else {}
+                payload["timing"] = {
+                    **timing,
+                    "send_reply_started_at": send_reply_started_iso,
+                    "send_reply_finished_at": time.strftime("%Y-%m-%dT%H:%M:%S", time.localtime(finished_at)),
+                    "send_reply_duration_seconds": round(max(0.0, finished_at - send_reply_started_at), 4),
+                }
+            return payload
+
         capture = self._capture_for_reply(reply)
         if not capture:
-            return {"ok": False, "verified": False, "reason": "capture_missing_before_send"}
+            return _finish({"ok": False, "verified": False, "reason": "capture_missing_before_send"})
         envelope_failure = ready_reply_session_envelope_failure(reply, capture)
         reply_target_name = str(reply.get("target_name") or "").strip()
         capture_target_name = str(capture.get("target_name") or "").strip()
         if envelope_failure:
-            return {
+            return _finish({
                 "ok": False,
                 "verified": False,
                 "reason": envelope_failure,
@@ -3228,7 +3425,7 @@ class ManagedListenerSchedulerBridge:
                 "message_content_digest": reply.get("message_content_digest"),
                 "capture_message_content_digest": capture.get("message_content_digest"),
                 "capture_ids": reply.get("capture_ids"),
-            }
+            })
         target = self._target_for_session(
             {
                 "target_name": reply_target_name,
@@ -3238,10 +3435,10 @@ class ManagedListenerSchedulerBridge:
         )
         reply_text = str(reply.get("reply_text") or "").strip()
         if not reply_text:
-            return {"ok": False, "verified": False, "reason": "empty_reply_text"}
+            return _finish({"ok": False, "verified": False, "reason": "empty_reply_text"})
         ownership_failure = brain_first_ready_reply_ownership_failure(reply)
         if ownership_failure:
-            return {"ok": False, "verified": False, "reason": ownership_failure}
+            return _finish({"ok": False, "verified": False, "reason": ownership_failure})
         verified = self._workflow["send_reply_with_optional_multi_bubble"](
             connector=self.connector,
             target=target,
@@ -3249,7 +3446,7 @@ class ManagedListenerSchedulerBridge:
             config=self.config,
         )
         if not verified.get("verified"):
-            return {"ok": False, "verified": False, "reason": "send_not_verified", "send_result": verified}
+            return _finish({"ok": False, "verified": False, "reason": "send_not_verified", "send_result": verified})
         batch = list(capture.get("batch") or [])
         overflow = list(capture.get("overflow_messages") or [])
         reply_trace_id = self._workflow["build_reply_trace_id"](target.name, batch, reply_text)
@@ -3316,11 +3513,11 @@ class ManagedListenerSchedulerBridge:
                 self._workflow["append_audit"](self.audit_path, audit_event)
             except Exception as exc:  # noqa: BLE001
                 post_send_warning = f"{post_send_warning}; audit_append_failed: {exc!r}".strip("; ")
-        return {
+        return _finish({
             "ok": True,
             "verified": True,
             "reply_trace_id": reply_trace_id,
             "send_result": verified,
             "audit_event": audit_event,
             "post_send_warning": post_send_warning,
-        }
+        })

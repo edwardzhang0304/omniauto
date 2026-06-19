@@ -7,6 +7,7 @@
 当前 RPA 控制层优化说明：
 
 - [`ai_customer_service_acceptance_hardening_20260617.md`](ai_customer_service_acceptance_hardening_20260617.md)：微信 AI 客服双会话验收加固方案，区分 prompt-send RPA 失败、reply-send RPA 失败和 Brain no-visible，保证验收报告不混淆排障方向。
+- [`ai_customer_service_latency_optimization_master_plan_20260619.md`](ai_customer_service_latency_optimization_master_plan_20260619.md)：微信 AI 客服端到端速度优化总纲，按 P0-P5 排序推进耗时埋点、短句 Brain profile、RPA 发送、OCR 捕获和双会话调度优化。
 - [`add_friend_rpa_adaptive_delivery_plan_20260617.md`](add_friend_rpa_adaptive_delivery_plan_20260617.md)：本轮 add_friend 自适应改造交付文档，定义布局模型、设备画像、语义定位、校准模式和验收矩阵。
 - [`add_friend_cli_contract_stability_plan_20260617.md`](add_friend_cli_contract_stability_plan_20260617.md)：add_friend Worker-facing CLI 契约稳定化方案，要求 `add-friend-entry-click-plan` 对外稳定、内部 Windows/macOS/DPI/OCR 适配可独立演进。
 - [`add_friend_rpa_adaptive_refactor_plan_20260617.md`](add_friend_rpa_adaptive_refactor_plan_20260617.md)：当前 add_friend RPA 自适应重构主文档，区分朋友 PR 原始路线、当前 Windows 主路线和后续重构方案。

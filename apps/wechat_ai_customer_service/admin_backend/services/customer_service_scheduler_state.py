@@ -31,6 +31,7 @@ from apps.wechat_ai_customer_service.message_identity import (
     normalize_repeatable_probe_text as canonical_normalize_repeatable_probe_text,
     occurrence_marker_for_message,
 )
+from apps.wechat_ai_customer_service.wechat_message_envelope import message_is_visual_or_media_ocr_noise
 
 
 STATE_VERSION = 2
@@ -175,6 +176,8 @@ def message_is_reply_input_candidate(
     if msg_type != "text":
         return False
     if not content:
+        return False
+    if message_is_visual_or_media_ocr_noise(message):
         return False
     sender = str(message.get("sender") or message.get("role") or "").strip().lower()
     if sender in SELF_MESSAGE_SENDERS and not capture_allows_self_messages(
@@ -907,6 +910,7 @@ def enqueue_pending_session(
     trace = session.get("latency_trace") if isinstance(session.get("latency_trace"), dict) else {}
     trace = {
         **trace,
+        "session_signal_detected_at": trace.get("session_signal_detected_at") or now,
         "unread_detected_at": trace.get("unread_detected_at") or now,
         "pending_enqueued_at": now,
     }
@@ -2061,6 +2065,7 @@ def _enqueue_ready_reply_from_payload(
                 else {}
             ),
             "ready_at": now,
+            "send_queue_entered_at": now,
         },
     }
     state.setdefault("ready_replies", {})[reply_id] = reply

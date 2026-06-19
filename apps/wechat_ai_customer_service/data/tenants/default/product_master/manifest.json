@@ -3,7 +3,7 @@
   "authority": "product_master",
   "category_id": "products",
   "tenant_id": "default",
-  "updated_at": "2026-06-05T23:09:08",
+  "updated_at": "2026-06-19T20:04:57",
   "items_path": "items",
   "compatibility": {
     "legacy_read_fallback": "knowledge_bases/products",

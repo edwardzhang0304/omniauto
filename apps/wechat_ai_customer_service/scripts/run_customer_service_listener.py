@@ -119,6 +119,7 @@ RPA_HUMANIZED_SEND_DEFAULTS = {
     "send_after_trigger_delay_max_ms": 760,
     "adaptive_speed_enabled": True,
     "fast_send_confirmation_enabled": True,
+    "input_fast_visual_confirm_enabled": True,
     "send_trigger_mode": "enter_only",
     "send_input_confirm_attempts": 3,
     "send_rate_min_interval_seconds": 0,
@@ -632,6 +633,15 @@ def load_rpa_humanized_send_settings(config_path: Path) -> dict[str, Any]:
             )
         ),
     )
+    settings["input_fast_visual_confirm_enabled"] = env_bool(
+        "WECHAT_WIN32_OCR_INPUT_FAST_VISUAL_CONFIRM",
+        default=bool(
+            settings.get(
+                "input_fast_visual_confirm_enabled",
+                RPA_HUMANIZED_SEND_DEFAULTS["input_fast_visual_confirm_enabled"],
+            )
+        ),
+    )
     settings["send_trigger_mode"] = normalize_send_trigger_mode(
         os.getenv("WECHAT_WIN32_OCR_SEND_TRIGGER_MODE")
         or settings.get("send_trigger_mode")
@@ -758,6 +768,12 @@ def normalize_rpa_humanized_send_settings(settings: dict[str, Any] | None) -> di
                 RPA_HUMANIZED_SEND_DEFAULTS["fast_send_confirmation_enabled"],
             )
         ),
+        "input_fast_visual_confirm_enabled": bool(
+            source.get(
+                "input_fast_visual_confirm_enabled",
+                RPA_HUMANIZED_SEND_DEFAULTS["input_fast_visual_confirm_enabled"],
+            )
+        ),
         "send_trigger_mode": normalize_send_trigger_mode(source.get("send_trigger_mode")),
         "send_input_confirm_attempts": positive_int(
             source.get("send_input_confirm_attempts"),
@@ -815,6 +831,7 @@ def apply_rpa_humanized_send_env(env: dict[str, str], settings: dict[str, Any]) 
         "WECHAT_WIN32_OCR_HUMANIZED_SEND_AFTER_TRIGGER_DELAY_MAX_MS": "send_after_trigger_delay_max_ms",
         "WECHAT_WIN32_OCR_HUMANIZED_ADAPTIVE_SPEED_ENABLED": "adaptive_speed_enabled",
         "WECHAT_WIN32_OCR_FAST_SEND_CONFIRMATION": "fast_send_confirmation_enabled",
+        "WECHAT_WIN32_OCR_INPUT_FAST_VISUAL_CONFIRM": "input_fast_visual_confirm_enabled",
         "WECHAT_WIN32_OCR_SEND_TRIGGER_MODE": "send_trigger_mode",
         "WECHAT_WIN32_OCR_SEND_INPUT_CONFIRM_ATTEMPTS": "send_input_confirm_attempts",
         "WECHAT_WIN32_OCR_SEND_MIN_INTERVAL_SECONDS": "send_rate_min_interval_seconds",

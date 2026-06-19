@@ -12,6 +12,7 @@ from __future__ import annotations
 from typing import Any
 
 from apps.wechat_ai_customer_service.admin_backend.services.raw_message_store import RawMessageStore
+from apps.wechat_ai_customer_service.wechat_message_envelope import message_is_visual_or_media_ocr_noise
 
 
 DEFAULT_MAX_ROUNDS = 12
@@ -72,6 +73,8 @@ class ConversationHistoryAssembler:
         # Group consecutive messages by same sender into rounds
         rounds: list[dict[str, Any]] = []
         for msg in messages:
+            if message_is_visual_or_media_ocr_noise(msg):
+                continue
             sender = str(msg.get("sender") or msg.get("sender_role") or "unknown")
             content = str(msg.get("content") or "").strip()
             if not content:
@@ -125,6 +128,8 @@ class ConversationHistoryAssembler:
         lines: list[str] = []
         for msg in batch:
             if not isinstance(msg, dict):
+                continue
+            if message_is_visual_or_media_ocr_noise(msg):
                 continue
             content = str(msg.get("content") or "").strip()
             if not content:

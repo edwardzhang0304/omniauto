@@ -1,20 +1,23 @@
 {
   "schema_version": 1,
-  "compiled_at": "2026-06-09T10:53:12",
-  "source_root": "D:\\AI\\omniauto\\apps\\wechat_ai_customer_service\\data\\tenants\\ai_experience_pool_post_refactor_probe\\knowledge_bases",
+  "compiled_at": "2026-06-20T03:40:41",
+  "source_root": "D:\\AI\\omniauto\\apps\\wechat_ai_customer_service\\data\\tenants\\knowledge_contamination_guard_test\\knowledge_bases",
   "counts": {
-    "categories": 6,
+    "categories": 9,
     "category_items": {
+      "global_guidelines": 2,
       "chats": 0,
+      "risk_control": 2,
       "policies": 0,
       "erp_exports": 0,
+      "reply_style": 2,
       "product_faq": 0,
       "product_rules": 0,
       "product_explanations": 0
     },
     "products": 0,
     "faq": 0,
-    "style_examples": 0
+    "style_examples": 2
   },
   "note": "Compatibility export only. Product facts come from product_master; formal runtime source is shared_knowledge plus tenant knowledge_bases and product_item_knowledge."
 }

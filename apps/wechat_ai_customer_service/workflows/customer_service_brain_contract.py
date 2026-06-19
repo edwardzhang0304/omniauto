@@ -441,6 +441,26 @@ SOCIAL_CLOSING_STALE_CONTEXT_TERMS = (
     "MPV",
     "mpv",
 )
+SOCIAL_TURN_STALE_BUSINESS_CONTEXT_TERMS = tuple(
+    dict.fromkeys(
+        SOCIAL_CLOSING_STALE_CONTEXT_TERMS
+        + BUSINESS_REDIRECT_TERMS
+        + SOCIAL_COMPANION_BUSINESS_PULLBACK_TERMS
+        + UNSUPPORTED_INFO_COLLECTION_TERMS
+        + (
+            "资料",
+            "配置",
+            "产品",
+            "商品",
+            "型号",
+            "规格",
+            "清单",
+            "方案",
+            "门店",
+            "销售",
+        )
+    )
+)
 UNNECESSARY_HANDOFF_VISIBLE_TERMS = ("转人工", "人工客服", "人工帮", "负责人", "专员")
 INTERNAL_VISIBLE_MARKER_TERMS = (
     "【内部处理】",
@@ -1190,6 +1210,13 @@ def verify_brain_reply_quality(
         stale_context_check = check_social_turn_over_carries_stale_business_context(question, clean_reply)
         if stale_context_check.get("error"):
             errors.append(str(stale_context_check["error"]))
+        unsupported_context_check = check_social_turn_revives_unsupported_business_context(
+            question,
+            clean_reply,
+            evidence_pack or {},
+        )
+        if unsupported_context_check.get("error"):
+            errors.append(str(unsupported_context_check["error"]))
         if len(clean_reply) > int(cfg.get("social_reply_soft_max_chars") or 80):
             warnings.append("social_reply_too_long")
     elif is_thin_social_or_common_sense_reply(question, clean_reply, plan):
@@ -1714,6 +1741,111 @@ def check_social_turn_over_carries_stale_business_context(question: str, reply: 
     if contains_any(r, SOCIAL_CLOSING_STALE_CONTEXT_TERMS):
         return {"error": "social_closing_over_carries_stale_business_context"}
     return {}
+
+
+def check_social_turn_revives_unsupported_business_context(
+    question: str,
+    reply: str,
+    evidence_pack: dict[str, Any],
+) -> dict[str, Any]:
+    """Prevent pure social turns from reviving old unsupported entities.
+
+    This check is intentionally generic. It does not know any account, product,
+    image text, or industry-specific bad token. It only blocks a Brain draft
+    that answers a greeting/summon by re-opening business/entity context that
+    the current customer turn did not ask to continue and no authority source
+    supports.
+    """
+
+    q = normalize_space(strip_nonsemantic_runtime_markers(question))
+    r = normalize_space(reply)
+    if not q or not r:
+        return {}
+    obligation = classify_social_reply_obligation(q)
+    category = str(obligation.get("category") or "")
+    if category not in {"greeting", "summon_or_chase", "social_short", "thanks", "farewell"}:
+        return {}
+    if social_companion_turn_has_real_business_intent(q):
+        return {}
+    if social_turn_explicitly_continues_prior_context(q):
+        return {}
+    if social_turn_has_valid_delay_followup_continuity(q, r, evidence_pack):
+        return {}
+    if contains_any(r, SOCIAL_TURN_STALE_BUSINESS_CONTEXT_TERMS):
+        return {"error": "social_turn_revived_unsupported_business_context"}
+    if reply_introduces_unbacked_entity_not_in_question(q, r):
+        return {"error": "social_turn_revived_unsupported_business_context"}
+    return {}
+
+
+def social_turn_explicitly_continues_prior_context(question: str) -> bool:
+    return contains_any(
+        question,
+        (
+            "接着",
+            "继续",
+            "刚才",
+            "前面",
+            "上面",
+            "上一条",
+            "之前",
+            "这台",
+            "那台",
+            "这个",
+            "那个",
+            "按刚才",
+            "接着说",
+            "继续说",
+        ),
+    )
+
+
+def social_turn_has_valid_delay_followup_continuity(question: str, reply: str, evidence_pack: dict[str, Any]) -> bool:
+    state = extract_conversation_interaction_state(evidence_pack)
+    if str(state.get("suggested_reply_posture") or "") != "acknowledge_delay_then_continue":
+        return False
+    return check_delay_followup_context_continuity(question, reply, evidence_pack) == {}
+
+
+def reply_introduces_unbacked_entity_not_in_question(question: str, reply: str) -> bool:
+    compact_question = compact_entity_text(question)
+    for match in re.finditer(r"[A-Za-z][A-Za-z0-9]*(?:[\s_\-/]+[A-Za-z0-9]+)*", str(reply or "")):
+        token = compact_entity_text(match.group(0))
+        if len(token) < 4 or not re.search(r"[a-zA-Z]", token):
+            continue
+        if token in compact_question:
+            continue
+        if is_common_social_reply_fragment(token):
+            continue
+        return True
+    return False
+
+
+def is_common_social_reply_fragment(fragment: str) -> bool:
+    compact = compact_entity_text(fragment)
+    if not compact:
+        return True
+    if re.fullmatch(r"[0-9]+", compact):
+        return True
+    common = (
+        "在的",
+        "在呢",
+        "您说",
+        "你说",
+        "我在",
+        "您好",
+        "你好",
+        "方便",
+        "看到",
+        "刚看到",
+        "随时",
+        "这边",
+        "可以",
+        "没问题",
+        "马上",
+        "好的",
+    )
+    return any(compact_entity_text(item) in compact or compact in compact_entity_text(item) for item in common)
 
 
 def check_over_eager_business_redirect_after_social_fatigue(question: str, reply: str, evidence_pack: dict[str, Any]) -> dict[str, Any]:
@@ -3252,6 +3384,7 @@ def build_quality_repair_instruction(*, errors: list[str], warnings: list[str], 
         "BrainPlan未通过通用质量自检。请重新理解当前客户消息并修复回复，必须先正面回答当前问题；"
         "如果客户只是问候、催促、感谢或告别，也必须由Brain生成一句简短自然的客户可见回复，不能空回复、不能转人工、不能机械沉默；"
         "如果失败项包含thin_social_or_common_sense_reply，说明低风险闲聊/常识回复太薄；请先自然回答当前问题，再根据会话上下文轻承接，不要机械拉业务，不要编造事实；"
+        "如果失败项包含social_turn_revived_unsupported_business_context，说明客户当前只是问候/召唤/感谢/告别，回复却主动复活了旧业务或无权威来源的实体；请只简短回应当前社交消息，除非客户本轮明确说继续刚才话题；"
         "如果客户使用“刚才/前面/这两台/直接挑”等指代表达，必须结合conversation.context、history_text和product_master候选延续上一轮需求，不能只回复“确认/稍等”；"
         "如果失败项包含direct_decision_request_asked_new_need_instead_of_choice，说明客户已经要求你基于现有上下文直接做选择；请用product_master候选和会话上下文给出明确主推/备选及一句理由，不能继续泛泛反问预算、用途或车型偏好；"
         "如果失败项包含relative_context_product_drift或missing_relative_context_product_reference，必须只围绕recent_product_ids/上一轮可见推荐商品回答，不能换成新的商品候选；"
