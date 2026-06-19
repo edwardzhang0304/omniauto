@@ -307,6 +307,14 @@ def check_unknown_business_question_handoffs() -> None:
         "weak policy answer match should not count as authoritative evidence",
     )
 
+    product_pack = resolve("包装纸箱多少钱？")
+    assert_has_item(product_pack, "products", "packing_carton_ct_50")
+    assert_equal(product_pack["safety"]["must_handoff"], False, "normal packaging product question should stay auto-replyable")
+
+    address_pack = resolve("老板，包装纸箱是什么颜色？")
+    assert_has_item(address_pack, "products", "packing_carton_ct_50")
+    assert_equal(address_pack["safety"]["must_handoff"], False, "addressing the merchant as boss should not be treated as private preference")
+
 
 def check_custom_category_can_return_evidence() -> None:
     root = prepare_custom_root()

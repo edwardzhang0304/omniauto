@@ -2817,6 +2817,7 @@ def slim_brain_input_for_prompt(brain_input: dict[str, Any], *, settings: dict[s
                 "runtime_rag_hit_count",
                 "rag_hit_count",
                 "excluded_ai_experience_pool_hit_count",
+                "ai_experience_pool_reference_hit_count",
             )
             if key in audit_summary
         },
@@ -3153,14 +3154,28 @@ def compact_ai_experience_pool_for_prompt(value: Any) -> dict[str, Any]:
     if not isinstance(value, dict):
         return {}
     excluded = int(value.get("excluded_hit_count") or 0)
+    reference_hit_count = int(value.get("reference_hit_count") or 0)
     source = value.get("source") if isinstance(value.get("source"), dict) else {}
     hits = source.get("hits") if isinstance(source.get("hits"), list) else []
-    if excluded <= 0 and not hits:
+    trace = value.get("trace") if isinstance(value.get("trace"), dict) else {}
+    if excluded <= 0 and reference_hit_count <= 0 and not hits:
         return {}
     return {
         "authority_level": "ai_experience_pool",
         "can_authorize_reply_content": False,
         "excluded_hit_count": excluded,
+        "reference_hit_count": reference_hit_count,
+        "reference_ids": compact_prompt_value(trace.get("reference_ids", []), max_text_chars=80, max_list_items=3),
+        "exclusion_reasons": compact_prompt_value(trace.get("exclusion_reasons", {}), max_text_chars=80, max_list_items=4),
+        "usage_policy": clip(
+            str(value.get("runtime_usage_policy") or "AI经验池只可辅助场景理解、跟进策略和话术风格，不能授权事实或承诺。"),
+            140,
+        ),
+        "hits": [
+            compact_prompt_value(item, max_text_chars=120, max_list_items=4)
+            for item in hits[:2]
+            if isinstance(item, dict)
+        ],
     }
 
 
@@ -3542,6 +3557,7 @@ POST_REPAIR_HARD_DETERMINISTIC_QUALITY_ERRORS = {
     "trade_in_final_price_missing_verification_boundary",
 }
 POST_REPAIR_SOFT_DETERMINISTIC_QUALITY_ERRORS = {
+    "reply_too_long",
     "missing_direct_price_response",
     "missing_referenced_product_in_reply",
     "asks_new_need_instead_of_answering_price",
@@ -4164,6 +4180,8 @@ def validate_plan_against_evidence(plan: dict[str, Any], evidence_pack: dict[str
             if not source_ids:
                 errors.append(f"product_fact_missing_source_id:{fact_type}")
             for source_id in source_ids:
+                if source_id == "multiple" and len(normalized_product_ids) >= 2:
+                    continue
                 if normalize_source_id(source_id) not in normalized_product_ids:
                     errors.append(f"product_fact_source_not_in_evidence:{source_id}")
         if fact_type in POLICY_FACT_TYPES and source_level in {"formal_knowledge", "product_scoped_formal"}:

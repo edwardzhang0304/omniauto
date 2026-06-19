@@ -331,7 +331,7 @@ class RagService:
             from apps.wechat_ai_customer_service.workflows.rag_experience_store import RagExperienceStore
         except Exception:
             return []
-        store = RagExperienceStore(tenant_id=self.tenant_id)
+        store = RagExperienceStore(tenant_id=self.tenant_id, root=self.sources_root.parent / "rag_experience")
         chunks: list[dict[str, Any]] = []
         for item in store.list_retrievable(limit=1000):
             text = build_experience_chunk_text(item)
@@ -355,6 +355,41 @@ class RagService:
                     "char_count": len(text),
                     "status": "active",
                     "quality": quality,
+                    "created_at": item.get("created_at") or now(),
+                }
+            )
+        return chunks
+
+    def iter_experience_reference_chunks(self) -> list[dict[str, Any]]:
+        try:
+            from apps.wechat_ai_customer_service.workflows.rag_experience_store import RagExperienceStore
+        except Exception:
+            return []
+        store = RagExperienceStore(tenant_id=self.tenant_id, root=self.sources_root.parent / "rag_experience")
+        chunks: list[dict[str, Any]] = []
+        for item in store.list_reference_candidates(limit=1000):
+            text = build_experience_chunk_text(item)
+            if not text.strip():
+                continue
+            experience_id = str(item.get("experience_id") or "")
+            hit = item.get("rag_hit", {}) or {}
+            quality = item.get("quality", {}) if isinstance(item.get("quality"), dict) else {}
+            chunks.append(
+                {
+                    "chunk_id": "chunk_" + stable_digest(f"rag_experience_reference:{experience_id}:{text}", 16),
+                    "source_id": experience_id,
+                    "tenant_id": self.tenant_id,
+                    "layer": "rag_experience",
+                    "source_type": "rag_experience",
+                    "category": "rag_experience",
+                    "product_id": hit.get("product_id") or "",
+                    "source_path": str(store.path),
+                    "chunk_index": 0,
+                    "text": text,
+                    "char_count": len(text),
+                    "status": "active",
+                    "quality": quality,
+                    "reference_only": True,
                     "created_at": item.get("created_at") or now(),
                 }
             )
@@ -520,6 +555,54 @@ class RagService:
             "structured_priority": True,
         }
 
+    def search_experience_references(self, query: str, *, limit: int = 3) -> dict[str, Any]:
+        query_text = str(query or "").strip()
+        if not query_text:
+            return {"ok": True, "query": query_text, "hits": [], "confidence": 0.0, "reference_only": True}
+        query_profile = build_query_profile(query_text)
+        high_risk_terms = rag_terms("high_risk_terms")
+        hits: list[dict[str, Any]] = []
+        for chunk in self.iter_experience_reference_chunks():
+            entry = build_index_entry(chunk, high_risk_terms=high_risk_terms)
+            scoring = score_entry(query_text, query_profile, entry, product_id="")
+            score = float(scoring.get("final", 0.0))
+            if score <= 0:
+                continue
+            hits.append(
+                {
+                    "chunk_id": entry.get("chunk_id"),
+                    "source_id": entry.get("source_id"),
+                    "score": round(score, 4),
+                    "retrieval_mode": RETRIEVAL_MODE,
+                    "scoring": scoring,
+                    "text": entry.get("text"),
+                    "source_path": entry.get("source_path"),
+                    "layer": entry.get("layer"),
+                    "source_type": entry.get("source_type"),
+                    "category": entry.get("category"),
+                    "product_id": entry.get("product_id"),
+                    "risk_terms": entry.get("risk_terms", []),
+                    "reference_only": True,
+                    "rag_can_authorize": False,
+                }
+            )
+        hits.sort(key=lambda item: item["score"], reverse=True)
+        hits = hits[: max(1, min(int(limit or 3), 10))]
+        confidence = hits[0]["score"] if hits else 0.0
+        return {
+            "ok": True,
+            "query": query_text,
+            "query_profile": compact_query_profile(query_profile),
+            "tenant_id": self.tenant_id,
+            "hits": hits,
+            "confidence": round(float(confidence), 4),
+            "confidence_band": confidence_band(float(confidence)),
+            "retrieval_mode": RETRIEVAL_MODE,
+            "rag_can_authorize": False,
+            "structured_priority": True,
+            "reference_only": True,
+        }
+
     def evidence(
         self,
         query: str,
@@ -533,12 +616,17 @@ class RagService:
             product_id=str(context.get("last_product_id") or context.get("product_id") or ""),
             limit=limit,
         )
+        reference_result = self.search_experience_references(query, limit=min(3, max(1, int(limit or 5))))
+        hits = list(result.get("hits", []) or [])
+        hits.extend(reference_result.get("hits", []) or [])
+        confidence = max(float(result.get("confidence") or 0.0), float(reference_result.get("confidence") or 0.0))
         return {
             "enabled": True,
             "query": result.get("query"),
             "tenant_id": self.tenant_id,
-            "hits": result.get("hits", []),
-            "confidence": result.get("confidence", 0.0),
+            "hits": hits[: max(1, min(int(limit or 5), 20)) + min(3, len(reference_result.get("hits", []) or []))],
+            "confidence": round(confidence, 4),
+            "reference_hit_count": len(reference_result.get("hits", []) or []),
             "rag_can_authorize": False,
             "structured_priority": True,
         }

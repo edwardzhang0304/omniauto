@@ -26,6 +26,7 @@ QUALITY_RETRIEVAL_MIN_SCORE = 0.52
 QUALITY_RETRIEVAL_MIN_HIT_SCORE = 0.32
 QUALITY_REPEATABLE_MIN_HIT_SCORE = 0.24
 QUALITY_REPEATABLE_REPLY_COUNT = 3
+REFERENCE_CANDIDATE_BANDS = {"medium", "high"}
 WINDOWS_TRANSIENT_WRITE_ERRNOS = {13, 22}
 WINDOWS_TRANSIENT_WRITE_WINERRORS = {5, 32, 33}
 QUALITY_BLOCK_ACTION_TERMS = {
@@ -153,6 +154,17 @@ class RagExperienceStore:
                 continue
             enriched = with_quality(item)
             if experience_is_retrievable(enriched):
+                records.append(enriched)
+        records.sort(key=lambda item: str(item.get("updated_at") or item.get("created_at") or ""), reverse=True)
+        return records[: max(1, min(int(limit or 500), MAX_RECORDS))]
+
+    def list_reference_candidates(self, *, limit: int = 500) -> list[dict[str, Any]]:
+        records = []
+        for item in self.list_for_counts():
+            if str(item.get("status") or "active") != "active":
+                continue
+            enriched = with_quality(item)
+            if experience_is_reference_candidate(enriched):
                 records.append(enriched)
         records.sort(key=lambda item: str(item.get("updated_at") or item.get("created_at") or ""), reverse=True)
         return records[: max(1, min(int(limit or 500), MAX_RECORDS))]
@@ -896,6 +908,18 @@ def experience_is_retrievable(item: dict[str, Any]) -> bool:
     # AI经验池 is a governance/distribution pool. Runtime content evidence must
     # come from product master, formal knowledge, or current conversation facts.
     return False
+
+
+def experience_is_reference_candidate(item: dict[str, Any]) -> bool:
+    # Reference candidates may only guide style/scenario understanding. They stay
+    # out of runtime content evidence and are filtered again before prompting.
+    if str(item.get("source") or "") == "intake":
+        return False
+    quality = item.get("quality") if isinstance(item.get("quality"), dict) else {}
+    signals = quality.get("signals") if isinstance(quality.get("signals"), dict) else {}
+    if str(quality.get("band") or "") not in REFERENCE_CANDIDATE_BANDS:
+        return False
+    return bool(signals.get("quality_allows_retrieval") and signals.get("review_allows_retrieval"))
 
 
 def experience_review_allows_retrieval(item: dict[str, Any]) -> bool:

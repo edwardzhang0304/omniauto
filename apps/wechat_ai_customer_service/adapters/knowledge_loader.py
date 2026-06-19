@@ -38,6 +38,10 @@ from apps.wechat_ai_customer_service.platform_understanding_rules import (  # no
     rag_terms,
     string_map,
 )
+try:
+    from customer_service_brain_contract import strip_nonsemantic_runtime_markers  # noqa: E402
+except Exception:  # pragma: no cover - keep knowledge loading usable in narrow script contexts
+    strip_nonsemantic_runtime_markers = None  # type: ignore[assignment]
 
 PRODUCT_SCOPED_CATEGORY_IDS = {"product_faq", "product_rules", "product_explanations"}
 RAG_SOFT_REFERENCE_MIN_SCORE = 0.18
@@ -80,9 +84,22 @@ def build_evidence_pack(
     manifest_path: Path | None = None,
     context: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
+    semantic_text = semantic_text_for_evidence_matching(text)
     if manifest_path is not None:
-        return build_structured_evidence_pack(text, manifest_path=manifest_path, context=context)
-    return build_category_evidence_pack(text, context=context)
+        pack = build_structured_evidence_pack(semantic_text, manifest_path=manifest_path, context=context)
+    else:
+        pack = build_category_evidence_pack(semantic_text, context=context)
+    if semantic_text != str(text or ""):
+        pack["raw_input_text"] = str(text or "")
+        pack["input_text_sanitized"] = True
+    return pack
+
+
+def semantic_text_for_evidence_matching(text: str) -> str:
+    raw = str(text or "")
+    if callable(strip_nonsemantic_runtime_markers):
+        return str(strip_nonsemantic_runtime_markers(raw) or "").strip()
+    return raw.strip()
 
 
 def build_structured_evidence_pack(
@@ -226,13 +243,58 @@ def build_rag_runtime_evidence(
     context: dict[str, Any],
 ) -> dict[str, Any]:
     if not should_use_rag(intent_tags, evidence, text=text):
-        return {"enabled": True, "skipped": True, "reason": "structured_evidence_sufficient", "hits": []}
+        return build_ai_experience_reference_evidence_when_rag_skipped(text)
     try:
         rag = RagService().evidence(text, context=context, limit=5)
     except Exception as exc:
         return {"enabled": True, "ok": False, "error": repr(exc), "hits": [], "rag_can_authorize": False, "structured_priority": True}
     rag["ok"] = True
     return rag
+
+
+def build_ai_experience_reference_evidence_when_rag_skipped(text: str) -> dict[str, Any]:
+    payload = {"enabled": True, "skipped": True, "reason": "structured_evidence_sufficient", "hits": []}
+    if not should_use_ai_experience_reference(text):
+        return payload
+    try:
+        reference = RagService().search_experience_references(text, limit=3)
+    except Exception as exc:
+        payload.update({"ok": False, "reference_error": repr(exc)})
+        return payload
+    payload["ok"] = True
+    payload["reference_hit_count"] = len(reference.get("hits", []) or [])
+    payload["hits"] = reference.get("hits", []) or []
+    if payload["hits"]:
+        payload["reason"] = "structured_evidence_sufficient_with_ai_experience_reference"
+    return payload
+
+
+def should_use_ai_experience_reference(text: str) -> bool:
+    normalized = normalize_text(text)
+    if len(normalized) < 4:
+        return False
+    markers = (
+        "怎么回复",
+        "客户",
+        "用户",
+        "买家",
+        "嫌",
+        "接受不了",
+        "担心",
+        "比较",
+        "推荐",
+        "建议",
+        "挑",
+        "适合",
+        "预算",
+        "用途",
+        "家人",
+        "老婆",
+        "老公",
+        "新手",
+        "先看看",
+    )
+    return any(marker in normalized for marker in markers)
 
 
 def allow_soft_rag_reference(

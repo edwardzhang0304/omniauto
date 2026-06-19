@@ -247,4 +247,6 @@ def runtime_knowledge_roots(tenant_id: str | None = None) -> list[Path]:
     shared_cache_root = shared_runtime_cache_root()
     if (shared_cache_root / "registry.json").exists() and shared_runtime_cache_valid(tenant_id=tenant_id):
         roots.append(shared_cache_root)
+    elif (SHARED_KNOWLEDGE_ROOT / "registry.json").exists():
+        roots.append(SHARED_KNOWLEDGE_ROOT)
     return roots

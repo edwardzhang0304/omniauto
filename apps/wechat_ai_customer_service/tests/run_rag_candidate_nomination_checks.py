@@ -93,6 +93,10 @@ def check_candidate_suggested_creates_pending_candidate_only() -> bool:
             return False
         if review.get("rag_experience_id") != record["experience_id"]:
             return False
+        if (candidate.get("proposal") or {}).get("formal_patch") and candidate.get("can_promote") is False:
+            return False
+        if (tenant_review_candidates_root(TEST_TENANT) / "approved" / f"{candidate_id}.json").exists():
+            return False
         updated = next(item for item in store.list(status="all", limit=20) if item.get("experience_id") == record["experience_id"])
         nomination = updated.get("candidate_nomination") or {}
         governance = updated.get("governance") or {}

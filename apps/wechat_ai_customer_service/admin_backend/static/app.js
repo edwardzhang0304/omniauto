@@ -345,6 +345,14 @@ function apiHeaders(extra = {}) {
   return headers;
 }
 
+function isImplicitLocalSession(auth = state.auth) {
+  return auth?.strict === false && auth?.authenticated === false && auth?.session?.source === "implicit";
+}
+
+function hasLocalConsoleAccess() {
+  return Boolean(state.authToken || isImplicitLocalSession());
+}
+
 async function apiGet(path) {
   const response = await fetch(path, {headers: apiHeaders()});
   if (!response.ok) throw new Error(await responseErrorMessage(response, path));
@@ -390,6 +398,9 @@ function initializeLocalLogin() {
   document.getElementById("local-init-form")?.addEventListener("submit", (event) => initializeLocalAccount(event).catch((error) => showInitMessage(error.message)));
   document.getElementById("local-init-back")?.addEventListener("click", resetLocalInitialization);
   prepareCloudGateForLogin({silent: true, force: true}).catch(() => {});
+  bootstrapImplicitLocalSession().catch((error) => {
+    console.warn("implicit local login bootstrap failed", error);
+  });
   if (state.authToken) {
     prepareCloudGateForLogin({silent: false, force: true})
       .then((allowed) => {
@@ -408,6 +419,19 @@ function initializeLocalLogin() {
         lockLocalConsole();
       });
   }
+}
+
+async function bootstrapImplicitLocalSession() {
+  if (state.authToken) return;
+  const allowed = await prepareCloudGateForLogin({silent: true, force: true});
+  if (!allowed || state.authToken) return;
+  const auth = await apiGet("/api/auth/me").catch(() => null);
+  if (!isImplicitLocalSession(auth?.auth)) return;
+  state.auth = auth.auth;
+  document.body.classList.remove("auth-locked");
+  resetLocalLoginChallenge({silent: true});
+  hideLoginMessage();
+  await bootstrapAuthenticatedApp();
 }
 
 async function loginLocal(form) {
@@ -748,13 +772,13 @@ function clearCloudGatePrepareRetry() {
 }
 
 function scheduleCloudGatePrepareRetry() {
-  if (state.authToken) return;
+  if (hasLocalConsoleAccess()) return;
   if (!state.cloudLoginLocked) return;
   if (state.cloudGateRetryTimer) return;
   const retryDelayMs = 5000 + Math.floor(Math.random() * 2000);
   state.cloudGateRetryTimer = setTimeout(() => {
     state.cloudGateRetryTimer = null;
-    if (state.authToken || !state.cloudLoginLocked) return;
+    if (hasLocalConsoleAccess() || !state.cloudLoginLocked) return;
     prepareCloudGateForLogin({silent: true, force: true}).catch(() => {});
   }, retryDelayMs);
 }
@@ -1787,7 +1811,7 @@ function renderCustomerServiceSessionList() {
 }
 
 async function refreshCustomerServiceRuntime(options = {}) {
-  if (!state.authToken) return;
+  if (!hasLocalConsoleAccess()) return;
   try {
     const payload = await apiGet("/api/customer-service/runtime/status");
     state.customerServiceRuntime = payload.item || {};
@@ -1798,7 +1822,7 @@ async function refreshCustomerServiceRuntime(options = {}) {
 }
 
 async function refreshRecorderRuntime(options = {}) {
-  if (!state.authToken) return;
+  if (!hasLocalConsoleAccess()) return;
   try {
     const payload = await apiGet("/api/recorder/runtime/status");
     state.recorderRuntimeStatus = payload.item || {};
@@ -1861,7 +1885,7 @@ function renderCustomerServiceRuntime() {
             <strong>客服 · ${escapeHtml(customerVisualStateLabel)}</strong>
           </div>
           <div class="float-actions">
-            <button class="primary-button iconish-button customer-runtime-start" title="启动微信自动客服" ${!state.authToken || customerRuntime.running || state.customerServiceRuntimeBusy ? "disabled" : ""}>开</button>
+            <button class="primary-button iconish-button customer-runtime-start" title="启动微信自动客服" ${!hasLocalConsoleAccess() || customerRuntime.running || state.customerServiceRuntimeBusy ? "disabled" : ""}>开</button>
             <button class="secondary-button iconish-button customer-runtime-stop" title="停止微信自动客服" ${!customerRuntime.running || state.customerServiceRuntimeBusy ? "disabled" : ""}>停</button>
           </div>
         </div>
@@ -1871,7 +1895,7 @@ function renderCustomerServiceRuntime() {
             <strong>记录 · ${escapeHtml(recorderStateLabel)}</strong>
           </div>
           <div class="float-actions">
-            <button class="primary-button iconish-button recorder-runtime-start" title="启动AI智能记录员监听" ${!state.authToken || !recorderEnabled || recorderRunning || state.recorderRuntimeBusy ? "disabled" : ""}>开</button>
+            <button class="primary-button iconish-button recorder-runtime-start" title="启动AI智能记录员监听" ${!hasLocalConsoleAccess() || !recorderEnabled || recorderRunning || state.recorderRuntimeBusy ? "disabled" : ""}>开</button>
             <button class="secondary-button iconish-button recorder-runtime-stop" title="停止AI智能记录员监听" ${!recorderRunning || state.recorderRuntimeBusy ? "disabled" : ""}>停</button>
           </div>
         </div>
@@ -2064,7 +2088,7 @@ async function stopCustomerServiceRuntime() {
 
 function scheduleCustomerServiceRuntimePolling() {
   if (state.customerServiceRuntimeTimer) clearInterval(state.customerServiceRuntimeTimer);
-  if (!state.authToken) return;
+  if (!hasLocalConsoleAccess()) return;
   const refreshBothRuntimeStatuses = async () => {
     await Promise.all([
       refreshCustomerServiceRuntime({silent: true, skipRender: true}),
@@ -2102,7 +2126,7 @@ async function saveCustomerServiceSettings() {
 }
 
 async function refreshCustomerServiceSessions(options = {}) {
-  if (!state.authToken) return;
+  if (!hasLocalConsoleAccess()) return;
   try {
     const payload = await apiGet("/api/customer-service/sessions");
     state.customerServiceSessions = payload.items || [];
@@ -2203,7 +2227,7 @@ async function applyCustomerServiceSessionSelection(mode = "all") {
 }
 
 async function loadCustomerProfiles() {
-  if (!state.authToken) return;
+  if (!hasLocalConsoleAccess()) return;
   try {
     const payload = await apiGet("/api/customers");
     state.customerProfiles = payload.items || [];
@@ -4473,7 +4497,7 @@ function renderRagSources(payload = {}) {
 
 async function loadRagExperiences(options = {}) {
   const fast = options.fast !== false;
-  const defaultLimit = 500;
+  const defaultLimit = 80;
   const limit = Number.isFinite(Number(options.limit)) ? Math.max(20, Math.min(500, Number(options.limit))) : defaultLimit;
   const payload = await apiGet(`/api/rag/experiences?status=all&limit=${limit}&fast=${fast ? "true" : "false"}`);
   const rawItems = payload.items || [];
@@ -6478,16 +6502,16 @@ function renderRecorderExportProgress() {
   const clearDateButton = document.getElementById("recorder-export-date-clear");
   if (createButton) {
     createButton.classList.toggle("is-loading", state.recorderExportRunBusy);
-    createButton.disabled = !state.authToken || state.recorderExportRunBusy;
+    createButton.disabled = !hasLocalConsoleAccess() || state.recorderExportRunBusy;
     createButton.innerHTML = state.recorderExportRunBusy
       ? '<span class="loading-spinner button-spinner" aria-hidden="true"></span><span>创建中</span>'
       : "导出所有记录（结构化）";
   }
-  if (dayButton) dayButton.disabled = !state.authToken || state.recorderExportRunBusy;
-  if (weekButton) weekButton.disabled = !state.authToken || state.recorderExportRunBusy;
-  if (monthButton) monthButton.disabled = !state.authToken || state.recorderExportRunBusy;
-  if (customRangeButton) customRangeButton.disabled = !state.authToken || state.recorderExportRunBusy;
-  if (clearDateButton) clearDateButton.disabled = !state.authToken || state.recorderExportRunBusy;
+  if (dayButton) dayButton.disabled = !hasLocalConsoleAccess() || state.recorderExportRunBusy;
+  if (weekButton) weekButton.disabled = !hasLocalConsoleAccess() || state.recorderExportRunBusy;
+  if (monthButton) monthButton.disabled = !hasLocalConsoleAccess() || state.recorderExportRunBusy;
+  if (customRangeButton) customRangeButton.disabled = !hasLocalConsoleAccess() || state.recorderExportRunBusy;
+  if (clearDateButton) clearDateButton.disabled = !hasLocalConsoleAccess() || state.recorderExportRunBusy;
   if (!panel) return;
 
   const runs = state.recorderExportRuns || [];
@@ -7133,14 +7157,14 @@ function stopRecorderExportPolling() {
 }
 
 function syncRecorderExportPolling() {
-  const shouldPoll = Boolean(state.authToken) && state.activeView === "recorder" && hasRecorderExportActiveRuns();
+  const shouldPoll = hasLocalConsoleAccess() && state.activeView === "recorder" && hasRecorderExportActiveRuns();
   if (!shouldPoll) {
     stopRecorderExportPolling();
     return;
   }
   if (state.recorderExportPollingTimer) return;
   state.recorderExportPollingTimer = setInterval(() => {
-    if (state.activeView !== "recorder" || !state.authToken) {
+    if (state.activeView !== "recorder" || !hasLocalConsoleAccess()) {
       stopRecorderExportPolling();
       return;
     }

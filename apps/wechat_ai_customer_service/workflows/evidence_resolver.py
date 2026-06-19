@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from typing import Any
 
 try:  # pragma: no cover - supports both package and script imports.
@@ -30,7 +31,7 @@ class EvidenceResolver:
         hits = self.index.search(text, context=context, intent_tags=intent_tags, limit=limit)
         intent_tags = infer_intent_tags_from_hits(intent_tags, hits)
         evidence_items = [build_evidence_item(hit, intent_tags) for hit in hits]
-        safety = build_safety_summary(intent_tags, evidence_items)
+        safety = build_safety_summary(intent_tags, evidence_items, input_text=text)
         return {
             "schema_version": 1,
             "input_text": text,
@@ -135,13 +136,13 @@ def product_excerpt(data: dict[str, Any], intent_tags: list[str]) -> str:
     return clip(" | ".join(part for part in parts if part))
 
 
-def build_safety_summary(intent_tags: list[str], evidence_items: list[dict[str, Any]]) -> dict[str, Any]:
+def build_safety_summary(intent_tags: list[str], evidence_items: list[dict[str, Any]], *, input_text: str = "") -> dict[str, Any]:
     reasons: list[str] = []
     must_handoff = False
     if "handoff" in intent_tags:
         reasons.append("handoff_intent_detected")
         must_handoff = True
-    has_business_evidence = has_authoritative_business_evidence(intent_tags, evidence_items)
+    has_business_evidence = has_authoritative_business_evidence(intent_tags, evidence_items, input_text=input_text)
     for item in evidence_items:
         if item.get("requires_handoff"):
             if item.get("category_id") == "chats" and has_business_evidence:
@@ -168,7 +169,9 @@ def evidence_required_intents() -> set[str]:
     return set(business_intents()) | {"product", "scene_product", "spec", "warranty"}
 
 
-def has_authoritative_business_evidence(intent_tags: list[str], evidence_items: list[dict[str, Any]]) -> bool:
+def has_authoritative_business_evidence(intent_tags: list[str], evidence_items: list[dict[str, Any]], *, input_text: str = "") -> bool:
+    if asks_about_merchant_personal_preference(input_text):
+        return False
     tag_set = set(intent_tags)
     for item in evidence_items:
         category_id = str(item.get("category_id") or "")
@@ -177,6 +180,20 @@ def has_authoritative_business_evidence(intent_tags: list[str], evidence_items: 
         if category_id == "policies" and policy_item_matches_intent(item, tag_set):
             return True
     return False
+
+
+def asks_about_merchant_personal_preference(text: str) -> bool:
+    """Personal merchant/staff preferences are not authorized by product hits."""
+
+    normalized = str(text or "")
+    return bool(
+        re.search(
+            r"(?:你们老板|你老板|老板娘|店长|你们(?:员工|同事|客服|销售)|员工|同事|客服|销售|老板)"
+            r"[^，。！？,.!?\n]{0,8}"
+            r"(?:喜欢什么|喜欢哪|喜欢啥|偏好|爱好|什么颜色)",
+            normalized,
+        )
+    )
 
 
 def policy_item_matches_intent(item: dict[str, Any], tag_set: set[str]) -> bool:

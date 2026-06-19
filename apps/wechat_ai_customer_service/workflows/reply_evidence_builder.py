@@ -25,12 +25,74 @@ from evidence_authority import (
 )
 from llm_common_sense_layer import build_common_sense_guidance, common_sense_prompt_fragment
 from product_name_matcher import collect_matched_aliases, compact_match_text
+try:
+    from customer_service_brain_contract import strip_nonsemantic_runtime_markers
+except Exception:  # pragma: no cover - workflow import fallback for isolated scripts
+    strip_nonsemantic_runtime_markers = None  # type: ignore[assignment]
 
 
 DEFAULT_MAX_HISTORY_MESSAGES = 40
 DEFAULT_HISTORY_CHAR_BUDGET = 12000
 DEFAULT_MAX_RAG_HITS = 5
 DEFAULT_MAX_TEXT_CHARS = 900
+AI_EXPERIENCE_REFERENCE_SOURCE_TYPES = {
+    "rag_experience",
+    "cleaned_real_chat_pack",
+    "real_chat",
+    "real_chat_style",
+    "wechat_raw_message",
+    "raw_wechat_private",
+    "raw_wechat_group",
+    "raw_wechat_file_transfer",
+    "ai_recorder_chat",
+    "chat_log",
+    "upload",
+}
+AI_EXPERIENCE_RUNTIME_RISK_TERMS = {
+    "最低价",
+    "保证",
+    "包过",
+    "一定能",
+    "肯定能",
+    "绝对",
+    "赔偿",
+    "退款",
+    "合同",
+    "发票",
+    "转账",
+    "账号",
+    "月结",
+    "账期",
+    "库存",
+    "现货",
+    "现车",
+}
+AI_EXPERIENCE_RUNTIME_NOISE_TERMS = {
+    "请求添加",
+    "添加你为朋友",
+    "通过朋友验证",
+    "以上是打招呼的内容",
+    "系统消息",
+    "撤回了一条消息",
+    "拍了拍",
+    "语音通话",
+    "视频通话",
+    "文件传输助手",
+    "llm_synthesis_reply",
+    "rag_context_reply",
+}
+AI_EXPERIENCE_RUNTIME_STYLE_MARKERS = {
+    "你好",
+    "您好",
+    "在吗",
+    "好的",
+    "收到",
+    "谢谢",
+    "辛苦",
+    "稍等",
+    "我看一下",
+    "我确认一下",
+}
 GENERIC_CATALOG_ALIAS_TERMS = {
     "mpv",
     "suv",
@@ -468,6 +530,16 @@ def build_reply_evidence_pack(
             "runtime_rag_hit_count": len((compact_knowledge.get("rag_evidence", {}) or {}).get("hits", []) or []),
             "rag_hit_count": len((compact_knowledge.get("rag_evidence", {}) or {}).get("hits", []) or []),
             "excluded_ai_experience_pool_hit_count": int((compact_knowledge.get("ai_experience_pool", {}) or {}).get("excluded_hit_count") or 0),
+            "ai_experience_pool_reference_hit_count": int((compact_knowledge.get("ai_experience_pool", {}) or {}).get("reference_hit_count") or 0),
+            "ai_experience_pool_reference_ids": (
+                ((compact_knowledge.get("ai_experience_pool", {}) or {}).get("trace", {}) or {}).get("reference_ids", [])
+            ),
+            "ai_experience_pool_exclusion_reasons": (
+                ((compact_knowledge.get("ai_experience_pool", {}) or {}).get("trace", {}) or {}).get("exclusion_reasons", {})
+            ),
+            "ai_experience_pool_trace": (
+                ((compact_knowledge.get("ai_experience_pool", {}) or {}).get("trace", {}) or {}).get("items", [])
+            ),
             "rag_chunk_ids": [
                 str(item.get("chunk_id") or "")
                 for item in (compact_knowledge.get("rag_evidence", {}) or {}).get("hits", []) or []
@@ -627,12 +699,22 @@ def compact_knowledge_pack(
             "authority_level": "ai_experience_pool",
             "can_authorize_product_facts": False,
             "can_authorize_reply_content": False,
-            "usage": "governance_and_distribution_only",
+            "usage": "auxiliary_experience_and_style_only",
+            "runtime_usage_policy": (
+                "AI experience pool hits may guide scenario understanding, follow-up strategy, and tone only; "
+                "they must not authorize product facts, policies, prices, stock, availability, or commitments."
+            ),
             "excluded_hit_count": int(rag_evidence.get("excluded_hit_count") or 0),
+            "reference_hit_count": int(rag_evidence.get("reference_hit_count") or 0),
             "source": {
                 "enabled": rag_evidence.get("enabled", True),
                 "reason": rag_evidence.get("reason") or "ai_experience_pool_not_runtime_content_basis",
-                "hits": [],
+                "hits": rag_evidence.get("ai_experience_hits", []),
+            },
+            "trace": {
+                "reference_ids": rag_evidence.get("ai_experience_reference_ids", []),
+                "exclusion_reasons": rag_evidence.get("ai_experience_exclusion_reasons", {}),
+                "items": rag_evidence.get("ai_experience_trace", []),
             },
         },
         "rag_evidence": rag_evidence,
@@ -643,11 +725,21 @@ def compact_knowledge_pack(
 
 def compact_rag_evidence(rag_evidence: dict[str, Any], *, max_hits: int, max_text_chars: int = DEFAULT_MAX_TEXT_CHARS) -> dict[str, Any]:
     hits = []
+    ai_experience_hits = []
+    ai_experience_trace = []
+    ai_experience_exclusion_reasons: dict[str, int] = {}
     excluded_hit_count = 0
     for item in rag_evidence.get("hits", []) or []:
         if not isinstance(item, dict):
             continue
         if not can_authorize_reply_content(item, category_id=str(item.get("category") or ""), source_type=str(item.get("source_type") or "")):
+            ai_experience_hit = compact_ai_experience_runtime_hit(item, max_text_chars=max_text_chars)
+            decision = classify_ai_experience_runtime_usage(item)
+            reason = str(decision.get("reason") or "unknown")
+            ai_experience_exclusion_reasons[reason] = ai_experience_exclusion_reasons.get(reason, 0) + 1
+            ai_experience_trace.append(compact_ai_experience_runtime_trace(item, decision=decision))
+            if ai_experience_hit:
+                ai_experience_hits.append(ai_experience_hit)
             excluded_hit_count += 1
             continue
         hits.append(
@@ -674,8 +766,120 @@ def compact_rag_evidence(rag_evidence: dict[str, Any], *, max_hits: int, max_tex
         "rag_can_authorize": bool(rag_evidence.get("rag_can_authorize", False)),
         "structured_priority": rag_evidence.get("structured_priority", True),
         "excluded_hit_count": excluded_hit_count,
+        "reference_hit_count": len(ai_experience_hits),
+        "ai_experience_trace": ai_experience_trace[: max(1, max_hits * 2)],
+        "ai_experience_exclusion_reasons": ai_experience_exclusion_reasons,
+        "ai_experience_reference_ids": [
+            str(item.get("chunk_id") or item.get("source_id") or "")
+            for item in ai_experience_hits
+            if str(item.get("chunk_id") or item.get("source_id") or "")
+        ][: max(1, max_hits)],
+        "ai_experience_hits": ai_experience_hits[: max(1, max_hits)],
         "hits": hits,
     }
+
+
+def compact_ai_experience_runtime_hit(item: dict[str, Any], *, max_text_chars: int) -> dict[str, Any]:
+    decision = classify_ai_experience_runtime_usage(item)
+    if decision["runtime_usage"] == "drop":
+        return {}
+    text = truncate_text(sanitize_ai_experience_runtime_text(str(item.get("text") or "")), max(120, min(max_text_chars, 360)))
+    return {
+        "chunk_id": item.get("chunk_id"),
+        "source_id": item.get("source_id"),
+        "score": item.get("score"),
+        "category": item.get("category"),
+        "source_type": item.get("source_type"),
+        "retrieval_mode": item.get("retrieval_mode"),
+        "runtime_usage": decision["runtime_usage"],
+        "reason": decision["reason"],
+        "authority_level": "ai_experience_pool",
+        "can_authorize_reply_content": False,
+        "usage_policy": "experience/style reference only; never fact or commitment authority",
+        "text": text,
+    }
+
+
+def compact_ai_experience_runtime_trace(item: dict[str, Any], *, decision: dict[str, str]) -> dict[str, Any]:
+    return {
+        "chunk_id": item.get("chunk_id"),
+        "source_id": item.get("source_id"),
+        "score": item.get("score"),
+        "category": item.get("category"),
+        "source_type": item.get("source_type"),
+        "runtime_usage": decision.get("runtime_usage"),
+        "reason": decision.get("reason"),
+        "reference_only": True,
+        "can_authorize_reply_content": False,
+    }
+
+
+def classify_ai_experience_runtime_usage(item: dict[str, Any]) -> dict[str, str]:
+    source_type = str(item.get("source_type") or "").strip().lower()
+    category = str(item.get("category") or "").strip().lower()
+    text = normalize_ai_experience_text(str(item.get("text") or ""))
+    if source_type not in AI_EXPERIENCE_REFERENCE_SOURCE_TYPES and category not in {"chats", "style_examples", "rag_experience"}:
+        return {"runtime_usage": "drop", "reason": "not_ai_experience_pool_source"}
+    if not text:
+        return {"runtime_usage": "drop", "reason": "empty_text"}
+    if ai_experience_text_is_noise(text):
+        return {"runtime_usage": "drop", "reason": "runtime_noise_or_metadata"}
+    if ai_experience_text_has_risky_commitment(text):
+        return {"runtime_usage": "drop", "reason": "risky_fact_or_commitment_like_text"}
+    if ai_experience_text_is_style_only(text):
+        return {"runtime_usage": "style_only", "reason": "style_or_short_social_reference"}
+    if ai_experience_text_is_complete_reference(text):
+        return {"runtime_usage": "reference_experience", "reason": "complete_non_authoritative_experience"}
+    return {"runtime_usage": "style_only", "reason": "incomplete_but_style_useful"}
+
+
+def normalize_ai_experience_text(text: str) -> str:
+    return re.sub(r"\s+", " ", str(text or "")).strip()
+
+
+def ai_experience_text_is_noise(text: str) -> bool:
+    clean = normalize_ai_experience_text(text)
+    if len(clean) < 2:
+        return True
+    if any(term in clean for term in AI_EXPERIENCE_RUNTIME_NOISE_TERMS):
+        return True
+    if re.fullmatch(r"[\[\]【】()（）握手微笑OKok,.，。!！?？\s]+", clean):
+        return True
+    if re.match(r"^(?:客户|客服|user|assistant|system|agent|self)\s*[:：]\s*$", clean, re.I):
+        return True
+    return False
+
+
+def ai_experience_text_has_risky_commitment(text: str) -> bool:
+    clean = normalize_ai_experience_text(text)
+    return any(term in clean for term in AI_EXPERIENCE_RUNTIME_RISK_TERMS)
+
+
+def sanitize_ai_experience_runtime_text(text: str) -> str:
+    clean = normalize_ai_experience_text(text)
+    clean = re.sub(r"(?<!\d)1[3-9]\d{9}(?!\d)", "{手机号}", clean)
+    clean = re.sub(r"\d+(?:\.\d+)?\s*(?:万|万元|w|W|元|块|人民币)", "{金额}", clean)
+    clean = re.sub(r"\d+(?:\.\d+)?\s*(?:公里|km|KM|天|小时|分钟)", "{数量}", clean)
+    clean = re.sub(r"\d+\s*(?:个|件|台|套|箱|辆|条|次|轮)", "{数量}", clean)
+    return clean
+
+
+def ai_experience_text_is_style_only(text: str) -> bool:
+    clean = normalize_ai_experience_text(text)
+    if len(clean) <= 12 and any(term in clean for term in AI_EXPERIENCE_RUNTIME_STYLE_MARKERS):
+        return True
+    if not re.search(r"[？?。.!！；;，,]", clean) and len(clean) <= 18:
+        return True
+    return False
+
+
+def ai_experience_text_is_complete_reference(text: str) -> bool:
+    clean = normalize_ai_experience_text(text)
+    if len(clean) < 18:
+        return False
+    if re.search(r"(客户|用户|买家|对方|咨询|问|想|需要|关注|担心|比较|推荐|建议|可以|适合|优先)", clean):
+        return True
+    return bool(re.search(r"[？?].{4,}[。.!！]", clean))
 
 
 def collect_evidence_ids(pack: dict[str, Any]) -> list[str]:
@@ -1067,10 +1271,11 @@ def catalog_product_candidates(text: str, *, limit: int, context: dict[str, Any]
     except Exception:
         return []
     context = context if isinstance(context, dict) else {}
-    context_products = context_product_candidates(runtime, context, text, items=items)
+    semantic_text = semantic_text_for_catalog_matching(text)
+    context_products = context_product_candidates(runtime, context, semantic_text, items=items)
     context_product = context_products[0] if context_products else None
     scored = []
-    normalized = str(text or "").lower()
+    normalized = semantic_text.lower()
     catalog_request_mode = detect_catalog_request_mode(normalized)
     for item in items:
         if not isinstance(item, dict):
@@ -1148,9 +1353,16 @@ def catalog_product_candidates(text: str, *, limit: int, context: dict[str, Any]
     if context_products:
         context_ids = {str(item.get("id") or "") for item in context_products if str(item.get("id") or "")}
         ranked = [*context_products, *[item for item in ranked if str(item.get("id") or "") not in context_ids]]
-        if should_focus_context_product(text):
+        if should_focus_context_product(semantic_text):
             ranked = ranked[: max(1, min(limit, len(context_products)))]
     return ranked[: max(0, limit)]
+
+
+def semantic_text_for_catalog_matching(text: str) -> str:
+    raw = str(text or "")
+    if callable(strip_nonsemantic_runtime_markers):
+        return str(strip_nonsemantic_runtime_markers(raw) or "").strip()
+    return raw.strip()
 
 
 def should_attach_budget_alternatives(normalized_text: str, ranked: list[dict[str, Any]]) -> bool:

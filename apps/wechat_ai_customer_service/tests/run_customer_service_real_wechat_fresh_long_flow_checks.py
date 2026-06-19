@@ -311,9 +311,19 @@ class DryRunConnector:
             "messages": list(self.messages),
         }
 
-    def send_text_and_verify(self, target: str, text: str, exact: bool = True, *, skip_send_rate_guard: bool = False) -> dict[str, Any]:
+    def send_text_and_verify(
+        self,
+        target: str,
+        text: str,
+        exact: bool = True,
+        *,
+        skip_send_rate_guard: bool = False,
+        session_key: str = "",
+        **kwargs: Any,
+    ) -> dict[str, Any]:
+        _ = skip_send_rate_guard, kwargs
         self.sent_texts.append(text)
-        return {"ok": True, "verified": True, "target": target, "exact": exact, "text": text}
+        return {"ok": True, "verified": True, "target": target, "exact": exact, "text": text, "session_key": session_key}
 
 
 def build_adaptive_turns(token: str, *, scenario: str = "photo_studio") -> list[dict[str, Any]]:
@@ -466,7 +476,6 @@ def build_context_bridge_turns(token: str) -> list[dict[str, Any]]:
                 "说下预算",
                 "预算大概",
                 "确认一下预算",
-                "预算上限",
                 "9.58万",
                 "马自达3",
                 "A4L",
@@ -928,6 +937,10 @@ def summarize_turn(index: int, spec: dict[str, Any], event: dict[str, Any]) -> d
             "brain_duration_seconds": brain.get("duration_seconds"),
             "brain_stage_timings": brain.get("stage_timings", {}),
             "final_visible_duration_seconds": final_polish.get("duration_seconds"),
+        },
+        "brain": {
+            "audit_summary": brain.get("audit_summary"),
+            "brain_input_summary": brain.get("brain_input_summary"),
         },
         "customer_send_transport": event.get("_customer_send_transport"),
         "reply_send_transport": compact_send_transport(event.get("send_result")),

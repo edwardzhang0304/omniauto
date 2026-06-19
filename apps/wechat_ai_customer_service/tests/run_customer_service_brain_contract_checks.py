@@ -90,6 +90,7 @@ def main() -> int:
         check_common_sense_brain_plan_uses_guard_advisor_mode(),
         check_source_id_list_validation_accepts_multiple_product_ids(),
         check_source_id_pipe_validation_accepts_multiple_product_ids(),
+        check_source_id_multiple_alias_requires_multiple_product_evidence(),
         check_formal_policy_source_id_prefixes_validate_against_evidence(),
         check_semantic_reviewer_authority_summary_reads_evidence_formal_ids(),
         check_social_visible_contract_rejects_empty_or_handoff_plan(),
@@ -252,6 +253,7 @@ def main() -> int:
         check_context_budget_followup_catalog_candidates(),
         check_around_budget_catalog_candidates_prefer_near_budget(),
         check_context_feature_followup_catalog_candidates_prefer_recent_product(),
+        check_nonsemantic_runtime_marker_does_not_override_recent_context_products(),
         check_cargo_budget_candidates_prioritize_nonsedan_fit(),
         check_finance_process_question_relaxes_soft_handoff_with_formal_boundary(),
         check_specific_finance_commitment_question_keeps_handoff(),
@@ -807,6 +809,37 @@ def check_source_id_pipe_validation_accepts_multiple_product_ids() -> CaseResult
     ids = brain_module.split_fact_source_ids("chejin_qinplus_2022_dmi55|chejin_sienna_2021_hybrid")
     assert_true(ids == ["chejin_qinplus_2022_dmi55", "chejin_sienna_2021_hybrid"], f"unexpected split ids: {ids}")
     return CaseResult("source_id_pipe_validation_accepts_multiple_product_ids", True, {"validation": validation, "ids": ids})
+
+
+def check_source_id_multiple_alias_requires_multiple_product_evidence() -> CaseResult:
+    plan = copy.deepcopy(base_plan())
+    plan["facts_claimed"][0]["source_id"] = "multiple"
+    single_pack = fake_evidence_pack(include_product=True)
+    single_validation = brain_module.validate_plan_against_evidence(normalize_brain_plan(plan), single_pack)
+    assert_true(
+        not single_validation["ok"]
+        and "product_fact_source_not_in_evidence:multiple" in single_validation.get("errors", []),
+        f"multiple alias should not validate against a single product: {single_validation}",
+    )
+
+    multi_pack = fake_evidence_pack(include_product=True)
+    multi_pack["knowledge"]["product_master"]["items"].append(
+        {
+            "id": "chejin_camry_2021_20g",
+            "name": "2021款丰田凯美瑞2.0G",
+            "price": 8.98,
+            "authority_level": "product_master",
+        }
+    )
+    multi_pack["knowledge"]["evidence"]["products"] = list(multi_pack["knowledge"]["product_master"]["items"])
+    multi_pack["knowledge"]["evidence"]["catalog_candidates"] = list(multi_pack["knowledge"]["product_master"]["items"])
+    multi_validation = brain_module.validate_plan_against_evidence(normalize_brain_plan(plan), multi_pack)
+    assert_true(multi_validation["ok"], f"multiple alias should validate only with multiple product evidence: {multi_validation}")
+    return CaseResult(
+        "source_id_multiple_alias_requires_multiple_product_evidence",
+        True,
+        {"single": single_validation, "multi": multi_validation},
+    )
 
 
 def check_formal_policy_source_id_prefixes_validate_against_evidence() -> CaseResult:
@@ -5203,6 +5236,16 @@ def check_original_brain_quality_soft_pass_after_failed_repair_allows_soft_doubt
         soft.get("reason") == "original_brain_soft_quality_deferred_after_repair_failure",
         f"unexpected original soft-pass reason: {soft}",
     )
+    long_quality = dict(quality)
+    long_quality["errors"] = ["reply_too_long"]
+    long_soft = brain_module.original_brain_quality_soft_pass_after_failed_repair(
+        settings={},
+        plan=plan,
+        validation=validation,
+        quality=long_quality,
+        evidence_pack=pack,
+    )
+    assert_true(long_soft.get("ok"), f"overlong but evidence-backed Brain reply should soft-pass after repair failure: {long_soft}")
 
     hard_quality = dict(quality)
     hard_quality["errors"] = ["price_answer_without_product_evidence"]
@@ -5218,7 +5261,7 @@ def check_original_brain_quality_soft_pass_after_failed_repair_allows_soft_doubt
     return CaseResult(
         "original_brain_quality_soft_pass_after_failed_repair_allows_soft_doubts",
         True,
-        {"soft": soft, "hard_blocked": hard_blocked},
+        {"soft": soft, "long_soft": long_soft, "hard_blocked": hard_blocked},
     )
 
 
@@ -7804,6 +7847,38 @@ def check_context_feature_followup_catalog_candidates_prefer_recent_product() ->
         "context_feature_followup_catalog_candidates_prefer_recent_product",
         True,
         {"top": {"id": candidates[0].get("id"), "reason": candidates[0].get("match_reason")}},
+    )
+
+
+def check_nonsemantic_runtime_marker_does_not_override_recent_context_products() -> CaseResult:
+    context = {
+        "last_customer_need_text": "我想给我老婆换台代步车，平时接送孩子和买菜，预算9万以内，自动挡，最好有倒车影像。",
+        "recent_product_ids": ["chejin_camry_2021_20g", "chejin_golf_2020_280tsi"],
+        "last_product_id": "chejin_camry_2021_20g",
+    }
+    message = "那就按刚才说的，直接挑两台，别再问预算了。(FRESHLONG_20260619_175420-C2)"
+    with tenant_context("chejin"):
+        candidates = catalog_product_candidates(message, limit=5, context=context)
+        pack = workflow_module.build_evidence_pack(message, context=context)
+    ids = [str(item.get("id") or "") for item in candidates[:2]]
+    evidence_ids = [
+        str(item.get("id") or "")
+        for item in ((pack.get("evidence") or {}).get("products") or [])[:2]
+        if isinstance(item, dict)
+    ]
+    assert_true(
+        ids == ["chejin_camry_2021_20g", "chejin_golf_2020_280tsi"],
+        f"runtime marker must not be treated as an explicit ES6 product mention: {candidates[:3]}",
+    )
+    assert_true(
+        "chejin_hengyi_2019_es6" not in ids and "chejin_hengyi_2019_es6" not in evidence_ids,
+        f"non-semantic marker should not inject ES6 evidence: candidates={ids}, evidence={evidence_ids}",
+    )
+    assert_true(pack.get("input_text_sanitized") is True, f"sanitized evidence pack should be audited: {pack}")
+    return CaseResult(
+        "nonsemantic_runtime_marker_does_not_override_recent_context_products",
+        True,
+        {"candidate_ids": ids, "evidence_ids": evidence_ids},
     )
 
 
