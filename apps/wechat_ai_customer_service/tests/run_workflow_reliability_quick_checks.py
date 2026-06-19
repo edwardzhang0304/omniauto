@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -24,9 +25,14 @@ os.environ["WECHAT_VPS_BASE_URL"] = "http://localhost:8000"
 os.environ["WECHAT_CLOUD_REQUIRE_NODE_VERIFIED"] = "0"
 
 from apps.wechat_ai_customer_service.admin_backend.app import create_app  # noqa: E402
+from apps.wechat_ai_customer_service.admin_backend.services import knowledge_compiler as knowledge_compiler_module  # noqa: E402
+from apps.wechat_ai_customer_service.admin_backend.services import workflow_service as workflow_service_module  # noqa: E402
 
 
 TEST_ARTIFACTS = PROJECT_ROOT / "runtime" / "apps" / "wechat_ai_customer_service" / "test_artifacts" / "workflow_reliability"
+SNAPSHOT_ROOT = TEST_ARTIFACTS / "quick_versions"
+ISOLATED_KNOWLEDGE_ROOT = TEST_ARTIFACTS / "isolated_knowledge_bases"
+RUN_TOKEN = "quick_" + datetime.now().strftime("%Y%m%d_%H%M%S_%f")
 
 
 def main() -> int:
@@ -40,13 +46,25 @@ def main() -> int:
 
 
 def run_checks(*, rounds: int) -> dict[str, Any]:
+    install_quick_version_store()
+    install_isolated_knowledge_root()
+    cleanup_quick_artifacts()
+    baseline = QuickVersionStore().create_snapshot("workflow reliability quick baseline", {"run_token": RUN_TOKEN}, prune=False)
+    try:
+        return run_checks_inner(rounds=rounds)
+    finally:
+        QuickVersionStore().rollback(str(baseline.get("version_id") or ""))
+        cleanup_quick_artifacts()
+
+
+def run_checks_inner(*, rounds: int) -> dict[str, Any]:
     client = TestClient(create_app())
     TEST_ARTIFACTS.mkdir(parents=True, exist_ok=True)
     timeline: list[dict[str, Any]] = []
     failures: list[dict[str, Any]] = []
 
     for idx in range(1, rounds + 1):
-        round_id = f"{datetime.now().strftime('%Y%m%d_%H%M%S')}_r{idx}"
+        round_id = f"{RUN_TOKEN}_r{idx}"
         try:
             timeline.append(run_round(client, round_id=round_id))
         except Exception as exc:  # noqa: BLE001 - we want full round error capture
@@ -66,6 +84,101 @@ def run_checks(*, rounds: int) -> dict[str, Any]:
         "failures": failures,
         "conclusion": "PASS" if not failures else "FAIL",
     }
+
+
+class QuickVersionStore:
+    """Small test double for workflow quick checks.
+
+    The production VersionStore copies the full tenant/shared knowledge tree and
+    builds downloadable bundles. That is correct for real releases, but too
+    heavy for this quick reliability runner on a populated local workspace.
+    This store snapshots only the workflow knowledge base files the test mutates.
+    """
+
+    def create_snapshot(self, reason: str, metadata: dict[str, Any] | None = None, *, prune: bool = True) -> dict[str, Any]:
+        del prune
+        version_id = "quick_" + datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+        version_root = SNAPSHOT_ROOT / version_id
+        source_root = workflow_service_module.default_admin_knowledge_base_root("default")
+        compiled_source_root = knowledge_compiler_module.DEFAULT_COMPILED_ROOT
+        knowledge_target = version_root / "knowledge_bases"
+        compiled_target = version_root / "compiled_structured_compat"
+        version_root.mkdir(parents=True, exist_ok=False)
+        if source_root.exists():
+            shutil.copytree(source_root, knowledge_target)
+        if compiled_source_root.exists():
+            shutil.copytree(compiled_source_root, compiled_target)
+        payload = {
+            "version_id": version_id,
+            "created_at": datetime.now().isoformat(timespec="seconds"),
+            "reason": reason,
+            "metadata": metadata or {},
+            "knowledge_base_path": str(knowledge_target),
+            "structured_path": "",
+            "shared_knowledge_path": "",
+            "tenants_path": "",
+            "compiled_structured_compat_path": str(compiled_target),
+            "quick_test_snapshot": True,
+        }
+        (version_root / "metadata.json").write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+        return payload
+
+    def rollback(self, version_id: str) -> dict[str, Any]:
+        version_root = SNAPSHOT_ROOT / version_id
+        source = version_root / "knowledge_bases"
+        if not source.exists():
+            return {"ok": False, "message": f"version not found: {version_id}"}
+        target = workflow_service_module.default_admin_knowledge_base_root("default")
+        replace_tree_contents(source, target)
+        compiled_source = version_root / "compiled_structured_compat"
+        if compiled_source.exists():
+            replace_tree_contents(compiled_source, knowledge_compiler_module.DEFAULT_COMPILED_ROOT)
+        return {
+            "ok": True,
+            "message": "quick workflow knowledge rollback applied",
+            "version_id": version_id,
+            "quick_test_snapshot": True,
+        }
+
+
+def install_quick_version_store() -> None:
+    SNAPSHOT_ROOT.mkdir(parents=True, exist_ok=True)
+    workflow_service_module.VersionStore = QuickVersionStore
+
+
+def install_isolated_knowledge_root() -> None:
+    source_root = workflow_service_module.default_admin_knowledge_base_root("default")
+    if ISOLATED_KNOWLEDGE_ROOT.exists():
+        shutil.rmtree(ISOLATED_KNOWLEDGE_ROOT)
+    if source_root.exists():
+        shutil.copytree(source_root, ISOLATED_KNOWLEDGE_ROOT)
+    else:
+        ISOLATED_KNOWLEDGE_ROOT.mkdir(parents=True, exist_ok=True)
+
+    def isolated_default_admin_knowledge_base_root(tenant_id: str | None = None) -> Path:
+        del tenant_id
+        return ISOLATED_KNOWLEDGE_ROOT
+
+    workflow_service_module.default_admin_knowledge_base_root = isolated_default_admin_knowledge_base_root
+
+
+def cleanup_quick_artifacts() -> None:
+    curated_root = APP_ROOT / "data" / "tenants" / "default" / "learning_packs" / "curated_templates"
+    if not curated_root.exists():
+        return
+    for path in curated_root.glob(f"templates_wfr_batch_{RUN_TOKEN}_*.jsonl"):
+        path.unlink(missing_ok=True)
+
+
+def replace_tree_contents(source: Path, target: Path) -> None:
+    if target.exists():
+        for child in target.iterdir():
+            if child.is_dir():
+                shutil.rmtree(child)
+            else:
+                child.unlink(missing_ok=True)
+    target.mkdir(parents=True, exist_ok=True)
+    shutil.copytree(source, target, dirs_exist_ok=True)
 
 
 def run_round(client: TestClient, *, round_id: str) -> dict[str, Any]:

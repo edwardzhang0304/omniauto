@@ -72,6 +72,7 @@ COMMAND_ACTIONS = {"pause", "resume", "stop"}
 CONTROL_KEY_CHOICES = {"f8": VK_F8, "esc": VK_ESCAPE}
 DEFAULT_CONTROL_KEY = "f8"
 DEFAULT_INDICATOR_BACKEND = "layered"
+DEFAULT_LOCAL_SAFETY_STOP_PATH = "/api/customer-service/runtime/stop"
 INDICATOR_THEMES = ("blue", "yellow", "red")
 INDICATOR_PALETTES: dict[str, dict[str, str]] = {
     "blue": {
@@ -359,10 +360,27 @@ def write_runtime_status_hint(path: Path, *, tenant_id: str, state: str, message
         pass
 
 
-def request_local_safety_stop(*, tenant_id: str, timeout_seconds: float = 1.5) -> bool:
+def normalize_local_safety_stop_path(value: Any) -> str:
+    raw = str(value or "").strip()
+    if not raw:
+        return DEFAULT_LOCAL_SAFETY_STOP_PATH
+    if not raw.startswith("/"):
+        raw = f"/{raw}"
+    if not raw.startswith("/api/") or not raw.endswith("/runtime/stop"):
+        return DEFAULT_LOCAL_SAFETY_STOP_PATH
+    return raw
+
+
+def request_local_safety_stop(
+    *,
+    tenant_id: str,
+    stop_path: str = DEFAULT_LOCAL_SAFETY_STOP_PATH,
+    timeout_seconds: float = 1.5,
+) -> bool:
     """Ask the local admin backend to run the same full stop path as the web UI."""
 
-    url = f"http://127.0.0.1:8765/api/customer-service/runtime/stop?tenant_id={urllib.parse.quote(tenant_id)}"
+    safe_path = normalize_local_safety_stop_path(stop_path)
+    url = f"http://127.0.0.1:8765{safe_path}?tenant_id={urllib.parse.quote(tenant_id)}"
     request = urllib.request.Request(
         url,
         data=b"{}",
@@ -398,7 +416,10 @@ def process_alive(pid: int) -> bool:
         return False
     if not proc.is_running():
         return False
-    return proc.status() != psutil.STATUS_ZOMBIE
+    try:
+        return proc.status() != psutil.STATUS_ZOMBIE
+    except psutil.NoSuchProcess:
+        return False
 
 
 def normalize_indicator_backend(value: Any) -> str:
@@ -1292,6 +1313,7 @@ def main() -> int:
     parser.add_argument("--floating-indicator", action="store_true")
     parser.add_argument("--no-floating-indicator", action="store_true")
     parser.add_argument("--guard-state-path", type=Path)
+    parser.add_argument("--local-safety-stop-path", default=DEFAULT_LOCAL_SAFETY_STOP_PATH)
     args = parser.parse_args()
 
     tenant_id = str(args.tenant_id).strip() or "default"
@@ -1301,6 +1323,7 @@ def main() -> int:
     control_key_name = normalize_control_key_name(args.control_key)
     control_vk = CONTROL_KEY_CHOICES[control_key_name]
     control_key_label = control_key_name.upper()
+    local_safety_stop_path = normalize_local_safety_stop_path(args.local_safety_stop_path)
     control_double_window_raw = args.control_double_window_ms
     if args.esc_double_window_ms is not None:
         control_double_window_raw = args.esc_double_window_ms
@@ -1498,7 +1521,7 @@ def main() -> int:
                     message=f"double_{control_key_name}_stop_requested",
                 )
                 write_runtime_status_hint(status_path, tenant_id=tenant_id, state="stopped", message="已停止。")
-                request_local_safety_stop(tenant_id=tenant_id)
+                request_local_safety_stop(tenant_id=tenant_id, stop_path=local_safety_stop_path)
             elif action == "toggle_pause":
                 latest = load_control_payload(control_path, tenant_id=tenant_id)
                 current_mode = str(latest.get("mode") or "running").strip().lower()

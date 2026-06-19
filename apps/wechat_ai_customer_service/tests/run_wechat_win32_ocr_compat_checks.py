@@ -118,6 +118,7 @@ from apps.wechat_ai_customer_service.adapters.wechat_win32_ocr_sidecar import ( 
     send_input_confirm_attempt_count,
     send_click_candidate_points,
     safe_send_trigger,
+    send_with_guarded_clicks,
 )
 import apps.wechat_ai_customer_service.admin_backend.services.wechat_startup_check as startup_check  # noqa: E402
 import apps.wechat_ai_customer_service.workflows.preflight as preflight  # noqa: E402
@@ -603,17 +604,31 @@ def test_add_friend_menu_click_handles_stale_dialog_hwnd() -> None:
 
 def test_add_friend_uses_serialized_human_pacing() -> None:
     sidecar = PROJECT_ROOT / "apps" / "wechat_ai_customer_service" / "adapters" / "wechat_win32_ocr_sidecar.py"
+    add_friend_windows = PROJECT_ROOT / "apps" / "wechat_ai_customer_service" / "adapters" / "wechat_win32_ocr" / "add_friend_windows.py"
     source = sidecar.read_text(encoding="utf-8")
+    implementation_source = source + "\n" + add_friend_windows.read_text(encoding="utf-8")
     assert_true(callable(add_friend_human_pause), "add_friend human pacing helper should be importable")
     assert_true(callable(clear_add_friend_sidebar_search_box), "add_friend slow clear helper should be importable")
-    assert_true("clear_add_friend_sidebar_search_box(" in source and "target_hint=query" in source, "add_friend should use slow serialized search clearing")
-    assert_true("clear_sidebar_search_box_without_select_all(hwnd, search_x, search_y, target_hint=query)" not in source, "add_friend must not use fast shared search clearing")
-    assert_true("add_friend_wait_before_ocr(\"after_search_input_before_ocr\")" in source, "add_friend must pause between keyboard input and OCR")
-    assert_true("add_friend_human_pause(650, 1450, reason=\"before_mouse_click\")" in source, "add_friend must pause before mouse click")
-    assert_true("add_friend_human_pause(900, 1900, reason=\"after_mouse_click\")" in source, "add_friend must pause after mouse click")
+    assert_true("clear_add_friend_sidebar_search_box(" in implementation_source and "target_hint=query" in implementation_source, "add_friend should use slow serialized search clearing")
+    assert_true("clear_sidebar_search_box_without_select_all(hwnd, search_x, search_y, target_hint=query)" not in implementation_source, "add_friend must not use fast shared search clearing")
+    assert_true(
+        'add_friend_wait_before_ocr("after_search_input_before_ocr")' in implementation_source
+        or "add_friend_wait_before_ocr('after_search_input_before_ocr')" in implementation_source,
+        "add_friend must pause between keyboard input and OCR",
+    )
+    assert_true(
+        'add_friend_human_pause(650, 1450, reason="before_mouse_click")' in implementation_source
+        or "add_friend_human_pause(650, 1450, reason='before_mouse_click')" in implementation_source,
+        "add_friend must pause before mouse click",
+    )
+    assert_true(
+        'add_friend_human_pause(900, 1900, reason="after_mouse_click")' in implementation_source
+        or "add_friend_human_pause(900, 1900, reason='after_mouse_click')" in implementation_source,
+        "add_friend must pause after mouse click",
+    )
     flow_source = (PROJECT_ROOT / "apps" / "wechat_ai_customer_service" / "adapters" / "add_friend_flow.py").read_text(encoding="utf-8")
-    assert_true('default=1' in flow_source and 'WECHAT_WIN32_OCR_PLUS_ENTRY_CLICK_MAX_ATTEMPTS' in flow_source, "add_friend plus entry should default to a single click attempt")
-    assert_true('maximum=2' in flow_source, "add_friend plus entry retries must stay tightly capped")
+    assert_true("max_attempts = 1" in flow_source, "add_friend plus entry should use exactly one click attempt")
+    assert_true("WECHAT_WIN32_OCR_PLUS_ENTRY_CLICK_MAX_ATTEMPTS" not in flow_source, "add_friend plus entry attempts must not be expanded by env overrides")
     assert_true('add_friend_surface_readiness(before_shot' in flow_source, "add_friend must preflight full-window readiness before clicking")
 
 
@@ -2179,6 +2194,31 @@ def test_invalid_window_handle_is_hard_stop_not_recovery() -> None:
     )
 
 
+def test_daemon_invalid_window_handle_is_hard_stop() -> None:
+    payload = {
+        "ok": False,
+        "online": False,
+        "state": "daemon_dispatch_failed",
+        "error": "error(1400, 'GetWindowRect', '无效的窗口句柄。')",
+    }
+    assert_true(
+        rpa_payload_has_invalid_window_handle(payload),
+        "invalid hwnd surfaced through daemon_dispatch_failed should be classified explicitly",
+    )
+
+
+def test_sidecar_exception_payload_marks_invalid_window_handle() -> None:
+    sidecar_mod = sys.modules["apps.wechat_ai_customer_service.adapters.wechat_win32_ocr_sidecar"]
+    payload = sidecar_mod.exception_payload_for_sidecar(
+        RuntimeError("error(1400, 'GetWindowRect', '无效的窗口句柄。')"),
+        state="daemon_dispatch_failed",
+    )
+    assert_true(payload.get("ok") is False, f"exception payload should fail: {payload}")
+    assert_true(payload.get("reason") == "window_handle_invalid", f"invalid hwnd reason should be explicit: {payload}")
+    assert_true(payload.get("risk_stop_recommended") is True, f"invalid hwnd should request hard stop: {payload}")
+    assert_true(rpa_payload_has_invalid_window_handle(payload), f"connector should classify sidecar payload: {payload}")
+
+
 def test_send_text_invalid_window_handle_skips_wxauto4_reserve() -> None:
     class InvalidHwndConnector(WeChatConnector):
         def __init__(self) -> None:
@@ -2928,6 +2968,14 @@ def test_adaptive_humanized_input_speed_profiles() -> None:
     assert_true(3 <= int(short.get("chunk_min_chars") or 0) <= 7, f"short chunks should remain human-sized: {short}")
     assert_true(45 <= int(short.get("char_delay_min_ms") or 0) <= 125, f"short char delay should not be superhuman: {short}")
     assert_true(18 <= int(short.get("micro_pause_every_chars") or 0) <= 40, f"short pauses should remain natural: {short}")
+    assert_true(
+        int(short.get("send_post_input_delay_min_ms") or 0) >= 120,
+        f"adaptive profile must not shorten configured post-input pause: {short}",
+    )
+    assert_true(
+        int(short.get("send_post_input_delay_max_ms") or 0) >= 460,
+        f"adaptive profile must not shorten configured post-input pause: {short}",
+    )
 
     long_text = "这边先帮您确认几个点。" * 40
     long_profile = adapt_humanized_input_settings(base, long_text)
@@ -3075,6 +3123,60 @@ def test_safe_send_trigger_uses_single_enter_with_randomized_delays() -> None:
                 sidecar_mod.win32api.keybd_event = value
             else:
                 setattr(sidecar_mod, name, value)
+
+
+def test_send_with_guarded_clicks_skips_input_refocus_after_confirmed_paste() -> None:
+    sidecar_mod = sys.modules["apps.wechat_ai_customer_service.adapters.wechat_win32_ocr_sidecar"]
+    originals = {
+        "jitter_send_click_point": sidecar_mod.jitter_send_click_point,
+        "humanized_sleep_ms": sidecar_mod.humanized_sleep_ms,
+        "paste_text_with_confirmation": sidecar_mod.paste_text_with_confirmation,
+        "recover_send_window_guard": sidecar_mod.recover_send_window_guard,
+        "safe_send_trigger": sidecar_mod.safe_send_trigger,
+        "human_client_click": sidecar_mod.human_client_click,
+    }
+    calls = {"click": 0, "trigger": 0, "guards": 0, "sleep": []}
+    try:
+        sidecar_mod.jitter_send_click_point = lambda x, y, geometry: (int(x), int(y))
+        sidecar_mod.humanized_sleep_ms = lambda low, high: calls["sleep"].append((int(low), int(high))) or 0.0
+        sidecar_mod.paste_text_with_confirmation = lambda *_args, **_kwargs: {
+            "ok": True,
+            "point": [718, 736],
+            "input_mode": "sendinput_unicode",
+            "confirmed_by": "ocr_input_area",
+        }
+
+        def fake_guard(*_args, **_kwargs):
+            calls["guards"] += 1
+            return {"ok": True, "reason": "window_valid"}
+
+        sidecar_mod.recover_send_window_guard = fake_guard
+        sidecar_mod.safe_send_trigger = lambda *_args, **_kwargs: calls.__setitem__("trigger", calls["trigger"] + 1) or {
+            "ok": True,
+            "method": "keyboard_enter",
+            "send_trigger_mode": "enter_only",
+        }
+        sidecar_mod.human_client_click = lambda *_args, **_kwargs: calls.__setitem__("click", calls["click"] + 1)
+        result = send_with_guarded_clicks(
+            1001,
+            "你好，我想给老婆看一台时尚点、不太贵的二手车，别太大，你先直接帮我推荐方向。",
+            points={"input_point": [637, 715], "send_point": [919, 816]},
+            geometry={"left": 0, "top": 0, "right": 981, "bottom": 860, "width": 981, "height": 860},
+            settings={
+                "enabled": True,
+                "send_post_input_delay_min_ms": 450,
+                "send_post_input_delay_max_ms": 1200,
+                "send_trigger_delay_min_ms": 720,
+                "send_trigger_delay_max_ms": 2100,
+            },
+        )
+        assert_true(result.get("ok") is True, f"guarded click send should pass: {result}")
+        assert_true(calls["click"] == 0, f"confirmed input must not be clicked again before Enter: {calls}")
+        assert_true(calls["trigger"] == 1, f"send trigger should run once: {calls}")
+        assert_true(result.get("input_refocus", {}).get("skipped") is True, f"input refocus should be explicit: {result}")
+    finally:
+        for name, value in originals.items():
+            setattr(sidecar_mod, name, value)
 
 
 def test_input_text_region_state_distinguishes_blank_and_text() -> None:
@@ -4278,6 +4380,8 @@ def main() -> int:
         test_guarded_send_confirmation_fallback,
         test_fast_send_confirmation_skips_slow_message_read_when_guard_is_strong,
         test_invalid_window_handle_is_hard_stop_not_recovery,
+        test_daemon_invalid_window_handle_is_hard_stop,
+        test_sidecar_exception_payload_marks_invalid_window_handle,
         test_send_text_invalid_window_handle_skips_wxauto4_reserve,
         test_foreign_overlay_capture_filter_and_blind_target_gate,
         test_blind_target_confirmation_uses_sidebar_match_when_title_missing,
@@ -4288,6 +4392,7 @@ def main() -> int:
         test_sendinput_unicode_aborts_when_window_guard_fails,
         test_send_trigger_mode_defaults_to_enter_only,
         test_safe_send_trigger_uses_single_enter_with_randomized_delays,
+        test_send_with_guarded_clicks_skips_input_refocus_after_confirmed_paste,
         test_input_text_region_state_distinguishes_blank_and_text,
         test_input_region_visual_delta_confirmation,
         test_input_region_soft_blank_noise_allows_post_clear_progress,

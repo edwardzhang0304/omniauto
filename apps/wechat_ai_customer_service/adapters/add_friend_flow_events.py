@@ -152,7 +152,30 @@ def _add_query_search_events(add: Any, query_search: dict[str, Any]) -> None:
                 targets=_list(page.get("targets")),
                 selected_target=_first_target(page.get("targets")),
                 artifacts=_artifacts(page),
-                result={"state": query_search.get("state"), "query": query_search.get("query")},
+                result={
+                    "state": query_search.get("state"),
+                    "query": query_search.get("query"),
+                    "input_empty_before_clear": page.get("input_empty_before_clear"),
+                    "clear_result": query_search.get("clear_result"),
+                },
+            )
+        )
+
+    clear_verify = _dict(query_search.get("clear_verify"))
+    if clear_verify:
+        verify = _dict(clear_verify.get("verify"))
+        add(
+            make_step_event(
+                step_id="query_search_input_clear_verify",
+                title="清空搜索框后复核",
+                status="completed" if verify.get("ok") else "failed",
+                state_before="add_friend_search_page",
+                state_after="search_input_empty" if verify.get("ok") else "search_input_clear_failed",
+                ocr_items=_list(clear_verify.get("ocr_items")),
+                targets=_list(page.get("targets")),
+                selected_target=_first_target(page.get("targets")),
+                artifacts=_artifacts(clear_verify),
+                result=verify,
             )
         )
 

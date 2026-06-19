@@ -14,6 +14,16 @@ This project may contain Chinese text. Treat all source files as UTF-8.
 - If a bulk rewrite is required, explicitly read and write UTF-8 without BOM, or use Node.js `fs` APIs with `utf8`.
 - After editing frontend JavaScript or TypeScript files, run `node --check`, lint, or the relevant project test command.
 
+## Naming And Contract Stability
+
+Do not casually rename existing variables, constants, CLI commands, route names, artifact scopes, file paths, JSON field names, or public function names.
+
+- Treat names such as `add-friend-entry-click-plan`, worker-facing CLI routes, JSON output fields, and shared constants as collaboration contracts, not local implementation details.
+- Preserve the original name and add aliases or adapter layers when platform-specific behavior is needed.
+- Rename only when the user explicitly approves the exact old name, new name, and migration plan.
+- Before any approved rename, update compatibility tests, documentation, and downstream references in the same change.
+- If a name looks wrong or misleading, document the issue and propose a migration instead of silently changing it.
+
 ## WeChat Cloud Simulation Baseline (Required)
 
 For `apps/wechat_ai_customer_service`, the test environment has an approved local cloud simulation mode:

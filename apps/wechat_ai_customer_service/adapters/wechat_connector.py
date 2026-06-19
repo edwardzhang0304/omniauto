@@ -1631,8 +1631,16 @@ def rpa_payload_has_invalid_window_handle(payload: dict[str, Any]) -> bool:
     if not isinstance(payload, dict):
         return False
     state = str(payload.get("state") or "").strip()
+    reason = str(payload.get("reason") or "").strip()
+    if reason == "window_handle_invalid":
+        return True
+    if payload.get("risk_stop_reason") == "win32_invalid_window_handle":
+        return True
+    primary = payload.get("primary_status") if isinstance(payload.get("primary_status"), dict) else {}
+    if primary and rpa_payload_has_invalid_window_handle(primary):
+        return True
     error_text = str(payload.get("error") or "").strip().lower()
-    if state != "win32_ocr_failed":
+    if state not in {"win32_ocr_failed", "daemon_dispatch_failed", "compat_daemon_call_failed"}:
         return False
     return "getwindowrect" in error_text or "无效的窗口句柄" in error_text or "invalid window handle" in error_text
 

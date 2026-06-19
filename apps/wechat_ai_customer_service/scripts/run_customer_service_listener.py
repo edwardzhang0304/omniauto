@@ -1052,6 +1052,7 @@ def launch_operator_guard(
     state_path: Path,
     pid_path: Path,
     parent_pid: int | None = None,
+    local_safety_stop_path: str | None = None,
 ) -> dict[str, Any]:
     if os.name != "nt":
         return {"ok": False, "enabled": False, "reason": "windows_only"}
@@ -1078,6 +1079,8 @@ def launch_operator_guard(
         "--pause-poll-interval-ms",
         str(int(settings.get("pause_poll_interval_ms") or OPERATOR_GUARD_DEFAULTS["pause_poll_interval_ms"])),
     ]
+    if local_safety_stop_path:
+        command.extend(["--local-safety-stop-path", str(local_safety_stop_path)])
     if settings.get("block_manual_input", True):
         command.append("--block-manual-input")
     else:

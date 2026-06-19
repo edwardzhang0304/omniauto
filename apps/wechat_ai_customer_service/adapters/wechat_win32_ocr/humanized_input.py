@@ -281,7 +281,7 @@ def adapt_humanized_input_settings(settings: dict[str, Any], text: str) -> dict[
     ):
         current = int(active.get(key) or 0)
         target = int(profile[key])
-        if key.startswith("send_trigger") or key.startswith("send_after_trigger"):
+        if key.startswith("send_post_input") or key.startswith("send_trigger") or key.startswith("send_after_trigger"):
             active[key] = max(current, target)
         else:
             active[key] = 0 if current <= 0 else min(current, target)

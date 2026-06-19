@@ -267,12 +267,24 @@ def should_high_priority_faq_preempt_product(faq: dict[str, Any], product: dict[
     return str(faq.get("intent") or "") not in {"selection_help", "service_reliability"}
 
 
+FAQ_INTENT_ALIASES = {
+    "special_invoice_rule": "invoice",
+}
+
+
+def canonical_faq_intent(faq: dict[str, Any]) -> str:
+    raw_intent = str(faq.get("intent") or "faq").strip() or "faq"
+    return FAQ_INTENT_ALIASES.get(raw_intent, raw_intent)
+
+
 def build_faq_result(faq: dict[str, Any]) -> dict[str, Any]:
-    return {
+    raw_intent = str(faq.get("intent") or "faq").strip() or "faq"
+    intent = canonical_faq_intent(faq)
+    payload = {
         "enabled": True,
         "matched": True,
         "match_type": "faq",
-        "intent": str(faq.get("intent") or "faq"),
+        "intent": intent,
         "faq_keywords": faq.get("keywords", []),
         "reply_text": str(faq.get("answer") or ""),
         "needs_handoff": bool(faq.get("needs_handoff", False)),
@@ -280,6 +292,9 @@ def build_faq_result(faq: dict[str, Any]) -> dict[str, Any]:
         "operator_alert": bool(faq.get("operator_alert", False)),
         "reason": str(faq.get("reason") or "faq_keyword_matched"),
     }
+    if raw_intent != intent:
+        payload["faq_source_intent"] = raw_intent
+    return payload
 
 
 def build_catalog_result(knowledge: dict[str, Any]) -> dict[str, Any]:

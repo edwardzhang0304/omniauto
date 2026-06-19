@@ -101,5 +101,5 @@ def runtime_start() -> dict[str, Any]:
 
 
 @router.post("/runtime/stop")
-def runtime_stop() -> dict[str, Any]:
-    return RecorderRuntime().stop()
+def runtime_stop(tenant_id: str | None = Query(default=None)) -> dict[str, Any]:
+    return RecorderRuntime(tenant_id=tenant_id).stop()

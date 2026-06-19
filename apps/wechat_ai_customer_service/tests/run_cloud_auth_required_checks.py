@@ -30,6 +30,7 @@ def main() -> int:
         results.append(check_explicit_dev_auth_bypass_still_requires_opt_in())
         results.append(check_runtime_start_requires_login_in_cloud_mode())
         results.append(check_local_safety_stop_does_not_require_login())
+        results.append(check_recorder_local_safety_stop_uses_query_tenant_id())
     finally:
         restore_env("WECHAT_CLOUD_REQUIRED", old_cloud_required)
         restore_env("WECHAT_AUTH_REQUIRED", old_auth_required)
@@ -91,6 +92,27 @@ def check_local_safety_stop_does_not_require_login() -> dict[str, Any]:
         remote_response = client.post("/api/customer-service/runtime/stop", headers={"Host": "example.com", "X-Tenant-ID": "chejin"}, json={})
         assert_equal(remote_response.status_code, 401, "non-local runtime stop should still require login")
     return {"name": "check_local_safety_stop_does_not_require_login", "ok": True}
+
+
+def check_recorder_local_safety_stop_uses_query_tenant_id() -> dict[str, Any]:
+    os.environ["WECHAT_CLOUD_REQUIRED"] = "1"
+    os.environ.pop("WECHAT_AUTH_REQUIRED", None)
+    client = TestClient(create_app())
+    with patch("apps.wechat_ai_customer_service.admin_backend.api.recorder.RecorderRuntime") as recorder_runtime:
+        recorder_runtime.return_value.stop.return_value = {
+            "ok": True,
+            "message": "AI智能记录员监听已停止。",
+            "item": {"running": False, "state": "stopped"},
+        }
+        response = client.post(
+            "/api/recorder/runtime/stop?tenant_id=test02",
+            headers={"Host": "127.0.0.1"},
+            json={},
+        )
+        assert_equal(response.status_code, 200, "local recorder safety stop with query tenant should bypass stale login")
+        assert_equal(response.headers.get("X-Local-Safety-Stop"), "1", "query tenant safety stop should be explicit")
+        recorder_runtime.assert_called_once_with(tenant_id="test02")
+    return {"name": "check_recorder_local_safety_stop_uses_query_tenant_id", "ok": True}
 
 
 def restore_env(name: str, value: str | None) -> None:

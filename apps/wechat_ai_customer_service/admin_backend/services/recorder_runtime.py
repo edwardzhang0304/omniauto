@@ -406,6 +406,7 @@ class RecorderRuntime:
             state_path=state_path,
             pid_path=pid_path,
             parent_pid=parent_pid,
+            local_safety_stop_path="/api/recorder/runtime/stop",
         )
         if launch.get("ok") is not True:
             return {"ok": False, "enabled": True, "settings": guard_settings, "launch": launch}

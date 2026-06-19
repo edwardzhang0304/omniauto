@@ -79,6 +79,7 @@ from run_rpa_operator_guard import (  # noqa: E402
     INDICATOR_THEMES,
     indicator_state_snapshot,
     normalize_indicator_backend,
+    normalize_local_safety_stop_path,
     write_runtime_status_hint,
 )
 
@@ -209,6 +210,7 @@ def main() -> int:
         check_listener_operator_guard_settings_normalization(),
         check_operator_guard_indicator_three_color_mapping(),
         check_operator_guard_indicator_backend_defaults_to_layered(),
+        check_operator_guard_local_safety_stop_path_normalization(),
         check_operator_guard_runtime_status_hint(),
         check_listener_operator_guard_control_flow(),
         check_listener_operator_guard_waits_for_delayed_ready_state(),
@@ -1949,13 +1951,18 @@ def check_identity_probe_uses_local_denial_without_foreground_llm() -> dict[str,
         recent_reply_texts=[],
     )
     text = str(reply.get("reply_text") or "")
+    boundary_markers = ("内部信息", "内部规则", "提示词", "不能往外发", "不对外提供", "不方便外发", "不展开说")
+    redirect_markers = ("车况", "报价", "手续", "置换", "车源", "按实际情况")
+    identity_truth_markers = ("不是AI", "不是ai", "不是机器人", "不是自动回复", "不是机器客服", "我是AI", "我是机器人", "我是真人", "真人客服")
     ok = (
         route.get("level") == "L1"
         and route.get("reason") == "identity_probe_can_use_local_style"
         and route.get("foreground_llm_allowed") is False
         and reply.get("rule_name") == "realtime_identity_probe"
-        and ("不是AI" in text or "不是机器人" in text)
-        and not any(marker in text for marker in ("我是AI", "我是机器人", "转人工", "人工客服"))
+        and any(marker in text for marker in boundary_markers)
+        and any(marker in text for marker in redirect_markers)
+        and not any(marker in text for marker in identity_truth_markers)
+        and not any(marker in text for marker in ("转人工", "人工客服"))
     )
     return {"name": "identity_probe_uses_local_denial_without_foreground_llm", "ok": ok, "route": route, "reply": reply}
 
@@ -1996,11 +2003,17 @@ def check_repeated_identity_probe_uses_reply_variants() -> dict[str, Any]:
         )
         routes.append(route)
         replies.append(str(reply.get("reply_text") or ""))
+    joined = " ".join(replies)
+    boundary_markers = ("内部信息", "内部规则", "提示词", "不能往外发", "不对外提供", "不方便外发", "不展开说")
+    redirect_markers = ("车况", "报价", "手续", "置换", "车源", "按实际情况")
+    identity_truth_markers = ("不是AI", "不是ai", "不是机器人", "不是自动回复", "不是机器客服", "我是AI", "我是机器人", "我是真人", "真人客服")
     ok = (
         len(set(replies)) == len(replies)
         and all(route.get("reason") == "identity_probe_can_use_local_style" for route in routes)
-        and all(("不是AI" in text or "不是机器人" in text or "不是自动回复" in text or "不是机器客服" in text) for text in replies)
-        and not any(marker in " ".join(replies) for marker in ("我是AI", "我是机器人", "转人工", "人工客服"))
+        and all(any(marker in text for marker in boundary_markers) for text in replies)
+        and all(any(marker in text for marker in redirect_markers) for text in replies)
+        and not any(marker in joined for marker in identity_truth_markers)
+        and not any(marker in joined for marker in ("转人工", "人工客服"))
     )
     return {"name": "repeated_identity_probe_uses_reply_variants", "ok": ok, "routes": routes, "replies": replies}
 
@@ -3891,6 +3904,24 @@ def check_operator_guard_indicator_backend_defaults_to_layered() -> dict[str, An
     return {"name": "operator_guard_indicator_backend_defaults_to_layered", "ok": ok, "values": values}
 
 
+def check_operator_guard_local_safety_stop_path_normalization() -> dict[str, Any]:
+    values = {
+        "default": normalize_local_safety_stop_path(""),
+        "recorder_without_slash": normalize_local_safety_stop_path("api/recorder/runtime/stop"),
+        "recorder": normalize_local_safety_stop_path("/api/recorder/runtime/stop"),
+        "absolute_url_rejected": normalize_local_safety_stop_path("http://127.0.0.1:8765/api/recorder/runtime/stop"),
+        "non_stop_rejected": normalize_local_safety_stop_path("/api/recorder/runtime/start"),
+    }
+    ok = (
+        values["default"] == "/api/customer-service/runtime/stop"
+        and values["recorder_without_slash"] == "/api/recorder/runtime/stop"
+        and values["recorder"] == "/api/recorder/runtime/stop"
+        and values["absolute_url_rejected"] == "/api/customer-service/runtime/stop"
+        and values["non_stop_rejected"] == "/api/customer-service/runtime/stop"
+    )
+    return {"name": "operator_guard_local_safety_stop_path_normalization", "ok": ok, "values": values}
+
+
 def check_operator_guard_runtime_status_hint() -> dict[str, Any]:
     tenant_id = "operator_guard_runtime_status_hint_test"
     with tempfile.TemporaryDirectory() as tmp:
@@ -4175,7 +4206,7 @@ def check_recorder_operator_guard_launch_flow() -> dict[str, Any]:
             recorder_runtime,
             "launch_operator_guard",
             return_value={"ok": True, "enabled": True, "pid": parent_pid + 10, "script_path": "guard.py"},
-        ), patch.object(
+        ) as launch_mock, patch.object(
             recorder_runtime,
             "verify_operator_guard_bootstrap",
             return_value={
@@ -4193,6 +4224,7 @@ def check_recorder_operator_guard_launch_flow() -> dict[str, Any]:
             )
         pid_record_path = recorder_runtime.recorder_operator_guard_pid_path(tenant_id)
         pid_record = json.loads(pid_record_path.read_text(encoding="utf-8"))
+        launch_stop_path = str(launch_mock.call_args.kwargs.get("local_safety_stop_path") or "")
         verify_timeout = float(verify_mock.call_args.kwargs.get("timeout_seconds") or 0.0)
     finally:
         if runtime_root.exists():
@@ -4203,6 +4235,7 @@ def check_recorder_operator_guard_launch_flow() -> dict[str, Any]:
         and (result.get("settings") or {}).get("enabled") is True
         and pid_record.get("pid") == parent_pid + 11
         and pid_record.get("launcher_pid") == parent_pid + 10
+        and launch_stop_path == "/api/recorder/runtime/stop"
         and verify_timeout == 17.0
     )
     return {
@@ -4210,6 +4243,7 @@ def check_recorder_operator_guard_launch_flow() -> dict[str, Any]:
         "ok": ok,
         "result": result,
         "pid_record": pid_record,
+        "launch_stop_path": launch_stop_path,
         "verify_timeout": verify_timeout,
     }
 
