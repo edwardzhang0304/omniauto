@@ -135,7 +135,6 @@ from apps.wechat_ai_customer_service.adapters.add_friend_result_mapping import (
 )
 from apps.wechat_ai_customer_service.adapters.add_friend_routes import (
     ADD_FRIEND_MAIN_ROUTE,
-    ADD_FRIEND_WINDOWS_1080P_REFERENCE_ROUTE,
     ADD_FRIEND_ROUTES,
     ADD_FRIEND_WINDOWS_ROUTE,
     add_friend_route_accepts_formal_fields,

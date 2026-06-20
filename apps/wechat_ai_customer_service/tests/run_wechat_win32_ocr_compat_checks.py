@@ -197,9 +197,7 @@ def test_sidecar_help_exposes_stable_actions_and_flags() -> None:
         "messages",
         "send",
         "recover-render",
-        "add-friend-entry-click-plan",
         "add-friend-entry-click-plan-windows",
-        "add-friend-entry-click-plan-windows-1080p-reference",
     ):
         assert_true(action in help_text, f"sidecar --help should expose stable action {action}: {help_text[:800]}")
     for flag in (
@@ -228,7 +226,7 @@ def test_sidecar_help_exposes_stable_actions_and_flags() -> None:
 def test_sidecar_contract_validation_failure_is_json_without_window_probe() -> None:
     with tempfile.TemporaryDirectory() as temp:
         result = run_sidecar_script_without_pythonpath(
-            ["add-friend-entry-click-plan", "--phone", "17368746889", "--artifact-dir", temp],
+            ["add-friend-entry-click-plan-windows", "--phone", "17368746889", "--artifact-dir", temp],
             cwd=temp,
         )
     assert_true(result.returncode == 1, f"invalid add_friend payload should fail with rc=1: rc={result.returncode}, stdout={result.stdout}")
@@ -262,9 +260,7 @@ def test_sidecar_facade_exports_contract_surface() -> None:
         "messages",
         "send",
         "recover-render",
-        "add-friend-entry-click-plan",
         "add-friend-entry-click-plan-windows",
-        "add-friend-entry-click-plan-windows-1080p-reference",
     ):
         assert_true(action in sidecar_module.SIDECAR_ACTION_CHOICES, f"sidecar action choice missing: {action}")
     required_exports = (
@@ -523,7 +519,7 @@ def test_connector_add_friend_builds_win32_ocr_request() -> None:
     )
     assert_true(result.get("ok") is True and result.get("result_code") == "invite_sent", f"unexpected add_friend result: {result}")
     args = connector.calls[0]["args"]
-    assert_true(args[:3] == ["add-friend-entry-click-plan", "--phone", "17368746889"], f"add_friend should call the stable add_friend CLI action: {args}")
+    assert_true(args[:3] == ["add-friend-entry-click-plan-windows", "--phone", "17368746889"], f"add_friend should call the stable add_friend CLI action: {args}")
     assert_true("--verify-message" in args and "我是车金二手车张伟" in args, f"verify_message should pass through: {args}")
     assert_true("--remark-name" in args and "客户-CJ8K2P-6889" in args, f"remark_name should pass through: {args}")
     assert_true("--remark-code" in args and "CJ8K2P" in args, f"remark_code should pass through: {args}")
@@ -2530,9 +2526,7 @@ def test_passive_probe_mode_toggle() -> None:
         assert_true(use_passive_probe_mode("capabilities"), "capabilities should support passive probe mode")
         assert_true(use_passive_probe_mode("sessions"), "sessions should support passive probe mode")
         assert_true(use_passive_probe_mode("send") is False, "send action should never use passive probe mode")
-        assert_true(use_passive_probe_mode("add-friend-entry-click-plan") is False, "stable add_friend route should focus WeChat before clicks")
-        assert_true(use_passive_probe_mode("add-friend-entry-click-plan-windows") is False, "Windows add_friend alias should focus WeChat before clicks")
-        assert_true(use_passive_probe_mode("add-friend-entry-click-plan-windows-1080p-reference"), "reference add_friend route can remain passive for comparison")
+        assert_true(use_passive_probe_mode("add-friend-entry-click-plan-windows") is False, "Windows add_friend route should focus WeChat before clicks")
         os.environ["WECHAT_WIN32_OCR_PASSIVE_PROBE"] = "0"
         assert_true(use_passive_probe_mode("status") is False, "env override should disable passive probe mode")
     finally:
