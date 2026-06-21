@@ -43,7 +43,8 @@ Commands:
 git status --short --branch
 git merge-base --is-ancestor 32c9ebfcd34cd217487a4e01984e5f054754c683 HEAD
 python -c "from apps.wechat_ai_customer_service.adapters.add_friend_routes import ADD_FRIEND_MAIN_ROUTE, ADD_FRIEND_ROUTES; from apps.wechat_ai_customer_service.adapters.wechat_win32_ocr_sidecar import SIDECAR_ACTION_CHOICES; print(ADD_FRIEND_MAIN_ROUTE); print(ADD_FRIEND_ROUTES); print(tuple(x for x in SIDECAR_ACTION_CHOICES if 'add-friend' in x))"
-rg -n "ADD_FRIEND_WINDOWS_1080P_REFERENCE_ROUTE|ADD_FRIEND_WINDOWS_REFERENCE_ROUTE|ADD_FRIEND_ENTRY_CLICK_ROUTE|add-friend-entry-click-plan-windows-1080p-reference|run_wechat_add_friend_entry_click_plan\.ps1|\badd-friend-entry-click-plan\b" apps/wechat_ai_customer_service/adapters apps/wechat_ai_customer_service/scripts apps/wechat_ai_customer_service/tests apps/wechat_ai_customer_service/README.md AGENTS.md
+rg -n "ADD_FRIEND_WINDOWS_1080P_REFERENCE_ROUTE|ADD_FRIEND_WINDOWS_REFERENCE_ROUTE|ADD_FRIEND_ENTRY_CLICK_ROUTE|add-friend-entry-click-plan-windows-1080p-reference|run_wechat_add_friend_entry_click_plan\.ps1" apps/wechat_ai_customer_service/adapters apps/wechat_ai_customer_service/scripts apps/wechat_ai_customer_service/tests apps/wechat_ai_customer_service/README.md AGENTS.md
+rg -n -P "(?<![\w-])add-friend-entry-click-plan(?!-windows)(?![\w-])" apps/wechat_ai_customer_service/adapters apps/wechat_ai_customer_service/scripts apps/wechat_ai_customer_service/tests apps/wechat_ai_customer_service/README.md AGENTS.md
 ```
 
 Pass criteria:
@@ -244,4 +245,3 @@ The current version is considered healthy only when:
 - Phase 9 passes at least calibration/no-click readiness, and live add_friend passes if a test account is explicitly available.
 - All failures have been fixed and rerun, or explicitly recorded as environment blockers.
 - `.codex-longrun/progress.md`, `.codex-longrun/test-log.md`, and `.codex-longrun/state.json` are updated.
-
