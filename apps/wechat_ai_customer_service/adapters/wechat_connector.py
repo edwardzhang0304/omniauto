@@ -663,7 +663,7 @@ class WeChatConnector:
             raise WeChatConnectorError("remark_code is required")
         if str(remark_code).strip() not in str(remark_name).strip():
             raise WeChatConnectorError("remark_name must include remark_code")
-        args = ["add-friend-entry-click-plan"]
+        args = ["add-friend-entry-click-plan-windows"]
         if phone:
             args.extend(["--phone", str(phone)])
         if wechat:

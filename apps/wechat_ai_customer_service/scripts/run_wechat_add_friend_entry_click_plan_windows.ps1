@@ -87,7 +87,7 @@ $Args += @("--remark-code", $RemarkCode)
 
 Write-Host "ProjectRoot: $ProjectRoot"
 Write-Host "ArtifactDir: $ArtifactDir"
-Write-Host "Running explicit Windows add_friend entry click alias. The stable Worker-facing command is add-friend-entry-click-plan; this alias uses the same Windows adaptive implementation."
+Write-Host "Running Worker-facing Windows add_friend entry click route."
 
 $NativeErrorActionPreference = "Continue"
 $PreviousErrorActionPreference = $ErrorActionPreference

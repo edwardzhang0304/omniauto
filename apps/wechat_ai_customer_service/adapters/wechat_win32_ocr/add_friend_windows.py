@@ -72,7 +72,6 @@ from apps.wechat_ai_customer_service.adapters.add_friend_result_mapping import (
 )
 from apps.wechat_ai_customer_service.adapters.add_friend_routes import (
     ADD_FRIEND_MAIN_ROUTE,
-    ADD_FRIEND_WINDOWS_1080P_REFERENCE_ROUTE,
 )
 from apps.wechat_ai_customer_service.adapters.wechat_win32_ocr.env_config import env_flag
 from apps.wechat_ai_customer_service.adapters.wechat_win32_ocr.geometry import (
@@ -1922,8 +1921,7 @@ def add_friend_pre_click_main_window_readiness(hwnd: int, geometry: dict[str, An
     ocr_started_at = time.perf_counter()
     ocr_items = _ops().run_ocr_on_screen_region(screenshot, [0, 0, screenshot.size[0], screenshot.size[1]])
     ocr_seconds = round(time.perf_counter() - ocr_started_at, 3)
-    route_kind = 'windows_1080p_reference' if str(route or '') == ADD_FRIEND_WINDOWS_1080P_REFERENCE_ROUTE else 'windows'
-    plus_target = add_friend_plus_entry_target(geometry, screenshot.size, ocr_items, screenshot=screenshot, route_kind=route_kind)
+    plus_target = add_friend_plus_entry_target(geometry, screenshot.size, ocr_items, screenshot=screenshot, route_kind='windows')
     surface_readiness = _ops().add_friend_surface_readiness(screenshot, ocr_items, geometry, stage='formal_pre_click', require_main_surface=True)
     annotated_path = output_dir / 'add_friend_pre_click_main_window_annotated.png'
     annotated = draw_add_friend_screen_annotation(screenshot, ocr_items=ocr_items, targets=[plus_target], output_path=annotated_path, window_rect=None)
@@ -1959,8 +1957,7 @@ def add_friend_calibration_payload(hwnd: int, probe: dict[str, Any], *, geometry
     screenshot, screenshot_path = _ops().capture_wechat_window_visible_screen(hwnd, artifact_dir=str(output_dir), label='add_friend_calibration_main_window')
     ocr_started_at = time.perf_counter()
     ocr_items = _ops().run_ocr_on_screen_region(screenshot, [0, 0, screenshot.size[0], screenshot.size[1]])
-    route_kind = 'windows_1080p_reference' if str(route or '') == ADD_FRIEND_WINDOWS_1080P_REFERENCE_ROUTE else 'windows'
-    plus_target = add_friend_plus_entry_target(geometry, screenshot.size, ocr_items, screenshot=screenshot, route_kind=route_kind)
+    plus_target = add_friend_plus_entry_target(geometry, screenshot.size, ocr_items, screenshot=screenshot, route_kind='windows')
     readiness = _ops().add_friend_surface_readiness(screenshot, ocr_items, geometry, stage='calibration')
     annotated_path = output_dir / 'add_friend_calibration_main_window_annotated.png'
     annotated = draw_add_friend_screen_annotation(screenshot, ocr_items=ocr_items, targets=[plus_target], output_path=annotated_path, window_rect=None)

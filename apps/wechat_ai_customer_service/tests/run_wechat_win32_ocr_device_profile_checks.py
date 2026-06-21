@@ -40,7 +40,7 @@ def test_capture_geometry_guard_matches_sidecar() -> None:
 
 def test_build_device_profile_shape() -> None:
     profile = device_profile.build_device_profile(
-        route="add-friend-entry-click-plan",
+        route="add-friend-entry-click-plan-windows",
         geometry={"left": 0, "top": 0, "width": 981, "height": 860},
         screenshot_size=(981, 860),
         client_rect={"width": 981, "height": 860},
@@ -50,7 +50,7 @@ def test_build_device_profile_shape() -> None:
         monitors=[{"left": 0, "top": 0, "right": 1920, "bottom": 1200, "width": 1920, "height": 1200}],
     )
     assert_true(profile.get("platform") == "windows", f"profile platform mismatch: {profile}")
-    assert_true(profile.get("route") == "add-friend-entry-click-plan", f"profile route mismatch: {profile}")
+    assert_true(profile.get("route") == "add-friend-entry-click-plan-windows", f"profile route mismatch: {profile}")
     assert_true(profile.get("window_rect", {}).get("width") == 981, f"profile geometry mismatch: {profile}")
     assert_true(profile.get("screenshot_size") == [981, 860], f"profile screenshot mismatch: {profile}")
     assert_true(profile.get("dpi_scale") == 1.25, f"profile dpi scale mismatch: {profile}")

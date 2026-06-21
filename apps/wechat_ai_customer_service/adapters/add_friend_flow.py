@@ -18,7 +18,6 @@ from apps.wechat_ai_customer_service.adapters.add_friend_result_mapping import (
     add_friend_server_report_payload,
 )
 from apps.wechat_ai_customer_service.adapters.add_friend_routes import (
-    ADD_FRIEND_WINDOWS_1080P_REFERENCE_ROUTE,
     ADD_FRIEND_MAIN_ROUTE,
 )
 
@@ -161,7 +160,7 @@ def run_add_friend_entry_click_plan_flow(
     )
     window_origin_x = int(geometry.get("left") or 0)
     window_origin_y = int(geometry.get("top") or 0)
-    platform_adapter = "windows_1080p_reference" if selected_route == ADD_FRIEND_WINDOWS_1080P_REFERENCE_ROUTE else "windows"
+    platform_adapter = "windows"
     before_full_ocr_started_at = time.perf_counter()
     before_full_items = ops.run_ocr_on_screen_region(before_shot, [0, 0, before_shot.size[0], before_shot.size[1]])
     timings.append(
