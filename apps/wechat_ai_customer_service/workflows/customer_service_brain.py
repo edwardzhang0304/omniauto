@@ -355,9 +355,13 @@ def target_context_has_active_business_state(target_state: dict[str, Any]) -> bo
     return False
 
 
-def target_state_has_delay_followup_context(target_state: dict[str, Any]) -> bool:
+def target_state_has_delay_followup_context(target_state: dict[str, Any], current_text: Any = "") -> bool:
     interaction = target_state.get("conversation_interaction_state") if isinstance(target_state.get("conversation_interaction_state"), dict) else {}
     if not interaction:
+        return False
+    unanswered_text = normalize_fast_profile_text(interaction.get("last_unanswered_customer_text") or "")
+    current = normalize_fast_profile_text(current_text)
+    if current and unanswered_text and unanswered_text == current:
         return False
     posture = str(interaction.get("suggested_reply_posture") or "")
     return posture == "acknowledge_delay_then_continue" or (
@@ -405,7 +409,7 @@ def low_authority_fast_profile_decision(
         return {"enabled": False, "reason": "numeric_or_contact_signal"}
     if clean in LOW_AUTHORITY_FAST_AMBIGUOUS_ACKS and target_context_has_active_business_state(target_state):
         return {"enabled": False, "reason": "ambiguous_ack_needs_business_context"}
-    if target_state_has_delay_followup_context(target_state):
+    if target_state_has_delay_followup_context(target_state, combined):
         if social_message_requires_visible_brain_reply(combined):
             return {
                 "enabled": True,
@@ -436,7 +440,7 @@ def routine_product_fast_profile_decision(
     text = str(combined or "").strip()
     if not text:
         return {"enabled": False, "reason": "empty_message"}
-    if target_state_has_delay_followup_context(target_state):
+    if target_state_has_delay_followup_context(target_state, text):
         return {"enabled": False, "reason": "delay_followup_needs_full_context"}
     customer_messages = [
         item
@@ -2688,6 +2692,8 @@ def build_brain_prompt_pack(*, settings: dict[str, Any], brain_input: dict[str, 
             "客户可见回复只能来自BrainPlan.reply_segments；不能空回复，不能用本地模板。"
             "商品事实只用content_basis.product_master；政策/流程只用formal_knowledge；"
             "AI经验池、历史/style/RAG和常识只辅助表达，不能授权价格、库存、车况或承诺。"
+            "product_master.price_tiers是价格权威字段；客户给数量且命中阶梯时，必须用最适用阶梯单价和小计，不能回退基准价。"
+            "product_master.shipping_policy是物流/配送权威字段；存在该字段时，不能声称未找到物流政策。"
             "必须直答当前问题：问价直接报商品库价格；推荐要给明确候选和理由；比较要给取舍。"
             "预算内候选优先，超预算只能标为备选；客户要多台且候选足够时给2到3台。"
             "客户试探身份时不讨论身份真假，不说“我是真人客服/不是AI/不是机器人”；自然接住当前问题即可。reply_segments不得出现Brain、AI、机器人、模型、系统配置等内部实现或身份暴露词。"
@@ -2702,6 +2708,8 @@ def build_brain_prompt_pack(*, settings: dict[str, Any], brain_input: dict[str, 
             "权威边界：商品事实只用content_basis.product_master；政策/流程/边界只用formal_knowledge；"
             "当前会话事实只在本会话有效。AI经验池/历史/style/RAG只辅助表达，不能授权事实。"
             "LLM常识可做泛化取舍/避坑/保险等常识分析，但不得编造价格、库存、车况、贷款、售后或承诺。"
+            "product_master.price_tiers是价格权威字段；客户给数量且命中阶梯时，必须用最适用阶梯单价和小计，不能回退基准价。"
+            "product_master.shipping_policy是物流/配送权威字段；存在该字段时，不能声称未找到物流政策。"
             "legacy/existing_reply只作风险参考，不能作为上级答案或主导最终话术。"
             "safety里no_relevant_business_evidence只是软提示：若客户是问候/闲聊/常识问题，且不声明商品/政策事实、无硬风险，应直接自然回复。"
             "必须直答当前问题：问候/闲聊先自然接住；问价/推荐/比较/质疑要给结论。"
@@ -3065,6 +3073,8 @@ def build_brain_repair_prompt_pack(
         "你是微信客服大脑的质量修复器。你的任务不是新增事实，而是在同一证据包和同一权威边界内，"
         "修复原 BrainPlan 的答非所问、绕圈、缺少明确结论、机械套话或表达不自然问题。"
         "商品事实只能来自product_master；政策、流程和边界只能来自formal_knowledge；"
+        "product_master.price_tiers是价格权威字段；客户给数量且命中阶梯时，必须用最适用阶梯单价和小计，不能回退基准价。"
+        "product_master.shipping_policy是物流/配送权威字段；存在该字段时，不能声称未找到物流政策。"
         "如果需要重选或替换推荐商品，只能从brain_input里本轮提供的product_master、products、catalog_candidates中选择，"
         "不能凭历史聊天、AI经验池、style_context或模型记忆临时引入未在本轮证据中出现的商品；"
         "置换/收购类流程不可承诺上门验车、当天打款、最终收购价或固定服务时效，除非formal_knowledge明确授权；"
@@ -3556,6 +3566,9 @@ POST_REPAIR_HARD_DETERMINISTIC_QUALITY_ERRORS = {
     "over_budget_recommendation_ignores_budget_fit_candidates",
     "over_budget_recommendation_fills_budget_slot",
     "known_budget_fit_product_marked_price_uncertain",
+    "quantity_quote_ignored_applicable_price_tier",
+    "quantity_quote_missing_applicable_price_tier",
+    "shipping_policy_contradiction_for_destination",
     "missing_available_cargo_fit_candidate",
     "unverified_cargo_capacity_affirmative_claim",
     "contradicts_available_cargo_fit_candidate",
@@ -4495,6 +4508,11 @@ def compact_product_master_for_prompt(payload: dict[str, Any], *, max_items: int
 
 def compact_product_item_for_brain_prompt(item: dict[str, Any], *, max_text_chars: int) -> dict[str, Any]:
     """Keep authoritative product facts without dragging template-sized payloads."""
+    source = dict(item)
+    if not source.get("price_tiers") and source.get("discount_tiers"):
+        source["price_tiers"] = source.get("discount_tiers")
+    if not source.get("shipping_policy") and legacy_shipping_field_is_prompt_safe(source.get("shipping"), max_text_chars=max_text_chars):
+        source["shipping_policy"] = source.get("shipping")
     compact: dict[str, Any] = {}
     for key in (
         "id",
@@ -4511,26 +4529,28 @@ def compact_product_item_for_brain_prompt(item: dict[str, Any], *, max_text_char
         "transmission",
         "location",
         "price",
+        "price_tiers",
         "unit",
         "stock",
         "availability",
+        "shipping_policy",
         "authority_level",
         "match_reason",
         "context_used",
     ):
-        value = item.get(key)
+        value = source.get(key)
         if value not in (None, "", [], {}):
             compact[key] = compact_prompt_value(value, max_text_chars=max_text_chars, max_list_items=4)
-    aliases = item.get("aliases") or item.get("matched_aliases") or []
+    aliases = source.get("aliases") or source.get("matched_aliases") or []
     if isinstance(aliases, list) and aliases:
         compact["aliases"] = [str(alias) for alias in aliases[:6] if str(alias).strip()]
-    matched_aliases = item.get("matched_aliases") or []
+    matched_aliases = source.get("matched_aliases") or []
     if isinstance(matched_aliases, list) and matched_aliases:
         compact["matched_aliases"] = [str(alias) for alias in matched_aliases[:6] if str(alias).strip()]
-    specs = str(item.get("specs") or "").strip()
+    specs = str(source.get("specs") or "").strip()
     if specs:
         compact["specs"] = clip(specs, max(120, min(max_text_chars, 180)))
-    risk_rules = item.get("risk_rules") or []
+    risk_rules = source.get("risk_rules") or []
     if isinstance(risk_rules, list) and risk_rules:
         compact["risk_rules"] = [
             clip(str(rule), max(80, min(max_text_chars, 140)))
@@ -4538,6 +4558,16 @@ def compact_product_item_for_brain_prompt(item: dict[str, Any], *, max_text_char
             if str(rule).strip()
         ]
     return compact
+
+
+def legacy_shipping_field_is_prompt_safe(value: Any, *, max_text_chars: int) -> bool:
+    text = str(value or "").strip()
+    if not text:
+        return False
+    if len(text) > max(80, min(max_text_chars, 180)):
+        return False
+    policy_terms = ("包邮", "运费", "物流", "发货", "配送", "自提", "送货", "到站", "快递")
+    return any(term in text for term in policy_terms)
 
 
 def compact_formal_knowledge_for_prompt(payload: dict[str, Any], *, max_items: int, max_text_chars: int) -> dict[str, Any]:
@@ -4840,7 +4870,27 @@ def price_fact_matches_product(value: Any, item: dict[str, Any]) -> bool:
                 product_price = 0.0
             if product_price > 0 and any(abs(product_price - fact_price) <= 0.03 for fact_price in fact_prices):
                 return True
+        for product_price in product_tier_prices(container.get("price_tiers")):
+            if any(abs(product_price - fact_price) <= 0.03 for fact_price in fact_prices):
+                return True
     return False
+
+
+def product_tier_prices(value: Any) -> list[float]:
+    prices: list[float] = []
+    if not isinstance(value, list):
+        return prices
+    for item in value:
+        if not isinstance(item, dict):
+            continue
+        for key in ("unit_price", "price", "tier_price"):
+            try:
+                price = parse_fact_price(item.get(key))
+            except AttributeError:
+                price = 0.0
+            if price > 0 and price not in prices:
+                prices.append(price)
+    return prices
 
 
 def parse_fact_prices(value: Any) -> list[float]:

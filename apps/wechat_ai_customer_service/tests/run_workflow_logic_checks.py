@@ -31,6 +31,7 @@ os.environ.setdefault("WECHAT_CLOUD_REQUIRED", "0")
 os.environ.setdefault("WECHAT_CLOUD_STRICT_ONLINE", "0")
 
 import customer_intent_assist as customer_intent_assist_module  # noqa: E402
+import customer_service_brain as customer_service_brain_module  # noqa: E402
 import final_visible_llm_polish as final_polish_module  # noqa: E402
 import llm_reply_synthesis as synthesis_module  # noqa: E402
 import reply_style_adapter as reply_style_adapter_module  # noqa: E402
@@ -39,6 +40,7 @@ from customer_service_review_queue import build_review_queue  # noqa: E402
 from evidence_resolver import build_evidence_item  # noqa: E402
 from knowledge_index import KnowledgeHit  # noqa: E402
 from knowledge_loader import build_evidence_pack, legacy_shared_risk_control_faq  # noqa: E402
+from reply_evidence_builder import catalog_product_payload  # noqa: E402
 from listen_and_reply import (  # noqa: E402
     CustomerServiceBrainStartupError,
     ReplyDecision,
@@ -110,6 +112,8 @@ from final_visible_llm_polish import guard_polished_reply, maybe_polish_customer
 from llm_reply_guard import guard_synthesized_reply  # noqa: E402
 from realtime_reply_router import reply_similarity  # noqa: E402
 from reply_style_adapter import adapt_reply_style  # noqa: E402
+from customer_service_conversation_strategy import update_conversation_interaction_state_on_capture  # noqa: E402
+from wechat_connector import same_target_continuation_send_active  # noqa: E402
 from wxauto4_sidecar import is_wechat_main_window  # noqa: E402
 from apps.wechat_ai_customer_service.customer_service_live_safety import (  # noqa: E402
     CustomerServiceLiveSafetyError,
@@ -265,12 +269,14 @@ class FinalSegmentVerifyConnector(FakeConnector):
         self.send_calls = 0
         self.verify_calls = 0
         self.send_rate_guard_skips: list[bool] = []
+        self.continuation_fast_path_contexts: list[bool] = []
 
     def send_text(self, target: str, text: str, exact: bool = True, *, skip_send_rate_guard: bool = False, **kwargs: Any) -> dict[str, Any]:
         self.send_calls += 1
         self.sent_texts.append(text)
         self.sent_session_keys.append(str(kwargs.get("session_key") or ""))
         self.send_rate_guard_skips.append(bool(skip_send_rate_guard))
+        self.continuation_fast_path_contexts.append(same_target_continuation_send_active())
         return {
             "ok": True,
             "adapter": "win32_ocr",
@@ -283,6 +289,50 @@ class FinalSegmentVerifyConnector(FakeConnector):
         self.sent_texts.append(text)
         self.sent_session_keys.append(str(kwargs.get("session_key") or ""))
         self.send_rate_guard_skips.append(bool(skip_send_rate_guard))
+        self.continuation_fast_path_contexts.append(same_target_continuation_send_active())
+        return {
+            "ok": True,
+            "verified": True,
+            "target": target,
+            "exact": exact,
+            "text": text,
+            "send": {"ok": True, "adapter": "win32_ocr", "state": "send_win32_rpa"},
+            "adapter": "win32_ocr",
+            "state": "send_win32_rpa",
+            "verification_mode": "send_guard_confirmed_fast",
+            "skip_send_rate_guard": bool(skip_send_rate_guard),
+        }
+
+
+class ContinuationFallbackConnector(FinalSegmentVerifyConnector):
+    def __init__(self, messages: list[dict[str, Any]]) -> None:
+        super().__init__(messages)
+        self.failed_fast_path_once = False
+
+    def send_text_and_verify(self, target: str, text: str, exact: bool = True, *, skip_send_rate_guard: bool = False, **kwargs: Any) -> dict[str, Any]:
+        self.verify_calls += 1
+        self.sent_texts.append(text)
+        self.sent_session_keys.append(str(kwargs.get("session_key") or ""))
+        self.send_rate_guard_skips.append(bool(skip_send_rate_guard))
+        fast_path_active = same_target_continuation_send_active()
+        self.continuation_fast_path_contexts.append(fast_path_active)
+        if fast_path_active and not self.failed_fast_path_once:
+            self.failed_fast_path_once = True
+            return {
+                "ok": False,
+                "verified": False,
+                "target": target,
+                "exact": exact,
+                "text": text,
+                "send": {
+                    "ok": False,
+                    "adapter": "win32_ocr",
+                    "state": "send_guard_blocked",
+                    "error": "active target drifted during continuation fast path",
+                },
+                "adapter": "win32_ocr",
+                "state": "send_guard_blocked",
+            }
         return {
             "ok": True,
             "verified": True,
@@ -335,6 +385,8 @@ def run_checks() -> dict[str, Any]:
         check_semantic_batch_planner_separates_stale_general_noise_from_business_turn,
         check_semantic_batch_planner_detects_mixed_risk_questions,
         check_customer_preference_context_preserves_spouse_parking_need,
+        check_short_chase_up_after_replied_self_history_does_not_continue_closed_topic,
+        check_short_chase_up_with_unanswered_customer_context_can_continue_open_topic,
         check_conversation_context_preserves_need_fields_for_evidence_pack,
         check_mixed_safety_batch_forces_handoff,
         check_incomplete_customer_data_is_completed_and_written,
@@ -360,6 +412,8 @@ def run_checks() -> dict[str, Any]:
         check_reply_multi_bubble_does_not_retry_input_not_ready,
         check_reply_multi_bubble_verifies_only_final_segment_by_default,
         check_reply_multi_bubble_can_verify_each_segment_when_enabled,
+        check_reply_multi_bubble_uses_same_target_continuation_fast_path,
+        check_reply_multi_bubble_fast_path_retry_returns_to_full_path,
         check_identity_guard_setting_controls_ai_disclosure,
         check_identity_guard_controls_handoff_phrase_concealment,
         check_brain_owned_visible_reply_skips_local_handoff_concealment,
@@ -423,6 +477,7 @@ def run_checks() -> dict[str, Any]:
         check_llm_boundary_fallback_on_invalid_model_output,
         check_review_queue_reports_pending_and_handoff_items,
         check_evidence_boundary_cases,
+        check_catalog_product_payload_preserves_tiers_and_shipping_policy,
         check_after_sales_intent_preempts_duration_logistics,
         check_wechat_main_window_recognition,
     ]
@@ -1206,6 +1261,64 @@ def check_customer_preference_context_preserves_spouse_parking_need() -> None:
         assert_true(expected in terms, f"{expected} should be preserved in customer need context: {terms}")
     context = target_state.get("conversation_context") or {}
     assert_true("9万以内" in str(context.get("last_customer_need_text") or ""), "original contextual budget should be retained")
+
+
+def check_short_chase_up_after_replied_self_history_does_not_continue_closed_topic() -> None:
+    target_state: dict[str, Any] = {
+        "conversation_interaction_state": {
+            "schema_version": 1,
+            "last_reply_sent_at": "2026-06-20T19:00:00",
+            "last_reply_text_sample": "在的在的，让您久等啦～GOLD SERIES的配置我先发您看看？",
+            "last_unanswered_customer_text": "",
+            "last_unanswered_message_ids": [],
+            "unanswered_exists": False,
+            "suggested_reply_posture": "normal",
+        }
+    }
+    interaction = update_conversation_interaction_state_on_capture(
+        target_state,
+        "在吗",
+        message_ids=["msg-current-chase-up"],
+        now="2026-06-20T19:01:00",
+    )
+    assert_equal(
+        interaction.get("suggested_reply_posture"),
+        "natural_social_ack",
+        f"short summon after a fully replied turn must not continue self-history topic: {interaction}",
+    )
+    assert_equal(
+        interaction.get("last_unanswered_customer_text"),
+        "在吗",
+        f"current short summon should be the only unanswered customer text: {interaction}",
+    )
+
+
+def check_short_chase_up_with_unanswered_customer_context_can_continue_open_topic() -> None:
+    target_state: dict[str, Any] = {
+        "conversation_interaction_state": {
+            "schema_version": 1,
+            "last_customer_message_at": "2026-06-20T19:00:00",
+            "last_unanswered_customer_text": "十万左右适合女性开的电车或混动",
+            "last_unanswered_message_ids": ["msg-old-unanswered"],
+            "unanswered_exists": True,
+            "last_reply_sent_at": "",
+        }
+    }
+    interaction = update_conversation_interaction_state_on_capture(
+        target_state,
+        "在吗",
+        message_ids=["msg-current-chase-up"],
+        now="2026-06-20T19:01:00",
+    )
+    assert_equal(
+        interaction.get("suggested_reply_posture"),
+        "acknowledge_delay_then_continue",
+        f"real unanswered customer context should still allow delay follow-up posture: {interaction}",
+    )
+    assert_true(
+        "十万左右适合女性" in str(interaction.get("last_unanswered_customer_text") or ""),
+        f"previous customer question should remain the open context: {interaction}",
+    )
 
 
 def check_conversation_context_preserves_need_fields_for_evidence_pack() -> None:
@@ -2018,6 +2131,12 @@ def check_live_safety_guard_enforces_single_allowed_target() -> None:
         {"name": "新数据测试昨天19:23", "enabled": True, "exact": True, "max_batch_messages": 2},
     ]
     base_config["history_backfill"] = {"enabled": True, "load_times": 2, "freshness_load_times": 2}
+    base_config["rpa_humanized_send"] = {
+        "enabled": True,
+        "input_method": "sendinput_unicode",
+        "typing_typo_probability": 0.1,
+        "typing_typo_max": 1,
+    }
     base_config["multi_target"] = {
         "enabled": True,
         "scan_all_whitelist_each_iteration": True,
@@ -2608,6 +2727,106 @@ def check_reply_multi_bubble_can_verify_each_segment_when_enabled() -> None:
         str(result.get("verification_strategy") or ""),
         "verify_each_segment",
         "result should expose per-segment verification strategy",
+    )
+
+
+def check_reply_multi_bubble_uses_same_target_continuation_fast_path() -> None:
+    config = load_smoke_config()
+    target = parse_targets(config)[0]
+    config["reply"]["prefix"] = "[车金实盘] "
+    config["reply_multi_bubble"] = {
+        "enabled": True,
+        "min_split_chars": 28,
+        "max_segments": 3,
+        "preferred_segment_chars": 22,
+        "max_segment_chars": 40,
+        "min_segment_chars": 14,
+        "three_segment_threshold_chars": 120,
+        "inter_segment_delay_min_ms": 0,
+        "inter_segment_delay_max_ms": 0,
+        "verify_each_segment": False,
+        "same_target_continuation_fast_path_enabled": True,
+    }
+    connector = FinalSegmentVerifyConnector(messages=[])
+    reply_text = (
+        "[车金实盘] 我先按您说的预算给您缩小范围，优先看车况透明、后期费用低的车型；"
+        "如果要兼顾家用和颜值，我会把空间、油耗和保值率一起排进去。"
+    )
+
+    result = send_reply_with_optional_multi_bubble(
+        connector=connector,  # type: ignore[arg-type]
+        target=target,
+        reply_text=reply_text,
+        config=config,
+    )
+
+    segment_count = int(result.get("segment_count") or 0)
+    assert_true(bool(result.get("verified")), "continuation fast path should not break multi-bubble send")
+    assert_true(segment_count >= 2, "reply should split before checking continuation path")
+    assert_equal(connector.continuation_fast_path_contexts[0], False, "first bubble must use the normal full send path")
+    assert_true(
+        all(connector.continuation_fast_path_contexts[1:]),
+        f"follow-up bubbles should enter continuation context: {connector.continuation_fast_path_contexts}",
+    )
+    segment_results = result.get("segment_results") if isinstance(result.get("segment_results"), list) else []
+    assert_true(
+        bool(segment_results) and segment_results[0].get("same_target_continuation_fast_path") is False,
+        f"first segment should expose continuation=false: {segment_results}",
+    )
+    assert_true(
+        all(item.get("same_target_continuation_fast_path") is True for item in segment_results[1:]),
+        f"follow-up segments should expose continuation=true: {segment_results}",
+    )
+
+
+def check_reply_multi_bubble_fast_path_retry_returns_to_full_path() -> None:
+    config = load_smoke_config()
+    target = parse_targets(config)[0]
+    config["reply"]["prefix"] = "[车金实盘] "
+    config["reply_multi_bubble"] = {
+        "enabled": True,
+        "min_split_chars": 28,
+        "max_segments": 3,
+        "preferred_segment_chars": 22,
+        "max_segment_chars": 40,
+        "min_segment_chars": 14,
+        "three_segment_threshold_chars": 120,
+        "inter_segment_delay_min_ms": 0,
+        "inter_segment_delay_max_ms": 0,
+        "verify_each_segment": False,
+        "same_target_continuation_fast_path_enabled": True,
+        "retry_on_transient_send_failures": True,
+        "max_transient_retry_per_segment": 1,
+        "transient_retry_delay_min_ms": "1",
+        "transient_retry_delay_max_ms": "1",
+    }
+    connector = ContinuationFallbackConnector(messages=[])
+    reply_text = (
+        "[车金实盘] 这类需求我建议先看车况和预算匹配度，别只看配置表；"
+        "如果续发时前台目标漂移，系统应该回到完整路径重新确认后再发送。"
+    )
+
+    result = send_reply_with_optional_multi_bubble(
+        connector=connector,  # type: ignore[arg-type]
+        target=target,
+        reply_text=reply_text,
+        config=config,
+    )
+
+    assert_true(bool(result.get("verified")), "fast-path guard failure should recover through the old full path")
+    assert_true(bool(connector.failed_fast_path_once), "test connector should have exercised one fast-path failure")
+    assert_true(int(result.get("retry_attempts") or 0) >= 1, "fast-path failure should be counted as a transient retry")
+    contexts = connector.continuation_fast_path_contexts
+    assert_true(True in contexts, f"retry case should first try the continuation context: {contexts}")
+    first_fast = contexts.index(True)
+    assert_true(
+        False in contexts[first_fast + 1 :],
+        f"retry after fast-path failure must fall back to normal full path: {contexts}",
+    )
+    segment_attempt_counts = result.get("segment_attempt_counts") if isinstance(result.get("segment_attempt_counts"), list) else []
+    assert_true(
+        any(int(count or 0) >= 2 for count in segment_attempt_counts),
+        f"one segment should have retried after fast-path guard failure: {segment_attempt_counts}",
     )
 
 
@@ -5030,6 +5249,68 @@ def check_evidence_boundary_cases() -> None:
                 True,
                 f"{case['name']} safety reason",
             )
+
+
+def check_catalog_product_payload_preserves_tiers_and_shipping_policy() -> None:
+    item = {
+        "id": "test_product",
+        "data": {
+            "name": "测试商品",
+            "sku": "test_product",
+            "price": 1000,
+            "unit": "台",
+            "inventory": 9,
+            "price_tiers": [{"min_quantity": 5, "unit_price": 950}],
+            "shipping_policy": "江浙沪包邮，其他地区按物流实报实销",
+            "warranty_policy": "整机保修1年",
+        },
+    }
+    payload = catalog_product_payload(item)
+    assert_equal(payload.get("price_tiers"), [{"min_quantity": 5, "unit_price": 950}], "price tiers should reach Brain/evidence payload")
+    assert_equal(payload.get("discount_tiers"), [{"min_quantity": 5, "unit_price": 950}], "legacy discount tier alias should remain for compatibility")
+    assert_equal(payload.get("shipping_policy"), "江浙沪包邮，其他地区按物流实报实销", "canonical shipping_policy should reach Brain/evidence payload")
+    assert_equal(payload.get("shipping"), "江浙沪包邮，其他地区按物流实报实销", "legacy shipping alias should remain for compatibility")
+
+    legacy_item = {
+        "id": "legacy_product",
+        "data": {
+            "name": "旧结构商品",
+            "price": 1000,
+            "unit": "台",
+            "discount_tiers": [{"min_quantity": 10, "unit_price": 920}],
+            "shipping": "江浙沪包邮",
+        },
+    }
+    legacy_payload = catalog_product_payload(legacy_item)
+    assert_equal(legacy_payload.get("price_tiers"), [{"min_quantity": 10, "unit_price": 920}], "legacy discount_tiers should normalize to price_tiers")
+    assert_equal(legacy_payload.get("shipping_policy"), "江浙沪包邮", "legacy shipping should normalize to shipping_policy")
+    compact = customer_service_brain_module.compact_product_item_for_brain_prompt(legacy_payload, max_text_chars=160)
+    assert_equal(compact.get("price_tiers"), [{"min_quantity": 10, "unit_price": 920}], "Brain prompt should preserve normalized price tiers")
+    assert_equal(compact.get("shipping_policy"), "江浙沪包邮", "Brain prompt should preserve normalized shipping policy")
+
+    compact_from_raw_legacy = customer_service_brain_module.compact_product_item_for_brain_prompt(
+        {
+            "id": "legacy_raw",
+            "name": "旧字段商品",
+            "price": 1000,
+            "discount_tiers": [{"min_quantity": 10, "unit_price": 920}],
+            "shipping": "江浙沪包邮",
+        },
+        max_text_chars=160,
+    )
+    assert_equal(compact_from_raw_legacy.get("price_tiers"), [{"min_quantity": 10, "unit_price": 920}], "Brain prompt should normalize raw legacy discount_tiers")
+    assert_equal(compact_from_raw_legacy.get("shipping_policy"), "江浙沪包邮", "Brain prompt should normalize raw legacy shipping")
+    assert_true("discount_tiers" not in compact_from_raw_legacy, "Brain prompt should avoid duplicate legacy tier field")
+    assert_true("shipping" not in compact_from_raw_legacy, "Brain prompt should avoid duplicate legacy shipping field")
+    compact_long_legacy = customer_service_brain_module.compact_product_item_for_brain_prompt(
+        {
+            "id": "legacy_long",
+            "name": "长文本旧字段商品",
+            "shipping": "这是一段用于模拟历史聊天和知识命中的长文本。" * 20,
+        },
+        max_text_chars=160,
+    )
+    assert_true("shipping_policy" not in compact_long_legacy, "Brain prompt should not promote bulky legacy shipping text")
 
 
 def check_after_sales_intent_preempts_duration_logistics() -> None:

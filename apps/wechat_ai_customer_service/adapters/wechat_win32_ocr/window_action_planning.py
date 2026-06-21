@@ -182,8 +182,9 @@ def visible_window_candidate_score(
     except (TypeError, ValueError):
         parsed_content_score = 0
     safe_action_size = 1 if width >= int(min_send_width) and height >= int(min_send_height) else 0
+    capture_rank = 0 if parsed_content_score < 0 else (1 if capture_ready else 0)
     return (
-        1 if capture_ready else 0,
+        capture_rank,
         parsed_content_score,
         safe_action_size,
         area,

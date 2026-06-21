@@ -42,6 +42,9 @@ from apps.wechat_ai_customer_service.admin_backend.services.customer_service_sch
     ManagedListenerSchedulerBridge,
 )
 from apps.wechat_ai_customer_service.cloud_gate import cloud_gate_status, cloud_required_enabled  # noqa: E402
+from apps.wechat_ai_customer_service.customer_service_live_safety import (  # noqa: E402
+    apply_customer_service_live_safety_rpa_send_defaults,
+)
 from apps.wechat_ai_customer_service.sync import VpsLocalSyncService  # noqa: E402
 
 
@@ -500,6 +503,7 @@ def load_rpa_humanized_send_settings(config_path: Path) -> dict[str, Any]:
     except Exception:
         raw = {}
     if isinstance(raw, dict):
+        raw = apply_customer_service_live_safety_rpa_send_defaults(raw)
         candidate = raw.get("rpa_humanized_send")
         if isinstance(candidate, dict):
             payload = dict(candidate)
@@ -565,14 +569,19 @@ def load_rpa_humanized_send_settings(config_path: Path) -> dict[str, Any]:
                 os.getenv("WECHAT_WIN32_OCR_HUMANIZED_TYPING_TYPO_PROBABILITY"),
                 float(
                     settings.get("typing_typo_probability")
-                    or RPA_HUMANIZED_SEND_DEFAULTS["typing_typo_probability"]
+                    if settings.get("typing_typo_probability") not in (None, "")
+                    else RPA_HUMANIZED_SEND_DEFAULTS["typing_typo_probability"]
                 ),
             ),
         ),
     )
     settings["typing_typo_max"] = non_negative_int(
         os.getenv("WECHAT_WIN32_OCR_HUMANIZED_TYPING_TYPO_MAX"),
-        int(settings.get("typing_typo_max") or RPA_HUMANIZED_SEND_DEFAULTS["typing_typo_max"]),
+        int(
+            settings.get("typing_typo_max")
+            if settings.get("typing_typo_max") not in (None, "")
+            else RPA_HUMANIZED_SEND_DEFAULTS["typing_typo_max"]
+        ),
     )
     settings["send_pre_delay_min_ms"] = non_negative_int(
         os.getenv("WECHAT_WIN32_OCR_HUMANIZED_SEND_PRE_DELAY_MIN_MS"),
@@ -3237,12 +3246,13 @@ def summarize_scheduler_tick_activity(result: dict[str, Any] | None) -> dict[str
     pending = int(summary.get("pending_sessions") or 0)
     running = int(summary.get("llm_running") or 0)
     ready = int(summary.get("reply_ready") or 0)
+    sending = int(summary.get("reply_sending") or 0)
     sent = int(summary.get("reply_sent") or 0)
     event_names = {str(item.get("event") or "") for item in events}
     llm_completed = "llm_task_completed" in event_names
     send_completed = "send_completed" in event_names
     send_failed = "send_failed" in event_names
-    busy = bool(pending or running or ready or sent or events)
+    busy = bool(pending or running or ready or sending or sent or events)
     unread_or_capture_changed = bool(
         event_names
         & {
@@ -3255,6 +3265,7 @@ def summarize_scheduler_tick_activity(result: dict[str, Any] | None) -> dict[str
     )
     urgent_followup = bool(
         ready > 0
+        or sending > 0
         or pending > 0
         or llm_completed
         or send_completed
@@ -3268,6 +3279,7 @@ def summarize_scheduler_tick_activity(result: dict[str, Any] | None) -> dict[str
         "pending_sessions": pending,
         "llm_running": running,
         "reply_ready": ready,
+        "reply_sending": sending,
         "reply_sent": sent,
         "event_names": sorted(event_names),
     }
@@ -3280,11 +3292,12 @@ def status_message_from_result(result: dict, duration: float) -> str:
         summary = result.get("summary") if isinstance(result.get("summary"), dict) else {}
         sent = int(summary.get("reply_sent") or 0)
         ready = int(summary.get("reply_ready") or 0)
+        sending = int(summary.get("reply_sending") or 0)
         running = int(summary.get("llm_running") or 0)
         pending = int(summary.get("pending_sessions") or 0)
         if sent:
             return f"并发调度已发送回复，队列：待读 {pending}，思考中 {running}，待发 {ready}。耗时 {duration} 秒。"
-        if ready or running or pending:
+        if ready or sending or running or pending:
             return f"并发调度运行中，队列：待读 {pending}，思考中 {running}，待发 {ready}。耗时 {duration} 秒。"
         return f"并发调度本轮未发现新消息。耗时 {duration} 秒。"
     events = [item for item in result.get("events", []) or [] if isinstance(item, dict)]

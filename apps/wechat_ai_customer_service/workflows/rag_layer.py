@@ -91,6 +91,11 @@ _SEMANTIC_EQUIVALENTS_MAP_CACHE: dict[str, Any] = {
     "key": None,
     "value": None,
 }
+_EXPERIENCE_REFERENCE_INDEX_CACHE: dict[str, Any] = {
+    "key": None,
+    "entries": None,
+}
+_EXPERIENCE_REFERENCE_INDEX_CACHE_SCHEMA_VERSION = 1
 WINDOWS_TRANSIENT_WRITE_ERRNOS = {13, 22}
 WINDOWS_TRANSIENT_WRITE_WINERRORS = {5, 32, 33}
 WINDOWS_WRITE_RETRY_DELAYS = (0.05, 0.1, 0.2, 0.35, 0.5, 0.75, 1.0, 1.25)
@@ -559,11 +564,16 @@ class RagService:
         query_text = str(query or "").strip()
         if not query_text:
             return {"ok": True, "query": query_text, "hits": [], "confidence": 0.0, "reference_only": True}
+        started_at = time.perf_counter()
         query_profile = build_query_profile(query_text)
-        high_risk_terms = rag_terms("high_risk_terms")
+        profile_duration = time.perf_counter() - started_at
+        index_started_at = time.perf_counter()
+        cache_key = self.experience_reference_index_cache_key()
+        entries, cache_state = self.experience_reference_index_entries_with_state(cache_key)
+        index_duration = time.perf_counter() - index_started_at
+        scoring_started_at = time.perf_counter()
         hits: list[dict[str, Any]] = []
-        for chunk in self.iter_experience_reference_chunks():
-            entry = build_index_entry(chunk, high_risk_terms=high_risk_terms)
+        for entry in entries:
             scoring = score_entry(query_text, query_profile, entry, product_id="")
             score = float(scoring.get("final", 0.0))
             if score <= 0:
@@ -589,6 +599,8 @@ class RagService:
         hits.sort(key=lambda item: item["score"], reverse=True)
         hits = hits[: max(1, min(int(limit or 3), 10))]
         confidence = hits[0]["score"] if hits else 0.0
+        scoring_duration = time.perf_counter() - scoring_started_at
+        total_duration = time.perf_counter() - started_at
         return {
             "ok": True,
             "query": query_text,
@@ -601,7 +613,110 @@ class RagService:
             "rag_can_authorize": False,
             "structured_priority": True,
             "reference_only": True,
+            "timing": {
+                "query_profile_duration_seconds": round(profile_duration, 4),
+                "reference_index_duration_seconds": round(index_duration, 4),
+                "reference_scoring_duration_seconds": round(scoring_duration, 4),
+                "duration_seconds": round(total_duration, 4),
+                "reference_entry_count": len(entries),
+                "reference_index_cache_hit": cache_state in {"memory", "file"},
+                "reference_index_cache_state": cache_state,
+            },
         }
+
+    def experience_reference_index_entries(self) -> list[dict[str, Any]]:
+        entries, _cache_state = self.experience_reference_index_entries_with_state(self.experience_reference_index_cache_key())
+        return entries
+
+    def experience_reference_index_entries_with_state(self, key: str) -> tuple[list[dict[str, Any]], str]:
+        if _EXPERIENCE_REFERENCE_INDEX_CACHE.get("key") == key and isinstance(_EXPERIENCE_REFERENCE_INDEX_CACHE.get("entries"), list):
+            return list(_EXPERIENCE_REFERENCE_INDEX_CACHE["entries"]), "memory"
+        cached_entries = self.read_experience_reference_index_cache(key)
+        if cached_entries is not None:
+            _EXPERIENCE_REFERENCE_INDEX_CACHE["key"] = key
+            _EXPERIENCE_REFERENCE_INDEX_CACHE["entries"] = cached_entries
+            return list(cached_entries), "file"
+        high_risk_terms = rag_terms("high_risk_terms")
+        entries = [
+            build_index_entry(chunk, high_risk_terms=high_risk_terms)
+            for chunk in self.iter_experience_reference_chunks()
+        ]
+        _EXPERIENCE_REFERENCE_INDEX_CACHE["key"] = key
+        _EXPERIENCE_REFERENCE_INDEX_CACHE["entries"] = entries
+        self.write_experience_reference_index_cache(key, entries)
+        return list(entries), "miss"
+
+    def experience_reference_index_cache_key(self) -> str:
+        source_signature = "missing"
+        try:
+            from apps.wechat_ai_customer_service.workflows.rag_experience_store import RagExperienceStore
+        except Exception:
+            return (
+                f"{self.tenant_id}|reference_index_v{_EXPERIENCE_REFERENCE_INDEX_CACHE_SCHEMA_VERSION}"
+                f"|rag_experience_store_unavailable|{platform_understanding_cache_token()}"
+            )
+        try:
+            db = postgres_store(self.tenant_id)
+            if db:
+                records = db.list_rag_experiences(self.tenant_id, status="all", limit=500)
+                source_signature = "postgres:" + stable_digest(
+                    "|".join(
+                        f"{item.get('experience_id')}:{item.get('status')}:{item.get('updated_at') or item.get('created_at')}:{item.get('reviewed_by_user')}"
+                        for item in records
+                        if isinstance(item, dict)
+                    ),
+                    32,
+                )
+                return (
+                    f"{self.tenant_id}|reference_index_v{_EXPERIENCE_REFERENCE_INDEX_CACHE_SCHEMA_VERSION}"
+                    f"|{platform_understanding_cache_token()}|{source_signature}"
+                )
+            store_path = RagExperienceStore(tenant_id=self.tenant_id, root=self.sources_root.parent / "rag_experience").path
+            if store_path.exists():
+                stat = store_path.stat()
+                source_signature = f"{store_path}:{stat.st_mtime_ns}:{stat.st_size}"
+            else:
+                source_signature = f"{store_path}:missing"
+        except OSError:
+            source_signature = "stat_error"
+        return (
+            f"{self.tenant_id}|reference_index_v{_EXPERIENCE_REFERENCE_INDEX_CACHE_SCHEMA_VERSION}"
+            f"|{platform_understanding_cache_token()}|{source_signature}"
+        )
+
+    def experience_reference_index_cache_path(self) -> Path:
+        return self.cache_root / "experience_reference_index.json"
+
+    def read_experience_reference_index_cache(self, key: str) -> list[dict[str, Any]] | None:
+        path = self.experience_reference_index_cache_path()
+        if not path.exists():
+            return None
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return None
+        if not isinstance(payload, dict) or payload.get("key") != key:
+            return None
+        if payload.get("schema_version") != _EXPERIENCE_REFERENCE_INDEX_CACHE_SCHEMA_VERSION:
+            return None
+        entries = payload.get("entries")
+        if not isinstance(entries, list):
+            return None
+        return [entry for entry in entries if isinstance(entry, dict)]
+
+    def write_experience_reference_index_cache(self, key: str, entries: list[dict[str, Any]]) -> None:
+        payload = {
+            "schema_version": _EXPERIENCE_REFERENCE_INDEX_CACHE_SCHEMA_VERSION,
+            "tenant_id": self.tenant_id,
+            "key": key,
+            "built_at": now(),
+            "entry_count": len(entries),
+            "entries": entries,
+        }
+        try:
+            write_json_file(self.experience_reference_index_cache_path(), payload)
+        except OSError:
+            pass
 
     def evidence(
         self,
@@ -620,6 +735,9 @@ class RagService:
         hits = list(result.get("hits", []) or [])
         hits.extend(reference_result.get("hits", []) or [])
         confidence = max(float(result.get("confidence") or 0.0), float(reference_result.get("confidence") or 0.0))
+        timing: dict[str, Any] = {}
+        if isinstance(reference_result.get("timing"), dict):
+            timing["reference"] = reference_result.get("timing")
         return {
             "enabled": True,
             "query": result.get("query"),
@@ -629,6 +747,7 @@ class RagService:
             "reference_hit_count": len(reference_result.get("hits", []) or []),
             "rag_can_authorize": False,
             "structured_priority": True,
+            "timing": timing,
         }
 
     def status(self) -> dict[str, Any]:

@@ -17,6 +17,7 @@ for path in (PROJECT_ROOT, WORKFLOWS_ROOT):
 from apps.wechat_ai_customer_service.adapters.knowledge_loader import select_products  # noqa: E402
 from apps.wechat_ai_customer_service.workflows.knowledge_index import field_matches, normalize_text  # noqa: E402
 from apps.wechat_ai_customer_service.workflows.product_name_matcher import collect_matched_aliases  # noqa: E402
+from product_knowledge import decide_product_knowledge_reply  # noqa: E402
 
 
 def main() -> int:
@@ -26,6 +27,7 @@ def main() -> int:
         check_knowledge_loader_select_products_homophone,
         check_knowledge_index_field_matches_homophone,
         check_no_false_positive_for_unrelated_model,
+        check_numeric_spec_alias_does_not_match_order_quantity,
     ]
     results: list[dict[str, object]] = []
     for check in checks:
@@ -86,6 +88,45 @@ def check_no_false_positive_for_unrelated_model() -> None:
     aliases = ["卡罗拉"]
     matched = collect_matched_aliases(aliases, "卡宴多少钱")
     assert_true(not matched, "unrelated model should not be matched by typo tolerance")
+
+
+def check_numeric_spec_alias_does_not_match_order_quantity() -> None:
+    aliases = ["净水器滤芯", "10寸滤芯", "10寸"]
+    followup = collect_matched_aliases(aliases, "再来10台发到杭州多少钱？")
+    assert_true("10寸" not in followup, "order quantity should not fuzzily match numeric spec alias")
+
+    explicit = collect_matched_aliases(aliases, "10寸滤芯多少钱？")
+    assert_true("10寸滤芯" in explicit, "explicit numeric spec alias should still match")
+
+    knowledge = {
+        "products": [
+            {
+                "id": "commercial_fridge_bx_200",
+                "name": "商用冰箱 BX-200",
+                "aliases": ["商用冰箱", "冰箱", "BX-200"],
+                "price": 1000,
+                "unit": "台",
+                "discount_tiers": [{"min_quantity": 10, "unit_price": 920}],
+            },
+            {
+                "id": "water_filter_core",
+                "name": "净水器滤芯 标准款",
+                "aliases": aliases,
+                "price": 80,
+                "unit": "件",
+            },
+        ],
+        "faq": [],
+    }
+    contextual = decide_product_knowledge_reply(
+        "再来10台发到杭州多少钱？",
+        knowledge,
+        context={"last_product_id": "commercial_fridge_bx_200"},
+    )
+    assert_true(
+        contextual.get("product_id") == "commercial_fridge_bx_200",
+        f"context product should win when no explicit product alias exists: {contextual}",
+    )
 
 
 def assert_true(value: bool, message: str) -> None:
