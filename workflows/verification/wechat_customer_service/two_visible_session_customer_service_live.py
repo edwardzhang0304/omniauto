@@ -5,6 +5,7 @@ import json
 import os
 import re
 import sys
+import tempfile
 import time
 import traceback
 from datetime import datetime
@@ -16,6 +17,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[3]
 APP_ROOT = PROJECT_ROOT / "apps" / "wechat_ai_customer_service"
 TENANT_ID = "chejin"
 TARGETS = ["新数据测试", "许聪"]
+PROMPT_LABEL = "双会话长测"
 ARTIFACT_ROOT = (
     PROJECT_ROOT
     / "runtime"
@@ -1070,24 +1072,48 @@ def wait_for_replies(
     allow_send: bool = True,
     timeout_seconds: float = 240.0,
     tick_interval_seconds: float = 4.0,
+    probe_status_each_tick: bool = True,
 ) -> dict[str, Any]:
     deadline = time.time() + max(10.0, float(timeout_seconds or 240.0))
     sent = 0
     ticks: list[dict[str, Any]] = []
+    last_status: dict[str, Any] = {}
+    deferred_status_probe = False
+
+    def current_status() -> dict[str, Any]:
+        if last_status:
+            return last_status
+        return connector.status(interactive=False)
+
     while time.time() < deadline:
         tick = bridge.tick(allow_send=allow_send)
         compact = compact_tick(tick)
         ticks.append(compact)
         append_jsonl(progress_path, {"event": "scheduler_tick", **compact, "created_at": now_text()})
         sent += tick_sent_count(tick)
-        status = connector.status(interactive=False)
-        reason = hard_status_reason(status) or hard_tick_reason(tick)
-        if reason:
-            return {"ok": False, "reason": reason, "ticks": ticks, "post_status": compact_status(status)}
         summary = tick.get("summary") if isinstance(tick.get("summary"), dict) else {}
+        sending = int((summary.get("reply_sending") or 0) if isinstance(summary, dict) else 0)
+        if probe_status_each_tick and sending <= 0:
+            last_status = connector.status(interactive=False)
+            deferred_status_probe = False
+        elif probe_status_each_tick and sending > 0:
+            deferred_status_probe = True
+            append_jsonl(
+                progress_path,
+                {
+                    "event": "status_probe_deferred_during_reply_sending",
+                    "reply_sending": sending,
+                    "created_at": now_text(),
+                },
+            )
+        reason = (hard_status_reason(last_status) if probe_status_each_tick and last_status else "") or hard_tick_reason(tick)
+        if reason:
+            post_status = current_status() if probe_status_each_tick else connector.status(interactive=False)
+            return {"ok": False, "reason": reason, "ticks": ticks, "post_status": compact_status(post_status)}
         ready = int((summary.get("reply_ready") or 0) if isinstance(summary, dict) else 0)
         if (allow_send and sent >= expected) or (not allow_send and ready >= expected):
-            return {"ok": True, "ticks": ticks, "post_status": compact_status(status)}
+            post_status = connector.status(interactive=False) if deferred_status_probe else current_status()
+            return {"ok": True, "ticks": ticks, "post_status": compact_status(post_status)}
         active_counts = [
             int(summary.get(name) or 0)
             for name in (
@@ -1099,14 +1125,16 @@ def wait_for_replies(
                 "llm_queued",
                 "llm_running",
                 "reply_ready",
+                "reply_sending",
             )
         ]
         if not any(active_counts):
+            post_status = connector.status(interactive=False) if deferred_status_probe else current_status()
             return {
                 "ok": False,
                 "reason": "reply_incomplete_idle_no_visible_reply",
                 "ticks": ticks,
-                "post_status": compact_status(status),
+                "post_status": compact_status(post_status),
             }
         time.sleep(max(0.2, float(tick_interval_seconds or 4.0)))
     return {"ok": False, "reason": "reply_timeout", "ticks": ticks, "post_status": compact_status(connector.status(interactive=False))}
@@ -1322,7 +1350,7 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
                     target_artifact_dir = round_dir / "prompt_send" / safe_name(target)
                     send = connector.send_text_and_verify(
                         target,
-                        f"【双会话长测{token}-R{round_index}-{target}】{prompts[target]}",
+                        f"【{PROMPT_LABEL}{token}-R{round_index}-{target}】{prompts[target]}",
                         exact=True,
                         artifact_dir=str(target_artifact_dir),
                         session_key=session_key_by_target[target],
@@ -1382,6 +1410,7 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
                 allow_send=allow_reply_send,
                 timeout_seconds=float(getattr(args, "reply_timeout_seconds", 240.0) or 240.0),
                 tick_interval_seconds=float(getattr(args, "tick_interval_seconds", 4.0) or 4.0),
+                probe_status_each_tick=not bool(getattr(args, "dry_reply_send", False)),
             )
             round_result["reply_phase"] = replies
             round_result["sent_replies"] = wrapper.sent
@@ -1552,6 +1581,45 @@ def print_json(payload: dict[str, Any]) -> None:
         sys.stdout.buffer.write((text + "\n").encode("utf-8", errors="replace"))
 
 
+class _SelfCheckBridge:
+    def __init__(self, ticks: list[dict[str, Any]]) -> None:
+        self._ticks = list(ticks)
+
+    def tick(self, *, allow_send: bool = True) -> dict[str, Any]:
+        if self._ticks:
+            return self._ticks.pop(0)
+        return {
+            "ok": True,
+            "duration_seconds": 0.0,
+            "summary": {
+                "pending_sessions": 0,
+                "planner_queued": 0,
+                "planner_running": 0,
+                "polish_queued": 0,
+                "polish_running": 0,
+                "llm_queued": 0,
+                "llm_running": 0,
+                "reply_ready": 0,
+            },
+            "events": [],
+        }
+
+
+class _SelfCheckConnector:
+    def __init__(self) -> None:
+        self.status_calls = 0
+
+    def status(self, *, interactive: bool = False) -> dict[str, Any]:
+        self.status_calls += 1
+        return {
+            "ok": True,
+            "online": True,
+            "state": "main_window_compat",
+            "ocr_count": 1,
+            "interactive": bool(interactive),
+        }
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--run-id", default=datetime.now().strftime("%Y%m%d_%H%M%S"))
@@ -1638,6 +1706,76 @@ def run_self_check() -> bool:
         return False
     if scenario_prompts("short_business")[0].get("新数据测试") != "秦PLUS多少钱？":
         return False
+    with tempfile.TemporaryDirectory() as temp:
+        progress_path = Path(temp) / "progress.jsonl"
+        ticks = [
+            {
+                "ok": True,
+                "duration_seconds": 0.0,
+                "summary": {"llm_running": 1},
+                "events": [],
+            },
+            {
+                "ok": True,
+                "duration_seconds": 0.0,
+                "summary": {"reply_sent": 1},
+                "events": [{"event": "send_completed", "target_name": "新数据测试"}],
+            },
+        ]
+        dry_connector = _SelfCheckConnector()
+        dry_result = wait_for_replies(
+            _SelfCheckBridge(ticks),
+            dry_connector,
+            progress_path,
+            expected=1,
+            allow_send=True,
+            timeout_seconds=5,
+            tick_interval_seconds=0.2,
+            probe_status_each_tick=False,
+        )
+        if not dry_result.get("ok") or dry_connector.status_calls != 1:
+            return False
+        live_connector = _SelfCheckConnector()
+        live_result = wait_for_replies(
+            _SelfCheckBridge(ticks),
+            live_connector,
+            progress_path,
+            expected=1,
+            allow_send=True,
+            timeout_seconds=5,
+            tick_interval_seconds=0.2,
+            probe_status_each_tick=True,
+        )
+        if not live_result.get("ok") or live_connector.status_calls != 2:
+            return False
+        sending_connector = _SelfCheckConnector()
+        sending_result = wait_for_replies(
+            _SelfCheckBridge(
+                [
+                    {
+                        "ok": True,
+                        "duration_seconds": 0.0,
+                        "summary": {"reply_sending": 1},
+                        "events": [{"event": "send_dispatched", "target_name": "新数据测试"}],
+                    },
+                    {
+                        "ok": True,
+                        "duration_seconds": 0.0,
+                        "summary": {"reply_sent": 1},
+                        "events": [{"event": "send_completed", "target_name": "新数据测试"}],
+                    },
+                ]
+            ),
+            sending_connector,
+            progress_path,
+            expected=1,
+            allow_send=True,
+            timeout_seconds=5,
+            tick_interval_seconds=0.2,
+            probe_status_each_tick=True,
+        )
+        if not sending_result.get("ok") or sending_connector.status_calls != 1:
+            return False
     config_check_dir = ARTIFACT_ROOT / "_self_check_config"
     previous_input_method = os.environ.get("WECHAT_LIVE_TEST_RPA_INPUT_METHOD")
     try:

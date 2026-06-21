@@ -45,7 +45,6 @@ def test_required_files_exist() -> None:
         "apps/wechat_ai_customer_service/adapters/add_friend_screenshot.py",
         "apps/wechat_ai_customer_service/adapters/wechat_win32_ocr_sidecar.py",
         "apps/wechat_ai_customer_service/adapters/wechat_connector.py",
-        "apps/wechat_ai_customer_service/scripts/run_wechat_add_friend_entry_click_plan.ps1",
         "apps/wechat_ai_customer_service/scripts/run_wechat_add_friend_entry_click_plan_windows.ps1",
         "apps/wechat_ai_customer_service/scripts/check_wechat_add_friend_entry_click_latest.ps1",
     ]
@@ -90,9 +89,9 @@ def test_entry_click_script_defaults_are_low_disturbance() -> None:
 
 def test_entry_click_script_is_main_review_entry() -> None:
     script = (
-        PROJECT_ROOT / "apps/wechat_ai_customer_service/scripts/run_wechat_add_friend_entry_click_plan.ps1"
+        PROJECT_ROOT / "apps/wechat_ai_customer_service/scripts/run_wechat_add_friend_entry_click_plan_windows.ps1"
     ).read_text(encoding="utf-8")
-    assert_true('"add-friend-entry-click-plan"' in script, "entry-click script must call the stable main route")
+    assert_true('"add-friend-entry-click-plan-windows"' in script, "entry-click script must call the Windows main route")
     for token in ["VerifyMessage", "RemarkName", "RemarkCode", "--verify-message", "--remark-name", "--remark-code"]:
         assert_true(token in script, f"entry-click script must expose formal field: {token}")
     assert_true('"--sales-name"' not in script, "entry-click main route must not pass removed sales-name")
@@ -123,9 +122,7 @@ def test_entry_click_latest_check_script_contract() -> None:
         "already_friend",
         "Route",
         "ArtifactScope",
-        "canonical",
         "add_friend_entry_click_plan_windows",
-        "add_friend_entry_click_plan_windows_1080p_reference",
     ]:
         assert_true(token in script, f"latest check script missing contract token: {token}")
     assert_true("exit 1" in script and "exit 0" in script, "latest check script must be CI-friendly")
@@ -137,7 +134,7 @@ def test_add_friend_readme_formal_contract() -> None:
         PROJECT_ROOT / "apps/wechat_ai_customer_service/docs/add_friend_rpa_pr_readiness_20260616.md"
     ).read_text(encoding="utf-8")
     for text, name in [(readme, "README"), (readiness, "readiness doc")]:
-        assert_true("add-friend-entry-click-plan" in text, f"{name} must name the stable add_friend route")
+        assert_true("add-friend-entry-click-plan-windows" in text, f"{name} must name the stable add_friend route")
         assert_true("add-friend-entry-click-plan-windows" in text, f"{name} must name the Windows alias or handoff route")
         for token in ["verify_message", "remark_name", "remark_code", "TASK_PAYLOAD_INVALID", "invite_sent"]:
             assert_true(token in text, f"{name} missing formal contract token: {token}")
@@ -170,7 +167,6 @@ def test_add_friend_artifact_layout_contract() -> None:
         ADD_FRIEND_ENTRY_CLICK_STDOUT_JSON,
         ADD_FRIEND_LATEST_DIR,
         ADD_FRIEND_RUNTIME_DIR,
-        ADD_FRIEND_WINDOWS_1080P_REFERENCE_ARTIFACT_SCOPE,
         ADD_FRIEND_WINDOWS_ARTIFACT_SCOPE,
         add_friend_artifact_manifest,
         add_friend_artifact_scope,
@@ -185,10 +181,6 @@ def test_add_friend_artifact_layout_contract() -> None:
     assert_true(ADD_FRIEND_RUNTIME_DIR == "runtime", f"runtime dir mismatch: {ADD_FRIEND_RUNTIME_DIR}")
     assert_true(ADD_FRIEND_LATEST_DIR == "latest", f"latest dir mismatch: {ADD_FRIEND_LATEST_DIR}")
     assert_true(ADD_FRIEND_WINDOWS_ARTIFACT_SCOPE == "add_friend_entry_click_plan_windows", "Windows artifact scope constant mismatch")
-    assert_true(
-        ADD_FRIEND_WINDOWS_1080P_REFERENCE_ARTIFACT_SCOPE == "add_friend_entry_click_plan_windows_1080p_reference",
-        "Windows 1920x1080 reference artifact scope constant mismatch",
-    )
     assert_true(add_friend_artifact_scope(ADD_FRIEND_MAIN_ROUTE) == ADD_FRIEND_WINDOWS_ARTIFACT_SCOPE, "main route artifact scope mismatch")
     root = Path("C:/omniauto")
     route_root = add_friend_route_artifact_root(root, ADD_FRIEND_MAIN_ROUTE)
@@ -207,7 +199,7 @@ def test_add_friend_artifact_layout_contract() -> None:
     manifest = add_friend_artifact_manifest(root, ADD_FRIEND_MAIN_ROUTE)
     assert_true(manifest.get("scope") == "add_friend_entry_click_plan_windows", f"manifest scope mismatch: {manifest}")
     script = (
-        PROJECT_ROOT / "apps/wechat_ai_customer_service/scripts/run_wechat_add_friend_entry_click_plan.ps1"
+        PROJECT_ROOT / "apps/wechat_ai_customer_service/scripts/run_wechat_add_friend_entry_click_plan_windows.ps1"
     ).read_text(encoding="utf-8")
     assert_true("runtime\\add_friend_entry_click_plan_windows\\$Timestamp" in script, "entry-click script timestamp dir must match artifact contract")
     assert_true("runtime\\add_friend_entry_click_plan_windows\\latest" in script, "entry-click script latest dir must match artifact contract")
@@ -216,10 +208,8 @@ def test_add_friend_artifact_layout_contract() -> None:
 def test_add_friend_route_manifest_contract() -> None:
     from apps.wechat_ai_customer_service.adapters.add_friend_routes import (
         ADD_FRIEND_MAIN_ROUTE,
-        ADD_FRIEND_WINDOWS_1080P_REFERENCE_ROUTE,
         ADD_FRIEND_ROUTES,
         ADD_FRIEND_WINDOWS_MAIN_ROUTE,
-        ADD_FRIEND_WINDOWS_REFERENCE_ROUTE,
         ADD_FRIEND_WINDOWS_ROUTE,
         add_friend_route_accepts_formal_fields,
         add_friend_route_accepts_query,
@@ -231,37 +221,28 @@ def test_add_friend_route_manifest_contract() -> None:
         is_add_friend_route,
     )
 
-    assert_true(ADD_FRIEND_MAIN_ROUTE == "add-friend-entry-click-plan", f"unexpected main route: {ADD_FRIEND_MAIN_ROUTE}")
-    assert_true(ADD_FRIEND_WINDOWS_ROUTE == "add-friend-entry-click-plan-windows", f"Windows alias mismatch: {ADD_FRIEND_WINDOWS_ROUTE}")
+    assert_true(ADD_FRIEND_MAIN_ROUTE == "add-friend-entry-click-plan-windows", f"unexpected main route: {ADD_FRIEND_MAIN_ROUTE}")
+    assert_true(ADD_FRIEND_WINDOWS_ROUTE == "add-friend-entry-click-plan-windows", f"Windows route mismatch: {ADD_FRIEND_WINDOWS_ROUTE}")
     assert_true(ADD_FRIEND_WINDOWS_MAIN_ROUTE == ADD_FRIEND_WINDOWS_ROUTE, f"Windows main alias mismatch: {ADD_FRIEND_WINDOWS_MAIN_ROUTE}")
-    assert_true(ADD_FRIEND_WINDOWS_1080P_REFERENCE_ROUTE == "add-friend-entry-click-plan-windows-1080p-reference", f"unexpected Windows 1920x1080 reference route: {ADD_FRIEND_WINDOWS_1080P_REFERENCE_ROUTE}")
-    assert_true(ADD_FRIEND_WINDOWS_REFERENCE_ROUTE == ADD_FRIEND_WINDOWS_1080P_REFERENCE_ROUTE, f"Windows reference alias mismatch: {ADD_FRIEND_WINDOWS_REFERENCE_ROUTE}")
     assert_true(
-        ADD_FRIEND_ROUTES == (
-            "add-friend-entry-click-plan",
-            "add-friend-entry-click-plan-windows",
-            "add-friend-entry-click-plan-windows-1080p-reference",
-        ),
-        f"expected stable route, Windows alias, and explicit reference route: {ADD_FRIEND_ROUTES}",
+        ADD_FRIEND_ROUTES == ("add-friend-entry-click-plan-windows",),
+        f"expected only the Windows add_friend route: {ADD_FRIEND_ROUTES}",
     )
-    assert_true(is_add_friend_main_route(ADD_FRIEND_MAIN_ROUTE), "entry-click route must be the official main route")
-    assert_true(not is_add_friend_main_route(ADD_FRIEND_WINDOWS_ROUTE), "Windows alias should not replace the stable main route")
-    assert_true(not is_add_friend_main_route(ADD_FRIEND_WINDOWS_1080P_REFERENCE_ROUTE), "Windows 1920x1080 reference route should not be the Windows main route")
+    assert_true(is_add_friend_main_route(ADD_FRIEND_MAIN_ROUTE), "Windows entry-click route must be the official main route")
+    assert_true(is_add_friend_main_route(ADD_FRIEND_WINDOWS_ROUTE), "Windows route must be the official main route")
     assert_true(add_friend_route_kind(ADD_FRIEND_MAIN_ROUTE) == "windows", "main route kind mismatch")
-    assert_true(add_friend_route_kind(ADD_FRIEND_WINDOWS_ROUTE) == "windows", "Windows alias route kind mismatch")
-    assert_true(add_friend_route_kind(ADD_FRIEND_WINDOWS_1080P_REFERENCE_ROUTE) == "windows_1080p_reference", "Windows 1920x1080 reference route kind mismatch")
+    assert_true(add_friend_route_kind(ADD_FRIEND_WINDOWS_ROUTE) == "windows", "Windows route kind mismatch")
     assert_true(add_friend_route_accepts_formal_fields(ADD_FRIEND_MAIN_ROUTE), "main route must accept formal fields")
     assert_true(add_friend_route_accepts_query(ADD_FRIEND_MAIN_ROUTE), "main route must accept phone/wechat query")
     assert_true(add_friend_route_uses_passive_probe(ADD_FRIEND_MAIN_ROUTE) is False, "main route must focus WeChat before formal add_friend clicks")
-    assert_true(add_friend_route_uses_passive_probe(ADD_FRIEND_WINDOWS_ROUTE) is False, "Windows alias must focus WeChat before formal add_friend clicks")
-    assert_true(add_friend_route_uses_passive_probe(ADD_FRIEND_WINDOWS_1080P_REFERENCE_ROUTE), "reference route can remain passive for comparison")
+    assert_true(add_friend_route_uses_passive_probe(ADD_FRIEND_WINDOWS_ROUTE) is False, "Windows route must focus WeChat before formal add_friend clicks")
     assert_true(not is_add_friend_diagnostic_route(ADD_FRIEND_MAIN_ROUTE), "main route must not be diagnostic")
-    assert_true(not is_add_friend_diagnostic_route(ADD_FRIEND_WINDOWS_ROUTE), "Windows alias must not be diagnostic")
-    assert_true(is_add_friend_diagnostic_route(ADD_FRIEND_WINDOWS_1080P_REFERENCE_ROUTE), "reference route must be diagnostic")
+    assert_true(not is_add_friend_diagnostic_route(ADD_FRIEND_WINDOWS_ROUTE), "Windows route must not be diagnostic")
     assert_true(not is_add_friend_legacy_route(ADD_FRIEND_MAIN_ROUTE), "main route must not be legacy")
-    assert_true(not is_add_friend_legacy_route(ADD_FRIEND_WINDOWS_ROUTE), "Windows alias must not be legacy")
-    assert_true(not is_add_friend_legacy_route(ADD_FRIEND_WINDOWS_1080P_REFERENCE_ROUTE), "reference route is diagnostic, not a legacy public route")
-    for removed in ["add-friend", "add-friend-plan", "add-friend-entry-plan"]:
+    assert_true(not is_add_friend_legacy_route(ADD_FRIEND_WINDOWS_ROUTE), "Windows route must not be legacy")
+    removed_public_route = "add-friend-entry-click-" + "plan"
+    removed_reference_route = "add-friend-entry-click-plan-windows-" + "1080p-reference"
+    for removed in ["add-friend", "add-friend-plan", "add-friend-entry-plan", removed_public_route, removed_reference_route]:
         assert_true(not is_add_friend_route(removed), f"removed add_friend action should not be a route: {removed}")
         assert_true(not is_add_friend_diagnostic_route(removed), f"removed add_friend action should not be diagnostic: {removed}")
         assert_true(not is_add_friend_legacy_route(removed), f"removed add_friend action should not be legacy: {removed}")
@@ -377,7 +358,7 @@ def test_entry_click_field_contract() -> None:
 
     argv = args_for_daemon_request(
         {
-            "action": "add-friend-entry-click-plan",
+            "action": "add-friend-entry-click-plan-windows",
             "phone": "17368746889",
             "verify_message": "我是车金二手车张伟",
             "remark_name": "客户-CJ8K2P",
@@ -1131,7 +1112,7 @@ def test_add_friend_calibration_mode_contract() -> None:
 
     argv = sidecar_mod.args_for_daemon_request(
         {
-            "action": "add-friend-entry-click-plan",
+            "action": "add-friend-entry-click-plan-windows",
             "phone": "17756658083",
             "verify_message": "你好",
             "remark_name": "客户-CJ8K2P",

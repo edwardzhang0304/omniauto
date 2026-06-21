@@ -135,7 +135,6 @@ from apps.wechat_ai_customer_service.adapters.add_friend_result_mapping import (
 )
 from apps.wechat_ai_customer_service.adapters.add_friend_routes import (
     ADD_FRIEND_MAIN_ROUTE,
-    ADD_FRIEND_WINDOWS_1080P_REFERENCE_ROUTE,
     ADD_FRIEND_ROUTES,
     ADD_FRIEND_WINDOWS_ROUTE,
     add_friend_route_accepts_formal_fields,
@@ -186,6 +185,8 @@ UI_ACTION_GUARD_PATH = PROJECT_ROOT / "runtime" / "wechat_win32_ocr_ui_action_gu
 UI_ACTION_AUDIT_PATH = PROJECT_ROOT / "runtime" / "wechat_win32_ocr_ui_actions.jsonl"
 _LAST_ACTIVATE_MONOTONIC_BY_HWND: dict[int, float] = {}
 _LAST_RPA_ACTION_STATE: dict[str, Any] = {}
+_LAST_OPEN_CHAT_TIMING: dict[str, Any] = {}
+_LAST_SESSION_ACTIVATION_TIMING: dict[str, Any] = {}
 RENDER_RECOVERY_GUARD_PATH = PROJECT_ROOT / "runtime" / "wechat_win32_ocr_render_recovery_guard.json"
 MIN_SEND_CLIENT_WIDTH = 700
 MIN_SEND_CLIENT_HEIGHT = 720
@@ -217,6 +218,10 @@ DEFAULT_UI_ACTION_NEAR_POINT_SOFT_LIMIT = 2
 DEFAULT_RENDER_RECOVERY_MIN_INTERVAL_SECONDS = 180
 DEFAULT_QUICK_LOGIN_AUTO_ENTER = False
 DEFAULT_TARGET_READY_MAX_ATTEMPTS = 1
+DEFAULT_TARGET_READY_SWITCH_VALIDATION_CACHE_SECONDS = 4.0
+DEFAULT_TARGET_READY_PREVALIDATION_OCR_SEED_SECONDS = 1.5
+DEFAULT_ACTIVE_SEND_TARGET_ROI_OCR = False
+DEFAULT_INPUT_REGION_PRECHECK_OCR_SEED_SECONDS = 3.0
 BLANK_RENDER_BRIGHT_MIN = 238.0
 BLANK_RENDER_DARK_MAX = 18.0
 BLANK_RENDER_STDDEV_MAX = 8.0
@@ -250,6 +255,7 @@ DEFAULT_HUMANIZED_LONG_TEXT_CHARS = 240
 DEFAULT_INPUT_COPYBACK_STRONG_CONFIRM = False
 DEFAULT_SEND_INPUT_CONFIRM_ATTEMPTS = 3
 DEFAULT_INPUT_FAST_VISUAL_CONFIRM = False
+DEFAULT_INPUT_CONFIRM_ROI_OCR = True
 DEFAULT_POST_SEND_STRICT_CONFIRM = False
 DEFAULT_SEND_TRIGGER_MODE = "enter_only"
 DEFAULT_STRICT_SEND_FOCUS_GUARD = True
@@ -301,6 +307,98 @@ FOREIGN_CAPTURE_TOKENS = (
 )
 
 _OCR_ENGINE: RapidOCR | None = None
+_TARGET_READY_PREVALIDATION_OCR_SEED: dict[str, Any] = {}
+_INPUT_REGION_PRECHECK_OCR_SEED: dict[str, Any] = {}
+_OCR_TRACE_STACK: list[list[dict[str, Any]]] = []
+
+
+def _sidecar_timing_merge_prefixed(timing: dict[str, Any], prefix: str, nested: dict[str, Any]) -> None:
+    for key, value in dict(nested or {}).items():
+        merged_key = f"{prefix}_{key}"
+        if merged_key in timing:
+            continue
+        timing[merged_key] = value
+
+
+def _sidecar_timing_merge_validation(timing: dict[str, Any], prefix: str, validation: dict[str, Any] | None) -> None:
+    if not isinstance(validation, dict):
+        return
+    nested = validation.get("timing")
+    if isinstance(nested, dict):
+        _sidecar_timing_merge_prefixed(timing, prefix, nested)
+
+
+def _sidecar_timing_merge_ocr_trace(timing: dict[str, Any], prefix: str, trace: list[dict[str, Any]] | None) -> None:
+    if not trace:
+        return
+    calls = [dict(item) for item in trace if isinstance(item, dict)]
+    if not calls:
+        return
+    timing[f"{prefix}_ocr_call_count"] = len(calls)
+    timing[f"{prefix}_ocr_total_duration_seconds"] = round(
+        sum(float(item.get("duration_seconds") or 0.0) for item in calls),
+        4,
+    )
+    timing[f"{prefix}_ocr_calls"] = calls
+
+
+def _ocr_trace_start() -> int:
+    _OCR_TRACE_STACK.append([])
+    return len(_OCR_TRACE_STACK) - 1
+
+
+def _ocr_trace_finish(token: int) -> list[dict[str, Any]]:
+    if not _OCR_TRACE_STACK:
+        return []
+    if token != len(_OCR_TRACE_STACK) - 1:
+        return list(_OCR_TRACE_STACK[token]) if 0 <= token < len(_OCR_TRACE_STACK) else []
+    return _OCR_TRACE_STACK.pop()
+
+
+def _ocr_image_size(image: Any) -> tuple[int, int]:
+    size = getattr(image, "size", (0, 0))
+    try:
+        return int(size[0] or 0), int(size[1] or 0)
+    except Exception:
+        return 0, 0
+
+
+def _ocr_trace_record(
+    *,
+    purpose: str,
+    image: Any,
+    duration_seconds: float,
+    count: int,
+    region: str = "full",
+    source: str = "",
+) -> None:
+    if not _OCR_TRACE_STACK:
+        return
+    width, height = _ocr_image_size(image)
+    record = {
+        "purpose": str(purpose or "unspecified"),
+        "region": str(region or "full"),
+        "source": str(source or ""),
+        "width": width,
+        "height": height,
+        "duration_seconds": round(max(0.0, float(duration_seconds or 0.0)), 4),
+        "count": int(count or 0),
+    }
+    _OCR_TRACE_STACK[-1].append(record)
+
+
+def run_ocr_traced(image: Any, purpose: str, *, region: str = "full", source: str = "") -> list[dict[str, Any]]:
+    started = time.perf_counter()
+    items = run_ocr(image)
+    _ocr_trace_record(
+        purpose=purpose,
+        image=image,
+        duration_seconds=time.perf_counter() - started,
+        count=len(items),
+        region=region,
+        source=source,
+    )
+    return items
 
 
 def _sidecar_timing_now_iso() -> str:
@@ -478,6 +576,9 @@ def run_action(args: argparse.Namespace) -> dict[str, Any]:
 
     probe["passive_probe"] = passive_probe
     if not passive_probe:
+        foreground_blank_dismissal = dismiss_blank_foreground_window_before_activation(hwnd, artifact_dir=args.artifact_dir)
+        if foreground_blank_dismissal.get("attempted"):
+            probe["foreground_blank_dismissal"] = foreground_blank_dismissal
         activate_window(hwnd)
         normalized_window = normalize_wechat_window(hwnd)
         probe["window_normalization"] = normalized_window
@@ -552,6 +653,7 @@ def run_action(args: argparse.Namespace) -> dict[str, Any]:
                     "target": args.target,
                     "opened": bool(opened),
                     "guard": validation,
+                    "open_chat_timing": dict(_LAST_OPEN_CHAT_TIMING),
                     "error": "The target chat was not confirmed before reading messages.",
                 }
             if scroll_to_latest_before_read_enabled():
@@ -581,13 +683,25 @@ def run_action(args: argparse.Namespace) -> dict[str, Any]:
             raise ValueError("--text is required for send")
         target_ready_timing: dict[str, Any] = {}
         target_ready_started = _sidecar_timing_start(target_ready_timing, "target_ready")
-        target_ready = ensure_target_ready_for_send(
-            hwnd,
-            args.target,
-            exact=bool(args.exact),
-            artifact_dir=args.artifact_dir,
-            session_key=str(args.session_key or ""),
-        )
+        continuation_fast_path = same_target_continuation_fast_path_enabled()
+        if continuation_fast_path:
+            target_ready = {
+                "ok": True,
+                "attempts": 0,
+                "validation": None,
+                "timing": {
+                    "target_ready_continuation_fast_path": True,
+                    "target_ready_skipped_for_continuation": True,
+                },
+            }
+        else:
+            target_ready = ensure_target_ready_for_send(
+                hwnd,
+                args.target,
+                exact=bool(args.exact),
+                artifact_dir=args.artifact_dir,
+                session_key=str(args.session_key or ""),
+            )
         _sidecar_timing_finish(target_ready_timing, "target_ready", target_ready_started)
         if isinstance(target_ready.get("timing"), dict):
             for key, value in target_ready["timing"].items():
@@ -619,9 +733,15 @@ def run_action(args: argparse.Namespace) -> dict[str, Any]:
             exact=bool(args.exact),
             skip_send_rate_guard=bool(args.skip_send_rate_guard),
             artifact_dir=args.artifact_dir,
-            validated_guard=target_ready.get("validation") if isinstance(target_ready.get("validation"), dict) else None,
+            validated_guard=None
+            if continuation_fast_path
+            else target_ready.get("validation")
+            if isinstance(target_ready.get("validation"), dict)
+            else None,
         )
         if isinstance(send_result_payload, dict):
+            if continuation_fast_path:
+                send_result_payload.setdefault("same_target_continuation_fast_path", True)
             existing_timing = send_result_payload.get("timing")
             merged_timing = dict(target_ready_timing)
             if isinstance(existing_timing, dict):
@@ -654,6 +774,10 @@ def use_passive_probe_mode(action: str) -> bool:
 
 def scroll_to_latest_before_read_enabled() -> bool:
     return env_flag("WECHAT_WIN32_OCR_SCROLL_TO_LATEST_BEFORE_READ", default=False)
+
+
+def same_target_continuation_fast_path_enabled() -> bool:
+    return env_flag("WECHAT_WIN32_OCR_CONTINUATION_SEND_FAST_PATH", default=False)
 
 
 def detect_blank_render(
@@ -702,6 +826,77 @@ def auxiliary_wechat_shell_like(ocr_items: list[dict[str, Any]], *, geometry: di
             "height": int(geometry.get("height") or 0),
         },
     }
+
+
+def service_container_name(text: str) -> str:
+    compact = normalize_ocr_text(text).replace(" ", "")
+    if not compact:
+        return ""
+    for token in ("服务号", "订阅号", "公众号"):
+        if token in compact:
+            return token
+    return ""
+
+
+def target_is_service_container(target: str) -> bool:
+    return bool(service_container_name(target))
+
+
+def active_service_container_wrong_target(
+    ocr_items: list[dict[str, Any]],
+    image_size: tuple[int, int],
+    *,
+    target: str,
+) -> dict[str, Any]:
+    if target_is_service_container(target):
+        return {"detected": False}
+    width, height = image_size
+    if width <= 0 or height <= 0:
+        return {"detected": False}
+    split_x = session_split_x(width)
+    header_bottom = chat_header_cutoff_y(height) + max(58, int(height * 0.08))
+    matches: list[dict[str, Any]] = []
+    for item in ocr_items:
+        text = normalize_ocr_text(item.get("text"))
+        token = service_container_name(text)
+        if not token:
+            continue
+        center_y = float(item.get("center_y") or 0)
+        right = float(item.get("right") or 0)
+        compact = text.replace(" ", "")
+        has_back_arrow = compact.startswith(("<", "〈", "‹", "＜"))
+        in_service_back_header = has_back_arrow and center_y <= header_bottom and right <= split_x + 72
+        in_active_title = (
+            center_y <= active_chat_title_bottom_y(height) + 24
+            and right > split_x + 8
+            and float(item.get("center_x") or 0) >= active_chat_title_left_x(width) - 24
+        )
+        if not (in_service_back_header or in_active_title):
+            continue
+        matches.append(
+            {
+                "text": text,
+                "container": token,
+                "center_y": center_y,
+                "right": right,
+                "role": "service_back_header" if in_service_back_header else "active_title",
+                "has_back_arrow": has_back_arrow,
+            }
+        )
+    if not matches:
+        return {"detected": False}
+    return {
+        "detected": True,
+        "reason": "service_container_wrong_target",
+        "requested_target": str(target or ""),
+        "matches": matches[:3],
+    }
+
+
+def session_candidate_is_service_container_wrong_target(session: dict[str, Any], target: str) -> bool:
+    if target_is_service_container(target):
+        return False
+    return bool(service_container_name(str(session.get("name") or "")))
 
 
 def recover_blank_render_payload(hwnd: int, probe: dict[str, Any], *, artifact_dir: str | None = None) -> dict[str, Any]:
@@ -1790,7 +1985,13 @@ def add_friend_popup_menu_bounds(image_size: tuple[int, int], *, plus_screen_x: 
     return win32_ocr_add_friend_windows.add_friend_popup_menu_bounds(image_size, plus_screen_x=plus_screen_x, plus_screen_y=plus_screen_y)
 
 
-def run_ocr_on_screen_region(image: Image.Image, bounds: list[int]) -> list[dict[str, Any]]:
+def run_ocr_on_screen_region(
+    image: Image.Image,
+    bounds: list[int],
+    *,
+    purpose: str = "screen_region",
+    source: str = "run_ocr_on_screen_region",
+) -> list[dict[str, Any]]:
     left, top, right, bottom = [int(value) for value in bounds[:4]]
     width, height = image.size
     left = max(0, min(width - 1, left))
@@ -1798,7 +1999,7 @@ def run_ocr_on_screen_region(image: Image.Image, bounds: list[int]) -> list[dict
     right = max(left + 1, min(width, right))
     bottom = max(top + 1, min(height, bottom))
     cropped = image.crop((left, top, right, bottom))
-    items = run_ocr(cropped)
+    items = run_ocr_traced(cropped, purpose, region="roi", source=source)
     for item in items:
         for key in ("left", "right", "center_x"):
             item[key] = float(item.get(key) or 0.0) + left
@@ -1808,6 +2009,222 @@ def run_ocr_on_screen_region(image: Image.Image, bounds: list[int]) -> list[dict
         if isinstance(box, list):
             item["box"] = [[float(point[0]) + left, float(point[1]) + top] for point in box if isinstance(point, (list, tuple)) and len(point) >= 2]
     return items
+
+
+def active_send_target_roi_ocr_enabled() -> bool:
+    return env_flag("WECHAT_WIN32_OCR_ACTIVE_SEND_TARGET_ROI_OCR", default=DEFAULT_ACTIVE_SEND_TARGET_ROI_OCR)
+
+
+def input_confirm_roi_ocr_enabled() -> bool:
+    return env_flag("WECHAT_WIN32_OCR_INPUT_CONFIRM_ROI_OCR", default=DEFAULT_INPUT_CONFIRM_ROI_OCR)
+
+
+def run_ocr_for_input_region_probe(
+    screenshot: Any,
+    *,
+    geometry: dict[str, Any],
+    timing: dict[str, Any],
+    prefix: str,
+    purpose: str,
+    roi_purpose: str,
+) -> tuple[list[dict[str, Any]], str]:
+    if not input_confirm_roi_ocr_enabled():
+        timing[f"{prefix}_roi_enabled"] = False
+        full_started = _sidecar_timing_start(timing, f"{prefix}_full_ocr")
+        items = run_ocr_traced(
+            screenshot,
+            purpose,
+            source="paste_text_with_confirmation",
+        )
+        _sidecar_timing_finish(timing, f"{prefix}_full_ocr", full_started)
+        timing[f"{prefix}_source"] = "full"
+        return items, "full"
+
+    bounds = list(input_text_region_bounds(geometry))
+    timing[f"{prefix}_roi_enabled"] = True
+    timing[f"{prefix}_roi_bounds"] = list(bounds)
+    roi_started = _sidecar_timing_start(timing, f"{prefix}_roi_ocr")
+    items = run_ocr_on_screen_region(
+        screenshot,
+        bounds,
+        purpose=roi_purpose,
+        source="paste_text_with_confirmation",
+    )
+    _sidecar_timing_finish(timing, f"{prefix}_roi_ocr", roi_started)
+    timing[f"{prefix}_roi_ocr_count"] = len(items)
+    timing[f"{prefix}_source"] = "roi"
+    return items, "roi"
+
+
+def run_ocr_for_input_confirmation(
+    screenshot: Any,
+    *,
+    geometry: dict[str, Any],
+    timing: dict[str, Any],
+    prefix: str,
+) -> tuple[list[dict[str, Any]], str]:
+    return run_ocr_for_input_region_probe(
+        screenshot,
+        geometry=geometry,
+        timing=timing,
+        prefix=prefix,
+        purpose="input_after_token_confirm",
+        roi_purpose="input_after_token_confirm_roi",
+    )
+
+
+def remember_input_region_precheck_ocr_seed(
+    *,
+    hwnd: int,
+    target: str,
+    exact: bool,
+    screenshot: Any,
+    ocr_items: list[dict[str, Any]],
+    geometry: dict[str, Any],
+    screenshot_path: str | None = None,
+) -> None:
+    global _INPUT_REGION_PRECHECK_OCR_SEED
+    try:
+        input_region = input_text_region_state(screenshot, ocr_items, geometry=geometry)
+    except Exception:
+        _INPUT_REGION_PRECHECK_OCR_SEED = {}
+        return
+    _INPUT_REGION_PRECHECK_OCR_SEED = {
+        "hwnd": int(hwnd or 0),
+        "target": str(target or ""),
+        "exact": bool(exact),
+        "geometry": dict(geometry or {}),
+        "screenshot_size": list(getattr(screenshot, "size", (0, 0))),
+        "input_region": dict(input_region or {}),
+        "screenshot_path": str(screenshot_path or ""),
+        "created_monotonic": time.monotonic(),
+    }
+
+
+def consume_input_region_precheck_ocr_seed(
+    *,
+    hwnd: int,
+    target: str,
+    exact: bool,
+    geometry: dict[str, Any],
+) -> dict[str, Any] | None:
+    global _INPUT_REGION_PRECHECK_OCR_SEED
+    seed = dict(_INPUT_REGION_PRECHECK_OCR_SEED or {})
+    if not seed:
+        return None
+    _INPUT_REGION_PRECHECK_OCR_SEED = {}
+    try:
+        age = time.monotonic() - float(seed.get("created_monotonic") or 0.0)
+    except Exception:
+        return None
+    if age < 0 or age > DEFAULT_INPUT_REGION_PRECHECK_OCR_SEED_SECONDS:
+        return None
+    if int(seed.get("hwnd") or 0) != int(hwnd or 0):
+        return None
+    if str(seed.get("target") or "") != str(target or ""):
+        return None
+    if bool(seed.get("exact")) != bool(exact):
+        return None
+    seed_geometry = seed.get("geometry") if isinstance(seed.get("geometry"), dict) else {}
+    if int(seed_geometry.get("width") or 0) != int(geometry.get("width") or 0):
+        return None
+    if int(seed_geometry.get("height") or 0) != int(geometry.get("height") or 0):
+        return None
+    input_region = seed.get("input_region") if isinstance(seed.get("input_region"), dict) else {}
+    if not input_region:
+        return None
+    seed["age_seconds"] = round(max(0.0, age), 4)
+    return seed
+
+
+def active_send_target_roi_bounds(image_size: tuple[int, int]) -> list[int]:
+    width, height = [int(value or 0) for value in image_size[:2]]
+    if width <= 0 or height <= 0:
+        return [0, 0, 1, 1]
+    left = max(0, min(width - 1, active_chat_title_left_x(width) - 32))
+    top = 0
+    right = width
+    bottom = height
+    return [left, top, right, bottom]
+
+
+def active_send_target_roi_chat_surface_visible(ocr_items: list[dict[str, Any]]) -> bool:
+    chat_surface_tokens = (
+        "发送",
+        "聊天",
+        "按下enter",
+        "文件传输助手",
+    )
+    texts = [normalize_ocr_text(item.get("text")) for item in ocr_items if normalize_ocr_text(item.get("text"))]
+    return any(token in text.lower() for text in texts for token in chat_surface_tokens)
+
+
+def active_send_target_roi_has_soft_blocking_text(ocr_items: list[dict[str, Any]]) -> bool:
+    texts = [normalize_ocr_text(item.get("text")) for item in ocr_items if normalize_ocr_text(item.get("text"))]
+    return any(token in text for text in texts for token in SOFT_BLOCKING_SCREEN_TOKENS)
+
+
+def run_ocr_for_active_send_target(
+    screenshot: Any,
+    *,
+    target: str,
+    exact: bool,
+    geometry: dict[str, Any],
+    timing: dict[str, Any],
+) -> tuple[list[dict[str, Any]], str, dict[str, Any] | None]:
+    if not active_send_target_roi_ocr_enabled():
+        timing["validate_active_send_target_roi_enabled"] = False
+        full_started = _sidecar_timing_start(timing, "validate_active_send_target_full_ocr")
+        items = run_ocr_traced(screenshot, "active_send_target_validation", source="validate_active_send_target")
+        _sidecar_timing_finish(timing, "validate_active_send_target_full_ocr", full_started)
+        return items, "full", None
+
+    timing["validate_active_send_target_roi_enabled"] = True
+    roi_bounds = active_send_target_roi_bounds(getattr(screenshot, "size", (0, 0)))
+    timing["validate_active_send_target_roi_bounds"] = list(roi_bounds)
+    roi_started = _sidecar_timing_start(timing, "validate_active_send_target_roi_ocr")
+    roi_items = run_ocr_on_screen_region(
+        screenshot,
+        roi_bounds,
+        purpose="active_send_target_validation_roi",
+        source="validate_active_send_target",
+    )
+    _sidecar_timing_finish(timing, "validate_active_send_target_roi_ocr", roi_started)
+    timing["validate_active_send_target_roi_ocr_count"] = len(roi_items)
+    if not roi_items:
+        blank_render = detect_blank_render(screenshot, roi_items, geometry=geometry)
+        if blank_render.get("detected"):
+            timing["validate_active_send_target_roi_decision"] = "blank_render_no_full_ocr"
+            return roi_items, "roi", blank_render
+        timing["validate_active_send_target_roi_decision"] = "fallback_empty_roi"
+        full_started = _sidecar_timing_start(timing, "validate_active_send_target_full_ocr")
+        items = run_ocr_traced(screenshot, "active_send_target_validation_fallback_full", source="validate_active_send_target")
+        _sidecar_timing_finish(timing, "validate_active_send_target_full_ocr", full_started)
+        return items, "full_fallback", None
+
+    quick_login_detected = quick_login_like(roi_items, geometry=geometry)
+    auxiliary_shell = auxiliary_wechat_shell_like(roi_items, geometry=geometry)
+    blocking_reason = blocking_screen_reason(roi_items)
+    active_match = active_chat_matches(roi_items, getattr(screenshot, "size", (0, 0)), target=target, exact=exact)
+    chat_surface_visible = active_send_target_roi_chat_surface_visible(roi_items)
+    soft_blocking_text = active_send_target_roi_has_soft_blocking_text(roi_items)
+    timing["validate_active_send_target_roi_quick_login_detected"] = bool(quick_login_detected)
+    timing["validate_active_send_target_roi_auxiliary_shell_detected"] = bool(auxiliary_shell.get("detected"))
+    timing["validate_active_send_target_roi_blocking_detected"] = bool(blocking_reason)
+    timing["validate_active_send_target_roi_active_match"] = bool(active_match)
+    timing["validate_active_send_target_roi_chat_surface_visible"] = bool(chat_surface_visible)
+    timing["validate_active_send_target_roi_soft_blocking_text"] = bool(soft_blocking_text)
+    if active_match and chat_surface_visible and not soft_blocking_text and not quick_login_detected and not auxiliary_shell.get("detected") and not blocking_reason:
+        timing["validate_active_send_target_roi_decision"] = "accepted"
+        return roi_items, "roi", None
+    if chat_surface_visible and not soft_blocking_text and not quick_login_detected and not auxiliary_shell.get("detected") and not blocking_reason:
+        timing["validate_active_send_target_roi_decision"] = "rejected_without_full_fallback"
+        return roi_items, "roi_rejected", None
+    timing["validate_active_send_target_roi_decision"] = "fallback_uncertain"
+    full_started = _sidecar_timing_start(timing, "validate_active_send_target_full_ocr")
+    items = run_ocr_traced(screenshot, "active_send_target_validation_fallback_full", source="validate_active_send_target")
+    _sidecar_timing_finish(timing, "validate_active_send_target_full_ocr", full_started)
+    return items, "full_fallback", None
 
 
 def add_friend_menu_text_matches(text: str, tokens: tuple[str, ...]) -> bool:
@@ -2138,10 +2555,12 @@ def send_payload(
     validated_guard: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     timing: dict[str, Any] = {}
+    ocr_trace_token = _ocr_trace_start()
     send_payload_started = _sidecar_timing_start(timing, "send_payload")
 
     def finish(payload: dict[str, Any]) -> dict[str, Any]:
         _sidecar_timing_finish(timing, "send_payload", send_payload_started)
+        _sidecar_timing_merge_ocr_trace(timing, "send_payload", _ocr_trace_finish(ocr_trace_token))
         payload["timing"] = dict(timing)
         send_result = payload.get("send_result")
         if isinstance(send_result, dict):
@@ -2166,6 +2585,7 @@ def send_payload(
             # Fallback to full active target validation to keep behavior robust
             # when foreground recovery is temporarily blocked.
             validation = validate_active_send_target(hwnd, target, exact=exact, artifact_dir=artifact_dir)
+            _sidecar_timing_merge_validation(timing, "pre_send_guard_validation", validation)
             reused_prevalidated_guard = False
             if not validation.get("ok"):
                 _sidecar_timing_finish(timing, "pre_send_guard", pre_send_guard_started)
@@ -2182,6 +2602,7 @@ def send_payload(
             geometry = validation["geometry"]
         else:
             strict_validation = validate_active_send_target(hwnd, target, exact=exact, artifact_dir=artifact_dir)
+            _sidecar_timing_merge_validation(timing, "pre_send_guard_strict_validation", strict_validation)
             if not strict_validation.get("ok") or not active_send_guard_is_strong(strict_validation):
                 _sidecar_timing_finish(timing, "pre_send_guard", pre_send_guard_started)
                 return finish({
@@ -2222,6 +2643,7 @@ def send_payload(
             validation["geometry"] = geometry
     else:
         validation = validate_active_send_target(hwnd, target, exact=exact, artifact_dir=artifact_dir)
+        _sidecar_timing_merge_validation(timing, "pre_send_guard_validation", validation)
         if not validation.get("ok") or not active_send_guard_is_strong(validation):
             _sidecar_timing_finish(timing, "pre_send_guard", pre_send_guard_started)
             return finish({
@@ -2248,6 +2670,15 @@ def send_payload(
             "guard": {**validation, "points": points},
             "error": str(points.get("error") or "send points were unsafe"),
         })
+    input_region_seed = consume_input_region_precheck_ocr_seed(
+        hwnd=hwnd,
+        target=target,
+        exact=exact,
+        geometry=geometry,
+    )
+    timing["input_region_precheck_seed_reused"] = bool(input_region_seed)
+    if isinstance(input_region_seed, dict):
+        timing["input_region_precheck_seed_age_seconds"] = input_region_seed.get("age_seconds")
     requested_send_mode = str(os.getenv("WECHAT_WIN32_OCR_SEND_MODE") or DEFAULT_SEND_MODE).strip().lower()
     settings = adapt_humanized_input_settings(humanized_input_settings(), text)
     send_mode = requested_send_mode
@@ -2309,6 +2740,7 @@ def send_payload(
             allow_unconfirmed_paste=bool(validation.get("blind_send")),
             artifact_dir=artifact_dir,
             settings=settings,
+            before_input_region_seed=input_region_seed,
         )
         _sidecar_timing_finish(timing, "guarded_click_send", guarded_click_started)
         if isinstance(click_result.get("timing"), dict):
@@ -2730,7 +3162,7 @@ def clear_existing_input_draft(
         humanized_action_sleep(10, 30)
     time.sleep(random.uniform(0.16, 0.32))
     screenshot, _path = capture_wechat(hwnd, artifact_dir=artifact_dir, label=f"send_input_clear_{attempt}")
-    ocr_items = run_ocr(screenshot)
+    ocr_items = run_ocr_traced(screenshot, "input_after_clear_draft", source="clear_existing_input_draft")
     after_state = input_text_region_state(screenshot, ocr_items, geometry=geometry)
     if not after_state.get("has_visible_text") or input_region_soft_blank_noise(after_state):
         if input_region_soft_blank_noise(after_state):
@@ -3067,6 +3499,79 @@ def foreground_window_matches_target(hwnd: int) -> dict[str, Any]:
     }
 
 
+def dismiss_blank_foreground_window_before_activation(hwnd: int, *, artifact_dir: str | None = None) -> dict[str, Any]:
+    if not hwnd or win32gui is None:
+        return {"attempted": False, "reason": "window_unavailable"}
+    try:
+        foreground = int(win32gui.GetForegroundWindow() or 0)
+    except Exception as exc:
+        return {"attempted": False, "reason": "foreground_probe_failed", "error": repr(exc)}
+    if not foreground or foreground == int(hwnd):
+        return {"attempted": False, "reason": "foreground_already_target_or_unknown", "foreground_hwnd": foreground}
+    try:
+        pid = int(win32process.GetWindowThreadProcessId(foreground)[1] or 0)
+    except Exception:
+        pid = 0
+    path = process_executable_path(pid)
+    if not path.lower().endswith("\\weixin.exe"):
+        return {"attempted": False, "reason": "foreground_not_weixin", "foreground_hwnd": foreground, "pid": pid}
+    try:
+        geometry = get_window_geometry(foreground)
+        screenshot, screenshot_path = capture_wechat(
+            foreground,
+            artifact_dir=artifact_dir,
+            label="foreground_blank_dismissal_probe",
+        )
+        ocr_items = run_ocr(screenshot)
+        blank_render = detect_blank_render(screenshot, ocr_items, geometry=geometry)
+    except Exception as exc:
+        return {
+            "attempted": False,
+            "reason": "foreground_blank_probe_failed",
+            "foreground_hwnd": foreground,
+            "pid": pid,
+            "error": repr(exc),
+        }
+    if not blank_render.get("detected"):
+        return {
+            "attempted": False,
+            "reason": "foreground_weixin_not_blank",
+            "foreground_hwnd": foreground,
+            "pid": pid,
+            "ocr_count": len(ocr_items),
+            "blank_render": blank_render,
+            "screenshot_path": screenshot_path,
+        }
+    try:
+        ensure_left_button_released()
+        win32gui.ShowWindow(foreground, win32con.SW_MINIMIZE)
+        humanized_action_sleep(180, 320)
+        return {
+            "attempted": True,
+            "ok": True,
+            "reason": "blank_foreground_minimized_before_activation",
+            "foreground_hwnd": foreground,
+            "pid": pid,
+            "geometry": geometry,
+            "ocr_count": len(ocr_items),
+            "blank_render": blank_render,
+            "screenshot_path": screenshot_path,
+        }
+    except Exception as exc:
+        return {
+            "attempted": True,
+            "ok": False,
+            "reason": "blank_foreground_minimize_failed",
+            "foreground_hwnd": foreground,
+            "pid": pid,
+            "geometry": geometry,
+            "ocr_count": len(ocr_items),
+            "blank_render": blank_render,
+            "screenshot_path": screenshot_path,
+            "error": repr(exc),
+        }
+
+
 def non_retryable_input_failure(result: dict[str, Any] | None) -> bool:
     if not isinstance(result, dict):
         return False
@@ -3177,12 +3682,15 @@ def paste_text_with_confirmation(
     geometry: dict[str, Any],
     artifact_dir: str | None = None,
     settings: dict[str, Any] | None = None,
+    before_input_region_seed: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     timing: dict[str, Any] = {}
+    ocr_trace_token = _ocr_trace_start()
     paste_started = _sidecar_timing_start(timing, "paste_text_with_confirmation")
 
     def finish(payload: dict[str, Any]) -> dict[str, Any]:
         _sidecar_timing_finish(timing, "paste_text_with_confirmation", paste_started)
+        _sidecar_timing_merge_ocr_trace(timing, "paste_text_with_confirmation", _ocr_trace_finish(ocr_trace_token))
         payload["timing"] = dict(timing)
         return payload
 
@@ -3236,19 +3744,34 @@ def paste_text_with_confirmation(
                 "window_guard": focus_guard,
             })
         try:
-            before_capture_started = _sidecar_timing_start(timing, "before_capture")
-            before_screenshot, _before_path = capture_wechat(
-                hwnd,
-                artifact_dir=artifact_dir,
-                label=f"send_input_before_{attempt}",
-            )
-            _sidecar_timing_finish(timing, "before_capture", before_capture_started)
-            before_ocr_started = _sidecar_timing_start(timing, "before_ocr")
-            before_ocr_items = run_ocr(before_screenshot)
-            _sidecar_timing_finish(timing, "before_ocr", before_ocr_started)
-            before_region_started = _sidecar_timing_start(timing, "before_region")
-            before_input_region = input_text_region_state(before_screenshot, before_ocr_items, geometry=geometry)
-            _sidecar_timing_finish(timing, "before_region", before_region_started)
+            seed_region = before_input_region_seed.get("input_region") if isinstance(before_input_region_seed, dict) else None
+            if attempt == 1 and isinstance(seed_region, dict) and seed_region:
+                timing["before_ocr_seed_reused"] = True
+                timing["before_ocr_seed_age_seconds"] = before_input_region_seed.get("age_seconds")
+                timing["before_ocr_source"] = "pre_send_guard_seed"
+                before_input_region = dict(seed_region)
+            else:
+                timing["before_ocr_seed_reused"] = False
+                before_capture_started = _sidecar_timing_start(timing, "before_capture")
+                before_screenshot, _before_path = capture_wechat(
+                    hwnd,
+                    artifact_dir=artifact_dir,
+                    label=f"send_input_before_{attempt}",
+                )
+                _sidecar_timing_finish(timing, "before_capture", before_capture_started)
+                before_ocr_started = _sidecar_timing_start(timing, "before_ocr")
+                before_ocr_items, _before_ocr_source = run_ocr_for_input_region_probe(
+                    before_screenshot,
+                    geometry=geometry,
+                    timing=timing,
+                    prefix="before_ocr",
+                    purpose="input_before_draft_check",
+                    roi_purpose="input_before_draft_check_roi",
+                )
+                _sidecar_timing_finish(timing, "before_ocr", before_ocr_started)
+                before_region_started = _sidecar_timing_start(timing, "before_region")
+                before_input_region = input_text_region_state(before_screenshot, before_ocr_items, geometry=geometry)
+                _sidecar_timing_finish(timing, "before_region", before_region_started)
         except Exception as exc:
             before_input_region = {
                 "has_visible_text": True,
@@ -3404,7 +3927,12 @@ def paste_text_with_confirmation(
                 "input_result": input_result,
             })
         after_ocr_started = _sidecar_timing_start(timing, "after_ocr")
-        ocr_items = run_ocr(screenshot)
+        ocr_items, after_ocr_source = run_ocr_for_input_confirmation(
+            screenshot,
+            geometry=geometry,
+            timing=timing,
+            prefix="after_ocr",
+        )
         _sidecar_timing_finish(timing, "after_ocr", after_ocr_started)
         if input_area_contains_any_token(ocr_items, geometry=geometry, tokens=probe_tokens):
             return finish({
@@ -3439,6 +3967,49 @@ def paste_text_with_confirmation(
                 "input_mode": input_method,
                 "input_result": input_result,
             })
+        if after_ocr_source == "roi":
+            fallback_started = _sidecar_timing_start(timing, "after_ocr_full_fallback")
+            full_ocr_items = run_ocr_traced(
+                screenshot,
+                "input_after_token_confirm_fallback_full",
+                source="paste_text_with_confirmation",
+            )
+            _sidecar_timing_finish(timing, "after_ocr_full_fallback", fallback_started)
+            timing["after_ocr_source"] = "roi_full_fallback"
+            if input_area_contains_any_token(full_ocr_items, geometry=geometry, tokens=probe_tokens):
+                return finish({
+                    "ok": True,
+                    "attempt": attempt,
+                    "click_mode": mode,
+                    "point": [click_x, click_y],
+                    "probe_token": probe_token,
+                    "probe_tokens": probe_tokens,
+                    "confirmed_by": "ocr_input_area",
+                    "input_clear": clear_result,
+                    "input_mode": input_method,
+                    "input_result": input_result,
+                })
+            full_after_region_started = _sidecar_timing_start(timing, "after_region_full_fallback")
+            full_after_region = input_text_region_state(screenshot, full_ocr_items, geometry=geometry)
+            _sidecar_timing_finish(timing, "after_region_full_fallback", full_after_region_started)
+            full_visual_confirm_started = _sidecar_timing_start(timing, "visual_confirm_full_fallback")
+            full_visual_confirm = input_region_visual_delta_confirms(before_input_region, full_after_region, input_result)
+            _sidecar_timing_finish(timing, "visual_confirm_full_fallback", full_visual_confirm_started)
+            if full_visual_confirm.get("ok"):
+                return finish({
+                    "ok": True,
+                    "attempt": attempt,
+                    "click_mode": mode,
+                    "point": [click_x, click_y],
+                    "probe_token": probe_token,
+                    "probe_tokens": probe_tokens,
+                    "confirmed_by": "input_area_visual_delta",
+                    "input_visual_confirm": full_visual_confirm,
+                    "input_clear": clear_result,
+                    "input_mode": input_method,
+                    "input_result": input_result,
+                })
+            last_input_region = full_after_region
         if allow_copyback:
             copyback_confirm_started = _sidecar_timing_start(timing, "copyback_confirm")
             clipboard_confirm = confirm_input_token_via_clipboard(probe_tokens)
@@ -3619,6 +4190,7 @@ def send_with_guarded_clicks(
     allow_unconfirmed_paste: bool = False,
     artifact_dir: str | None = None,
     settings: dict[str, Any] | None = None,
+    before_input_region_seed: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     # WeChat 4.1.x keeps the attachment toolbar near the bottom. Paste first
     # and confirm OCR can see the token in the input area before sending.
@@ -3646,9 +4218,12 @@ def send_with_guarded_clicks(
         geometry=geometry,
         artifact_dir=artifact_dir,
         settings=settings,
+        before_input_region_seed=before_input_region_seed,
     )
     _sidecar_timing_finish(timing, "typing", typing_started)
     _sidecar_timing_finish(timing, "input_focus", input_focus_started)
+    if isinstance(paste_result.get("timing"), dict):
+        _sidecar_timing_merge_prefixed(timing, "paste", paste_result["timing"])
     if not paste_result.get("ok"):
         if allow_unconfirmed_paste and str(paste_result.get("reason") or "") == "input_token_not_detected_after_paste":
             paste_result = {
@@ -4027,32 +4602,73 @@ def activate_session_candidate(
     default_click_x: int,
     artifact_dir: str | None = None,
 ) -> bool:
+    timing: dict[str, Any] = {}
+    activation_started = _sidecar_timing_start(timing, "activation")
+
+    def finish(opened: bool) -> bool:
+        global _LAST_SESSION_ACTIVATION_TIMING
+        _sidecar_timing_finish(timing, "activation", activation_started)
+        timing["opened"] = bool(opened)
+        _LAST_SESSION_ACTIVATION_TIMING = dict(timing)
+        return opened
+
     center_y = session.get("center_y")
     if center_y is None:
-        return False
+        timing["reason"] = "missing_center_y"
+        return finish(False)
+    choose_started = _sidecar_timing_start(timing, "activation_choose_click")
     click_x, click_y, _click_meta = choose_session_row_click_point(
         session,
         geometry,
         default_x=default_click_x,
     )
+    _sidecar_timing_finish(timing, "activation_choose_click", choose_started)
+    timing["activation_candidate_name"] = str(session.get("name") or "")
+    if session_candidate_is_service_container_wrong_target(session, target):
+        timing["reason"] = "service_container_candidate_wrong_target"
+        timing["hard_stop"] = True
+        return finish(False)
     # Use exactly one human-like click per candidate. If the active-title
     # guard cannot confirm the switch, stop this RPA attempt and let the
     # scheduler cool down/re-capture instead of probing the same row again.
+    pre_click_wait_started = _sidecar_timing_start(timing, "activation_pre_click_wait")
     humanized_action_sleep(260, 720)
+    _sidecar_timing_finish(timing, "activation_pre_click_wait", pre_click_wait_started)
+    click_started = _sidecar_timing_start(timing, "activation_click")
     human_client_click(hwnd, click_x, click_y)
+    _sidecar_timing_finish(timing, "activation_click", click_started)
     for attempt in range(target_switch_passive_confirm_attempts()):
+        timing["activation_confirm_attempts_observed"] = attempt + 1
         if attempt == 0:
+            confirm_wait_started = _sidecar_timing_start(timing, f"activation_confirm_{attempt + 1}_wait")
             humanized_action_sleep(320, 620)
+            _sidecar_timing_finish(timing, f"activation_confirm_{attempt + 1}_wait", confirm_wait_started)
         else:
             # Passive re-read only. Some WeChat builds need a short render
             # settle after switching chats; repeated row clicks are not needed.
+            confirm_wait_started = _sidecar_timing_start(timing, f"activation_confirm_{attempt + 1}_wait")
             humanized_action_sleep(180, 360)
+            _sidecar_timing_finish(timing, f"activation_confirm_{attempt + 1}_wait", confirm_wait_started)
+        confirm_started = _sidecar_timing_start(timing, f"activation_confirm_{attempt + 1}_validation")
         validation = validate_active_send_target(hwnd, target, exact=exact, artifact_dir=artifact_dir)
+        _sidecar_timing_finish(timing, f"activation_confirm_{attempt + 1}_validation", confirm_started)
+        _sidecar_timing_merge_validation(timing, f"activation_confirm_{attempt + 1}_validation", validation)
         if active_send_guard_is_strong(validation):
-            return True
+            timing["activation_confirmed_by_attempt"] = attempt + 1
+            remember_target_switch_validation(
+                hwnd=hwnd,
+                target=target,
+                exact=exact,
+                session_key=str(session.get("session_key") or ""),
+                validation=validation,
+                geometry=geometry,
+            )
+            return finish(True)
         if target_switch_validation_is_hard_stop(validation):
-            return False
-    return False
+            timing["reason"] = "hard_stop"
+            return finish(False)
+    timing["reason"] = "target_not_confirmed"
+    return finish(False)
 
 
 def session_matches_key(session: dict[str, Any], session_key: str) -> bool:
@@ -4122,7 +4738,7 @@ def ensure_main_session_list(
     max_hops: int = 2,
 ) -> tuple[Any, list[dict[str, Any]]]:
     screenshot, _path = capture_wechat(hwnd, artifact_dir=artifact_dir, label="open_chat")
-    ocr_items = run_ocr(screenshot)
+    ocr_items = run_ocr_traced(screenshot, "open_chat_main_list", source="ensure_main_session_list")
     hops = max(0, int(max_hops))
     for _ in range(hops):
         back_target = detect_session_subview_back_target(ocr_items, screenshot.size)
@@ -4131,7 +4747,7 @@ def ensure_main_session_list(
         client_click(hwnd, int(back_target["x"]), int(back_target["y"]))
         humanized_action_sleep(280, 480)
         screenshot, _path = capture_wechat(hwnd, artifact_dir=artifact_dir, label="open_chat_main_list")
-        ocr_items = run_ocr(screenshot)
+        ocr_items = run_ocr_traced(screenshot, "open_chat_main_list_after_back", source="ensure_main_session_list")
     return screenshot, ocr_items
 
 
@@ -4141,6 +4757,7 @@ def target_switch_surface_state(
     *,
     geometry: dict[str, Any],
     screenshot_path: str = "",
+    target: str = "",
 ) -> dict[str, Any]:
     if not ocr_items:
         blank_render = detect_blank_render(screenshot, ocr_items, geometry=geometry)
@@ -4206,6 +4823,24 @@ def target_switch_surface_state(
             "ocr_count": len(ocr_items),
             "error": f"WeChat cross-chat switch guard found blocking screen: {blocking_reason}",
         }
+    if target:
+        service_probe = active_service_container_wrong_target(
+            ocr_items,
+            getattr(screenshot, "size", (0, 0)),
+            target=target,
+        )
+        if service_probe.get("detected"):
+            return {
+                "ok": False,
+                "online": True,
+                "reason": "service_container_wrong_target",
+                "state": "wrong_target_service_container_detected",
+                "geometry": geometry,
+                "screenshot_path": screenshot_path,
+                "ocr_count": len(ocr_items),
+                "service_container_probe": service_probe,
+                "error": "WeChat is on a service-account container/page, not the requested chat; stop before further RPA action.",
+            }
     return {"ok": True, "online": True, "reason": "surface_ready", "ocr_count": len(ocr_items)}
 
 
@@ -4224,6 +4859,172 @@ def target_ready_attempt_count(max_attempts: int | None) -> int:
     )
 
 
+def target_ready_switch_validation_cache_seconds() -> float:
+    return bounded_float(
+        os.getenv("WECHAT_WIN32_OCR_TARGET_READY_SWITCH_VALIDATION_CACHE_SECONDS"),
+        default=DEFAULT_TARGET_READY_SWITCH_VALIDATION_CACHE_SECONDS,
+        minimum=0.0,
+        maximum=12.0,
+    )
+
+
+def target_ready_prevalidation_ocr_seed_seconds() -> float:
+    return bounded_float(
+        os.getenv("WECHAT_WIN32_OCR_TARGET_READY_PREVALIDATION_OCR_SEED_SECONDS"),
+        default=DEFAULT_TARGET_READY_PREVALIDATION_OCR_SEED_SECONDS,
+        minimum=0.0,
+        maximum=5.0,
+    )
+
+
+def target_ready_geometry_cache_key(geometry: dict[str, Any] | None) -> tuple[int, int, int, int]:
+    data = geometry if isinstance(geometry, dict) else {}
+    return (
+        int(data.get("left") or 0),
+        int(data.get("top") or 0),
+        int(data.get("width") or 0),
+        int(data.get("height") or 0),
+    )
+
+
+def remember_target_switch_validation(
+    *,
+    hwnd: int,
+    target: str,
+    exact: bool,
+    session_key: str,
+    validation: dict[str, Any],
+    geometry: dict[str, Any] | None = None,
+) -> None:
+    if not active_send_guard_is_strong(validation):
+        return
+    cached_geometry = (
+        validation.get("geometry")
+        if isinstance(validation.get("geometry"), dict)
+        else (geometry if isinstance(geometry, dict) else get_window_geometry(hwnd))
+    )
+    _LAST_RPA_ACTION_STATE["target_ready_last_switch_validation"] = {
+        "ts": time.monotonic(),
+        "hwnd": int(hwnd or 0),
+        "target": str(target or ""),
+        "exact": bool(exact),
+        "session_key": str(session_key or ""),
+        "geometry_key": list(target_ready_geometry_cache_key(cached_geometry)),
+        "validation": dict(validation),
+    }
+
+
+def consume_recent_target_switch_validation(
+    *,
+    hwnd: int,
+    target: str,
+    exact: bool,
+    session_key: str,
+    ttl_seconds: float | None = None,
+) -> dict[str, Any] | None:
+    cached = _LAST_RPA_ACTION_STATE.get("target_ready_last_switch_validation")
+    if not isinstance(cached, dict):
+        return None
+    ttl = target_ready_switch_validation_cache_seconds() if ttl_seconds is None else max(0.0, float(ttl_seconds))
+    if ttl <= 0:
+        return None
+    age = max(0.0, time.monotonic() - float(cached.get("ts") or 0.0))
+    if age > ttl:
+        return None
+    if int(cached.get("hwnd") or 0) != int(hwnd or 0):
+        return None
+    if str(cached.get("target") or "") != str(target or ""):
+        return None
+    if bool(cached.get("exact")) != bool(exact):
+        return None
+    clean_session_key = str(session_key or "").strip()
+    cached_session_key = str(cached.get("session_key") or "").strip()
+    if clean_session_key and cached_session_key and cached_session_key != clean_session_key:
+        return None
+    validation = cached.get("validation")
+    if not isinstance(validation, dict) or not active_send_guard_is_strong(validation):
+        return None
+    geometry = validation.get("geometry") if isinstance(validation.get("geometry"), dict) else {}
+    cached_geometry_key = list(cached.get("geometry_key") or [])
+    if list(target_ready_geometry_cache_key(geometry)) != cached_geometry_key:
+        return None
+    current_geometry_key = list(target_ready_geometry_cache_key(get_window_geometry(hwnd)))
+    if current_geometry_key != cached_geometry_key:
+        return None
+    reused = dict(validation)
+    reused["target_ready_reused_switch_validation"] = True
+    reused["target_ready_reused_switch_validation_age_seconds"] = round(age, 4)
+    return reused
+
+
+def remember_target_ready_prevalidation_ocr_seed(
+    *,
+    hwnd: int,
+    target: str,
+    exact: bool,
+    screenshot: Any,
+    ocr_items: list[dict[str, Any]],
+    geometry: dict[str, Any] | None,
+    screenshot_path: str = "",
+) -> None:
+    global _TARGET_READY_PREVALIDATION_OCR_SEED
+    if not ocr_items:
+        return
+    _TARGET_READY_PREVALIDATION_OCR_SEED = {
+        "ts": time.monotonic(),
+        "hwnd": int(hwnd or 0),
+        "target": str(target or ""),
+        "exact": bool(exact),
+        "geometry_key": list(target_ready_geometry_cache_key(geometry)),
+        "screenshot": screenshot,
+        "ocr_items": list(ocr_items),
+        "screenshot_path": str(screenshot_path or ""),
+    }
+
+
+def consume_target_ready_prevalidation_ocr_seed(
+    *,
+    hwnd: int,
+    target: str,
+    exact: bool,
+    geometry: dict[str, Any] | None,
+    ttl_seconds: float | None = None,
+) -> dict[str, Any] | None:
+    global _TARGET_READY_PREVALIDATION_OCR_SEED
+    cached = _TARGET_READY_PREVALIDATION_OCR_SEED
+    if not isinstance(cached, dict):
+        return None
+    _TARGET_READY_PREVALIDATION_OCR_SEED = {}
+    ttl = target_ready_prevalidation_ocr_seed_seconds() if ttl_seconds is None else max(0.0, float(ttl_seconds))
+    if ttl <= 0:
+        return None
+    age = max(0.0, time.monotonic() - float(cached.get("ts") or 0.0))
+    if age > ttl:
+        return None
+    if int(cached.get("hwnd") or 0) != int(hwnd or 0):
+        return None
+    if str(cached.get("target") or "") != str(target or ""):
+        return None
+    if bool(cached.get("exact")) != bool(exact):
+        return None
+    cached_geometry_key = list(cached.get("geometry_key") or [])
+    if list(target_ready_geometry_cache_key(geometry)) != cached_geometry_key:
+        return None
+    current_geometry_key = list(target_ready_geometry_cache_key(get_window_geometry(hwnd)))
+    if current_geometry_key != cached_geometry_key:
+        return None
+    screenshot = cached.get("screenshot")
+    ocr_items = cached.get("ocr_items")
+    if screenshot is None or not isinstance(ocr_items, list) or not ocr_items:
+        return None
+    return {
+        "screenshot": screenshot,
+        "ocr_items": list(ocr_items),
+        "screenshot_path": str(cached.get("screenshot_path") or ""),
+        "age_seconds": round(age, 4),
+    }
+
+
 def target_search_fallback_enabled() -> bool:
     # The search/header region is a high-risk path for live WeChat RPA. Prefer
     # visible-session and unread-badge switching; enable only for diagnostics.
@@ -4234,52 +5035,239 @@ def target_search_enter_fallback_enabled() -> bool:
     return env_flag("WECHAT_WIN32_OCR_TARGET_SEARCH_ENTER_FALLBACK", default=False)
 
 
+def target_search_retry_after_search_enabled() -> bool:
+    return env_flag("WECHAT_WIN32_OCR_TARGET_SEARCH_RETRY_AFTER_SEARCH", default=False)
+
+
+def sidebar_search_focus_indicator_detected(screenshot: Any, geometry: dict[str, Any] | None = None) -> bool:
+    if screenshot is None:
+        return False
+    try:
+        image = screenshot.convert("RGB")
+    except Exception:
+        return False
+    data = geometry if isinstance(geometry, dict) else {}
+    width = int(data.get("width") or getattr(image, "width", 0) or 0)
+    if width <= 0:
+        return False
+    split_x = session_split_x(width)
+    left = 88
+    top = 48
+    right = min(max(160, split_x - 62), getattr(image, "width", width))
+    bottom = min(88, getattr(image, "height", 0) or 88)
+    if right <= left or bottom <= top:
+        return False
+    active_pixels = 0
+    for y in range(top, bottom):
+        for x in range(left, right):
+            red, green, blue = image.getpixel((x, y))
+            if green >= 105 and green - red >= 45 and green - blue >= 25:
+                active_pixels += 1
+                if active_pixels >= 80:
+                    return True
+    return False
+
+
+def sidebar_search_state_detected(
+    screenshot: Any,
+    ocr_items: list[dict[str, Any]],
+    *,
+    geometry: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    texts = [normalize_ocr_text(item.get("text")) for item in ocr_items or [] if normalize_ocr_text(item.get("text"))]
+    compact = "".join(texts)
+    if "搜一搜" in compact:
+        return {"detected": True, "reason": "wechat_global_search_page_text"}
+    if sidebar_search_focus_indicator_detected(screenshot, geometry):
+        return {"detected": True, "reason": "sidebar_search_focus_indicator"}
+    return {"detected": False, "reason": ""}
+
+
+def dismiss_sidebar_search_state(
+    hwnd: int,
+    *,
+    target_hint: str = "",
+    geometry: dict[str, Any] | None = None,
+    artifact_dir: str | None = None,
+) -> dict[str, Any]:
+    """Exit the sidebar search mode after a diagnostic/search fallback pass."""
+    guard = basic_send_window_guard(hwnd)
+    if not guard.get("ok"):
+        return {"ok": False, "reason": "window_guard_failed_before_search_dismiss", "window_guard": guard}
+    active_geometry = geometry if isinstance(geometry, dict) else get_window_geometry(hwnd)
+    result: dict[str, Any] = {"ok": True, "method": "guarded_escape_search_dismiss", "attempts": 0}
+    max_attempts = 2 if artifact_dir else 1
+    last_search_state: dict[str, Any] = {"detected": False, "reason": ""}
+    for attempt in range(1, max_attempts + 1):
+        result["attempts"] = attempt
+        humanized_action_sleep(360, 920)
+        key_press(win32con.VK_ESCAPE)
+        humanized_action_sleep(620, 1400)
+        after_guard = basic_send_window_guard(hwnd)
+        result["window_guard"] = after_guard
+        if not after_guard.get("ok"):
+            return {"ok": False, "reason": "window_guard_failed_after_search_dismiss", "window_guard": after_guard}
+        if not artifact_dir:
+            return result
+        shot, shot_path = capture_wechat(hwnd, artifact_dir=artifact_dir, label="open_chat_search_dismiss_after_escape")
+        items = run_ocr_traced(shot, "open_chat_search_dismiss_after_escape", source="open_chat")
+        surface = target_switch_surface_state(
+            shot,
+            items,
+            geometry=active_geometry,
+            screenshot_path=shot_path,
+            target=target_hint,
+        )
+        result["surface"] = surface
+        result["ocr_count"] = len(items)
+        result["screenshot_path"] = shot_path
+        if not surface.get("ok"):
+            return {
+                **result,
+                "ok": False,
+                "reason": str(surface.get("reason") or "search_dismiss_surface_not_ok"),
+            }
+        last_search_state = sidebar_search_state_detected(shot, items, geometry=active_geometry)
+        result["search_state"] = last_search_state
+        if not last_search_state.get("detected"):
+            return result
+        humanized_action_sleep(520, 1300)
+    return {
+        **result,
+        "ok": False,
+        "reason": str(last_search_state.get("reason") or "search_state_still_active_after_dismiss"),
+        "search_state": last_search_state,
+    }
+
+
 def clear_sidebar_search_box_without_select_all(
     hwnd: int,
     search_x: int,
     search_y: int,
     *,
     target_hint: str = "",
-) -> None:
-    """Clear sidebar search text without Ctrl+A to avoid global selection artifacts."""
-    # First ESC clears an existing search session in many WeChat builds.
-    key_press(win32con.VK_ESCAPE)
-    humanized_action_sleep(60, 130)
-    human_window_image_click(hwnd, search_x, search_y)
-    humanized_action_sleep(70, 150)
-    # Use short Backspace/Delete bursts instead of select-all. This is slower,
-    # but safer when focus occasionally drifts.
-    default_backspaces = min(max(len(str(target_hint or "")) + 6, 10), 18)
+    geometry: dict[str, Any] | None = None,
+    artifact_dir: str | None = None,
+) -> dict[str, Any]:
+    """Prepare sidebar search with slow, verified actions.
+
+    This intentionally avoids Ctrl+A and long backspace bursts. If focus drifts,
+    a long key burst can look mechanical and may type into the active chat.
+    """
+    guard = basic_send_window_guard(hwnd)
+    if not guard.get("ok"):
+        return {"ok": False, "reason": "window_guard_failed_before_search_clear", "window_guard": guard}
+    # ESC + search-box click can stall rendering on some WeChat builds. Keep
+    # it opt-in for diagnostics instead of making it part of the normal search
+    # preparation path.
+    escape_enabled = env_flag("WECHAT_WIN32_OCR_TARGET_SEARCH_CLEAR_ESCAPE", default=False)
+    if escape_enabled:
+        humanized_action_sleep(520, 1200)
+        key_press(win32con.VK_ESCAPE)
+        humanized_action_sleep(650, 1400)
+    click_result: dict[str, Any] = {"ok": True, "bounds": None}
+    active_geometry = geometry if isinstance(geometry, dict) else get_window_geometry(hwnd)
+    split_x = session_split_x(int(active_geometry.get("width") or 0))
+    bounds = [
+        max(42, int(search_x) - 56),
+        max(42, int(search_y) - 22),
+        min(max(120, split_x - 34), int(search_x) + 96),
+        min(132, int(search_y) + 26),
+    ]
+    if bounds[2] > bounds[0] and bounds[3] > bounds[1]:
+        click_result = human_window_image_click_in_bounds(
+            hwnd,
+            int(search_x),
+            int(search_y),
+            bounds=bounds,
+            action_name="sidebar_search_box_click",
+        )
+    else:
+        human_window_image_click(hwnd, search_x, search_y)
+    humanized_action_sleep(720, 1600)
+    if artifact_dir:
+        probe_shot, probe_path = capture_wechat(hwnd, artifact_dir=artifact_dir, label="open_chat_search_box_after_click")
+        probe_items = run_ocr_traced(probe_shot, "open_chat_search_box_after_click", source="open_chat")
+        surface = target_switch_surface_state(
+            probe_shot,
+            probe_items,
+            geometry=active_geometry,
+            screenshot_path=probe_path,
+            target=target_hint,
+        )
+        if not surface.get("ok"):
+            return {
+                "ok": False,
+                "reason": str(surface.get("reason") or "search_box_surface_not_ok"),
+                "surface": surface,
+                "click": click_result,
+            }
+    # Use only a tiny stale-query cleanup. A long burst is both risky and
+    # unnecessary after ESC + a fresh search-box click.
+    default_backspaces = random.randint(1, 3)
     backspaces = bounded_int(
         os.getenv("WECHAT_WIN32_OCR_TARGET_SEARCH_CLEAR_BACKSPACES"),
         default=default_backspaces,
-        minimum=4,
-        maximum=32,
-    )
-    deletes = bounded_int(
-        os.getenv("WECHAT_WIN32_OCR_TARGET_SEARCH_CLEAR_DELETES"),
-        default=2,
         minimum=0,
         maximum=8,
     )
-    next_pause_at = random.randint(5, 8)
+    deletes = bounded_int(
+        os.getenv("WECHAT_WIN32_OCR_TARGET_SEARCH_CLEAR_DELETES"),
+        default=0,
+        minimum=0,
+        maximum=2,
+    )
+    key_count = 1
     for idx in range(backspaces):
+        guard = basic_send_window_guard(hwnd)
+        if not guard.get("ok"):
+            return {
+                "ok": False,
+                "reason": "window_guard_failed_during_search_clear",
+                "window_guard": guard,
+                "backspaces": idx,
+                "deletes": 0,
+                "click": click_result,
+            }
         key_press(win32con.VK_BACK)
-        humanized_action_sleep(8, 26)
-        if idx + 1 >= next_pause_at:
-            humanized_action_sleep(25, 70)
-            next_pause_at += random.randint(5, 8)
-    for _ in range(deletes):
+        key_count += 1
+        humanized_action_sleep(140, 460)
+    for idx in range(deletes):
+        guard = basic_send_window_guard(hwnd)
+        if not guard.get("ok"):
+            return {
+                "ok": False,
+                "reason": "window_guard_failed_during_search_clear",
+                "window_guard": guard,
+                "backspaces": backspaces,
+                "deletes": idx,
+                "click": click_result,
+            }
         key_press(win32con.VK_DELETE)
-        humanized_action_sleep(12, 34)
+        key_count += 1
+        humanized_action_sleep(160, 480)
+    humanized_action_sleep(520, 1300)
+    return {
+        "ok": True,
+        "method": "slow_sidebar_search_prepare",
+        "backspaces": backspaces,
+        "deletes": deletes,
+        "key_count": key_count,
+        "click": click_result,
+    }
 
 
 def type_sidebar_search_query(hwnd: int, target: str) -> dict[str, Any]:
-    method = str(os.getenv("WECHAT_WIN32_OCR_TARGET_SEARCH_INPUT_METHOD") or "sendinput_unicode").strip().lower()
+    method = str(os.getenv("WECHAT_WIN32_OCR_TARGET_SEARCH_INPUT_METHOD") or "clipboard").strip().lower()
     if method == "clipboard":
+        guard = basic_send_window_guard(hwnd)
+        if not guard.get("ok"):
+            return {"ok": False, "method": "clipboard", "reason": "window_guard_failed_before_search_paste", "window_guard": guard}
+        humanized_action_sleep(300, 900)
         clipboard_copy(target)
+        humanized_action_sleep(220, 720)
         hotkey(win32con.VK_CONTROL, ord("V"))
-        humanized_action_sleep(70, 150)
+        humanized_action_sleep(850, 1700)
         return {"ok": True, "method": "clipboard"}
     settings = {
         "enabled": True,
@@ -4308,37 +5296,87 @@ def open_chat(
     artifact_dir: str | None = None,
     session_key: str = "",
 ) -> bool:
-    screenshot, ocr_items = ensure_main_session_list(hwnd, artifact_dir=artifact_dir)
-    geometry = get_window_geometry(hwnd)
+    timing: dict[str, Any] = {}
+    ocr_trace_token = _ocr_trace_start()
+    open_chat_total_started = _sidecar_timing_start(timing, "open_chat")
+
+    def finish(opened: bool, reason: str = "") -> bool:
+        global _LAST_OPEN_CHAT_TIMING
+        _sidecar_timing_finish(timing, "open_chat", open_chat_total_started)
+        _sidecar_timing_merge_ocr_trace(timing, "open_chat", _ocr_trace_finish(ocr_trace_token))
+        timing["opened"] = bool(opened)
+        if reason:
+            timing["reason"] = reason
+        _LAST_OPEN_CHAT_TIMING = dict(timing)
+        return opened
+
+    main_list_started = _sidecar_timing_start(timing, "open_chat_main_list")
+    geometry_for_seed = get_window_geometry(hwnd)
+    seed = consume_target_ready_prevalidation_ocr_seed(
+        hwnd=hwnd,
+        target=target,
+        exact=exact,
+        geometry=geometry_for_seed,
+    )
+    if isinstance(seed, dict):
+        screenshot = seed["screenshot"]
+        ocr_items = list(seed.get("ocr_items") or [])
+        if detect_session_subview_back_target(ocr_items, screenshot.size):
+            timing["open_chat_main_list_prevalidation_ocr_seed_reused"] = False
+            timing["open_chat_main_list_prevalidation_ocr_seed_discarded"] = "session_subview"
+            screenshot, ocr_items = ensure_main_session_list(hwnd, artifact_dir=artifact_dir)
+        else:
+            timing["open_chat_main_list_prevalidation_ocr_seed_reused"] = True
+            timing["open_chat_main_list_prevalidation_ocr_seed_age_seconds"] = seed.get("age_seconds")
+            timing["open_chat_main_list_prevalidation_ocr_seed_count"] = len(ocr_items)
+    else:
+        screenshot, ocr_items = ensure_main_session_list(hwnd, artifact_dir=artifact_dir)
+        timing["open_chat_main_list_prevalidation_ocr_seed_reused"] = False
+    _sidecar_timing_finish(timing, "open_chat_main_list", main_list_started)
+    geometry_started = _sidecar_timing_start(timing, "open_chat_geometry")
+    geometry = geometry_for_seed if isinstance(geometry_for_seed, dict) else get_window_geometry(hwnd)
     session_click_x = session_click_x_for_geometry(geometry)
-    search_x, search_y = search_box_point_for_geometry(geometry)
-    surface = target_switch_surface_state(screenshot, ocr_items, geometry=geometry)
+    search_x, search_y = sidebar_search_input_focus_point_for_geometry(geometry)
+    _sidecar_timing_finish(timing, "open_chat_geometry", geometry_started)
+    surface_started = _sidecar_timing_start(timing, "open_chat_surface")
+    surface = target_switch_surface_state(screenshot, ocr_items, geometry=geometry, target=target)
+    _sidecar_timing_finish(timing, "open_chat_surface", surface_started)
     if not surface.get("ok"):
-        return False
+        return finish(False, str(surface.get("reason") or "surface_not_ok"))
     if not ocr_items:
         # OCR unavailable is not permission to probe the UI. Searching/clicking
         # blindly after an unreadable screenshot is a high-risk RPA pattern.
-        return False
+        return finish(False, "no_ocr_items")
     clean_session_key = str(session_key or "").strip()
-    if not clean_session_key and active_chat_matches(ocr_items, screenshot.size, target=target, exact=exact):
-        return True
+    active_match_started = _sidecar_timing_start(timing, "open_chat_active_match")
+    active_matches = active_chat_matches(ocr_items, screenshot.size, target=target, exact=exact)
+    _sidecar_timing_finish(timing, "open_chat_active_match", active_match_started)
+    timing["open_chat_initial_active_match"] = bool(active_matches)
+    if not clean_session_key and active_matches:
+        return finish(True, "active_target_match")
     if (
         clean_session_key
         and str(_LAST_RPA_ACTION_STATE.get("active_session_key") or "") == clean_session_key
-        and active_chat_matches(ocr_items, screenshot.size, target=target, exact=exact)
+        and active_matches
     ):
-        return True
+        return finish(True, "active_session_key_match")
+    parse_started = _sidecar_timing_start(timing, "open_chat_parse_sessions")
     sessions = parse_sessions_from_ocr(ocr_items, screenshot.size, screenshot=screenshot)
-    if clean_session_key and active_chat_matches(ocr_items, screenshot.size, target=target, exact=exact):
+    _sidecar_timing_finish(timing, "open_chat_parse_sessions", parse_started)
+    timing["open_chat_session_count"] = len(sessions)
+    if clean_session_key and active_matches:
         if visible_session_name_is_unambiguous(sessions, target, exact=exact):
             _LAST_RPA_ACTION_STATE["active_session_key"] = clean_session_key
             _LAST_RPA_ACTION_STATE["active_target"] = target
-            return True
-        return False
+            return finish(True, "active_visible_unambiguous")
+        return finish(False, "active_visible_ambiguous")
     if clean_session_key:
+        find_started = _sidecar_timing_start(timing, "open_chat_find_session_key")
         keyed = find_session_candidate_by_key(sessions, clean_session_key)
+        _sidecar_timing_finish(timing, "open_chat_find_session_key", find_started)
         if keyed is None:
-            return False
+            return finish(False, "session_key_candidate_not_found")
+        activation_started = _sidecar_timing_start(timing, "open_chat_activate_session")
         opened = activate_session_candidate(
             hwnd,
             keyed,
@@ -4348,14 +5386,17 @@ def open_chat(
             default_click_x=session_click_x,
             artifact_dir=artifact_dir,
         )
+        _sidecar_timing_finish(timing, "open_chat_activate_session", activation_started)
+        _sidecar_timing_merge_prefixed(timing, "open_chat", _LAST_SESSION_ACTIVATION_TIMING)
         if opened:
             _LAST_RPA_ACTION_STATE["active_session_key"] = clean_session_key
             _LAST_RPA_ACTION_STATE["active_target"] = target
-        return opened
+        return finish(opened, "session_key_candidate_activated" if opened else "session_key_candidate_not_confirmed")
     for item in sessions:
         if not session_name_matches(str(item.get("name") or ""), target, exact=exact):
             continue
-        return activate_session_candidate(
+        activation_started = _sidecar_timing_start(timing, "open_chat_activate_session")
+        opened = activate_session_candidate(
             hwnd,
             item,
             target=target,
@@ -4364,31 +5405,88 @@ def open_chat(
             default_click_x=session_click_x,
             artifact_dir=artifact_dir,
         )
+        _sidecar_timing_finish(timing, "open_chat_activate_session", activation_started)
+        _sidecar_timing_merge_prefixed(timing, "open_chat", _LAST_SESSION_ACTIVATION_TIMING)
+        return finish(opened, "name_candidate_activated" if opened else "name_candidate_not_confirmed")
 
     if not target_search_fallback_enabled():
-        return False
+        return finish(False, "visible_candidate_not_found")
 
     # Search is the highest-risk cross-chat path. Do it at most once per open,
     # then click a visible OCR result instead of blindly pressing Enter/Down.
-    clear_sidebar_search_box_without_select_all(hwnd, search_x, search_y, target_hint=target)
+    search_clear_started = _sidecar_timing_start(timing, "open_chat_search_clear")
+    clear_result = clear_sidebar_search_box_without_select_all(
+        hwnd,
+        search_x,
+        search_y,
+        target_hint=target,
+        geometry=geometry,
+        artifact_dir=artifact_dir,
+    )
+    _sidecar_timing_finish(timing, "open_chat_search_clear", search_clear_started)
+    timing["open_chat_search_clear_result"] = clear_result
+    if not clear_result.get("ok"):
+        return finish(False, str(clear_result.get("reason") or "search_clear_failed"))
+    search_input_started = _sidecar_timing_start(timing, "open_chat_search_input")
     input_result = type_sidebar_search_query(hwnd, target)
+    _sidecar_timing_finish(timing, "open_chat_search_input", search_input_started)
+    timing["open_chat_search_input_result"] = input_result
     if not input_result.get("ok"):
-        return False
-    time.sleep(random.uniform(0.45, 0.75))
+        dismiss_started = _sidecar_timing_start(timing, "open_chat_search_input_failed_dismiss")
+        dismiss_result = dismiss_sidebar_search_state(
+            hwnd,
+            target_hint=target,
+            geometry=geometry,
+            artifact_dir=artifact_dir,
+        )
+        _sidecar_timing_finish(timing, "open_chat_search_input_failed_dismiss", dismiss_started)
+        timing["open_chat_search_input_failed_dismiss_result"] = dismiss_result
+        return finish(False, str(input_result.get("reason") or "search_input_failed"))
+    search_wait_started = _sidecar_timing_start(timing, "open_chat_search_wait")
+    time.sleep(random.uniform(1.2, 2.4))
+    _sidecar_timing_finish(timing, "open_chat_search_wait", search_wait_started)
+    search_capture_started = _sidecar_timing_start(timing, "open_chat_search_capture_ocr")
     search_shot, search_path = capture_wechat(hwnd, artifact_dir=artifact_dir, label="open_chat_search_results")
-    search_items = run_ocr(search_shot)
-    surface = target_switch_surface_state(search_shot, search_items, geometry=geometry, screenshot_path=search_path)
+    search_items = run_ocr_traced(search_shot, "open_chat_search_results", source="open_chat")
+    _sidecar_timing_finish(timing, "open_chat_search_capture_ocr", search_capture_started)
+    search_surface_started = _sidecar_timing_start(timing, "open_chat_search_surface")
+    surface = target_switch_surface_state(
+        search_shot,
+        search_items,
+        geometry=geometry,
+        screenshot_path=search_path,
+        target=target,
+    )
+    _sidecar_timing_finish(timing, "open_chat_search_surface", search_surface_started)
     if not surface.get("ok"):
-        return False
+        return finish(False, str(surface.get("reason") or "search_surface_not_ok"))
     if not search_items:
-        return False
-    if active_chat_matches(search_items, search_shot.size, target=target, exact=exact):
-        return True
+        return finish(False, "search_no_ocr_items")
+    search_active_started = _sidecar_timing_start(timing, "open_chat_search_active_match")
+    search_active_matches = active_chat_matches(search_items, search_shot.size, target=target, exact=exact)
+    _sidecar_timing_finish(timing, "open_chat_search_active_match", search_active_started)
+    if search_active_matches:
+        dismiss_started = _sidecar_timing_start(timing, "open_chat_search_active_match_dismiss")
+        dismiss_result = dismiss_sidebar_search_state(
+            hwnd,
+            target_hint=target,
+            geometry=geometry,
+            artifact_dir=artifact_dir,
+        )
+        _sidecar_timing_finish(timing, "open_chat_search_active_match_dismiss", dismiss_started)
+        timing["open_chat_search_active_match_dismiss_result"] = dismiss_result
+        if not dismiss_result.get("ok"):
+            return finish(False, str(dismiss_result.get("reason") or "search_dismiss_failed_after_active_match"))
+        return finish(True, "search_active_target_match")
+    search_parse_started = _sidecar_timing_start(timing, "open_chat_search_parse_sessions")
     search_sessions = parse_sessions_from_ocr(search_items, search_shot.size, screenshot=search_shot)
+    _sidecar_timing_finish(timing, "open_chat_search_parse_sessions", search_parse_started)
+    timing["open_chat_search_session_count"] = len(search_sessions)
     for item in search_sessions:
         if not session_name_matches(str(item.get("name") or ""), target, exact=exact):
             continue
-        return activate_session_candidate(
+        activation_started = _sidecar_timing_start(timing, "open_chat_search_activate_session")
+        opened = activate_session_candidate(
             hwnd,
             item,
             target=target,
@@ -4397,29 +5495,64 @@ def open_chat(
             default_click_x=session_click_x,
             artifact_dir=artifact_dir,
         )
+        _sidecar_timing_finish(timing, "open_chat_search_activate_session", activation_started)
+        _sidecar_timing_merge_prefixed(timing, "open_chat_search", _LAST_SESSION_ACTIVATION_TIMING)
+        if not opened:
+            dismiss_started = _sidecar_timing_start(timing, "open_chat_search_unconfirmed_dismiss")
+            dismiss_result = dismiss_sidebar_search_state(
+                hwnd,
+                target_hint=target,
+                geometry=geometry,
+                artifact_dir=artifact_dir,
+            )
+            _sidecar_timing_finish(timing, "open_chat_search_unconfirmed_dismiss", dismiss_started)
+            timing["open_chat_search_unconfirmed_dismiss_result"] = dismiss_result
+        return finish(opened, "search_candidate_activated" if opened else "search_candidate_not_confirmed")
 
     if target_search_enter_fallback_enabled():
+        search_enter_started = _sidecar_timing_start(timing, "open_chat_search_enter")
         key_press(win32con.VK_RETURN)
         time.sleep(random.uniform(0.45, 0.7))
         validation = validate_active_send_target(hwnd, target, exact=exact, artifact_dir=artifact_dir)
+        _sidecar_timing_finish(timing, "open_chat_search_enter", search_enter_started)
         if active_send_guard_is_strong(validation):
-            return True
+            return finish(True, "search_enter_confirmed")
         if target_switch_validation_is_hard_stop(validation):
-            return False
+            return finish(False, "search_enter_hard_stop")
+
+    if not target_search_retry_after_search_enabled():
+        dismiss_started = _sidecar_timing_start(timing, "open_chat_search_dismiss")
+        dismiss_result = dismiss_sidebar_search_state(
+            hwnd,
+            target_hint=target,
+            geometry=geometry,
+            artifact_dir=artifact_dir,
+        )
+        _sidecar_timing_finish(timing, "open_chat_search_dismiss", dismiss_started)
+        timing["open_chat_search_dismiss_result"] = dismiss_result
+        return finish(False, "target_not_found_after_single_search_attempt")
 
     # Re-scan and try a direct sidebar click once more after search.
+    retry_capture_started = _sidecar_timing_start(timing, "open_chat_retry_capture_ocr")
     retry_shot, _retry_path = capture_wechat(hwnd, artifact_dir=artifact_dir, label="open_chat_retry")
-    retry_items = run_ocr(retry_shot)
-    surface = target_switch_surface_state(retry_shot, retry_items, geometry=geometry)
+    retry_items = run_ocr_traced(retry_shot, "open_chat_retry", source="open_chat")
+    _sidecar_timing_finish(timing, "open_chat_retry_capture_ocr", retry_capture_started)
+    retry_surface_started = _sidecar_timing_start(timing, "open_chat_retry_surface")
+    surface = target_switch_surface_state(retry_shot, retry_items, geometry=geometry, target=target)
+    _sidecar_timing_finish(timing, "open_chat_retry_surface", retry_surface_started)
     if not surface.get("ok"):
-        return False
+        return finish(False, str(surface.get("reason") or "retry_surface_not_ok"))
     if not retry_items:
-        return False
+        return finish(False, "retry_no_ocr_items")
+    retry_parse_started = _sidecar_timing_start(timing, "open_chat_retry_parse_sessions")
     retry_sessions = parse_sessions_from_ocr(retry_items, retry_shot.size, screenshot=retry_shot)
+    _sidecar_timing_finish(timing, "open_chat_retry_parse_sessions", retry_parse_started)
+    timing["open_chat_retry_session_count"] = len(retry_sessions)
     for item in retry_sessions:
         if not session_name_matches(str(item.get("name") or ""), target, exact=exact):
             continue
-        return activate_session_candidate(
+        activation_started = _sidecar_timing_start(timing, "open_chat_retry_activate_session")
+        opened = activate_session_candidate(
             hwnd,
             item,
             target=target,
@@ -4428,7 +5561,29 @@ def open_chat(
             default_click_x=session_click_x,
             artifact_dir=artifact_dir,
         )
-    return False
+        _sidecar_timing_finish(timing, "open_chat_retry_activate_session", activation_started)
+        _sidecar_timing_merge_prefixed(timing, "open_chat_retry", _LAST_SESSION_ACTIVATION_TIMING)
+        if not opened:
+            dismiss_started = _sidecar_timing_start(timing, "open_chat_retry_unconfirmed_dismiss")
+            dismiss_result = dismiss_sidebar_search_state(
+                hwnd,
+                target_hint=target,
+                geometry=geometry,
+                artifact_dir=artifact_dir,
+            )
+            _sidecar_timing_finish(timing, "open_chat_retry_unconfirmed_dismiss", dismiss_started)
+            timing["open_chat_retry_unconfirmed_dismiss_result"] = dismiss_result
+        return finish(opened, "retry_candidate_activated" if opened else "retry_candidate_not_confirmed")
+    dismiss_started = _sidecar_timing_start(timing, "open_chat_retry_search_dismiss")
+    dismiss_result = dismiss_sidebar_search_state(
+        hwnd,
+        target_hint=target,
+        geometry=geometry,
+        artifact_dir=artifact_dir,
+    )
+    _sidecar_timing_finish(timing, "open_chat_retry_search_dismiss", dismiss_started)
+    timing["open_chat_retry_search_dismiss_result"] = dismiss_result
+    return finish(False, "target_not_found_after_retry")
 
 
 def ensure_target_ready_for_send(
@@ -4460,6 +5615,7 @@ def ensure_target_ready_for_send(
         pre_validation_started = _sidecar_timing_start(timing, "target_ready_pre_validation")
         pre_validation = validate_active_send_target(hwnd, target, exact=exact, artifact_dir=artifact_dir)
         _sidecar_timing_finish(timing, "target_ready_pre_validation", pre_validation_started)
+        _sidecar_timing_merge_validation(timing, "target_ready_pre_validation", pre_validation)
         if pre_validation.get("ok") and active_send_guard_is_strong(pre_validation):
             opened_by_session_confirm = False
             if clean_session_key:
@@ -4469,6 +5625,7 @@ def ensure_target_ready_for_send(
                     session_open_started = _sidecar_timing_start(timing, "target_ready_session_open_chat")
                     opened = open_chat(hwnd, target, exact=exact, artifact_dir=artifact_dir, session_key=clean_session_key)
                     _sidecar_timing_finish(timing, "target_ready_session_open_chat", session_open_started)
+                    _sidecar_timing_merge_prefixed(timing, "target_ready_session", _LAST_OPEN_CHAT_TIMING)
                     if not opened:
                         return finish({
                             "ok": False,
@@ -4478,12 +5635,26 @@ def ensure_target_ready_for_send(
                             "reason": "session_key_not_confirmed_by_active_cache",
                         })
                     opened_by_session_confirm = bool(opened)
-                    session_pause_started = _sidecar_timing_start(timing, "target_ready_session_confirm_pause")
-                    humanized_action_sleep(180, 320)
-                    _sidecar_timing_finish(timing, "target_ready_session_confirm_pause", session_pause_started)
                     session_validation_started = _sidecar_timing_start(timing, "target_ready_session_post_validation")
-                    validation = validate_active_send_target(hwnd, target, exact=exact, artifact_dir=artifact_dir)
+                    cached_validation = consume_recent_target_switch_validation(
+                        hwnd=hwnd,
+                        target=target,
+                        exact=exact,
+                        session_key=clean_session_key,
+                    )
+                    if isinstance(cached_validation, dict):
+                        validation = cached_validation
+                        timing["target_ready_session_confirm_pause_skipped"] = True
+                        timing["target_ready_session_post_validation_reused"] = True
+                    else:
+                        session_pause_started = _sidecar_timing_start(timing, "target_ready_session_confirm_pause")
+                        humanized_action_sleep(180, 320)
+                        _sidecar_timing_finish(timing, "target_ready_session_confirm_pause", session_pause_started)
+                        validation = validate_active_send_target(hwnd, target, exact=exact, artifact_dir=artifact_dir)
+                        timing["target_ready_session_confirm_pause_skipped"] = False
+                        timing["target_ready_session_post_validation_reused"] = False
                     _sidecar_timing_finish(timing, "target_ready_session_post_validation", session_validation_started)
+                    _sidecar_timing_merge_validation(timing, "target_ready_session_post_validation", validation)
                     if not validation.get("ok") or not active_send_guard_is_strong(validation):
                         return finish({"ok": False, "attempts": attempt, "validation": validation, "opened": True})
                     pre_validation = validation
@@ -4497,12 +5668,31 @@ def ensure_target_ready_for_send(
         open_chat_started = _sidecar_timing_start(timing, "target_ready_open_chat")
         opened = open_chat(hwnd, target, exact=exact, artifact_dir=artifact_dir, session_key=clean_session_key)
         _sidecar_timing_finish(timing, "target_ready_open_chat", open_chat_started)
-        post_open_pause_started = _sidecar_timing_start(timing, "target_ready_post_open_pause")
-        humanized_action_sleep(280 + attempt * 90, 440 + attempt * 150)
-        _sidecar_timing_finish(timing, "target_ready_post_open_pause", post_open_pause_started)
+        _sidecar_timing_merge_prefixed(timing, "target_ready", _LAST_OPEN_CHAT_TIMING)
         post_open_validation_started = _sidecar_timing_start(timing, "target_ready_post_open_validation")
-        validation = validate_active_send_target(hwnd, target, exact=exact, artifact_dir=artifact_dir)
+        cached_validation = (
+            consume_recent_target_switch_validation(
+                hwnd=hwnd,
+                target=target,
+                exact=exact,
+                session_key=clean_session_key,
+            )
+            if opened
+            else None
+        )
+        if isinstance(cached_validation, dict):
+            validation = cached_validation
+            timing["target_ready_post_open_pause_skipped"] = True
+            timing["target_ready_post_open_validation_reused"] = True
+        else:
+            post_open_pause_started = _sidecar_timing_start(timing, "target_ready_post_open_pause")
+            humanized_action_sleep(280 + attempt * 90, 440 + attempt * 150)
+            _sidecar_timing_finish(timing, "target_ready_post_open_pause", post_open_pause_started)
+            validation = validate_active_send_target(hwnd, target, exact=exact, artifact_dir=artifact_dir)
+            timing["target_ready_post_open_pause_skipped"] = False
+            timing["target_ready_post_open_validation_reused"] = False
         _sidecar_timing_finish(timing, "target_ready_post_open_validation", post_open_validation_started)
+        _sidecar_timing_merge_validation(timing, "target_ready_post_open_validation", validation)
         if validation.get("ok") and active_send_guard_is_strong(validation):
             return finish({"ok": True, "attempts": attempt, "validation": validation, "opened": bool(opened)})
         last_validation = validation
@@ -4538,16 +5728,46 @@ def validate_active_send_target(
     exact: bool,
     artifact_dir: str | None = None,
 ) -> dict[str, Any]:
+    timing: dict[str, Any] = {}
+    ocr_trace_token = _ocr_trace_start()
+    validation_started = _sidecar_timing_start(timing, "validate_active_send_target")
+
+    def finish(payload: dict[str, Any]) -> dict[str, Any]:
+        _sidecar_timing_finish(timing, "validate_active_send_target", validation_started)
+        _sidecar_timing_merge_ocr_trace(timing, "validate_active_send_target", _ocr_trace_finish(ocr_trace_token))
+        payload["timing"] = dict(timing)
+        return payload
+
+    geometry_started = _sidecar_timing_start(timing, "validate_active_send_target_geometry")
     geometry = get_window_geometry(hwnd)
     geometry_check = validate_send_geometry(geometry)
+    _sidecar_timing_finish(timing, "validate_active_send_target_geometry", geometry_started)
+    timing["validate_active_send_target_geometry_ok"] = bool(geometry_check.get("ok"))
     if not geometry_check.get("ok"):
-        return {**geometry_check, "online": True, "geometry": geometry}
+        return finish({**geometry_check, "online": True, "geometry": geometry})
+    capture_started = _sidecar_timing_start(timing, "validate_active_send_target_capture")
     screenshot, path = capture_wechat(hwnd, artifact_dir=artifact_dir, label="send_guard")
-    ocr_items = run_ocr(screenshot)
+    _sidecar_timing_finish(timing, "validate_active_send_target_capture", capture_started)
+    timing["validate_active_send_target_screenshot_width"] = int(getattr(screenshot, "size", (0, 0))[0] or 0)
+    timing["validate_active_send_target_screenshot_height"] = int(getattr(screenshot, "size", (0, 0))[1] or 0)
+    ocr_started = _sidecar_timing_start(timing, "validate_active_send_target_ocr")
+    ocr_items, ocr_source, roi_blank_render = run_ocr_for_active_send_target(
+        screenshot,
+        target=target,
+        exact=exact,
+        geometry=geometry,
+        timing=timing,
+    )
+    _sidecar_timing_finish(timing, "validate_active_send_target_ocr", ocr_started)
+    timing["validate_active_send_target_ocr_count"] = len(ocr_items)
+    timing["validate_active_send_target_ocr_source"] = ocr_source
     if not ocr_items:
-        blank_render = detect_blank_render(screenshot, ocr_items, geometry=geometry)
+        blank_started = _sidecar_timing_start(timing, "validate_active_send_target_blank_render")
+        blank_render = roi_blank_render or detect_blank_render(screenshot, ocr_items, geometry=geometry)
+        _sidecar_timing_finish(timing, "validate_active_send_target_blank_render", blank_started)
+        timing["validate_active_send_target_blank_render_detected"] = bool(blank_render.get("detected"))
         if blank_render.get("detected"):
-            return {
+            return finish({
                 "ok": False,
                 "online": False,
                 "reason": "blank_render",
@@ -4556,9 +5776,9 @@ def validate_active_send_target(
                 "screenshot_path": path,
                 "render_probe": blank_render,
                 "error": "WeChat render is blank; block blind send and recover the window before automation.",
-            }
+            })
         if allow_blind_target_confirmation(target):
-            return {
+            return finish({
                 "ok": True,
                 "online": True,
                 "reason": "target_confirm_skipped_no_ocr",
@@ -4568,8 +5788,8 @@ def validate_active_send_target(
                 "confirmation_confidence": "none",
                 "geometry": geometry,
                 "screenshot_path": path,
-            }
-        return {
+            })
+        return finish({
             "ok": False,
             "online": True,
             "reason": "ocr_capture_unavailable",
@@ -4579,9 +5799,13 @@ def validate_active_send_target(
             "geometry": geometry,
             "screenshot_path": path,
             "error": "No OCR text was captured from WeChat; target confirmation is unavailable.",
-        }
-    if quick_login_like(ocr_items, geometry=geometry):
-        return {
+        })
+    quick_login_started = _sidecar_timing_start(timing, "validate_active_send_target_quick_login")
+    quick_login_detected = quick_login_like(ocr_items, geometry=geometry)
+    _sidecar_timing_finish(timing, "validate_active_send_target_quick_login", quick_login_started)
+    timing["validate_active_send_target_quick_login_detected"] = bool(quick_login_detected)
+    if quick_login_detected:
+        return finish({
             "ok": False,
             "online": False,
             "reason": "login_or_qr",
@@ -4589,10 +5813,13 @@ def validate_active_send_target(
             "geometry": geometry,
             "screenshot_path": path,
             "error": "WeChat quick-login view detected; enter WeChat before sending.",
-        }
+        })
+    auxiliary_started = _sidecar_timing_start(timing, "validate_active_send_target_auxiliary_shell")
     auxiliary_shell = auxiliary_wechat_shell_like(ocr_items, geometry=geometry)
+    _sidecar_timing_finish(timing, "validate_active_send_target_auxiliary_shell", auxiliary_started)
+    timing["validate_active_send_target_auxiliary_shell_detected"] = bool(auxiliary_shell.get("detected"))
     if auxiliary_shell.get("detected"):
-        return {
+        return finish({
             "ok": False,
             "online": False,
             "reason": "auxiliary_shell_window",
@@ -4601,18 +5828,58 @@ def validate_active_send_target(
             "screenshot_path": path,
             "shell_probe": auxiliary_shell,
             "error": "Selected WeChat window looks like an auxiliary shell, not the requested chat.",
-        }
+        })
+    blocking_started = _sidecar_timing_start(timing, "validate_active_send_target_blocking_screen")
     blocking_reason = blocking_screen_reason(ocr_items)
+    _sidecar_timing_finish(timing, "validate_active_send_target_blocking_screen", blocking_started)
+    timing["validate_active_send_target_blocking_detected"] = bool(blocking_reason)
     if blocking_reason:
-        return {
+        return finish({
             "ok": False,
             "online": False if blocking_reason in {"login_or_qr"} else True,
             "reason": blocking_reason,
             "geometry": geometry,
             "screenshot_path": path,
             "error": f"WeChat send guard found blocking screen: {blocking_reason}",
-        }
-    if not active_chat_matches(ocr_items, screenshot.size, target=target, exact=exact):
+        })
+    service_container_started = _sidecar_timing_start(timing, "validate_active_send_target_service_container")
+    service_container = active_service_container_wrong_target(
+        ocr_items,
+        getattr(screenshot, "size", (0, 0)),
+        target=target,
+    )
+    _sidecar_timing_finish(timing, "validate_active_send_target_service_container", service_container_started)
+    timing["validate_active_send_target_service_container_detected"] = bool(service_container.get("detected"))
+    if service_container.get("detected"):
+        return finish({
+            "ok": False,
+            "online": True,
+            "reason": "service_container_wrong_target",
+            "state": "wrong_target_service_container_detected",
+            "requested_target": target,
+            "confirmed_target": str((service_container.get("matches") or [{}])[0].get("container") or ""),
+            "confirmation_confidence": "failed_service_container",
+            "geometry": geometry,
+            "screenshot_path": path,
+            "service_container_probe": service_container,
+            "error": "The active WeChat page is a service-account container/page, not the requested chat.",
+        })
+    if ocr_source in {"full", "full_fallback"}:
+        remember_target_ready_prevalidation_ocr_seed(
+            hwnd=hwnd,
+            target=target,
+            exact=exact,
+            screenshot=screenshot,
+            ocr_items=ocr_items,
+            geometry=geometry,
+            screenshot_path=path,
+        )
+    active_match_started = _sidecar_timing_start(timing, "validate_active_send_target_active_match")
+    active_match = active_chat_matches(ocr_items, screenshot.size, target=target, exact=exact)
+    _sidecar_timing_finish(timing, "validate_active_send_target_active_match", active_match_started)
+    timing["validate_active_send_target_active_match"] = bool(active_match)
+    if not active_match:
+        blind_guard_started = _sidecar_timing_start(timing, "validate_active_send_target_blind_guard")
         blind_guard = blind_target_confirmation_guard(
             target=target,
             exact=exact,
@@ -4621,9 +5888,11 @@ def validate_active_send_target(
             geometry=geometry,
             screenshot_path=path,
         )
+        _sidecar_timing_finish(timing, "validate_active_send_target_blind_guard", blind_guard_started)
+        timing["validate_active_send_target_blind_guard_ok"] = bool(blind_guard.get("ok"))
         if blind_guard.get("ok"):
-            return blind_guard
-        return {
+            return finish(blind_guard)
+        return finish({
             "ok": False,
             "online": True,
             "reason": "target_title_not_confirmed",
@@ -4633,8 +5902,17 @@ def validate_active_send_target(
             "geometry": geometry,
             "screenshot_path": path,
             "error": "The active chat title did not match the requested target.",
-        }
-    return {
+        })
+    remember_input_region_precheck_ocr_seed(
+        hwnd=hwnd,
+        target=target,
+        exact=exact,
+        screenshot=screenshot,
+        ocr_items=ocr_items,
+        geometry=geometry,
+        screenshot_path=path,
+    )
+    return finish({
         "ok": True,
         "online": True,
         "reason": "target_confirmed",
@@ -4643,7 +5921,7 @@ def validate_active_send_target(
         "confirmation_confidence": "active_title_strict",
         "geometry": geometry,
         "screenshot_path": path,
-    }
+    })
 
 
 def validate_post_send_target(
@@ -6668,6 +7946,27 @@ def active_chat_title_bottom_y(height: int) -> int:
 
 def search_box_point_for_geometry(geometry: dict[str, Any]) -> tuple[int, int]:
     return win32_ocr_geometry.search_box_point_for_geometry(geometry)
+
+
+def sidebar_search_input_focus_point_for_geometry(geometry: dict[str, Any]) -> tuple[int, int]:
+    """Return a point inside the sidebar search text-input area.
+
+    The historical search-box point is also used as a geometry reference for
+    the nearby plus-entry locator. Keep that contract stable, and use this
+    separate point when the intent is to focus the search input itself.
+    """
+    anchor_x, anchor_y = search_box_point_for_geometry(geometry)
+    width = int(geometry.get("width") or 0)
+    split_x = session_split_x(width)
+    minimum = max(96, int(anchor_x) + 42)
+    maximum = max(minimum, min(split_x - 96, int(anchor_x) + 110))
+    focus_x = bounded_int(
+        int(split_x * 0.52),
+        default=int(anchor_x) + 68,
+        minimum=minimum,
+        maximum=maximum,
+    )
+    return focus_x, int(anchor_y)
 
 
 def session_click_x_for_geometry(geometry: dict[str, Any]) -> int:

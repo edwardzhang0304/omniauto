@@ -24,6 +24,7 @@ Text extracted from non-text visual carriers is capture/audit metadata. It is no
 3. Raw-message learning marks visual/media OCR as non-learnable.
 4. Conversation history assembler excludes visual/media OCR records so old image text cannot be sent back into Brain as dialogue.
 5. Brain quality gate rejects pure social turns that proactively revive stale unsupported business/entity context. Short greetings such as "你好" or "在吗" should answer the current turn briefly unless the customer explicitly asks to continue prior business.
+6. Brain quality gate also rejects pure social turns that proactively name supported but irrelevant prior business context, such as "you previously asked about X", unless the current customer turn explicitly says to continue the earlier topic. Authority is not the same as current-turn relevance.
 
 ## Non-Goals
 
@@ -39,3 +40,4 @@ Text extracted from non-text visual carriers is capture/audit metadata. It is no
 - Raw learning excludes visual/media OCR.
 - Conversation history skips visual/media OCR but keeps normal chat text.
 - Brain quality verification rejects a pure greeting reply that reopens an old unsupported business/entity topic.
+- Brain quality verification rejects a pure greeting reply that reopens an old supported prior business topic, while still allowing explicit continuation such as "继续说刚才那台".

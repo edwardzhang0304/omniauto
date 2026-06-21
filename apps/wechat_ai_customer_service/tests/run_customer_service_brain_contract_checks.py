@@ -84,6 +84,7 @@ def main() -> int:
         check_nonsemantic_runtime_markers_do_not_break_social_classification(),
         check_quality_gate_rejects_social_closing_stale_business_context(),
         check_quality_gate_rejects_social_greeting_reviving_unbacked_visual_entity(),
+        check_quality_gate_rejects_social_greeting_reviving_supported_prior_context(),
         check_quality_gate_rejects_high_risk_commitment_echo(),
         check_quality_gate_rejects_overconfident_sales_pressure(),
         check_normalizes_brain_schema_aliases_without_authorizing_style_facts(),
@@ -100,9 +101,11 @@ def main() -> int:
         check_conversation_strategy_state_is_session_isolated(),
         check_brain_input_includes_non_authoritative_conversation_strategy_hint(),
         check_brain_input_includes_delay_followup_interaction_hint(),
+        check_delay_followup_fast_profile_ignores_current_summon_only_context(),
         check_brain_input_marks_social_turn_context_priority(),
         check_brain_input_treats_ocr_speaker_prefix_as_metadata(),
         check_quality_gate_rejects_fresh_greeting_for_delay_followup(),
+        check_quality_gate_rejects_self_history_continuation_for_current_summon_only(),
         check_quality_gate_rejects_over_eager_business_redirect_after_social_fatigue(),
         check_quality_gate_warns_thin_social_or_common_sense_reply_without_blocking(),
         check_quality_gate_allows_business_appointment_after_social_fatigue(),
@@ -127,6 +130,9 @@ def main() -> int:
         check_rejects_formal_policy_fact_without_source_id(),
         check_quality_gate_rejects_generic_stall_for_price(),
         check_quality_gate_accepts_substantive_boundary_refusal(),
+        check_quality_gate_rejects_quantity_quote_ignoring_applicable_price_tier(),
+        check_quality_gate_rejects_shipping_policy_contradiction_for_destination(),
+        check_quality_gate_accepts_quantity_quote_with_tier_and_shipping_policy(),
         check_quality_gate_rejects_social_info_collection(),
         check_quality_gate_requires_clear_recommendation(),
         check_quality_gate_rejects_broad_need_question_for_direct_decision_request(),
@@ -207,6 +213,7 @@ def main() -> int:
         check_safe_uncertain_reply_budget_restatement_needs_no_product_fact(),
         check_uncertainty_boundary_condition_claim_is_not_product_fact(),
         check_brain_canonicalizes_context_product_price_to_product_master(),
+        check_brain_canonicalizes_context_product_tier_price_to_product_master(),
         check_brain_rehydrates_context_product_fact_to_product_master(),
         check_brain_canonicalizes_year_model_price_text_to_product_master(),
         check_guard_rejects_unsupported_price_without_product_master(),
@@ -612,6 +619,47 @@ def check_quality_gate_rejects_social_greeting_reviving_unbacked_visual_entity()
             "explicit_continue_quality": explicit_continue_quality,
             "normal_quality": normal_quality,
         },
+    )
+
+
+def check_quality_gate_rejects_social_greeting_reviving_supported_prior_context() -> CaseResult:
+    pack = fake_evidence_pack(include_product=True)
+    stale_plan = normalize_brain_plan(
+        {
+            "can_answer": True,
+            "answer_mode": "soft_social_reply",
+            "evidence_used": {"product_ids": ["chejin_qinplus_2022_dmi55"]},
+            "facts_claimed": [],
+            "reply_segments": ["在的，抱歉让您久等了。您之前问过秦PLUS，现在还需要帮您确认哪块？"],
+            "recommended_action": "send_reply",
+            "confidence": 0.88,
+        }
+    )
+    stale_quality = verify_brain_reply_quality(
+        stale_plan,
+        current_message="你好，在吗？\n[live-regression:test:1:1]",
+        evidence_pack=pack,
+        settings={},
+    )
+    assert_true(
+        "social_turn_revived_supported_prior_business_context" in stale_quality.get("errors", []),
+        f"pure greeting should not revive supported prior business context: {stale_quality}",
+    )
+
+    continue_quality = verify_brain_reply_quality(
+        stale_plan,
+        current_message="那继续说刚才秦PLUS",
+        evidence_pack=pack,
+        settings={},
+    )
+    assert_true(
+        "social_turn_revived_supported_prior_business_context" not in continue_quality.get("errors", []),
+        f"explicit continuation should still allow prior context: {continue_quality}",
+    )
+    return CaseResult(
+        "quality_gate_rejects_social_greeting_reviving_supported_prior_context",
+        True,
+        {"stale_quality": stale_quality, "continue_quality": continue_quality},
     )
 
 
@@ -1298,6 +1346,37 @@ def check_brain_input_includes_delay_followup_interaction_hint() -> CaseResult:
     return CaseResult("brain_input_includes_delay_followup_interaction_hint", True, {"hint": prompt_hint})
 
 
+def check_delay_followup_fast_profile_ignores_current_summon_only_context() -> CaseResult:
+    state = {
+        "conversation_interaction_state": {
+            "schema_version": 1,
+            "customer_chase_up_detected": True,
+            "unanswered_exists": True,
+            "delay_context": "unknown_elapsed",
+            "suggested_reply_posture": "acknowledge_delay_then_continue",
+            "last_unanswered_customer_text": "在吗",
+            "last_reply_text_sample": "在的在的，让您久等啦～配置我这就发您",
+            "policy_note": "客户本轮更像是在催促上一轮等待/未闭环内容，不是新开场。",
+        },
+    }
+    fast_decision = brain_module.low_authority_fast_profile_decision(
+        settings=brain_module.effective_brain_settings(base_config(base_plan(), include_product=False)),
+        combined="在吗",
+        batch=[{"id": "msg-current-summon", "sender": "customer", "content": "在吗"}],
+        target_state=state,
+    )
+    assert_true(fast_decision.get("enabled"), f"current short summon should still use a fast Brain profile: {fast_decision}")
+    assert_true(
+        fast_decision.get("reason") == "social_short_turn",
+        f"current summon alone must not be treated as old unanswered context: {fast_decision}",
+    )
+    assert_true(
+        fast_decision.get("requires_interaction_context") is not True,
+        f"current summon only should not force delay interaction context: {fast_decision}",
+    )
+    return CaseResult("delay_followup_fast_profile_ignores_current_summon_only_context", True, {"decision": fast_decision})
+
+
 def check_brain_input_marks_social_turn_context_priority() -> CaseResult:
     brain_input = brain_module.build_brain_input(
         settings=brain_module.effective_brain_settings(base_config(base_plan(), include_product=False)),
@@ -1398,6 +1477,68 @@ def check_quality_gate_rejects_fresh_greeting_for_delay_followup() -> CaseResult
     )
     assert_true(good_quality.get("ok"), f"context-aware delay follow-up should pass: {good_quality}")
     return CaseResult("quality_gate_rejects_fresh_greeting_for_delay_followup", True, {"errors": bad_quality.get("errors")})
+
+
+def check_quality_gate_rejects_self_history_continuation_for_current_summon_only() -> CaseResult:
+    pack = fake_evidence_pack(include_product=False)
+    pack["conversation_interaction_state"] = {
+        "authority": "non_authoritative_interaction_hint",
+        "customer_chase_up_detected": True,
+        "unanswered_exists": True,
+        "suggested_reply_posture": "acknowledge_delay_then_continue",
+        "last_unanswered_customer_text": "在吗",
+        "last_reply_text_sample": "在的在的，让您久等啦～配置我这就发您",
+    }
+    bad_plan = normalize_brain_plan(
+        {
+            **base_plan(),
+            "answer_mode": "soft_social_reply",
+            "evidence_used": {"common_sense_topics": ["small_talk_customer_care"]},
+            "facts_claimed": [],
+            "reply_segments": ["在的在的，不好意思让您久等啦～刚在核对配置资料，这就发您，您先看。"],
+            "recommended_action": "send_reply",
+            "risk": {"risk_level": "low", "risk_tags": ["small_talk"], "needs_handoff": False},
+        }
+    )
+    bad_quality = verify_brain_reply_quality(
+        bad_plan,
+        current_message="在吗",
+        evidence_pack=pack,
+        settings={},
+    )
+    assert_true(not bad_quality.get("ok"), f"self-history continuation should be repaired: {bad_quality}")
+    assert_true(
+        "social_turn_continued_self_history_without_open_customer_context" in (bad_quality.get("errors") or []),
+        f"expected self-history continuation error: {bad_quality}",
+    )
+
+    good_plan = copy.deepcopy(bad_plan)
+    good_plan["reply_segments"] = ["在的在的，不好意思让您久等啦～有什么我现在帮您看。"]
+    good_quality = verify_brain_reply_quality(
+        good_plan,
+        current_message="在吗",
+        evidence_pack=pack,
+        settings={},
+    )
+    assert_true(good_quality.get("ok"), f"plain social reply should pass: {good_quality}")
+
+    real_open_pack = copy.deepcopy(pack)
+    real_open_pack["conversation_interaction_state"]["last_unanswered_customer_text"] = "十万左右适合女性开的电车或混动"
+    allowed_quality = verify_brain_reply_quality(
+        bad_plan,
+        current_message="在吗",
+        evidence_pack=real_open_pack,
+        settings={},
+    )
+    assert_true(
+        "social_turn_continued_self_history_without_open_customer_context" not in (allowed_quality.get("errors") or []),
+        f"real unanswered customer context should not trigger self-history-only error: {allowed_quality}",
+    )
+    return CaseResult(
+        "quality_gate_rejects_self_history_continuation_for_current_summon_only",
+        True,
+        {"errors": bad_quality.get("errors")},
+    )
 
 
 def check_quality_gate_rejects_over_eager_business_redirect_after_social_fatigue() -> CaseResult:
@@ -2464,6 +2605,94 @@ def check_quality_gate_accepts_substantive_boundary_refusal() -> CaseResult:
         True,
         {"safe": quality, "vague": vague_quality},
     )
+
+
+def commercial_fridge_evidence_pack() -> dict[str, Any]:
+    product = {
+        "id": "commercial_fridge_bx_200",
+        "name": "商用冰箱 BX-200",
+        "aliases": ["商用冰箱", "BX-200"],
+        "price": 1000,
+        "unit": "台",
+        "stock": 37,
+        "price_tiers": [
+            {"min_quantity": 5, "unit_price": 950},
+            {"min_quantity": 10, "unit_price": 920},
+        ],
+        "shipping_policy": "现货，付款后48小时内发出；江浙沪包邮，其他地区按物流实报实销。",
+        "authority_level": "product_master",
+    }
+    pack = fake_evidence_pack(include_product=False)
+    pack["knowledge"]["evidence"]["products"] = [product]
+    pack["knowledge"]["evidence"]["catalog_candidates"] = [product]
+    pack["knowledge"]["product_master"]["items"] = [product]
+    pack["audit_summary"]["evidence_ids"] = ["product:commercial_fridge_bx_200"]
+    return pack
+
+
+def quantity_quote_plan(reply: str) -> dict[str, Any]:
+    plan = copy.deepcopy(base_plan())
+    plan.update(
+        {
+            "answer_mode": "quote_product_fact",
+            "understanding": {
+                "user_intent": "询问商品批量报价和配送",
+                "normalized_entities": [{"raw": "商用冰箱", "normalized": "商用冰箱 BX-200", "entity_type": "product"}],
+            },
+            "evidence_used": {"product_ids": ["commercial_fridge_bx_200"]},
+            "facts_claimed": [
+                {
+                    "fact_type": "price",
+                    "value": reply,
+                    "source_level": "product_master",
+                    "source_id": "commercial_fridge_bx_200",
+                }
+            ],
+            "reply_segments": [reply],
+        }
+    )
+    return normalize_brain_plan(plan)
+
+
+def check_quality_gate_rejects_quantity_quote_ignoring_applicable_price_tier() -> CaseResult:
+    quality = verify_brain_reply_quality(
+        quantity_quote_plan("6台商用冰箱 BX-200 货款6000元，上海运费大概200-400元。"),
+        current_message="6台商用冰箱发到上海多少钱？",
+        evidence_pack=commercial_fridge_evidence_pack(),
+        settings={},
+    )
+    assert_true(not quality["ok"], f"quantity quote must use applicable tier price: {quality}")
+    assert_true(
+        "quantity_quote_ignored_applicable_price_tier" in quality["errors"],
+        f"expected tier-price error: {quality}",
+    )
+    return CaseResult("quality_gate_rejects_quantity_quote_ignoring_applicable_price_tier", True, {"errors": quality["errors"]})
+
+
+def check_quality_gate_rejects_shipping_policy_contradiction_for_destination() -> CaseResult:
+    quality = verify_brain_reply_quality(
+        quantity_quote_plan("6台商用冰箱 BX-200 按950元/台，小计5700元，上海运费大概200-400元。"),
+        current_message="6台商用冰箱发到上海多少钱？",
+        evidence_pack=commercial_fridge_evidence_pack(),
+        settings={},
+    )
+    assert_true(not quality["ok"], f"reply must respect destination shipping policy: {quality}")
+    assert_true(
+        "shipping_policy_contradiction_for_destination" in quality["errors"],
+        f"expected shipping-policy error: {quality}",
+    )
+    return CaseResult("quality_gate_rejects_shipping_policy_contradiction_for_destination", True, {"errors": quality["errors"]})
+
+
+def check_quality_gate_accepts_quantity_quote_with_tier_and_shipping_policy() -> CaseResult:
+    quality = verify_brain_reply_quality(
+        quantity_quote_plan("6台商用冰箱 BX-200 按950元/台，货款小计5700元；上海属于江浙沪包邮范围。"),
+        current_message="6台商用冰箱发到上海多少钱？",
+        evidence_pack=commercial_fridge_evidence_pack(),
+        settings={},
+    )
+    assert_true(quality["ok"], f"tier quote with matching shipping policy should pass: {quality}")
+    return CaseResult("quality_gate_accepts_quantity_quote_with_tier_and_shipping_policy", True, {"quality": quality})
 
 
 def check_quality_gate_rejects_social_info_collection() -> CaseResult:
@@ -6480,6 +6709,66 @@ def check_brain_canonicalizes_context_product_price_to_product_master() -> CaseR
     assert_true(evidence_validation["ok"], f"canonicalized source should be in evidence: {evidence_validation}")
     return CaseResult(
         "brain_canonicalizes_context_product_price_to_product_master",
+        True,
+        {"changed": changed, "validation": validation, "evidence_validation": evidence_validation},
+    )
+
+
+def check_brain_canonicalizes_context_product_tier_price_to_product_master() -> CaseResult:
+    plan = normalize_brain_plan(
+        {
+            "can_answer": True,
+            "answer_mode": "quote_product_fact",
+            "evidence_used": {
+                "product_ids": ["commercial_fridge_bx_200"],
+                "conversation_fact_ids": ["last_product_price"],
+            },
+            "facts_claimed": [
+                {
+                    "fact_type": "price",
+                    "value": "950元/台",
+                    "source_level": "current_conversation_fact",
+                    "source_id": "last_product_price",
+                }
+            ],
+            "reply_segments": ["商用冰箱 BX-200 6台按950元/台，货款小计5700元。"],
+            "risk": {"needs_handoff": False},
+            "recommended_action": "send_reply",
+            "confidence": 0.9,
+            "reason": "tier price originated from product master price_tiers",
+        }
+    )
+    product = {
+        "id": "commercial_fridge_bx_200",
+        "name": "商用冰箱 BX-200",
+        "price": 1000,
+        "price_tiers": [
+            {"min_quantity": 5, "unit_price": 950},
+            {"min_quantity": 10, "unit_price": 920},
+        ],
+        "authority_level": "product_master",
+    }
+    pack = fake_evidence_pack(include_product=False)
+    pack["conversation"]["context"] = {
+        "last_product_id": "commercial_fridge_bx_200",
+        "last_product_price": 950,
+        "recent_product_ids": ["commercial_fridge_bx_200"],
+    }
+    knowledge = pack["knowledge"]
+    evidence = knowledge["evidence"]
+    evidence["products"] = [product]
+    evidence["catalog_candidates"] = [product]
+    knowledge["product_master"]["items"] = [product]
+    pack["audit_summary"]["evidence_ids"] = ["product:commercial_fridge_bx_200"]
+    changed = brain_module.canonicalize_conversation_product_fact_sources(plan, pack)
+    validation = validate_brain_plan(plan, require_fact_claims=True)
+    evidence_validation = brain_module.validate_plan_against_evidence(plan, pack)
+    assert_true(changed and changed[0]["source_id"] == "commercial_fridge_bx_200", f"tier price fact should be canonicalized: {changed}")
+    assert_true(plan["facts_claimed"][0]["source_level"] == "product_master", f"source should be product_master: {plan}")
+    assert_true(validation["ok"], f"canonicalized tier plan should validate: {validation}")
+    assert_true(evidence_validation["ok"], f"canonicalized tier source should be in evidence: {evidence_validation}")
+    return CaseResult(
+        "brain_canonicalizes_context_product_tier_price_to_product_master",
         True,
         {"changed": changed, "validation": validation, "evidence_validation": evidence_validation},
     )

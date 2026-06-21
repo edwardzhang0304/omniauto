@@ -56,6 +56,7 @@ def main() -> int:
         check_rag_index_rebuild_excludes_ai_experience_pool_and_raw_uploads,
         check_runtime_search_filters_legacy_ai_experience_pool_entries,
         check_reply_evidence_excludes_ai_experience_pool_hits,
+        check_reply_evidence_preserves_rag_timing_as_audit_only,
         check_ai_experience_pool_reference_hits_are_auxiliary_only,
         check_ai_experience_pool_reference_search_hits_without_content_authority,
         check_ai_experience_pool_runtime_gate_drops_noise_and_risky_commitments,
@@ -291,6 +292,29 @@ def check_reply_evidence_excludes_ai_experience_pool_hits() -> bool:
         len(hits) == 1
         and hits[0].get("source_id") == "source_formal_policy"
         and result.get("excluded_hit_count") == 2
+    )
+
+
+def check_reply_evidence_preserves_rag_timing_as_audit_only() -> bool:
+    result = compact_rag_evidence(
+        {
+            "enabled": True,
+            "ok": True,
+            "hits": [useful_experience_chunk()],
+            "timing": {
+                "reference": {
+                    "reference_index_cache_state": "file",
+                    "reference_index_duration_seconds": 0.42,
+                }
+            },
+        },
+        max_hits=5,
+        max_text_chars=200,
+    )
+    return (
+        result.get("hits") == []
+        and result.get("reference_hit_count") == 1
+        and result.get("timing", {}).get("reference", {}).get("reference_index_cache_state") == "file"
     )
 
 

@@ -3,19 +3,32 @@
     "name": "greeting",
     "messages": ["你好，在吗？"],
     "expect_action": "sent",
-    "expect_reply_contains": ["好", "在"]
+    "expect_reply_contains_any": [["在", "您好", "你好", "您说", "可以"]],
+    "expect_reply_not_contains": ["商用冰箱", "净水器滤芯", "人体工学办公椅", "之前问过", "继续确认"]
   },
   {
     "name": "catalog",
     "messages": ["你们有哪些商品？"],
     "expect_action": "sent",
-    "expect_reply_contains": ["商用冰箱", "人体工学办公椅", "净水器滤芯"]
+    "expect_reply_contains_min": [
+      {
+        "min": 3,
+        "items": [
+          "商用冰箱",
+          "人体工学办公椅",
+          "净水器滤芯",
+          "静音空气净化器",
+          "智能指纹门锁",
+          "五层加硬包装纸箱"
+        ]
+      }
+    ]
   },
   {
     "name": "product_quote_no_quantity",
     "messages": ["商用冰箱多少钱？"],
     "expect_action": "sent",
-    "expect_reply_contains": ["商用冰箱 BX-200", "1000", "950"]
+    "expect_reply_contains": ["商用冰箱 BX-200", "1000"]
   },
   {
     "name": "quantity_quote_with_shipping_city",

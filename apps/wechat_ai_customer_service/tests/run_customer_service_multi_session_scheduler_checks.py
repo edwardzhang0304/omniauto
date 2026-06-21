@@ -7,6 +7,7 @@ import json
 import os
 import sys
 import tempfile
+import threading
 import time
 import uuid
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -845,6 +846,55 @@ def check_runtime_tick_does_not_wait_for_slow_llm() -> None:
             runtime.shutdown()
 
 
+def check_runtime_submits_planner_after_each_capture() -> None:
+    with tempfile.TemporaryDirectory() as temp:
+        path = Path(temp) / "scheduler_state.json"
+        store = SchedulerStateStore(tenant_id="unit_capture_overlap", path=path)
+        state = store.empty_state()
+        enqueue_pending_session(state, "客户A", session_key="wx:rpa:v1:unit-a", reason="unit_overlap", now="2026-05-25T10:00:00")
+        enqueue_pending_session(state, "客户B", session_key="wx:rpa:v1:unit-b", reason="unit_overlap", now="2026-05-25T10:00:01")
+        store.save(state)
+
+        planner_started_for_a = threading.Event()
+        planner_seen_during_b_capture: list[bool] = []
+
+        def capture_fn(session: dict[str, Any]) -> dict[str, Any]:
+            target = str(session.get("target_name") or "")
+            if target == "客户B":
+                planner_seen_during_b_capture.append(planner_started_for_a.wait(timeout=1.0))
+            return {"messages": [message(target, 1)], "batch": [message(target, 1)]}
+
+        def planner(capture: dict[str, Any], task: dict[str, Any]) -> dict[str, Any]:
+            target = str(capture.get("target_name") or "")
+            if target == "客户A":
+                planner_started_for_a.set()
+            time.sleep(0.03)
+            return {"ok": True, "reply_text": f"回复 {target}", "decision": {"rule_name": "unit_overlap"}}
+
+        runtime = CustomerServiceSchedulerRuntime(
+            store=store,
+            config=SchedulerConfig(enabled=True, capture_max_sessions_per_round=2, llm_max_concurrency=2, send_max_replies_per_round=1),
+            capture_fn=capture_fn,
+            plan_reply_fn=planner,
+        )
+        try:
+            result = runtime.tick(allow_send=False, now="2026-05-25T10:00:02")
+            assert_equal(planner_seen_during_b_capture, [True], "planner for first capture should start before second capture finishes")
+            events = [(item.get("event"), item.get("target_name")) for item in result.get("events") or []]
+            assert_true(
+                events.index(("capture_completed", "客户A"))
+                < events.index(("llm_task_submitted", "客户A"))
+                < events.index(("capture_completed", "客户B")),
+                f"planner submit should be interleaved with capture events: {events}",
+            )
+            assert_true(
+                ("llm_task_submitted", "客户B") in events,
+                f"second capture should still submit planner task through the same path: {events}",
+            )
+        finally:
+            runtime.shutdown()
+
+
 def check_runtime_retries_same_capture_for_monitor_only_short_pending_after_brain_no_visible_reply() -> None:
     with tempfile.TemporaryDirectory() as temp:
         path = Path(temp) / "scheduler_state.json"
@@ -1658,8 +1708,16 @@ def check_scheduler_fast_followup_treats_unread_and_capture_as_urgent() -> None:
         "summary": {"pending_sessions": 0, "llm_running": 1, "reply_ready": 0, "reply_sent": 0},
         "events": [{"event": "capture_completed", "target_name": "客户A"}],
     }
+    sending_result = {
+        "scheduler_enabled": True,
+        "summary": {"pending_sessions": 0, "llm_running": 0, "reply_ready": 0, "reply_sending": 1, "reply_sent": 0},
+        "events": [],
+    }
     assert_true(summarize_scheduler_tick_activity(signal_result)["urgent_followup"], "unread signal should trigger fast follow-up")
     assert_true(summarize_scheduler_tick_activity(capture_result)["urgent_followup"], "capture completion should trigger fast follow-up")
+    sending_activity = summarize_scheduler_tick_activity(sending_result)
+    assert_true(sending_activity["busy"], "in-flight send should keep scheduler busy")
+    assert_true(sending_activity["urgent_followup"], "in-flight send should trigger fast follow-up for worker collection")
 
 
 def check_runtime_repeated_unread_signal_does_not_stale_same_batch() -> None:
@@ -2254,6 +2312,103 @@ def check_runtime_prioritizes_ready_send_before_new_capture() -> None:
             assert_equal(action_order[:2], ["send:客户已完成", "capture:客户新消息"], "ready replies should be sent before starting new RPA capture")
             assert_true(result["summary"]["reply_sent"] >= 1, "pre-existing ready reply should be marked sent before any new capture")
         finally:
+            runtime.shutdown()
+
+
+def check_runtime_collects_llm_while_send_worker_blocks_capture() -> None:
+    with tempfile.TemporaryDirectory() as temp:
+        path = Path(temp) / "scheduler_state.json"
+        store = SchedulerStateStore(tenant_id="unit", path=path)
+        state = store.load()
+        capture_ready = record_capture_result(
+            state,
+            "客户已完成",
+            messages=[message("R", 1)],
+            batch=[message("R", 1)],
+            now="2026-06-21T14:00:00",
+        )
+        task_ready = enqueue_llm_task(state, capture_ready["capture_id"], now="2026-06-21T14:00:01")
+        mark_llm_started(state, task_ready["task_id"], now="2026-06-21T14:00:02")
+        complete_llm_task(
+            state,
+            task_ready["task_id"],
+            reply_text="已生成回复",
+            decision={"rule_name": "unit"},
+            now="2026-06-21T14:00:03",
+        )
+        capture_running = record_capture_result(
+            state,
+            "客户Brain完成",
+            messages=[message("B", 1)],
+            batch=[message("B", 1)],
+            now="2026-06-21T14:00:04",
+        )
+        task_running = enqueue_llm_task(state, capture_running["capture_id"], now="2026-06-21T14:00:05")
+        mark_llm_started(state, task_running["task_id"], now="2026-06-21T14:00:06")
+        enqueue_pending_session(state, "客户新消息", reason="unit_pending", now="2026-06-21T14:00:07")
+        store.save(state)
+        send_started = threading.Event()
+        release_send = threading.Event()
+        action_order: list[str] = []
+
+        def capture_fn(session: dict[str, Any]) -> dict[str, Any]:
+            action_order.append(f"capture:{session.get('target_name')}")
+            return {"messages": [message("N", 1)], "batch": [message("N", 1)]}
+
+        def planner(capture: dict[str, Any], task: dict[str, Any]) -> dict[str, Any]:
+            return {"ok": True, "reply_text": "后台Brain完成回复", "decision": {"rule_name": "unit"}}
+
+        def sender(reply: dict[str, Any]) -> dict[str, Any]:
+            action_order.append(f"send:{reply.get('target_name')}")
+            send_started.set()
+            assert_true(release_send.wait(2.0), "test send worker should be released")
+            return {"ok": True, "verified": True}
+
+        runtime = CustomerServiceSchedulerRuntime(
+            store=store,
+            config=SchedulerConfig(enabled=True, capture_max_sessions_per_round=1, llm_max_concurrency=1, send_max_replies_per_round=1),
+            capture_fn=capture_fn,
+            plan_reply_fn=planner,
+            send_fn=sender,
+        )
+        try:
+            runtime._planner_futures[task_running["task_id"]] = runtime._planner_executor.submit(
+                runtime._run_planner_future,
+                copy.deepcopy(capture_running),
+                copy.deepcopy(task_running),
+            )
+            first = runtime.tick(allow_send=True, now="2026-06-21T14:00:08")
+            assert_true(
+                any(item.get("event") == "send_dispatched" for item in first.get("events") or []),
+                f"ready reply should be dispatched to send worker: {first}",
+            )
+            assert_true(
+                any(item.get("event") == "llm_task_completed" for item in first.get("events") or []),
+                f"scheduler should collect completed Brain in the same tick after send dispatch: {first}",
+            )
+            assert_true(
+                not any(item.startswith("capture:客户新消息") for item in action_order),
+                f"foreground capture must wait while send worker is in flight: {action_order}",
+            )
+            assert_true(send_started.wait(2.0), "send worker should start")
+            time.sleep(0.03)
+            second = runtime.tick(allow_send=True, now="2026-06-21T14:00:09")
+            assert_true(
+                not any(item.startswith("capture:客户新消息") for item in action_order),
+                f"foreground capture must still wait while send worker is in flight: {action_order}; second={second}",
+            )
+            state_after = store.load()
+            assert_equal(state_after["llm_tasks"][task_running["task_id"]]["status"], "completed", "Brain task should be collected")
+            release_send.set()
+            for _ in range(10):
+                final = runtime.tick(allow_send=True, now="2026-06-21T14:00:10")
+                if any(item.get("event") == "send_completed" for item in final.get("events") or []):
+                    break
+                time.sleep(0.03)
+            else:
+                raise AssertionError("send worker result should be collected after release")
+        finally:
+            release_send.set()
             runtime.shutdown()
 
 
@@ -3621,6 +3776,54 @@ def check_listener_rpa_send_rate_zero_is_preserved() -> None:
             int(burst_limit if burst_limit not in (None, "") else -1),
             20,
             "burst limit should preserve configured value",
+        )
+
+
+def check_listener_rpa_send_settings_apply_live_safety_effective_defaults() -> None:
+    with tempfile.TemporaryDirectory() as temp:
+        path = Path(temp) / "listener_config.json"
+        path.write_text(
+            json.dumps(
+                {
+                    "targets": [{"name": "客户A", "enabled": True, "exact": True}],
+                    "live_safety_guard": {
+                        "enabled": True,
+                        "allowed_targets": ["客户A"],
+                        "require_recent_bootstrap": False,
+                    },
+                    "rpa_humanized_send": {
+                        "enabled": True,
+                        "input_method": "sendinput_unicode",
+                        "typing_typo_probability": 0.1,
+                        "typing_typo_max": 1,
+                        "send_input_confirm_attempts": 3,
+                    },
+                },
+                ensure_ascii=False,
+                indent=2,
+            ),
+            encoding="utf-8",
+        )
+        settings = load_rpa_humanized_send_settings(path)
+        assert_equal(
+            settings.get("input_method"),
+            "clipboard_chunks",
+            "listener env settings should use effective live-safety input method",
+        )
+        assert_equal(
+            settings.get("typing_typo_probability"),
+            0.0,
+            "listener env settings should disable deliberate typo injection",
+        )
+        assert_equal(
+            settings.get("typing_typo_max"),
+            0,
+            "listener env settings should disable typo/backspace budget",
+        )
+        assert_equal(
+            settings.get("send_input_confirm_attempts"),
+            1,
+            "listener env settings should avoid repeated input confirmation attempts",
         )
 
 
@@ -6155,6 +6358,7 @@ def run_checks() -> dict[str, Any]:
         check_session_monitor_event_driven_dispatch_rotates_under_hot_target,
         check_capture_failed_backoff_blocks_immediate_requeue,
         check_runtime_tick_does_not_wait_for_slow_llm,
+        check_runtime_submits_planner_after_each_capture,
         check_runtime_retries_same_capture_for_monitor_only_short_pending_after_brain_no_visible_reply,
         check_runtime_retries_same_capture_for_real_ocr_short_probe_after_brain_no_visible_reply,
         check_runtime_retries_same_capture_for_full_customer_capture_after_brain_no_visible_reply,
@@ -6177,6 +6381,7 @@ def run_checks() -> dict[str, Any]:
         check_runtime_send_runner_fifo,
         check_runtime_send_event_includes_observability,
         check_runtime_prioritizes_ready_send_before_new_capture,
+        check_runtime_collects_llm_while_send_worker_blocks_capture,
         check_runtime_recovers_orphaned_running_llm_task_after_restart,
         check_runtime_times_out_running_llm_task_without_swallowing_message,
         check_runtime_restores_missing_llm_task_from_in_memory_snapshot,
@@ -6211,6 +6416,7 @@ def run_checks() -> dict[str, Any]:
         check_live_safety_applies_backend_scheduler_defaults,
         check_live_safety_file_transfer_defaults_to_self_test_target,
         check_listener_rpa_send_rate_zero_is_preserved,
+        check_listener_rpa_send_settings_apply_live_safety_effective_defaults,
         check_managed_bridge_applies_rpa_fast_send_confirmation_env,
         check_managed_bridge_capture_send_marks_workflow_state,
         check_managed_bridge_freshness_preview_fast_pass_without_strict_scan,

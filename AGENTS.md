@@ -18,7 +18,8 @@ This project may contain Chinese text. Treat all source files as UTF-8.
 
 Do not casually rename existing variables, constants, CLI commands, route names, artifact scopes, file paths, JSON field names, or public function names.
 
-- Treat names such as `add-friend-entry-click-plan`, worker-facing CLI routes, JSON output fields, and shared constants as collaboration contracts, not local implementation details.
+- Treat names such as the current add_friend route `add-friend-entry-click-plan-windows`, worker-facing CLI routes, JSON output fields, and shared constants as collaboration contracts, not local implementation details.
+- Historical add_friend routes such as `add-friend-entry-click-plan` and `add-friend-entry-click-plan-windows-1080p-reference` must not be silently reintroduced after PR #21; document and confirm any compatibility bridge before adding them back.
 - Preserve the original name and add aliases or adapter layers when platform-specific behavior is needed.
 - Rename only when the user explicitly approves the exact old name, new name, and migration plan.
 - Before any approved rename, update compatibility tests, documentation, and downstream references in the same change.

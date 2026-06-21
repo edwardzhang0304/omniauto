@@ -105,7 +105,7 @@ from realtime_reply_router import (
     update_token_budget_from_synthesis,
 )
 from reply_style_adapter import adapt_reply_style, infer_source_channel
-from wechat_connector import FILE_TRANSFER_ASSISTANT, ROOT, WeChatConnector
+from wechat_connector import FILE_TRANSFER_ASSISTANT, ROOT, WeChatConnector, same_target_continuation_send_context
 from apps.wechat_ai_customer_service.customer_service_live_safety import apply_customer_service_live_safety_guard
 from apps.wechat_ai_customer_service.admin_backend.services.customer_service_runtime import (
     summarize_listener_result,
@@ -2584,6 +2584,7 @@ def reply_multi_bubble_settings(config: dict[str, Any]) -> dict[str, Any]:
     inter_delay_max_ms = max(inter_delay_min_ms, int(source.get("inter_segment_delay_max_ms") or 560))
     retry_enabled = source.get("retry_on_transient_send_failures", True) is not False
     verify_each_segment = source.get("verify_each_segment", False) is True
+    same_target_continuation_fast_path_enabled = source.get("same_target_continuation_fast_path_enabled", True) is not False
     raw_retry_max = source.get("max_transient_retry_per_segment")
     try:
         retry_max = int(raw_retry_max) if raw_retry_max not in (None, "") else 1
@@ -2613,6 +2614,7 @@ def reply_multi_bubble_settings(config: dict[str, Any]) -> dict[str, Any]:
         "inter_segment_delay_min_ms": inter_delay_min_ms,
         "inter_segment_delay_max_ms": inter_delay_max_ms,
         "verify_each_segment": bool(verify_each_segment),
+        "same_target_continuation_fast_path_enabled": bool(same_target_continuation_fast_path_enabled),
         "retry_on_transient_send_failures": bool(retry_enabled),
         "max_transient_retry_per_segment": retry_max,
         "transient_retry_delay_min_ms": retry_delay_min_ms,
@@ -2837,32 +2839,44 @@ def send_reply_with_optional_multi_bubble(
             )
             should_verify_segment = verify_each_segment or index == len(segments)
             skip_segment_rate_guard = index > 1
-            if should_verify_segment or not callable(getattr(connector, "send_text", None)):
-                result = connector.send_text_and_verify(
-                    target.name,
-                    segment,
-                    exact=target.exact,
-                    skip_send_rate_guard=skip_segment_rate_guard,
-                    session_key=str(getattr(target, "session_key", "") or ""),
-                )
-            else:
-                send_only = connector.send_text(
-                    target.name,
-                    segment,
-                    exact=target.exact,
-                    skip_send_rate_guard=skip_segment_rate_guard,
-                    session_key=str(getattr(target, "session_key", "") or ""),
-                )  # type: ignore[attr-defined]
-                send_only_meta = send_only if isinstance(send_only, dict) else {}
-                result = {
-                    "ok": bool(send_only_meta.get("ok")),
-                    "verified": bool(send_only_meta.get("ok")),
-                    "send": send_only_meta,
-                    "verification_mode": "send_only_intermediate",
-                    "adapter": send_only_meta.get("adapter"),
-                    "state": send_only_meta.get("state"),
-                    "skip_send_rate_guard": skip_segment_rate_guard,
-                }
+            continuation_fast_path = bool(settings.get("same_target_continuation_fast_path_enabled")) and index > 1 and attempts == 1
+            write_workflow_phase(
+                "rpa_send_segment_continuation_context",
+                target=target.name,
+                segment_index=index,
+                segment_count=len(segments),
+                segment_attempt=attempts,
+                same_target_continuation_fast_path=continuation_fast_path,
+            )
+            with same_target_continuation_send_context(continuation_fast_path):
+                if should_verify_segment or not callable(getattr(connector, "send_text", None)):
+                    result = connector.send_text_and_verify(
+                        target.name,
+                        segment,
+                        exact=target.exact,
+                        skip_send_rate_guard=skip_segment_rate_guard,
+                        session_key=str(getattr(target, "session_key", "") or ""),
+                    )
+                else:
+                    send_only = connector.send_text(
+                        target.name,
+                        segment,
+                        exact=target.exact,
+                        skip_send_rate_guard=skip_segment_rate_guard,
+                        session_key=str(getattr(target, "session_key", "") or ""),
+                    )  # type: ignore[attr-defined]
+                    send_only_meta = send_only if isinstance(send_only, dict) else {}
+                    result = {
+                        "ok": bool(send_only_meta.get("ok")),
+                        "verified": bool(send_only_meta.get("ok")),
+                        "send": send_only_meta,
+                        "verification_mode": "send_only_intermediate",
+                        "adapter": send_only_meta.get("adapter"),
+                        "state": send_only_meta.get("state"),
+                        "skip_send_rate_guard": skip_segment_rate_guard,
+                    }
+            if isinstance(result, dict):
+                result.setdefault("same_target_continuation_fast_path", bool(continuation_fast_path))
             verified = bool(result.get("verified"))
             state = _send_result_state(result)
             write_workflow_phase(
@@ -4975,6 +4989,7 @@ def apply_local_customer_service_settings(config: dict[str, Any]) -> dict[str, A
     reply_multi_bubble.setdefault("inter_segment_delay_min_ms", 180)
     reply_multi_bubble.setdefault("inter_segment_delay_max_ms", 420)
     reply_multi_bubble.setdefault("verify_each_segment", False)
+    reply_multi_bubble.setdefault("same_target_continuation_fast_path_enabled", True)
     reply_multi_bubble.setdefault("retry_on_transient_send_failures", True)
     reply_multi_bubble.setdefault("max_transient_retry_per_segment", 1)
     reply_multi_bubble.setdefault("transient_retry_delay_min_ms", 600)

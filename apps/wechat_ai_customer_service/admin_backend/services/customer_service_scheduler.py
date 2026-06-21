@@ -237,6 +237,9 @@ def _latency_breakdown_from_trace(trace: dict[str, Any]) -> dict[str, Any]:
         "polish_future_seconds": ("polish_future_submitted_at", "polish_future_finished_at"),
         "polish_worker_seconds": ("polish_worker_started_at", "polish_worker_finished_at"),
         "ready_queue_wait_seconds": ("send_queue_entered_at", "send_started_at"),
+        "ready_to_dispatch_seconds": ("send_queue_entered_at", "send_dispatched_at"),
+        "dispatch_to_worker_start_seconds": ("send_dispatched_at", "send_worker_started_at"),
+        "send_worker_seconds": ("send_worker_started_at", "send_worker_finished_at"),
         "send_seconds": ("send_started_at", "send_finished_at"),
         "send_rpa_seconds": ("send_rpa_started_at", "send_rpa_finished_at"),
         "freshness_check_seconds": ("freshness_check_started_at", "freshness_check_finished_at"),
@@ -244,6 +247,7 @@ def _latency_breakdown_from_trace(trace: dict[str, Any]) -> dict[str, Any]:
         "capture_to_sent_seconds": ("capture_started_at", "send_finished_at"),
         "brain_to_sent_seconds": ("brain_started_at", "send_finished_at"),
         "ready_to_sent_seconds": ("ready_at", "send_finished_at"),
+        "dispatch_to_finished_seconds": ("send_dispatched_at", "send_finished_at"),
     }
     breakdown: dict[str, Any] = {}
     for name, (start_key, finish_key) in pairs.items():
@@ -768,10 +772,15 @@ class CustomerServiceSchedulerRuntime:
         self._polish_executor = ThreadPoolExecutor(max_workers=max(1, int(config.polish_max_concurrency or config.llm_max_concurrency)))
         self._polish_futures: dict[str, Future[dict[str, Any]]] = {}
         self._polish_task_snapshots: dict[str, dict[str, Any]] = {}
+        self._send_executor = ThreadPoolExecutor(max_workers=1)
+        self._send_future: Future[dict[str, Any]] | None = None
+        self._send_reply_id: str = ""
+        self._send_reply_snapshot: dict[str, Any] = {}
 
     def shutdown(self) -> None:
         self._planner_executor.shutdown(wait=False, cancel_futures=False)
         self._polish_executor.shutdown(wait=False, cancel_futures=False)
+        self._send_executor.shutdown(wait=False, cancel_futures=False)
 
     def _restore_missing_polish_task_from_snapshot(self, state: dict[str, Any], task_id: str) -> bool:
         task = (state.get("polish_tasks", {}) or {}).get(task_id)
@@ -871,7 +880,8 @@ class CustomerServiceSchedulerRuntime:
         phase_started = time.perf_counter()
         events.extend(pre_sent)
 
-        captured = self._capture_pending(state, now=now)
+        send_inflight = self._send_inflight()
+        captured = [] if send_inflight else self._capture_pending(state, now=now)
         phase_durations["capture_seconds"] = round(max(0.0, time.perf_counter() - phase_started), 4)
         phase_started = time.perf_counter()
         events.extend(captured)
@@ -980,6 +990,7 @@ class CustomerServiceSchedulerRuntime:
                     now=now,
                 )
                 events.append({"event": "capture_completed", "target_name": target_name, "capture_id": capture["capture_id"], "task_id": task["task_id"]})
+                events.extend(self._submit_llm_tasks(state, now=now))
             else:
                 events.append({"event": "capture_empty", "target_name": target_name, "capture_id": capture["capture_id"]})
         return events
@@ -1368,137 +1379,256 @@ class CustomerServiceSchedulerRuntime:
             events.append({"event": "polish_task_completed", "task_id": task_id, "status": completion.get("status"), "degraded": bool(result.get("degraded"))})
         return events
 
+    def _send_inflight(self) -> bool:
+        return self._send_future is not None and not self._send_future.done()
+
     def _consume_send_queue(self, state: dict[str, Any], *, allow_send: bool, now: str | None = None) -> list[dict[str, Any]]:
         events: list[dict[str, Any]] = []
-        if not allow_send or self.send_fn is None:
+        events.extend(self._collect_send_future(state, now=now))
+        events.extend(self._recover_orphaned_sending_replies(state, now=now))
+        if not allow_send or self.send_fn is None or self._send_inflight():
             return events
-        replies = select_ready_replies(state, limit=self.config.send_max_replies_per_round)
-        for reply in replies:
-            reply_id = str(reply.get("reply_id") or "")
-            ownership_failure = brain_first_ready_reply_ownership_failure(reply)
-            if ownership_failure:
-                mark_reply_failed(state, reply_id, reason=ownership_failure, now=now)
-                events.append(
-                    {
-                        "event": "send_blocked",
-                        "reply_id": reply_id,
-                        "target_name": reply.get("target_name"),
-                        "reason": ownership_failure,
-                    }
-                )
+        replies = select_ready_replies(state, limit=1)
+        if not replies:
+            return events
+        events.extend(self._dispatch_send_reply(state, replies[0], now=now))
+        events.extend(self._collect_send_future(state, now=now))
+        return events
+
+    def _recover_orphaned_sending_replies(self, state: dict[str, Any], *, now: str | None = None) -> list[dict[str, Any]]:
+        if self._send_future is not None:
+            return []
+        events: list[dict[str, Any]] = []
+        for reply in list((state.get("ready_replies", {}) or {}).values()):
+            if not isinstance(reply, dict) or reply.get("status") != "sending":
                 continue
-            envelope_failure = ready_reply_session_envelope_failure(reply, self._capture_for_reply(state, reply))
-            if envelope_failure:
-                mark_reply_stale(state, reply_id, reason=envelope_failure, now=now)
+            reply_id = str(reply.get("reply_id") or "")
+            if not reply_id:
+                continue
+            mark_reply_failed(state, reply_id, reason="send_worker_orphaned_after_restart", now=now)
+            events.append(
+                {
+                    "event": "send_failed",
+                    "reply_id": reply_id,
+                    "target_name": reply.get("target_name"),
+                    "session_key": reply.get("session_key"),
+                    "reason": "send_worker_orphaned_after_restart",
+                }
+            )
+        return events
+
+    def _dispatch_send_reply(self, state: dict[str, Any], reply: dict[str, Any], *, now: str | None = None) -> list[dict[str, Any]]:
+        events: list[dict[str, Any]] = []
+        reply_id = str(reply.get("reply_id") or "")
+        ownership_failure = brain_first_ready_reply_ownership_failure(reply)
+        if ownership_failure:
+            mark_reply_failed(state, reply_id, reason=ownership_failure, now=now)
+            events.append(
+                {
+                    "event": "send_blocked",
+                    "reply_id": reply_id,
+                    "target_name": reply.get("target_name"),
+                    "reason": ownership_failure,
+                }
+            )
+            return events
+        envelope_failure = ready_reply_session_envelope_failure(reply, self._capture_for_reply(state, reply))
+        if envelope_failure:
+            mark_reply_stale(state, reply_id, reason=envelope_failure, now=now)
+            enqueue_pending_session(
+                state,
+                str(reply.get("target_name") or ""),
+                exact=True,
+                conversation_type=str(reply.get("conversation_type") or "unknown"),
+                session_key=str(reply.get("session_key") or ""),
+                reason="reply_session_envelope_failed_before_send",
+                now=now,
+            )
+            events.append(
+                {
+                    "event": "reply_stale",
+                    "reply_id": reply_id,
+                    "target_name": reply.get("target_name"),
+                    "reason": envelope_failure,
+                }
+            )
+            return events
+        mark_reply_sending(state, reply_id, now=now)
+        dispatched_at = datetime.now().isoformat(timespec="seconds")
+        live_reply = (state.get("ready_replies", {}) or {}).get(reply_id)
+        if isinstance(live_reply, dict):
+            trace = live_reply.get("latency_trace") if isinstance(live_reply.get("latency_trace"), dict) else {}
+            live_reply["latency_trace"] = {**trace, "send_dispatched_at": dispatched_at}
+        callback_reply = self._reply_for_callbacks(state, reply)
+        self._send_reply_id = reply_id
+        self._send_reply_snapshot = copy.deepcopy(callback_reply)
+        self._send_future = self._send_executor.submit(self._run_send_future, copy.deepcopy(callback_reply))
+        events.append(
+            {
+                "event": "send_dispatched",
+                "reply_id": reply_id,
+                "target_name": reply.get("target_name"),
+                "session_key": reply.get("session_key"),
+            }
+        )
+        return events
+
+    def _run_send_future(self, reply: dict[str, Any]) -> dict[str, Any]:
+        started = time.perf_counter()
+        worker_started_at = datetime.now().isoformat(timespec="seconds")
+        trace: dict[str, Any] = {"send_worker_started_at": worker_started_at}
+        reply_id = str(reply.get("reply_id") or "")
+        try:
+            freshness_started_at = datetime.now().isoformat(timespec="seconds")
+            trace["freshness_check_started_at"] = freshness_started_at
+            freshness = self.freshness_fn(copy.deepcopy(reply))
+            freshness_finished_at = datetime.now().isoformat(timespec="seconds")
+            trace["freshness_check_finished_at"] = freshness_finished_at
+            if freshness.get("stale") or freshness.get("has_newer_messages"):
+                finished_at = datetime.now().isoformat(timespec="seconds")
+                trace["send_worker_finished_at"] = finished_at
+                trace["send_worker_duration_seconds"] = round(max(0.0, time.perf_counter() - started), 4)
+                return {
+                    "reply_id": reply_id,
+                    "status": "stale",
+                    "freshness": freshness,
+                    "latency_trace": trace,
+                    "finished_at": finished_at,
+                }
+            if self.send_fn is None:
+                raise RuntimeError("send_fn_missing")
+            send_rpa_started_at = datetime.now().isoformat(timespec="seconds")
+            trace["send_rpa_started_at"] = send_rpa_started_at
+            send_result = self.send_fn(copy.deepcopy(reply))
+            send_rpa_finished_at = datetime.now().isoformat(timespec="seconds")
+            trace["send_rpa_finished_at"] = send_rpa_finished_at
+            finished_at = datetime.now().isoformat(timespec="seconds")
+            trace["send_worker_finished_at"] = finished_at
+            trace["send_worker_duration_seconds"] = round(max(0.0, time.perf_counter() - started), 4)
+            failed = send_result.get("ok") is False or send_result.get("verified") is False
+            return {
+                "reply_id": reply_id,
+                "status": "send_failed" if failed else "sent",
+                "freshness": freshness,
+                "send_result": send_result,
+                "latency_trace": trace,
+                "finished_at": finished_at,
+            }
+        except Exception as exc:  # noqa: BLE001
+            finished_at = datetime.now().isoformat(timespec="seconds")
+            trace["send_worker_finished_at"] = finished_at
+            trace["send_worker_duration_seconds"] = round(max(0.0, time.perf_counter() - started), 4)
+            return {
+                "reply_id": reply_id,
+                "status": "send_failed",
+                "reason": repr(exc),
+                "error": repr(exc),
+                "traceback": "".join(traceback.format_exception(type(exc), exc, exc.__traceback__))[-4000:],
+                "latency_trace": trace,
+                "finished_at": finished_at,
+            }
+
+    def _collect_send_future(self, state: dict[str, Any], *, now: str | None = None) -> list[dict[str, Any]]:
+        future = self._send_future
+        if future is None or not future.done():
+            return []
+        reply_id = self._send_reply_id
+        reply_snapshot = copy.deepcopy(self._send_reply_snapshot)
+        self._send_future = None
+        self._send_reply_id = ""
+        self._send_reply_snapshot = {}
+        try:
+            result = future.result()
+        except Exception as exc:  # noqa: BLE001
+            result = {
+                "reply_id": reply_id,
+                "status": "send_failed",
+                "reason": repr(exc),
+                "error": repr(exc),
+                "traceback": "".join(traceback.format_exception(type(exc), exc, exc.__traceback__))[-4000:],
+                "finished_at": datetime.now().isoformat(timespec="seconds"),
+            }
+        return self._apply_send_future_result(state, reply_snapshot, result, now=now)
+
+    def _apply_send_future_result(
+        self,
+        state: dict[str, Any],
+        reply_snapshot: dict[str, Any],
+        result: dict[str, Any],
+        *,
+        now: str | None = None,
+    ) -> list[dict[str, Any]]:
+        events: list[dict[str, Any]] = []
+        reply_id = str(result.get("reply_id") or reply_snapshot.get("reply_id") or "")
+        reply = (state.get("ready_replies", {}) or {}).get(reply_id)
+        if not isinstance(reply, dict):
+            events.append({"event": "send_collect_missing_reply", "reply_id": reply_id, "reason": "reply_missing"})
+            return events
+        trace_update = result.get("latency_trace") if isinstance(result.get("latency_trace"), dict) else {}
+        if trace_update:
+            trace = reply.get("latency_trace") if isinstance(reply.get("latency_trace"), dict) else {}
+            reply["latency_trace"] = {**trace, **trace_update}
+        freshness = result.get("freshness") if isinstance(result.get("freshness"), dict) else {}
+        if freshness:
+            reply["freshness_check"] = copy.deepcopy(freshness)
+        finished_at = str(result.get("finished_at") or now or datetime.now().isoformat(timespec="seconds"))
+        status = str(result.get("status") or "")
+        if status == "stale":
+            reason = str(freshness.get("reason") or "freshness_stale")
+            mark_reply_stale(state, reply_id, reason=reason, now=finished_at)
+            if self.config.stale_reply_policy == "discard_and_requeue":
+                self._record_stale_reply_context(state, reply, freshness=freshness, now=finished_at)
                 enqueue_pending_session(
                     state,
                     str(reply.get("target_name") or ""),
                     exact=True,
                     conversation_type=str(reply.get("conversation_type") or "unknown"),
                     session_key=str(reply.get("session_key") or ""),
-                    reason="reply_session_envelope_failed_before_send",
-                    now=now,
+                    reason="reply_stale_before_send",
+                    now=finished_at,
                 )
-                events.append(
-                    {
-                        "event": "reply_stale",
-                        "reply_id": reply_id,
-                        "target_name": reply.get("target_name"),
-                        "reason": envelope_failure,
-                    }
-                )
-                continue
-            mark_reply_sending(state, reply_id, now=now)
-            callback_reply = self._reply_for_callbacks(state, reply)
-            freshness_started_at = datetime.now().isoformat(timespec="seconds")
-            live_reply = (state.get("ready_replies", {}) or {}).get(reply_id)
-            if isinstance(live_reply, dict):
-                trace = live_reply.get("latency_trace") if isinstance(live_reply.get("latency_trace"), dict) else {}
-                live_reply["latency_trace"] = {**trace, "freshness_check_started_at": freshness_started_at}
-            freshness = self.freshness_fn(copy.deepcopy(callback_reply))
-            freshness_finished_at = datetime.now().isoformat(timespec="seconds")
-            live_reply = (state.get("ready_replies", {}) or {}).get(reply_id)
-            if isinstance(live_reply, dict):
-                trace = live_reply.get("latency_trace") if isinstance(live_reply.get("latency_trace"), dict) else {}
-                live_reply["freshness_check"] = copy.deepcopy(freshness)
-                live_reply["latency_trace"] = {**trace, "freshness_check_finished_at": freshness_finished_at}
-            if freshness.get("stale") or freshness.get("has_newer_messages"):
-                mark_reply_stale(state, reply_id, reason=str(freshness.get("reason") or "freshness_stale"), now=now)
-                if self.config.stale_reply_policy == "discard_and_requeue":
-                    self._record_stale_reply_context(state, reply, freshness=freshness, now=now)
-                    enqueue_pending_session(
-                        state,
-                        str(reply.get("target_name") or ""),
-                        exact=True,
-                        conversation_type=str(reply.get("conversation_type") or "unknown"),
-                        session_key=str(reply.get("session_key") or ""),
-                        reason="reply_stale_before_send",
-                        now=now,
-                    )
-                events.append({"event": "reply_stale", "reply_id": reply_id, "target_name": reply.get("target_name"), "freshness": freshness})
-                continue
-            try:
-                send_rpa_started_at = datetime.now().isoformat(timespec="seconds")
-                live_reply = (state.get("ready_replies", {}) or {}).get(reply_id)
-                if isinstance(live_reply, dict):
-                    trace = live_reply.get("latency_trace") if isinstance(live_reply.get("latency_trace"), dict) else {}
-                    live_reply["latency_trace"] = {**trace, "send_rpa_started_at": send_rpa_started_at}
-                send_result = self.send_fn(copy.deepcopy(callback_reply))
-            except Exception as exc:  # noqa: BLE001
-                mark_reply_failed(state, reply_id, reason=repr(exc), now=now)
-                events.append(
-                    {
-                        "event": "send_failed",
-                        "reply_id": reply_id,
-                        "target_name": reply.get("target_name"),
-                        "session_key": reply.get("session_key"),
-                        "reason": repr(exc),
-                        "error": repr(exc),
-                    }
-                )
-                continue
-            send_rpa_finished_at = datetime.now().isoformat(timespec="seconds")
-            live_reply = (state.get("ready_replies", {}) or {}).get(reply_id)
-            if isinstance(live_reply, dict):
-                trace = live_reply.get("latency_trace") if isinstance(live_reply.get("latency_trace"), dict) else {}
-                live_reply["latency_trace"] = {**trace, "send_rpa_finished_at": send_rpa_finished_at}
-            send_observability = self._extract_send_observability(send_result)
-            if send_result.get("ok") is False or send_result.get("verified") is False:
-                failure_reason = str(send_result.get("reason") or send_result.get("error") or "send_failed")
-                mark_reply_failed(state, reply_id, reason=failure_reason, send_result=send_result, now=now)
-                failed_event = {
-                    "event": "send_failed",
-                    "reply_id": reply_id,
-                    "target_name": reply.get("target_name"),
-                    "session_key": reply.get("session_key"),
-                    "reason": failure_reason,
-                    "send_result": send_result,
-                }
-                if send_observability:
-                    failed_event["send_observability"] = send_observability
-                events.append(failed_event)
-                continue
-            mark_reply_sent(state, reply_id, send_result=send_result, now=now)
-            sent_reply = (state.get("ready_replies", {}) or {}).get(reply_id)
-            latency_trace = (
-                sent_reply.get("latency_trace")
-                if isinstance(sent_reply, dict) and isinstance(sent_reply.get("latency_trace"), dict)
-                else {}
-            )
-            latency_breakdown = _latency_breakdown_from_trace(latency_trace)
-            self._clear_stale_reply_context(state, reply)
-            completed_event = {
-                "event": "send_completed",
+            events.append({"event": "reply_stale", "reply_id": reply_id, "target_name": reply.get("target_name"), "freshness": freshness})
+            return events
+        send_result = result.get("send_result") if isinstance(result.get("send_result"), dict) else {}
+        send_observability = self._extract_send_observability(send_result)
+        if status == "send_failed" or send_result.get("ok") is False or send_result.get("verified") is False:
+            failure_reason = str(result.get("reason") or send_result.get("reason") or send_result.get("error") or "send_failed")
+            mark_reply_failed(state, reply_id, reason=failure_reason, send_result=send_result, now=finished_at)
+            failed_event = {
+                "event": "send_failed",
                 "reply_id": reply_id,
                 "target_name": reply.get("target_name"),
+                "session_key": reply.get("session_key"),
+                "reason": failure_reason,
+                "send_result": send_result,
             }
-            if latency_trace:
-                completed_event["latency_trace"] = copy.deepcopy(latency_trace)
-            if latency_breakdown:
-                completed_event["latency_breakdown"] = latency_breakdown
+            if result.get("traceback"):
+                failed_event["traceback"] = result.get("traceback")
             if send_observability:
-                completed_event["send_observability"] = send_observability
-            events.append(completed_event)
+                failed_event["send_observability"] = send_observability
+            events.append(failed_event)
+            return events
+        mark_reply_sent(state, reply_id, send_result=send_result, now=finished_at)
+        sent_reply = (state.get("ready_replies", {}) or {}).get(reply_id)
+        latency_trace = (
+            sent_reply.get("latency_trace")
+            if isinstance(sent_reply, dict) and isinstance(sent_reply.get("latency_trace"), dict)
+            else {}
+        )
+        latency_breakdown = _latency_breakdown_from_trace(latency_trace)
+        self._clear_stale_reply_context(state, reply)
+        completed_event = {
+            "event": "send_completed",
+            "reply_id": reply_id,
+            "target_name": reply.get("target_name"),
+        }
+        if latency_trace:
+            completed_event["latency_trace"] = copy.deepcopy(latency_trace)
+        if latency_breakdown:
+            completed_event["latency_breakdown"] = latency_breakdown
+        if send_observability:
+            completed_event["send_observability"] = send_observability
+        events.append(completed_event)
         return events
 
     def _record_stale_reply_context(

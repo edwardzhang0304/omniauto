@@ -14,6 +14,9 @@ import psutil
 from apps.wechat_ai_customer_service.adapters.wechat_connector import WeChatConnector
 from apps.wechat_ai_customer_service.admin_backend.services.customer_service_runtime import CustomerServiceRuntime
 from apps.wechat_ai_customer_service.admin_backend.services.recorder_runtime import RecorderRuntime
+from apps.wechat_ai_customer_service.customer_service_live_safety import (
+    apply_customer_service_live_safety_rpa_send_defaults,
+)
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[4]
@@ -54,6 +57,7 @@ def collect_rpa_acceptance_report(
     checks: list[dict[str, Any]] = []
 
     customer_config = read_json(tenant_root / "customer_service" / "listener_config.json")
+    customer_config = apply_customer_service_live_safety_rpa_send_defaults(customer_config)
     recorder_settings = read_json(tenant_root / "recorder" / "settings.json")
     customer_status = read_effective_runtime_status(
         root,

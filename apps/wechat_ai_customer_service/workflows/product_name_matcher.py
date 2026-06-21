@@ -237,6 +237,8 @@ def likely_single_typo_match(alias_token: str, query_token: str) -> bool:
     query = compact_match_text(query_token)
     if len(alias) < 3 or len(alias) > 12 or len(query) < len(alias):
         return False
+    if alias_requires_exact_spec_match(alias):
+        return False
     # Avoid overly broad typo matching for long mixed sentences.
     if len(query) > 48:
         return False
@@ -249,6 +251,10 @@ def likely_single_typo_match(alias_token: str, query_token: str) -> bool:
         if edit_distance_with_cap(alias, window, cap=1) <= 1:
             return True
     return False
+
+
+def alias_requires_exact_spec_match(alias: str) -> bool:
+    return bool(re.search(r"[0-9a-z]", alias))
 
 
 def edit_distance_with_cap(left: str, right: str, *, cap: int) -> int:
