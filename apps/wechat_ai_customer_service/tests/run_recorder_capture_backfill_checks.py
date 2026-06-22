@@ -34,18 +34,21 @@ class FakeConnector:
         self.loaded = loaded if loaded is not None else visible
         self.loaded_ok = loaded_ok
         self.history_load_calls: list[int] = []
+        self.session_key_calls: list[str] = []
 
-    def get_messages(self, target: str, exact: bool = True, history_load_times: int = 0) -> dict[str, Any]:
+    def get_messages(self, target: str, exact: bool = True, history_load_times: int = 0, *, session_key: str = "") -> dict[str, Any]:
+        self.session_key_calls.append(str(session_key or ""))
         if history_load_times:
             self.history_load_calls.append(history_load_times)
             return {
                 "ok": self.loaded_ok,
                 "target": target,
                 "exact": exact,
+                "session_key": session_key,
                 "history_load": {"ok": self.loaded_ok, "requested_load_times": history_load_times},
                 "messages": self.loaded,
             }
-        return {"ok": True, "target": target, "exact": exact, "messages": self.visible}
+        return {"ok": True, "target": target, "exact": exact, "session_key": session_key, "messages": self.visible}
 
     def send_text(self, target: str, text: str, exact: bool = True, *, skip_send_rate_guard: bool = False) -> dict[str, Any]:
         return {"ok": True, "target": target, "text": text, "exact": exact}

@@ -73,11 +73,17 @@ ORDER_ACTION_TERMS = ("订", "代付", "下单", "买", "各订", "已订", "补
 CANCEL_OR_STATUS_TERMS = ("不下单", "取消", "退掉", "不用了", "暂时不用", "已带走", "库存有现货", "按表格订货", "照表格订货")
 SUMMARY_OR_PROMO_TERMS = ("合计", "共计", "满", "赠品")
 NON_ORDER_PRODUCT_HINTS = {"代购", "抗体", "满", "共计", "合计", "文件", "备注"}
+ORDER_STATUS_PREFIX_RE = re.compile(r"^(?:当前|现在|目前|这次)?(?:只|仅|就|先|再)?(?:订|下单|代付|买|补订|重订|再订)\s*")
 LLM_ORDER_INTENT_TERMS = ("订", "下单", "代付", "补订", "再订", "买", "发货", "货号", "规格", "元", "盒", "瓶", "套")
 DEFAULT_INCLUDE_RECORD_TYPES = ("order_item", "gift_item")
 FOLLOWUP_CONFIRM_RE = re.compile(r"^(?:是的|对|好的|嗯|行|确认|收到|ok|OK|嗯嗯)\s*[,，:：]?\s*(?P<body>.+)?$")
 FOLLOWUP_SETTLEMENT_HINTS = ("合计", "共计", "满减", "优惠", "抹零", "返款", "抵扣", "欠款", "预存")
-VALIDATION_MARKER_RE = re.compile(r"【\s*验收标记[^】]*】|验收标记\s*[:：]?\s*[A-Za-z0-9_.-]{6,}", re.IGNORECASE)
+VALIDATION_MARKER_RE = re.compile(
+    r"【\s*(?:验收标记|记录员实盘验收)[^】\]\n\r]*(?:】|\])?"
+    r"|(?:验收标记|记录员实盘验收)\s*[:：]?\s*[A-Za-z0-9_.\-\s]{6,}"
+    r"|LIVE\s*_?\s*LAB\s*_?\s*EXPORT\s*_?\s*\d{8}\s*_?\s*\d{6}\s*[A-Z]?",
+    re.IGNORECASE,
+)
 INVENTORY_STATUS_RE = re.compile(
     r"(?:^|[\s，,。；;])(?:现货|库存)(?:[^，,。；;\n\r]{0,24})?(?:差|缺)\s*\d+(?:\.\d+)?\s*(?:瓶|盒|箱|包|支|套|个|件|板|提|组)(?:[^，,。；;\n\r]{0,24})?(?:满|凑)\s*\d+\s*(?:箱|盒|包|件|套)",
     re.IGNORECASE,
@@ -922,6 +928,12 @@ class RecorderExportRunService:
         llm_segmentation_max_segments = max(1, min(int(config.get("llm_segmentation_max_segments", 6) or 6), 12))
         llm_supplement_mode = str(config.get("llm_supplement_mode") or "missing_core_fields_only")
         llm_parallel_workers = max(1, min(int(config.get("llm_parallel_workers", 4) or 4), 8))
+        recorder_brain_classification_enabled = bool(config.get("recorder_brain_classification_enabled", True))
+        recorder_brain_classification_min_confidence = max(
+            0.0,
+            min(float(config.get("recorder_brain_classification_min_confidence", 0.68) or 0.68), 1.0),
+        )
+        recorder_brain_classification_budget = max(0, int(config.get("recorder_brain_classification_max_calls_per_run", 16) or 16))
         date_output_mode = str(config.get("date_output_mode") or "YYYY-MM-DD")
         extract_mode = str(config.get("extract_mode") or "llm_first").strip().lower()
         missing_quantity_strategy = str(config.get("missing_quantity_strategy") or "strict").strip().lower()
@@ -967,6 +979,7 @@ class RecorderExportRunService:
         llm_segment_calls = 0
         llm_repair_calls = 0
         llm_brand_calls = 0
+        recorder_brain_classification_calls = 0
 
         # Pass-1: rule baseline
         for index, message in enumerate(ordered_messages, start=1):
@@ -1108,6 +1121,14 @@ class RecorderExportRunService:
                 message = target.get("message") if isinstance(target.get("message"), dict) else {}
                 content = str(target.get("content") or "")
                 try:
+                    recorder_brain_segments: list[str] = []
+                    if target.get("recorder_brain_classification_allowed"):
+                        recorder_brain_segments = self._recorder_brain_order_block_segments(
+                            message,
+                            min_confidence=recorder_brain_classification_min_confidence,
+                            max_segments=llm_segmentation_max_segments,
+                        )
+                        target["recorder_brain_classification_used"] = bool(recorder_brain_segments)
                     return (
                         target,
                         content,
@@ -1117,6 +1138,7 @@ class RecorderExportRunService:
                             use_segmentation=llm_segmentation_enabled,
                             max_segments=llm_segmentation_max_segments,
                             force_multi_split=bool(target.get("force_multi_split")),
+                            recorder_brain_segments=recorder_brain_segments,
                         ),
                         "",
                     )
@@ -1124,6 +1146,11 @@ class RecorderExportRunService:
                     return target, content, [], repr(exc)
 
             limited_llm_targets = llm_targets[:llm_target_total]
+            for target_index, target in enumerate(limited_llm_targets):
+                target["recorder_brain_classification_allowed"] = bool(
+                    recorder_brain_classification_enabled
+                    and target_index < recorder_brain_classification_budget
+                )
             worker_count = min(llm_parallel_workers, max(1, llm_target_total))
             if worker_count > 1 and llm_target_total > 1:
                 with ThreadPoolExecutor(max_workers=worker_count) as executor:
@@ -1133,6 +1160,8 @@ class RecorderExportRunService:
                         llm_extract_calls += 1
                         if llm_segmentation_enabled:
                             llm_segment_calls += 1
+                        if target.get("recorder_brain_classification_used"):
+                            recorder_brain_classification_calls += 1
                         if llm_error:
                             target["llm_error"] = llm_error
                         apply_llm_result(target, content, llm_rows)
@@ -1163,6 +1192,8 @@ class RecorderExportRunService:
                     llm_extract_calls += 1
                     if llm_segmentation_enabled:
                         llm_segment_calls += 1
+                    if target.get("recorder_brain_classification_used"):
+                        recorder_brain_classification_calls += 1
                     if llm_error:
                         target["llm_error"] = llm_error
                     apply_llm_result(target, content, llm_rows)
@@ -1336,6 +1367,7 @@ class RecorderExportRunService:
             "llm_segment_calls": llm_segment_calls,
             "llm_repair_calls": llm_repair_calls,
             "llm_brand_calls": llm_brand_calls,
+            "recorder_brain_classification_calls": recorder_brain_classification_calls,
         }
 
     def _dedupe_close_export_rows(self, rows: list[dict[str, Any]], *, max_minutes: int = 10) -> list[dict[str, Any]]:
@@ -1367,6 +1399,32 @@ class RecorderExportRunService:
                 kept.append(candidate)
                 continue
             kept[duplicate_index] = self._prefer_close_duplicate_export_row(kept[duplicate_index], candidate)
+        return self._dedupe_close_ocr_variant_rows(kept, max_seconds=max_seconds)
+
+    def _dedupe_close_ocr_variant_rows(self, rows: list[dict[str, Any]], *, max_seconds: int) -> list[dict[str, Any]]:
+        kept: list[dict[str, Any]] = []
+        index_by_key: dict[tuple[str, ...], list[int]] = {}
+        for row in rows:
+            candidate = dict(row) if isinstance(row, dict) else {}
+            key = self._close_ocr_variant_duplicate_key(candidate)
+            if not key:
+                kept.append(candidate)
+                continue
+            candidate_seconds = self._export_row_time_seconds(candidate)
+            duplicate_index: int | None = None
+            for kept_index in reversed(index_by_key.get(key, [])):
+                existing = kept[kept_index]
+                existing_seconds = self._export_row_time_seconds(existing)
+                if candidate_seconds is None or existing_seconds is None:
+                    continue
+                if abs(candidate_seconds - existing_seconds) <= max_seconds and self._rows_are_ocr_quality_variants(existing, candidate):
+                    duplicate_index = kept_index
+                    break
+            if duplicate_index is None:
+                index_by_key.setdefault(key, []).append(len(kept))
+                kept.append(candidate)
+                continue
+            kept[duplicate_index] = self._prefer_close_duplicate_export_row(kept[duplicate_index], candidate)
         return kept
 
     def _close_export_duplicate_key(self, row: dict[str, Any]) -> tuple[str, ...]:
@@ -1389,6 +1447,40 @@ class RecorderExportRunService:
             sale_price,
             total_sale,
         )
+
+    def _close_ocr_variant_duplicate_key(self, row: dict[str, Any]) -> tuple[str, ...]:
+        product = self._normalize_export_duplicate_text(row.get("product_name"), remove_spaces=True)
+        spec = self._normalize_spec_key(str(row.get("spec") or ""))
+        if not product or not spec:
+            return ()
+        return (
+            self._normalize_export_duplicate_text(row.get("date")),
+            self._normalize_export_duplicate_text(row.get("name"), remove_spaces=True),
+            self._normalize_export_duplicate_text(row.get("owner"), remove_spaces=True),
+            self._normalize_export_duplicate_text(row.get("receiver"), remove_spaces=True),
+            self._normalize_export_duplicate_text(row.get("record_type")),
+            self._normalize_export_duplicate_text(row.get("brand"), remove_spaces=True),
+            product,
+            spec,
+            self._normalize_export_duplicate_text(row.get("unit"), remove_spaces=True),
+        )
+
+    def _rows_are_ocr_quality_variants(self, existing: dict[str, Any], candidate: dict[str, Any]) -> bool:
+        if not existing or not candidate:
+            return False
+        existing_complete = bool(str(existing.get("sale_price") or existing.get("total_sale") or "").strip())
+        candidate_complete = bool(str(candidate.get("sale_price") or candidate.get("total_sale") or "").strip())
+        if existing_complete != candidate_complete:
+            return True
+        existing_review = bool(existing.get("needs_review"))
+        candidate_review = bool(candidate.get("needs_review"))
+        if existing_review != candidate_review:
+            return True
+        existing_risks = {str(flag) for flag in (existing.get("risk_flags") or []) if str(flag)}
+        candidate_risks = {str(flag) for flag in (candidate.get("risk_flags") or []) if str(flag)}
+        if ("missing_price" in existing_risks) != ("missing_price" in candidate_risks):
+            return True
+        return False
 
     @staticmethod
     def _normalize_export_duplicate_text(value: Any, *, remove_spaces: bool = False) -> str:
@@ -1429,7 +1521,19 @@ class RecorderExportRunService:
             winner.get("evidence_message_ids"),
             loser.get("evidence_message_ids"),
         )
-        winner["risk_flags"] = self._merge_unique_list_values(winner.get("risk_flags"), loser.get("risk_flags"))
+        winner_risks = self._merge_unique_list_values(winner.get("risk_flags"))
+        loser_risks = self._merge_unique_list_values(loser.get("risk_flags"))
+        corrected_risks = set()
+        if str(winner.get("sale_price") or winner.get("total_sale") or "").strip():
+            corrected_risks.add("missing_price")
+        if str(winner.get("product_name") or "").strip():
+            corrected_risks.add("missing_product")
+        if str(winner.get("quantity") or "").strip():
+            corrected_risks.add("missing_quantity")
+        winner["risk_flags"] = self._merge_unique_list_values(
+            winner_risks,
+            [risk for risk in loser_risks if risk not in corrected_risks],
+        )
         for key in ("remark", "evidence_text"):
             if not str(winner.get(key) or "").strip() and str(loser.get(key) or "").strip():
                 winner[key] = loser.get(key)
@@ -1442,6 +1546,13 @@ class RecorderExportRunService:
         for key in ("brand", "product_name", "spec", "quantity", "unit", "sale_price", "total_sale", "name"):
             if str(row.get(key) or "").strip():
                 score += 0.01
+        if str(row.get("sale_price") or "").strip():
+            score += 0.18
+        if str(row.get("total_sale") or "").strip():
+            score += 0.18
+        risk_flags = {str(flag) for flag in (row.get("risk_flags") or []) if str(flag)}
+        if "missing_price" in risk_flags or (not str(row.get("sale_price") or "").strip() and not str(row.get("total_sale") or "").strip()):
+            score -= 0.35
         return score
 
     @staticmethod
@@ -1553,6 +1664,8 @@ class RecorderExportRunService:
             return False
         if re.search(r"(酸|醇|酮|酶|胺|碱|盐|钠|钾|钙|镁|锌|铜|铁|水|液|剂|粉|盒|管|头|膜|皿|瓶)$", token):
             return False
+        if token in {"当前", "现在", "目前", "当前只", "现在只", "目前只", "只", "仅", "就", "先", "再"}:
+            return False
         if re.search(r"(老师|收货|订|代付|下单|买|元|货号|型号|规格)", token):
             return False
         return bool(re.fullmatch(r"[\u4e00-\u9fa5A-Za-z]+", token))
@@ -1658,10 +1771,12 @@ class RecorderExportRunService:
         # Priority-0: first line as a standalone brand with product-price lines following.
         first = lines[0].strip("：:")
         has_follow_price_line = any(bool(PRICE_RE.search(line) or self._extract_formula_total(line)) for line in lines[1:4])
-        if has_follow_price_line and self._looks_like_brand_token(first):
+        if has_follow_price_line and self._looks_like_brand_token(first) and not self._looks_like_ocr_validation_code_line(first):
             return first
         # Priority-1: explicit alias / leading-brand pattern in lines.
         for line in lines[:6]:
+            if self._looks_like_ocr_validation_code_line(line):
+                continue
             head = self._normalize_order_text(re.split(r"[，,；;：:\s]", line, maxsplit=1)[0])
             alias = self._extract_brand_name(line) or self._extract_brand_name(head)
             if alias:
@@ -1705,6 +1820,8 @@ class RecorderExportRunService:
         for idx, line in enumerate(lines):
             source_kind = ""
             brand = self._extract_brand_name(line)
+            if brand and self._looks_like_ocr_validation_code_line(line):
+                brand = ""
             if brand:
                 source_kind = "line_extract"
             if not brand:
@@ -1732,7 +1849,7 @@ class RecorderExportRunService:
                     source_kind = "head_line"
             if not brand and self._looks_like_brand_token(line.strip("：:")):
                 lookahead = lines[idx + 1 : min(len(lines), idx + 4)]
-                if any(self._looks_like_product_body(item) for item in lookahead):
+                if any(self._looks_like_product_body(item) for item in lookahead) and not self._looks_like_ocr_validation_code_line(line):
                     brand = line.strip("：:")
                     source_kind = "standalone_line"
             if not brand:
@@ -1769,6 +1886,16 @@ class RecorderExportRunService:
                 }
             )
         return lines, mentions
+
+    @staticmethod
+    def _looks_like_ocr_validation_code_line(text: str) -> bool:
+        token = re.sub(r"[\s\]\[【】()（）:：;；,，._-]+", "", str(text or "").strip())
+        if len(token) < 8:
+            return False
+        if not re.fullmatch(r"[A-Z0-9]+", token):
+            return False
+        digit_count = sum(1 for ch in token if ch.isdigit())
+        return digit_count >= 3 or len(token) >= 14
 
     def _resolve_row_line_index(
         self,
@@ -2294,6 +2421,9 @@ class RecorderExportRunService:
         for part in raw_parts:
             working_part = self._normalize_order_text(part)
             if segments and (PRICE_RE.search(working_part) or self._extract_formula_total(working_part)):
+                if self._looks_like_price_only_continuation(working_part) and self._segment_expects_unit_price_tail(segments[-1]):
+                    segments[-1] = self._normalize_order_text(f"{segments[-1]} {working_part}")
+                    continue
                 carry_tail, anchored = self._split_price_part_with_start_anchor(working_part)
                 if carry_tail:
                     segments[-1] = self._normalize_order_text(f"{segments[-1]} {carry_tail}")
@@ -2314,10 +2444,25 @@ class RecorderExportRunService:
             return [normalized]
         return cleaned[:max_segments]
 
+    @staticmethod
+    def _looks_like_price_only_continuation(text: str) -> bool:
+        normalized = re.sub(r"\s+", "", str(text or ""))
+        if not normalized:
+            return False
+        return bool(re.fullmatch(r"\d+(?:\.\d+)?元[。.,，;；]?(?:备注[:：]?.*)?", normalized))
+
+    @staticmethod
+    def _segment_expects_unit_price_tail(text: str) -> bool:
+        normalized = re.sub(r"\s+", "", str(text or ""))
+        if not normalized:
+            return False
+        return bool(re.search(r"每(?:盒|箱|袋|瓶|套|个|包|桶|台|件|支|根|片|株|卷|张|双|板|把|组|升)$", normalized))
+
     def _parse_line_item(self, line: str, *, brand_context: str = "") -> dict[str, Any]:
         text = self._normalize_order_text(str(line or ""))
         if not text:
             return {}
+        text = self._strip_leading_carried_brand_before_new_item(text)
         if self._looks_like_cancel_or_status_line(text):
             return {}
         if any(term in text for term in ("按表格订货", "照表格订货")):
@@ -2377,6 +2522,27 @@ class RecorderExportRunService:
             "total_sale": total_sale,
             "remark": text,
         }
+
+    def _strip_leading_carried_brand_before_new_item(self, text: str) -> str:
+        normalized = self._normalize_order_text(text)
+        if not normalized:
+            return ""
+        aliases = sorted((self._active_brand_aliases or list(DEFAULT_LAB_BRAND_ALIASES)), key=len, reverse=True)
+        for carried in aliases:
+            carried_token = self._normalize_order_text(carried)
+            if not carried_token or not normalized.startswith(carried_token):
+                continue
+            tail = self._normalize_order_text(normalized[len(carried_token) :].lstrip("：: "))
+            if not tail or not re.match(r"^[；;，,、]", tail):
+                continue
+            tail = self._normalize_order_text(tail.lstrip("；;，,、 "))
+            if not tail:
+                continue
+            for next_brand in aliases:
+                next_token = self._normalize_order_text(next_brand)
+                if next_token and next_token != carried_token and tail.startswith(next_token) and self._looks_like_product_body(tail):
+                    return tail
+        return normalized
 
     def _normalize_spec_text(self, value: str) -> str:
         spec = self._normalize_order_text(value)
@@ -2817,6 +2983,7 @@ class RecorderExportRunService:
         candidate = self._normalize_order_text(text)
         if not candidate:
             return ""
+        candidate = ORDER_STATUS_PREFIX_RE.sub("", candidate).strip()
         if any(term in candidate for term in ("不下单", "取消", "退掉", "暂时不用")):
             return ""
         special_buy = re.search(r"代购(?:买)?\s*\d+(?:\.\d+)?\s*(?:公斤|斤|个|包|箱|瓶|套|件|份|块|台|支|株|卷|提|板)?\s*(?P<name>[\u4e00-\u9fa5A-Za-z0-9\-()（）_+./]+)", candidate)
@@ -2870,6 +3037,13 @@ class RecorderExportRunService:
     def _normalize_order_text(text: str) -> str:
         normalized = str(text or "").replace("\xa0", " ")
         normalized = VALIDATION_MARKER_RE.sub(" ", normalized)
+        normalized = re.sub(r"^[\s\]】)）]+", " ", normalized)
+        normalized = re.sub(
+            r"^[A-Z0-9_ ]{8,90}\]\s+(?=[\u4e00-\u9fa5A-Za-z0-9]{1,24}(?:老师|主任|同学|客户|[:：]))",
+            " ",
+            normalized,
+            flags=re.IGNORECASE,
+        )
         normalized = re.sub(r"\s+", " ", normalized)
         return normalized.strip()
 
@@ -2902,15 +3076,50 @@ class RecorderExportRunService:
         return 0.0
 
     def _extract_quantity_unit(self, text: str) -> tuple[str, str]:
-        qty_match = QTY_UNIT_RE.search(text)
-        if qty_match:
-            return str(qty_match.group("qty") or ""), str(qty_match.group("unit") or "")
-        qty_cn = QTY_CN_UNIT_RE.search(text)
-        if qty_cn:
-            cn_value = self._cn_to_number(str(qty_cn.group("qty_cn") or ""))
+        normalized = self._normalize_order_text(text)
+        action_qty = re.search(
+            rf"(?:各订|订|已订|补订|再订|重订|下单|代付|买)\s*"
+            rf"(?P<qty>\d+(?:\.\d+)?)\s*(?P<unit>{ORDER_UNIT_PATTERN})",
+            normalized,
+        )
+        if action_qty:
+            return str(action_qty.group("qty") or ""), str(action_qty.group("unit") or "")
+        action_qty_cn = re.search(
+            rf"(?:各订|订|已订|补订|再订|重订|下单|代付|买)\s*"
+            rf"(?P<qty_cn>[一二两俩三四五六七八九十百半])\s*(?P<unit>{ORDER_UNIT_PATTERN})",
+            normalized,
+        )
+        if action_qty_cn:
+            cn_value = self._cn_to_number(str(action_qty_cn.group("qty_cn") or ""))
             if cn_value > 0:
-                return self._format_number(cn_value), str(qty_cn.group("unit") or "")
+                return self._format_number(cn_value), str(action_qty_cn.group("unit") or "")
+        qty_match = QTY_UNIT_RE.search(normalized)
+        if qty_match:
+            if self._looks_like_packaging_quantity_match(normalized, qty_match):
+                next_qty = QTY_UNIT_RE.search(normalized, qty_match.end())
+                if next_qty and not self._looks_like_packaging_quantity_match(normalized, next_qty):
+                    return str(next_qty.group("qty") or ""), str(next_qty.group("unit") or "")
+            else:
+                return str(qty_match.group("qty") or ""), str(qty_match.group("unit") or "")
+        qty_cn = QTY_CN_UNIT_RE.search(normalized)
+        if qty_cn:
+            if self._looks_like_packaging_quantity_match(normalized, qty_cn):
+                next_qty_cn = QTY_CN_UNIT_RE.search(normalized, qty_cn.end())
+                if next_qty_cn and not self._looks_like_packaging_quantity_match(normalized, next_qty_cn):
+                    cn_value = self._cn_to_number(str(next_qty_cn.group("qty_cn") or ""))
+                    if cn_value > 0:
+                        return self._format_number(cn_value), str(next_qty_cn.group("unit") or "")
+            else:
+                cn_value = self._cn_to_number(str(qty_cn.group("qty_cn") or ""))
+                if cn_value > 0:
+                    return self._format_number(cn_value), str(qty_cn.group("unit") or "")
         return "", ""
+
+    @staticmethod
+    def _looks_like_packaging_quantity_match(text: str, match: re.Match[str]) -> bool:
+        end = match.end()
+        tail = str(text or "")[end : end + 4]
+        return bool(re.match(r"\s*/\s*(?:盒|包|瓶|箱|袋|支|板|卷|套|个|桶)", tail))
 
     @staticmethod
     def _extract_formula_total(text: str) -> str:
@@ -3431,6 +3640,101 @@ class RecorderExportRunService:
                 break
         return segments
 
+    def _recorder_brain_classify_message(self, message: dict[str, Any], *, max_segments: int = 6) -> dict[str, Any]:
+        content = str(message.get("content") or "").strip()
+        text = self._normalize_order_text(content)
+        if not text:
+            return {}
+        prompt = {
+            "task": "你是微信AI记录员的语义分类中枢。请把混杂的原始聊天内容分门别类，先分类，不要直接编造表格字段。",
+            "source_text": text,
+            "message_metadata": {
+                "sender": str(message.get("sender") or ""),
+                "content_type": str(message.get("content_type") or message.get("type") or ""),
+                "message_time": recorder_time_text(message),
+            },
+            "rules": [
+                "群成员名、聊天标题、联系人名、老师名、OCR/RPA发言人标签默认是metadata，不是商品名。",
+                "引用、回复、历史预览不是当前订单事实，除非当前消息明确确认或修改它。",
+                "一条消息可以拆成多个blocks：订单商品、赠品、品牌上下文、人名/老师元数据、收货信息、地址信息、引用历史、状态噪声、确认语、其他。",
+                "商品、价格、数量、规格必须来自原文证据，不允许常识补全。",
+                "无法判断时标低confidence或归为other，不要强行变成订单。",
+                "多SKU消息要拆成多个可独立建行的order_item blocks。",
+            ],
+            "block_types": [
+                "order_item",
+                "gift_item",
+                "brand_context",
+                "person_metadata",
+                "receiver_info",
+                "address_info",
+                "quote_history",
+                "status_noise",
+                "followup_confirmation",
+                "other",
+            ],
+            "max_blocks": int(max_segments),
+            "response_contract": {
+                "message_intent": "order|mixed_order|followup|noise|unknown",
+                "confidence": "0-1",
+                "blocks": [
+                    {
+                        "block_id": "string",
+                        "type": "string",
+                        "text": "string",
+                        "source_role": "current_message|metadata|quote|ocr_noise|context",
+                        "can_create_order_row": "bool",
+                        "confidence": "0-1",
+                        "reason": "string",
+                    }
+                ],
+                "warnings": ["string"],
+            },
+        }
+        payload = self._call_deepseek_json_cached(prompt, namespace="recorder_brain_classify_message")
+        return payload if isinstance(payload, dict) else {}
+
+    def _recorder_brain_order_block_segments(
+        self,
+        message: dict[str, Any],
+        *,
+        min_confidence: float = 0.68,
+        max_segments: int = 6,
+    ) -> list[str]:
+        try:
+            payload = self._recorder_brain_classify_message(message, max_segments=max_segments)
+        except Exception:
+            return []
+        blocks = payload.get("blocks")
+        if not isinstance(blocks, list):
+            return []
+        segments: list[str] = []
+        for block in blocks:
+            if not isinstance(block, dict):
+                continue
+            block_type = str(block.get("type") or "").strip().lower()
+            source_role = str(block.get("source_role") or "current_message").strip().lower()
+            confidence = self._coerce_confidence(block.get("confidence"))
+            can_create = block.get("can_create_order_row")
+            if block_type not in {"order_item", "gift_item", "followup_confirmation"}:
+                continue
+            if source_role in {"metadata", "quote", "ocr_noise"}:
+                continue
+            if can_create is False:
+                continue
+            if confidence < min_confidence:
+                continue
+            text = self._normalize_order_text(str(block.get("text") or ""))
+            if not text:
+                continue
+            if block_type != "followup_confirmation" and not self._line_has_order_signal(text):
+                continue
+            if text not in segments:
+                segments.append(text)
+            if len(segments) >= max_segments:
+                break
+        return segments
+
     def _split_message_by_price_terminator(self, content: str, *, max_segments: int = 6) -> list[str]:
         lines = [self._normalize_order_text(line) for line in re.split(r"[\r\n]+", str(content or "")) if self._normalize_order_text(line)]
         if not lines:
@@ -3480,7 +3784,12 @@ class RecorderExportRunService:
                     line = self._normalize_order_text(line[: yuan_matches[-1].end()])
                     pending_prefix = tail
             buffer.append(line)
-            if PRICE_RE.search(line) or self._extract_formula_total(line):
+            price_tail_continues = bool(
+                idx + 1 < len(lines)
+                and self._segment_expects_unit_price_tail(line)
+                and self._looks_like_price_only_continuation(lines[idx + 1])
+            )
+            if (PRICE_RE.search(line) or self._extract_formula_total(line)) and not price_tail_continues:
                 flush_buffer()
             if len(segments) >= max_segments:
                 break
@@ -3702,6 +4011,13 @@ class RecorderExportRunService:
         product = self._normalize_order_text(product_name)
         if not product:
             return ""
+        scope = self._normalize_order_text(scope_text)
+        product = ORDER_STATUS_PREFIX_RE.sub("", product).strip("：:，,；;。 ")
+        product = self._strip_person_prefix_from_product_name(product, scope_text=scope_text)
+        product = self._strip_product_label_tokens_from_product_name(product)
+        if self._product_name_looks_like_person_metadata(product, scope_text=scope):
+            inferred_product = self._infer_product_name_from_scope_text(scope)
+            product = inferred_product or ""
         product = re.sub(
             rf"\s*(?:订|已订|代付|下单|补订|再订|重订|买)\s*[-一二两俩三四五六七八九十百\d]*(?:\.\d+)?\s*(?:{ORDER_UNIT_PATTERN})?.*$",
             "",
@@ -3722,11 +4038,126 @@ class RecorderExportRunService:
             return ""
         if not re.search(r"[\u4e00-\u9fa5A-Za-z]", product):
             return ""
-        scope = self._normalize_order_text(scope_text)
         if "元" in product and not any(token in product for token in ("试剂", "管", "盒", "瓶", "水", "膜", "板", "酶", "酸")):
             return ""
         product = re.sub(r"(?<=[\u4e00-\u9fa5])\s+(?=[\u4e00-\u9fa5])", "", product)
         return product
+
+    def _strip_product_label_tokens_from_product_name(self, product_name: str) -> str:
+        product = self._normalize_order_text(product_name)
+        if not product:
+            return ""
+        product = re.sub(r"(?:产品名称|货品名称|商品名称|品名|名称)\s*[：:]\s*", " ", product)
+        product = re.sub(r"\s*这\s*(?:\d+|[一二两俩三四五六七八九十百半]+)\s*个?抗体.*$", "", product)
+        return self._normalize_order_text(product).strip("：:，,；;。 ")
+
+    def _strip_person_prefix_from_product_name(self, product_name: str, *, scope_text: str = "") -> str:
+        product = self._normalize_order_text(product_name)
+        if not product:
+            return ""
+        scope = self._normalize_order_text(scope_text)
+        for _ in range(2):
+            match = re.match(
+                r"^(?P<prefix>[\u4e00-\u9fa5A-Za-z0-9]{1,16}(?:\s*[-—－]\s*[\u4e00-\u9fa5A-Za-z0-9]{1,16})?(?:老师|主任|同学|客户|师)?)\s*[：:]\s*(?P<body>.+)$",
+                product,
+            )
+            if not match:
+                break
+            prefix = self._normalize_order_text(str(match.group("prefix") or ""))
+            body = self._normalize_order_text(str(match.group("body") or ""))
+            if not prefix or not body:
+                break
+            if self._looks_like_brand_token(prefix) and self._extract_brand_name(prefix, fallback="") == prefix:
+                break
+            if self._product_prefix_looks_like_person_metadata(prefix, body=body, scope_text=scope):
+                product = body
+                continue
+            break
+        return product
+
+    def _product_prefix_looks_like_person_metadata(self, prefix: str, *, body: str, scope_text: str = "") -> bool:
+        token = self._normalize_order_text(prefix).strip("：: ")
+        body_text = self._normalize_order_text(body)
+        scope = self._normalize_order_text(scope_text)
+        if not token or not body_text:
+            return False
+        if self._looks_like_brand_token(token) and self._extract_brand_name(token, fallback="") == token:
+            return False
+        has_product_signal = bool(
+            PRODUCT_BRAND_CONTEXT_HINT_RE.search(body_text)
+            or QTY_UNIT_RE.search(body_text)
+            or PRICE_RE.search(body_text)
+            or SPEC_CODE_TOKEN_RE.search(body_text)
+            or self._extract_brand_name(body_text, fallback="")
+        )
+        if not has_product_signal:
+            return False
+        if token in {"师", "老师", "主任", "同学", "客户"}:
+            return True
+        if any(marker in token for marker in ("老师", "主任", "同学", "客户")):
+            return True
+        if re.search(r"[-—－]", token):
+            return bool(NAME_OWNER_RE.search(f"{token}老师") or re.fullmatch(r"[\u4e00-\u9fa5A-Za-z0-9]{1,8}\s*[-—－]\s*[\u4e00-\u9fa5A-Za-z0-9]{1,8}", token))
+        clean_person = self._sanitize_person_name(token)
+        if clean_person and clean_person == re.sub(r"\s+", "", token) and 1 <= len(clean_person) <= 4:
+            if f"{token}老师" in scope or f"{clean_person}老师" in scope:
+                return True
+            if token in scope and ("老师" in scope or NAME_OWNER_RE.search(scope)):
+                return True
+        if re.fullmatch(r"[\u4e00-\u9fa5]", token) and f"{token}老师" in scope:
+            return True
+        return False
+
+    def _product_name_looks_like_person_metadata(self, product_name: str, *, scope_text: str = "") -> bool:
+        token = self._normalize_order_text(product_name).strip("：:，,；;。 -—－")
+        scope = self._normalize_order_text(scope_text)
+        if not token:
+            return False
+        if self._looks_like_brand_token(token) and self._extract_brand_name(token, fallback="") == token:
+            return False
+        if token in {"师", "老师", "主任", "同学", "客户"}:
+            return True
+        if any(marker in token for marker in ("老师", "主任", "同学", "客户")):
+            return True
+        if NAME_OWNER_RE.search(f"{token}老师"):
+            return True
+        if re.fullmatch(r"[\u4e00-\u9fa5A-Za-z0-9]{1,8}\s*[-—－]\s*[\u4e00-\u9fa5A-Za-z0-9]{1,8}", token) and "老师" in scope:
+            return True
+        clean_person = self._sanitize_person_name(token)
+        if clean_person and clean_person == re.sub(r"\s+", "", token) and 1 <= len(clean_person) <= 4:
+            return f"{token}老师" in scope or f"{clean_person}老师" in scope
+        return False
+
+    def _infer_product_name_from_scope_text(self, scope_text: str) -> str:
+        scope = self._normalize_order_text(scope_text)
+        if not scope:
+            return ""
+        body = self._strip_person_prefix_from_product_name(scope, scope_text=scope)
+        body = ORDER_STATUS_PREFIX_RE.sub("", body).strip()
+        action_prefix = re.match(r"^(?:订|已订|代付|下单|补订|再订|重订|买|各订)\s*[：:]?\s*(?P<body>.+)$", body)
+        if action_prefix:
+            action_body = self._normalize_order_text(str(action_prefix.group("body") or ""))
+            if action_body and (
+                self._extract_brand_name(action_body, fallback="")
+                or PRODUCT_BRAND_CONTEXT_HINT_RE.search(action_body)
+                or SPEC_CODE_TOKEN_RE.search(action_body)
+            ):
+                body = action_body
+        body = re.sub(r"^(?:产品名称|货品名称|商品名称|品名|名称)\s*[：:]\s*", "", body)
+        body = re.sub(
+            rf"(?:\s|，|,|；|;)+(?:订|已订|代付|下单|补订|再订|重订|买|各订)?\s*(?:\d+(?:\.\d+)?|[一二两俩三四五六七八九十百半]+)\s*(?:{ORDER_UNIT_PATTERN})\b.*$",
+            "",
+            body,
+        )
+        body = re.sub(r"(?:单价|售价|总价|总共|每(?:盒|箱|袋|瓶|套|个|包|支|根|片|卷|把)|参加活动|活动价).*$", "", body)
+        body = re.sub(
+            r"\d+(?:\.\d+)?\s*[*xX×/+]\s*\d+(?:\.\d+)?(?:\s*=\s*\d+(?:\.\d+)?)?\s*元?.*$",
+            "",
+            body,
+        )
+        body = re.sub(r"\d+(?:\.\d+)?\s*元.*$", "", body)
+        body = self._normalize_order_text(body).strip("：:，,；;。 ")
+        return body if re.search(r"[\u4e00-\u9fa5A-Za-z]", body) else ""
 
     def _remove_spec_tokens_from_product_name(self, product_name: str, spec: str) -> str:
         product = self._normalize_order_text(product_name)
@@ -3737,6 +4168,12 @@ class RecorderExportRunService:
         primary_code = self._extract_primary_spec_code(normalized_spec)
         if primary_code:
             cleaned = re.sub(re.escape(primary_code), " ", cleaned, flags=re.IGNORECASE)
+            primary_match = re.match(r"^(?P<head>[A-Za-z])(?P<tail>[A-Za-z0-9._/\-*]{2,})$", primary_code)
+            if primary_match:
+                tail_code = self._normalize_spec_text(str(primary_match.group("tail") or ""))
+                head = str(primary_match.group("head") or "")
+                if tail_code and head:
+                    cleaned = re.sub(rf"(?<=[\u4e00-\u9fa5]){re.escape(head)}(?=\s*$)", " ", cleaned, flags=re.IGNORECASE)
         for marker_match in SPEC_MARKER_RE.finditer(cleaned):
             token = self._normalize_spec_text(str(marker_match.group("spec") or ""))
             if token and self._normalize_spec_key(token) in self._normalize_spec_key(normalized_spec):
@@ -3906,19 +4343,25 @@ class RecorderExportRunService:
         use_segmentation: bool = True,
         max_segments: int = 6,
         force_multi_split: bool = False,
+        recorder_brain_segments: list[str] | None = None,
     ) -> list[dict[str, Any]]:
         content = str(message.get("content") or "").strip()
         if not content:
             return []
         normalized_content = self._normalize_order_text(content)
         segments: list[str] = []
+        semantic_segments = [
+            self._normalize_order_text(item)
+            for item in (recorder_brain_segments or [])
+            if self._normalize_order_text(item)
+        ]
         complexity = self._message_complexity_score(normalized_content)
         deterministic_segments = self._split_message_by_price_terminator(normalized_content, max_segments=max_segments)
         if use_segmentation and (complexity >= 2 or "\n" in content or len(normalized_content) >= 120):
             segments = self._llm_segment_order_message(normalized_content, max_segments=max_segments)
-        if deterministic_segments:
+        if semantic_segments or deterministic_segments:
             merged_segments: list[str] = []
-            for candidate in [*deterministic_segments, *segments]:
+            for candidate in [*semantic_segments, *deterministic_segments, *segments]:
                 normalized_candidate = self._normalize_order_text(candidate)
                 if not normalized_candidate or normalized_candidate in merged_segments:
                     continue
@@ -4497,9 +4940,16 @@ class RecorderExportRunService:
         product_name = str(output.get("product_name") or "")
         sanitized_product = self._sanitize_product_name(product_name, scope_text=backfill_scope)
         if sanitized_product != self._normalize_order_text(product_name):
+            raw_product_for_risk = self._normalize_order_text(product_name)
+            high_risk_product_cleanup = bool(
+                not sanitized_product
+                or self._product_name_looks_like_person_metadata(raw_product_for_risk, scope_text=backfill_scope)
+                or PRICE_RE.search(raw_product_for_risk)
+            )
             output["product_name"] = sanitized_product
-            output["needs_review"] = True
-            output["confidence"] = min(float(output.get("confidence") or 0), 0.78 if sanitized_product else 0.62)
+            if high_risk_product_cleanup:
+                output["needs_review"] = True
+                output["confidence"] = min(float(output.get("confidence") or 0), 0.78 if sanitized_product else 0.62)
             product_name = sanitized_product
         brand_name = str(output.get("brand") or "")
         remark_text = str(output.get("remark") or "")
@@ -4562,6 +5012,11 @@ class RecorderExportRunService:
         if explicit_scope:
             output = self._clear_unsupported_quantity_from_scope(output, scope_text=explicit_scope)
         output = self._default_single_quantity_for_priced_row(output)
+        if not risk_flags and not output.get("needs_review"):
+            output["confidence"] = max(
+                self._coerce_confidence(output.get("confidence")),
+                self._estimate_confidence(output),
+            )
         output["needs_review"] = bool(
             output.get("needs_review")
             or float(output.get("confidence") or 0) < 0.75

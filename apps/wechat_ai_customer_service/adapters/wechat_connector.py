@@ -1079,10 +1079,16 @@ def wechat_rpa_lock(action: str, *, timeout_seconds: float = 90.0, stale_seconds
         except Exception:
             current = {}
         if int(current.get("pid") or 0) == os.getpid():
-            try:
-                lock_path.unlink()
-            except FileNotFoundError:
-                pass
+            for attempt in range(6):
+                try:
+                    lock_path.unlink()
+                    break
+                except FileNotFoundError:
+                    break
+                except PermissionError:
+                    if attempt >= 5:
+                        break
+                    time.sleep(0.08)
 
 
 def should_break_wechat_rpa_lock(path: Path, *, stale_seconds: float) -> bool:

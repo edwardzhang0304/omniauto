@@ -23,7 +23,7 @@ from apps.wechat_ai_customer_service.message_identity import (
 
 
 OCR_RPA_ADAPTERS = {"win32_ocr", "wechat_win32_ocr", "rpa_ocr", "ocr_rpa"}
-QUOTE_MARKER_RE = re.compile(r"\[(?:引用|回复)[^\]]*\]")
+QUOTE_MARKER_RE = re.compile(r"\[[^\]\n\r]{0,8}(?:引\s*\[?\s*用|引用|回复)[^\]]*\]")
 LONG_PRESS_OVERLAY_RE = re.compile(r"^(?:复制|转发|收藏|删除|多选|引用|提醒|翻译|搜一搜)(?:\s+|$)")
 SCREEN_TIME_RE = re.compile(r"^(?:星期[一二三四五六日天]|昨天|今天|前天)?\s*\d{1,2}:\d{2}(?::\d{2})?$")
 HIGH_RISK_CAPTURE_FLAGS = {
@@ -539,6 +539,18 @@ def existing_message_envelope(record: dict[str, Any]) -> dict[str, Any]:
     return {}
 
 
+def line_looks_like_quote_preview(line: str) -> bool:
+    compact = re.sub(r"\s+", "", str(line or ""))
+    if not compact:
+        return False
+    normalized = compact.replace("[", "").replace("]", "").replace("【", "").replace("】", "")
+    if normalized.startswith(("引用", "回复", "引[用", "引［用")):
+        return True
+    if normalized.startswith("用") and ("老师" in normalized or "旧订单" in normalized or "旧消息" in normalized):
+        return True
+    return False
+
+
 def remove_quote_fragments(text: str) -> tuple[str, list[dict[str, str]]]:
     fragments: list[dict[str, str]] = []
     clean = str(text or "")
@@ -552,7 +564,7 @@ def remove_quote_fragments(text: str) -> tuple[str, list[dict[str, str]]]:
         if not line:
             continue
         compact = re.sub(r"\s+", "", line)
-        if compact.startswith(("引用", "回复")) and ("：" in line or ":" in line or len(compact) <= 80):
+        if line_looks_like_quote_preview(line) and ("：" in line or ":" in line or len(compact) <= 80):
             fragments.append({"text": line, "reason": "quote_line"})
             continue
         lines.append(line)
