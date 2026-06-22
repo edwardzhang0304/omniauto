@@ -1787,6 +1787,8 @@ def input_add_friend_query_and_search(hwnd: int, output_dir: Path, *, query: str
     timings.append({'name': 'add_friend_search_button_click', 'seconds': round(time.perf_counter() - button_click_started_at, 3), 'result': button_click_result})
     pause_seconds = _ops().add_friend_paced_pause('verify', reason='after_add_friend_search_button_click_before_result_capture')
     timings.append({'name': 'after_add_friend_search_button_click_before_result_capture_pause', 'seconds': round(pause_seconds, 3)})
+    settle_seconds = add_friend_wait_for_search_result_settle()
+    timings.append({'name': 'after_add_friend_search_button_click_result_settle_wait', 'seconds': round(settle_seconds, 3)})
     result_shot, result_path = _ops().capture_wechat_window_visible_screen(hwnd, artifact_dir=str(output_dir), label='add_friend_search_result_window')
     result_region = add_friend_search_result_region(result_shot.size)
     result_ocr_started_at = time.perf_counter()
@@ -1979,6 +1981,19 @@ def click_add_friend_ocr_item(hwnd: int, item: dict[str, Any]) -> None:
 
 def add_friend_wait_before_ocr(reason: str) -> None:
     _ops().add_friend_human_pause(1200, 2600, reason=reason)
+
+
+def add_friend_wait_for_search_result_settle() -> float:
+    delay_ms = bounded_int(
+        os.getenv('WECHAT_WIN32_OCR_ADD_FRIEND_SEARCH_RESULT_SETTLE_MS'),
+        default=1800,
+        minimum=0,
+        maximum=8000,
+    )
+    if delay_ms <= 0:
+        return 0.0
+    time.sleep(delay_ms / 1000.0)
+    return delay_ms / 1000.0
 
 
 def clear_add_friend_sidebar_search_box(hwnd: int, search_x: int, search_y: int, *, target_hint: str='') -> None:
