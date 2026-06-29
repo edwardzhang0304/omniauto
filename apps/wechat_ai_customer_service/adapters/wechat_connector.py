@@ -16,6 +16,7 @@ every operation when that reserve path is enabled.
 from __future__ import annotations
 
 import difflib
+import builtins
 import json
 import os
 import queue
@@ -26,6 +27,7 @@ import sys
 import threading
 import time
 from contextlib import contextmanager
+from contextvars import ContextVar
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -53,6 +55,25 @@ _simulated_inbound_lock = threading.Lock()
 _simulated_inbound_cache: dict[str, list[dict[str, Any]]] = {}
 
 
+def _shared_context_var(name: str, *, default: bool = False) -> ContextVar[bool]:
+    store = getattr(builtins, "_omniauto_wechat_connector_contextvars", None)
+    if not isinstance(store, dict):
+        store = {}
+        setattr(builtins, "_omniauto_wechat_connector_contextvars", store)
+    existing = store.get(name)
+    if isinstance(existing, ContextVar):
+        return existing
+    created: ContextVar[bool] = ContextVar(name, default=default)
+    store[name] = created
+    return created
+
+
+_same_target_continuation_send_fast_path = _shared_context_var(
+    "same_target_continuation_send_fast_path",
+    default=False,
+)
+
+
 class WeChatConnectorError(RuntimeError):
     """Raised when the connector cannot complete a guarded operation."""
 
@@ -63,6 +84,25 @@ class RPALockTimeoutError(TimeoutError):
     def __init__(self, message: str, *, meta: dict[str, Any]) -> None:
         super().__init__(message)
         self.meta = dict(meta)
+
+
+def same_target_continuation_send_active() -> bool:
+    return bool(_same_target_continuation_send_fast_path.get(False))
+
+
+@contextmanager
+def same_target_continuation_send_context(enabled: bool = True):
+    token = _same_target_continuation_send_fast_path.set(bool(enabled))
+    try:
+        yield
+    finally:
+        _same_target_continuation_send_fast_path.reset(token)
+
+
+def same_target_continuation_send_env() -> dict[str, str]:
+    if not same_target_continuation_send_active():
+        return {}
+    return {"WECHAT_WIN32_OCR_CONTINUATION_SEND_FAST_PATH": "1"}
 
 
 @dataclass(frozen=True)
@@ -462,7 +502,9 @@ class WeChatConnector:
         lock_timeout = rpa_lock_timeout_seconds("send", default=18.0)
         try:
             with wechat_rpa_lock("send", timeout_seconds=lock_timeout) as lock_meta:
-                primary = self.call_compat_sidecar(compat_args_list, allow_failure=True, env_overrides=send_rpa_env())
+                env_overrides = send_rpa_env()
+                env_overrides.update(same_target_continuation_send_env())
+                primary = self.call_compat_sidecar(compat_args_list, allow_failure=True, env_overrides=env_overrides)
                 if primary.get("ok"):
                     primary.setdefault("adapter", "win32_ocr")
                     primary.setdefault("transport_priority", "rpa_first")
@@ -1037,10 +1079,16 @@ def wechat_rpa_lock(action: str, *, timeout_seconds: float = 90.0, stale_seconds
         except Exception:
             current = {}
         if int(current.get("pid") or 0) == os.getpid():
-            try:
-                lock_path.unlink()
-            except FileNotFoundError:
-                pass
+            for attempt in range(6):
+                try:
+                    lock_path.unlink()
+                    break
+                except FileNotFoundError:
+                    break
+                except PermissionError:
+                    if attempt >= 5:
+                        break
+                    time.sleep(0.08)
 
 
 def should_break_wechat_rpa_lock(path: Path, *, stale_seconds: float) -> bool:

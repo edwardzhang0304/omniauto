@@ -267,7 +267,7 @@ def update_conversation_interaction_state_on_capture(
     elapsed_since_reply = seconds_between(state.get("last_reply_started_at") or state.get("last_reply_sent_at"), tick)
     elapsed_since_customer = seconds_between(state.get("last_customer_message_at"), tick)
     chase_up = message_looks_like_chase_up(clean_text)
-    if chase_up and (has_unanswered_before_capture or elapsed_since_reply >= 15 or elapsed_since_customer >= 15):
+    if chase_up and has_unanswered_before_capture:
         posture = "acknowledge_delay_then_continue"
         delay_context = delay_context_for_elapsed(max(elapsed_since_reply, elapsed_since_customer))
         chase_streak = int(state.get("chase_up_streak") or 0) + 1

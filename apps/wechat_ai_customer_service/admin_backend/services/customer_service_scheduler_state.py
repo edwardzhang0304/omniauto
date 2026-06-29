@@ -2314,6 +2314,7 @@ def state_summary(state: dict[str, Any]) -> dict[str, Any]:
         "llm_queued": planner_queued + polish_queued,
         "llm_running": planner_running + polish_running,
         "reply_ready": sum(1 for item in replies if item.get("status") == "ready"),
+        "reply_sending": sum(1 for item in replies if item.get("status") == "sending"),
         "reply_stale": sum(1 for item in replies if item.get("status") == "stale"),
         "reply_sent": sum(1 for item in replies if item.get("status") == "sent"),
         "reply_failed": sum(1 for item in replies if item.get("status") == "send_failed"),

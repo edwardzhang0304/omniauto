@@ -118,6 +118,59 @@ def check_clipboard_once_fails_for_normal_acceptance() -> None:
         assert_true(any(item["id"] == "humanized_send_policy" for item in report["summary"]["failures"]), "humanized send gate should fail")
 
 
+def check_report_uses_live_safety_effective_rpa_send_config() -> None:
+    with tempfile.TemporaryDirectory(prefix="rpa_acceptance_live_safety_") as tmp:
+        root = Path(tmp)
+        config = good_listener_config()
+        config["targets"] = [{"name": "客户A", "enabled": True, "exact": True}]
+        config["live_safety_guard"] = {
+            "enabled": True,
+            "allowed_targets": ["客户A"],
+            "require_recent_bootstrap": False,
+        }
+        config["rpa_humanized_send"]["input_method"] = "sendinput_unicode"
+        config["rpa_humanized_send"]["typing_typo_probability"] = 0.1
+        config["rpa_humanized_send"]["typing_typo_max"] = 1
+        make_runtime_fixture(root, config=config)
+        report = collect_rpa_acceptance_report(runtime_root=root, tenant_id="unit", env={}, wechat_probe="none")
+        assert_true(report["status"] == "pass", f"effective live-safety config should pass: {report}")
+        send_config = report["snapshots"]["listener_config"]["rpa_humanized_send"]
+        assert_true(
+            send_config.get("input_method") == "clipboard_chunks",
+            f"report should show effective live-safety input method: {send_config}",
+        )
+        assert_true(send_config.get("typing_typo_probability") == 0.0, f"report should show typo disabled: {send_config}")
+        assert_true(send_config.get("typing_typo_max") == 0, f"report should show typo budget disabled: {send_config}")
+
+
+def check_report_tolerates_invalid_live_safety_rpa_numbers() -> None:
+    with tempfile.TemporaryDirectory(prefix="rpa_acceptance_live_safety_invalid_") as tmp:
+        root = Path(tmp)
+        config = good_listener_config()
+        config["targets"] = [{"name": "客户A", "enabled": True, "exact": True}]
+        config["live_safety_guard"] = {
+            "enabled": True,
+            "allowed_targets": ["客户A"],
+            "require_recent_bootstrap": False,
+        }
+        config["rpa_humanized_send"].update(
+            {
+                "input_method": "sendinput_unicode",
+                "typing_chunk_max_chars": "bad",
+                "send_pre_delay_min_ms": "bad",
+                "send_rate_burst_limit": "bad",
+            }
+        )
+        make_runtime_fixture(root, config=config)
+        report = collect_rpa_acceptance_report(runtime_root=root, tenant_id="unit", env={}, wechat_probe="none")
+        assert_true(report["status"] == "pass", f"invalid old RPA numbers should not break report: {report}")
+        send_config = report["snapshots"]["listener_config"]["rpa_humanized_send"]
+        assert_true(send_config.get("input_method") == "clipboard_chunks", f"effective config mismatch: {send_config}")
+        assert_true(int(send_config.get("typing_chunk_max_chars") or 0) >= 4, f"chunk max should be normalized: {send_config}")
+        assert_true(int(send_config.get("send_pre_delay_min_ms") or 0) >= 250, f"delay should be normalized: {send_config}")
+        assert_true(int(send_config.get("send_rate_burst_limit") or 0) >= 20, f"burst limit should be normalized: {send_config}")
+
+
 def check_fixed_window_origin_required() -> None:
     with tempfile.TemporaryDirectory(prefix="rpa_acceptance_window_origin_") as tmp:
         root = Path(tmp)
@@ -185,6 +238,8 @@ def run_all() -> dict[str, Any]:
         check_recorder_only_fixture_uses_guard_defaults,
         check_wxauto4_enabled_fails,
         check_clipboard_once_fails_for_normal_acceptance,
+        check_report_uses_live_safety_effective_rpa_send_config,
+        check_report_tolerates_invalid_live_safety_rpa_numbers,
         check_fixed_window_origin_required,
         check_running_without_guard_fails,
         check_running_with_guard_passes,

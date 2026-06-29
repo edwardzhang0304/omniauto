@@ -52,6 +52,9 @@ BUILTIN_MODULES = [
             "llm_segmentation_enabled": True,
             "llm_segmentation_max_segments": 6,
             "llm_supplement_mode": "missing_core_fields_only",
+            "recorder_brain_classification_enabled": True,
+            "recorder_brain_classification_min_confidence": 0.68,
+            "recorder_brain_classification_max_calls_per_run": 16,
             "extract_mode": "llm_first",
             "missing_quantity_strategy": "strict",
             "include_record_types_in_main_sheet": ["order_item", "gift_item"],
@@ -364,7 +367,13 @@ class RecorderModuleRegistryService:
                     if not isinstance(include_types, list) or not include_types:
                         config["include_record_types_in_main_sheet"] = list(builtin_config.get("include_record_types_in_main_sheet") or ["order_item", "gift_item"])
                         config_changed = True
-                    for bool_key in ("llm_dynamic_budget_enabled", "force_multi_sku_split_enabled", "context_followup_enabled", "brand_llm_inference_enabled"):
+                    for bool_key in (
+                        "llm_dynamic_budget_enabled",
+                        "force_multi_sku_split_enabled",
+                        "context_followup_enabled",
+                        "brand_llm_inference_enabled",
+                        "recorder_brain_classification_enabled",
+                    ):
                         if bool_key not in config:
                             config[bool_key] = bool(builtin_config.get(bool_key, True))
                             config_changed = True
@@ -385,6 +394,8 @@ class RecorderModuleRegistryService:
                         ("force_multi_order_signal_threshold", 2),
                         ("brand_llm_inference_max_calls_per_run", 20),
                         ("brand_llm_inference_min_confidence", 0.62),
+                        ("recorder_brain_classification_min_confidence", 0.68),
+                        ("recorder_brain_classification_max_calls_per_run", 16),
                     ):
                         try:
                             parsed = float(config.get(numeric_key)) if ("ratio" in numeric_key or "confidence" in numeric_key) else int(config.get(numeric_key))

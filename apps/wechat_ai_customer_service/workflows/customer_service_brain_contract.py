@@ -196,6 +196,11 @@ AUTHORITY_FACT_HINT_TERMS = (
 PRICE_QUESTION_TERMS = ("多少钱", "价格", "报价", "怎么卖", "几万", "多少米", "落地", "费用")
 RECOMMENDATION_QUESTION_TERMS = ("推荐", "建议", "怎么选", "选哪", "哪款", "哪台", "哪个", "更适合", "优先", "挑一")
 COMPARISON_QUESTION_TERMS = ("对比", "区别", "哪个好", "哪一个好", "比起来", "相比")
+QUANTITY_PRICE_QUESTION_TERMS = ("多少钱", "价格", "报价", "费用", "合计", "总共", "总价", "货款", "怎么卖")
+SHIPPING_QUESTION_TERMS = ("运费", "物流", "发到", "寄到", "送到", "配送", "包邮", "到上海", "发上海")
+SHIPPING_CHARGE_REPLY_TERMS = ("运费", "物流费", "配送费", "到付", "实报实销", "按物流")
+FREE_SHIPPING_REPLY_TERMS = ("包邮", "免运费", "运费不用", "不收运费")
+QUANTITY_UNIT_TERMS = ("台", "套", "件", "个", "箱", "辆", "只", "条", "支", "批")
 DIRECT_DECISION_REQUEST_TERMS = (
     "直接帮我挑",
     "直接给我挑",
@@ -460,6 +465,27 @@ SOCIAL_TURN_STALE_BUSINESS_CONTEXT_TERMS = tuple(
             "销售",
         )
     )
+)
+SOCIAL_TURN_PRIOR_CONTEXT_REVIVAL_TERMS = (
+    "您之前",
+    "你之前",
+    "之前问",
+    "之前聊",
+    "之前提",
+    "刚才问",
+    "刚才聊",
+    "前面问",
+    "前面聊",
+    "上次问",
+    "上次聊",
+    "还需要帮您确认",
+    "还需要我确认",
+    "继续给您",
+    "继续帮您",
+    "接着给您",
+    "接着帮您",
+    "接回刚才",
+    "接着刚才",
 )
 UNNECESSARY_HANDOFF_VISIBLE_TERMS = ("转人工", "人工客服", "人工帮", "负责人", "专员")
 INTERNAL_VISIBLE_MARKER_TERMS = (
@@ -745,7 +771,7 @@ QUALITY_WEAK_PRODUCT_ENTITY_TERMS = {
     "25l",
     "2.5l",
 }
-PRICE_VALUE_RE = re.compile(r"\d+(?:\.\d+)?\s*(?:万|万元|w|W)")
+PRICE_VALUE_RE = re.compile(r"\d+(?:\.\d+)?\s*(?:万元|万|w|W|元|块钱|块)")
 CONCRETE_MILEAGE_RE = re.compile(r"\d+(?:\.\d+)?\s*(?:万)?\s*公里")
 
 
@@ -1217,6 +1243,20 @@ def verify_brain_reply_quality(
         )
         if unsupported_context_check.get("error"):
             errors.append(str(unsupported_context_check["error"]))
+        supported_context_check = check_social_turn_revives_supported_prior_business_context(
+            question,
+            clean_reply,
+            evidence_pack or {},
+        )
+        if supported_context_check.get("error"):
+            errors.append(str(supported_context_check["error"]))
+        self_history_check = check_social_turn_continues_self_history_without_open_customer_context(
+            question,
+            clean_reply,
+            evidence_pack or {},
+        )
+        if self_history_check.get("error"):
+            errors.append(str(self_history_check["error"]))
         if len(clean_reply) > int(cfg.get("social_reply_soft_max_chars") or 80):
             warnings.append("social_reply_too_long")
     elif is_thin_social_or_common_sense_reply(question, clean_reply, plan):
@@ -1244,6 +1284,22 @@ def verify_brain_reply_quality(
                 errors.append("asks_new_need_instead_of_answering_price")
         elif PRICE_VALUE_RE.search(clean_reply):
             errors.append("price_answer_without_product_evidence")
+
+    quantity_tier_check = check_quantity_quote_uses_applicable_product_tier(
+        question,
+        clean_reply,
+        evidence_pack or {},
+    )
+    if quantity_tier_check.get("error"):
+        errors.append(str(quantity_tier_check["error"]))
+
+    shipping_policy_check = check_reply_respects_product_shipping_policy(
+        question,
+        clean_reply,
+        evidence_pack or {},
+    )
+    if shipping_policy_check.get("error"):
+        errors.append(str(shipping_policy_check["error"]))
 
     if contextual_recommendation_question and is_generic_stall_reply(clean_reply):
         errors.append("generic_stall_reply_for_contextual_recommendation")
@@ -1778,6 +1834,39 @@ def check_social_turn_revives_unsupported_business_context(
     return {}
 
 
+def check_social_turn_revives_supported_prior_business_context(
+    question: str,
+    reply: str,
+    evidence_pack: dict[str, Any],
+) -> dict[str, Any]:
+    """Keep pure social openings focused even when old business facts exist.
+
+    Product master or formal knowledge may support old entities, but support is
+    not the same thing as relevance. If the current customer turn is only a
+    greeting/summon/thanks/farewell and does not explicitly continue the prior
+    topic, Brain should acknowledge the social turn without proactively naming
+    previous business threads.
+    """
+
+    q = normalize_space(strip_nonsemantic_runtime_markers(question))
+    r = normalize_space(reply)
+    if not q or not r:
+        return {}
+    obligation = classify_social_reply_obligation(q)
+    category = str(obligation.get("category") or "")
+    if category not in {"greeting", "summon_or_chase", "social_short", "thanks", "farewell"}:
+        return {}
+    if social_companion_turn_has_real_business_intent(q):
+        return {}
+    if social_turn_explicitly_continues_prior_context(q):
+        return {}
+    if social_turn_has_valid_delay_followup_continuity(q, r, evidence_pack):
+        return {}
+    if contains_any(r, SOCIAL_TURN_PRIOR_CONTEXT_REVIVAL_TERMS):
+        return {"error": "social_turn_revived_supported_prior_business_context"}
+    return {}
+
+
 def social_turn_explicitly_continues_prior_context(question: str) -> bool:
     return contains_any(
         question,
@@ -2034,6 +2123,47 @@ def check_delay_followup_context_continuity(question: str, reply: str, evidence_
         return {}
     if len(r) <= 80 and contains_any(r, fresh_greeting_terms):
         return {"error": "delay_followup_reply_looks_like_fresh_greeting"}
+    return {}
+
+
+def check_social_turn_continues_self_history_without_open_customer_context(
+    question: str,
+    reply: str,
+    evidence_pack: dict[str, Any],
+) -> dict[str, Any]:
+    """Reject self-history continuation for pure social turns without open customer context."""
+
+    if not is_social_only_message(question):
+        return {}
+    state = extract_conversation_interaction_state(evidence_pack)
+    unanswered_text = normalize_space(str(state.get("last_unanswered_customer_text") or ""))
+    current = normalize_space(question)
+    compact_unanswered = re.sub(r"\W+", "", unanswered_text).lower()
+    compact_current = re.sub(r"\W+", "", current).lower()
+    has_prior_unanswered = bool(compact_unanswered and compact_unanswered != compact_current)
+    if has_prior_unanswered:
+        return {}
+    reply_text = normalize_space(reply)
+    self_history_continuation_terms = (
+        "配置",
+        "资料",
+        "这就发",
+        "马上发",
+        "现在发",
+        "发您",
+        "发你",
+        "核对",
+        "核资料",
+        "整理好",
+        "刚在整理",
+        "刚在核",
+        "您先看",
+        "你先看",
+        "随时问我",
+        "随时喊我",
+    )
+    if contains_any(reply_text, self_history_continuation_terms):
+        return {"error": "social_turn_continued_self_history_without_open_customer_context"}
     return {}
 
 
@@ -2586,6 +2716,79 @@ def collect_authoritative_product_ids(evidence_pack: dict[str, Any]) -> set[str]
             if value:
                 ids.add(value)
     return ids
+
+
+def check_quantity_quote_uses_applicable_product_tier(
+    question: str,
+    reply: str,
+    evidence_pack: dict[str, Any],
+) -> dict[str, Any]:
+    quantity = extract_quality_requested_quantity(question)
+    if quantity <= 0:
+        return {}
+    if not contains_any(question, QUANTITY_PRICE_QUESTION_TERMS):
+        return {}
+    for item in iter_authoritative_product_items(evidence_pack):
+        if not reply_or_question_mentions_product(question, reply, item):
+            continue
+        tier = applicable_quality_price_tier(item, quantity)
+        if not tier:
+            continue
+        tier_price = float(tier.get("unit_price") or 0.0)
+        base_price = quality_product_price_value(item)
+        if tier_price <= 0:
+            continue
+        expected_total = tier_price * quantity
+        reply_prices = quality_numeric_values(reply)
+        reply_has_tier_price = numeric_values_contain(reply_prices, tier_price)
+        reply_has_expected_total = numeric_values_contain(reply_prices, expected_total)
+        reply_has_base_total = base_price > 0 and abs(base_price - tier_price) > 0.03 and numeric_values_contain(reply_prices, base_price * quantity)
+        if reply_has_base_total and not (reply_has_tier_price or reply_has_expected_total):
+            return {
+                "error": "quantity_quote_ignored_applicable_price_tier",
+                "quantity": quantity,
+                "tier_price": tier_price,
+                "expected_total": expected_total,
+                "base_price": base_price,
+            }
+        if not reply_has_tier_price and not reply_has_expected_total:
+            return {
+                "error": "quantity_quote_missing_applicable_price_tier",
+                "quantity": quantity,
+                "tier_price": tier_price,
+                "expected_total": expected_total,
+            }
+    return {}
+
+
+def check_reply_respects_product_shipping_policy(
+    question: str,
+    reply: str,
+    evidence_pack: dict[str, Any],
+) -> dict[str, Any]:
+    if not contains_any(question, SHIPPING_QUESTION_TERMS):
+        return {}
+    destination = extract_quality_shipping_destination(question)
+    if not destination:
+        return {}
+    for item in iter_authoritative_product_items(evidence_pack):
+        if not reply_or_question_mentions_product(question, reply, item):
+            continue
+        policy = product_shipping_policy_text(item)
+        if not policy:
+            continue
+        if shipping_policy_says_free_for_destination(policy, destination):
+            reply_mentions_paid_shipping = contains_any(reply, SHIPPING_CHARGE_REPLY_TERMS) and (
+                bool(re.search(r"\d+(?:\.\d+)?\s*(?:-|到|~|－|—)?\s*\d*(?:\.\d+)?\s*元", reply))
+                or contains_any(reply, ("到付", "实报实销", "按物流"))
+            )
+            if reply_mentions_paid_shipping and not contains_any(reply, FREE_SHIPPING_REPLY_TERMS):
+                return {
+                    "error": "shipping_policy_contradiction_for_destination",
+                    "destination": destination,
+                    "policy": policy[:120],
+                }
+    return {}
 
 
 def check_budget_fit_recommendation(
@@ -3269,6 +3472,139 @@ def parse_quality_price_value(value: Any) -> float:
     return float(match.group(1)) if match else 0.0
 
 
+def quality_product_price_value(item: dict[str, Any]) -> float:
+    for container in (item, item.get("data") if isinstance(item.get("data"), dict) else {}):
+        for key in ("price", "price_wan", "unit_price", "报价", "标价"):
+            try:
+                value = container.get(key)
+            except AttributeError:
+                continue
+            parsed = parse_quality_price_value(value)
+            if parsed > 0:
+                return parsed
+    return 0.0
+
+
+def extract_quality_requested_quantity(text: str) -> int:
+    clean = normalize_space(text)
+    candidates: list[int] = []
+    unit_group = "".join(re.escape(unit) for unit in QUANTITY_UNIT_TERMS)
+    for match in re.finditer(rf"(\d{{1,5}})\s*[{unit_group}]", clean):
+        try:
+            value = int(match.group(1))
+        except ValueError:
+            continue
+        if value > 0:
+            candidates.append(value)
+    return max(candidates) if candidates else 0
+
+
+def applicable_quality_price_tier(item: dict[str, Any], quantity: int) -> dict[str, float]:
+    applicable: dict[str, float] = {}
+    for tier in collect_quality_price_tiers(item):
+        min_quantity = int(tier.get("min_quantity") or 0)
+        if quantity >= min_quantity and min_quantity >= int(applicable.get("min_quantity") or 0):
+            applicable = tier
+    return applicable
+
+
+def collect_quality_price_tiers(item: dict[str, Any]) -> list[dict[str, float]]:
+    tiers: list[dict[str, float]] = []
+    for value in (item.get("price_tiers"), (item.get("data") if isinstance(item.get("data"), dict) else {}).get("price_tiers")):
+        if not isinstance(value, list):
+            continue
+        for raw in value:
+            if not isinstance(raw, dict):
+                continue
+            min_quantity = parse_quality_quantity_value(
+                raw.get("min_quantity")
+                or raw.get("min_qty")
+                or raw.get("quantity")
+                or raw.get("数量")
+            )
+            unit_price = 0.0
+            for key in ("unit_price", "price", "tier_price", "单价"):
+                unit_price = parse_quality_price_value(raw.get(key))
+                if unit_price > 0:
+                    break
+            if min_quantity > 0 and unit_price > 0:
+                tiers.append({"min_quantity": float(min_quantity), "unit_price": float(unit_price)})
+    tiers.sort(key=lambda item: int(item.get("min_quantity") or 0))
+    return tiers
+
+
+def parse_quality_quantity_value(value: Any) -> int:
+    if isinstance(value, (int, float)):
+        return int(value)
+    match = re.search(r"(\d{1,5})", str(value or ""))
+    return int(match.group(1)) if match else 0
+
+
+def quality_numeric_values(text: str) -> list[float]:
+    values: list[float] = []
+    for match in re.finditer(r"(?<![A-Za-z0-9])(\d+(?:\.\d+)?)(?![A-Za-z0-9])", str(text or "")):
+        try:
+            value = float(match.group(1))
+        except ValueError:
+            continue
+        if value > 0 and value not in values:
+            values.append(value)
+    return values
+
+
+def numeric_values_contain(values: list[float], expected: float) -> bool:
+    if expected <= 0:
+        return False
+    tolerance = max(0.03, abs(expected) * 0.002)
+    return any(abs(value - expected) <= tolerance for value in values)
+
+
+def reply_or_question_mentions_product(question: str, reply: str, item: dict[str, Any]) -> bool:
+    terms = product_item_quality_terms(item)
+    return mentions_any_entity(question, terms) or mentions_any_entity(reply, terms)
+
+
+def product_shipping_policy_text(item: dict[str, Any]) -> str:
+    data = item.get("data") if isinstance(item.get("data"), dict) else {}
+    parts: list[str] = []
+    for container in (item, data):
+        for key in ("shipping_policy", "shipping", "logistics_policy", "delivery_policy", "发货", "物流"):
+            value = str(container.get(key) or "").strip()
+            if value and value not in parts:
+                parts.append(value)
+    return "\n".join(parts)
+
+
+def extract_quality_shipping_destination(text: str) -> str:
+    clean = normalize_space(text)
+    for pattern in (
+        r"(?:发到|寄到|送到|到)\s*([\u4e00-\u9fff]{2,8})",
+        r"([\u4e00-\u9fff]{2,8})(?:运费|物流|配送|包邮)",
+    ):
+        match = re.search(pattern, clean)
+        if match:
+            return match.group(1)
+    if "上海" in clean:
+        return "上海"
+    return ""
+
+
+def shipping_policy_says_free_for_destination(policy: str, destination: str) -> bool:
+    clean_policy = normalize_space(policy)
+    clean_destination = normalize_space(destination)
+    if not clean_policy or not clean_destination or "包邮" not in clean_policy:
+        return False
+    if "全国包邮" in clean_policy:
+        return True
+    jiangzhehu_regions = ("上海", "江苏", "浙江", "南京", "苏州", "无锡", "常州", "杭州", "宁波")
+    if "江浙沪" in clean_policy and any(region in clean_destination for region in jiangzhehu_regions):
+        return True
+    for region in jiangzhehu_regions:
+        if region in clean_policy and region in clean_destination:
+            return True
+    return False
+
+
 def product_item_quality_terms(item: dict[str, Any]) -> list[str]:
     terms: list[str] = []
     for key in ("name", "title", "model", "sku", "id", "product_id"):
@@ -3385,6 +3721,7 @@ def build_quality_repair_instruction(*, errors: list[str], warnings: list[str], 
         "如果客户只是问候、催促、感谢或告别，也必须由Brain生成一句简短自然的客户可见回复，不能空回复、不能转人工、不能机械沉默；"
         "如果失败项包含thin_social_or_common_sense_reply，说明低风险闲聊/常识回复太薄；请先自然回答当前问题，再根据会话上下文轻承接，不要机械拉业务，不要编造事实；"
         "如果失败项包含social_turn_revived_unsupported_business_context，说明客户当前只是问候/召唤/感谢/告别，回复却主动复活了旧业务或无权威来源的实体；请只简短回应当前社交消息，除非客户本轮明确说继续刚才话题；"
+        "如果失败项包含social_turn_revived_supported_prior_business_context，说明客户当前只是纯问候/召唤/感谢/告别，即使历史上下文或商品库里有旧业务实体，也不能主动说“您之前问过/继续确认”；请只回应当前社交消息，除非客户本轮明确要求继续上文；"
         "如果客户使用“刚才/前面/这两台/直接挑”等指代表达，必须结合conversation.context、history_text和product_master候选延续上一轮需求，不能只回复“确认/稍等”；"
         "如果失败项包含direct_decision_request_asked_new_need_instead_of_choice，说明客户已经要求你基于现有上下文直接做选择；请用product_master候选和会话上下文给出明确主推/备选及一句理由，不能继续泛泛反问预算、用途或车型偏好；"
         "如果失败项包含relative_context_product_drift或missing_relative_context_product_reference，必须只围绕recent_product_ids/上一轮可见推荐商品回答，不能换成新的商品候选；"
@@ -3392,6 +3729,8 @@ def build_quality_repair_instruction(*, errors: list[str], warnings: list[str], 
         "如果失败项包含missing_cargo_space_topic，必须正面回应客户的后备厢/装载/空间约束，推荐理由里要解释哪台更贴合这个使用场景；"
         "如果失败项包含missing_available_cargo_fit_candidate或contradicts_available_cargo_fit_candidate，说明product_master里已有预算内装载/空间更贴合的非轿车候选，必须点名这些候选，不能说现有都是轿车，也不能只泛泛说以后再筛SUV；"
         "如果失败项包含known_budget_fit_product_marked_price_uncertain，说明商品库已有预算内价格，必须直接按product_master价格表达，不能说还要看报价能否压进预算；"
+        "如果失败项包含quantity_quote_ignored_applicable_price_tier或quantity_quote_missing_applicable_price_tier，说明客户给了购买数量且product_master.price_tiers里有命中的阶梯价；必须按命中的阶梯单价重新计算小计，不能按基准价报价；"
+        "如果失败项包含shipping_policy_contradiction_for_destination，说明当前目的地命中product_master.shipping_policy里的配送/包邮规则；必须按该配送政策表达，不能编造运费区间、到付或实报实销；"
         "如果失败项包含over_budget_primary_recommendation_without_caveat，说明客户已有明确预算，但回复把超预算商品放成主推且没有清楚标注预算外；必须优先给预算内/近预算候选，超预算商品只能作为预算外备选并说明取舍；"
         "如果失败项包含over_budget_recommendation_fills_budget_slot，说明客户让你按预算挑多台车，超预算车型不能冒充预算内推荐；"
         "预算内候选不足两台时，可以先主推预算内候选，再把超预算车明确标成备选/预算外选择，并说明取舍，不能含糊成同等级推荐；"

@@ -80,6 +80,9 @@ def run_checks() -> None:
         validate_date_range_runs(client, headers)
         validate_name_context_inference_rules()
         validate_name_owner_price_prefix_cleanup()
+        validate_real_lab_product_name_prefix_cleanup()
+        validate_recorder_brain_semantic_classification_blocks()
+        validate_live_ocr_quote_and_validation_marker_cleanup()
         validate_ocr_broken_line_order_rules()
         validate_brand_single_use_rules()
         validate_close_duplicate_export_row_dedupe()
@@ -581,6 +584,232 @@ def validate_name_owner_price_prefix_cleanup() -> None:
     assert_true(svc._should_drop_order_row(formulation_noise_row), "OCR formulation fragments should not enter the main order sheet")
 
 
+def validate_real_lab_product_name_prefix_cleanup() -> None:
+    svc = RecorderExportRunService(tenant_id=TEST_TENANT)
+    real_cases = [
+        (
+            "张-陈秋平",
+            "张老师-陈秋平老师：订源叶 羟基酪醇 S25716-1g，2瓶，单价384元。",
+            "源叶羟基酪醇 S25716-1g",
+        ),
+        (
+            "李-王主任：麦克林 HEPES缓冲液 H811225 500g",
+            "李老师-王主任：麦克林 HEPES缓冲液 H811225 500g，订1瓶，售价218元。",
+            "麦克林 HEPES缓冲液 H811225 500g",
+        ),
+        (
+            "周梦：白鲨 50ml离心管",
+            "周梦老师：白鲨 50ml离心管，订2包，每包60元，明天送。",
+            "白鲨 50ml离心管",
+        ),
+        (
+            "郭：索莱宝油红O染色试剂盒",
+            "郭老师：索莱宝油红O染色试剂盒 G1262，订1盒，420元。",
+            "索莱宝油红O染色试剂盒",
+        ),
+        (
+            "师：Thermo Nunc 细胞培养瓶",
+            "姚晓敏老师：Thermo Nunc T75细胞培养瓶，订2箱，总价640元。",
+            "Thermo Nunc 细胞培养瓶",
+        ),
+        (
+            "正能产品名称：VEGFA Rabbit mAb 产品名称：FABP4 Rabbit mAb 产品名称：ACOX1 Rabbit mAb 这3个抗体",
+            "正能 产品名称：VEGFA Rabbit mAb 产品名称：FABP4 Rabbit mAb 产品名称：ACOX1 Rabbit mAb 这3个抗体各订一个20μ的，参加活动333*3=999元",
+            "正能 VEGFA Rabbit mAb FABP4 Rabbit mAb ACOX1 Rabbit mAb",
+        ),
+    ]
+    for product_name, scope_text, expected in real_cases:
+        sanitized = svc._sanitize_product_name(product_name, scope_text=scope_text)
+        assert_equal(sanitized, expected, f"real lab product prefix cleanup failed for {product_name}")
+    assert_equal(
+        svc._sanitize_product_name("源叶：氯化钡", scope_text="源叶：氯化钡 订一个500g 83*0.9=74.7元 程建军老师"),
+        "源叶：氯化钡",
+        "brand prefix with colon should not be stripped as person metadata",
+    )
+
+    row = svc._empty_order_row()
+    row.update(
+        {
+            "name": "周梦",
+            "owner": "周梦",
+            "product_name": "周梦：白鲨 50ml离心管",
+            "quantity": "2",
+            "unit": "包",
+            "sale_price": "60",
+            "source_scope_text": "周梦老师：白鲨 50ml离心管，订2包，每包60元，明天送。",
+            "confidence": 0.82,
+            "needs_review": False,
+        }
+    )
+    finalized = svc._finalize_order_row(row, {"content": row["source_scope_text"], "message_time": "2025-03-04 08:34:00"})
+    assert_equal(str(finalized.get("product_name") or ""), "白鲨 50ml离心管", "finalize should strip real lab speaker prefix before export")
+    assert_true("周梦：" not in str(finalized.get("product_name") or ""), "finalized product should not keep speaker prefix")
+
+
+def validate_recorder_brain_semantic_classification_blocks() -> None:
+    svc = RecorderExportRunService(tenant_id=TEST_TENANT)
+    message = {
+        "raw_message_id": "recorder_brain_realish_001",
+        "type": "text",
+        "content": "周梦老师：白鲨 50ml离心管，订2包，每包60元，明天送。\n[引用 张老师：旧订单 试剂盒 9盒 1元]\n收件人：周梦",
+        "message_time": "2025-03-04 08:35:00",
+    }
+    original_call_deepseek_json = export_run_module.call_deepseek_json
+
+    def fake_call_deepseek_json(prompt: dict[str, Any]) -> dict[str, Any]:
+        if prompt.get("task") == "你是微信AI记录员的语义分类中枢。请把混杂的原始聊天内容分门别类，先分类，不要直接编造表格字段。":
+            return {
+                "message_intent": "mixed_order",
+                "confidence": 0.91,
+                "blocks": [
+                    {
+                        "block_id": "meta_1",
+                        "type": "person_metadata",
+                        "text": "周梦老师",
+                        "source_role": "metadata",
+                        "can_create_order_row": False,
+                        "confidence": 0.95,
+                        "reason": "teacher name metadata",
+                    },
+                    {
+                        "block_id": "order_1",
+                        "type": "order_item",
+                        "text": "白鲨 50ml离心管，订2包，每包60元，明天送。",
+                        "source_role": "current_message",
+                        "can_create_order_row": True,
+                        "confidence": 0.9,
+                        "reason": "current order block",
+                    },
+                    {
+                        "block_id": "quote_1",
+                        "type": "quote_history",
+                        "text": "张老师：旧订单 试剂盒 9盒 1元",
+                        "source_role": "quote",
+                        "can_create_order_row": False,
+                        "confidence": 0.92,
+                        "reason": "quoted history",
+                    },
+                    {
+                        "block_id": "receiver_1",
+                        "type": "receiver_info",
+                        "text": "收件人：周梦",
+                        "source_role": "current_message",
+                        "can_create_order_row": False,
+                        "confidence": 0.86,
+                        "reason": "receiver info",
+                    },
+                ],
+                "warnings": [],
+            }
+        if prompt.get("response_contract", {}).get("rows") == "array<object>":
+            candidate_segments = prompt.get("candidate_segments") if isinstance(prompt.get("candidate_segments"), list) else []
+            assert_equal(candidate_segments[:1], ["白鲨 50ml离心管，订2包，每包60元，明天送。"], "classified order block should be the first extraction segment")
+            return {
+                "confidence": 0.9,
+                "reason": "classified block extraction",
+                "rows": [
+                    {
+                        "product_name": "白鲨 50ml离心管",
+                        "brand": "白鲨",
+                        "quantity": "2",
+                        "unit": "包",
+                        "sale_price": "60",
+                        "total_sale": "120",
+                        "name": "周梦",
+                        "owner": "周梦",
+                        "record_type": "order_item",
+                        "confidence": 0.9,
+                        "needs_review": False,
+                        "source_scope_text": "白鲨 50ml离心管，订2包，每包60元，明天送。",
+                    }
+                ],
+            }
+        return {}
+
+    export_run_module.call_deepseek_json = fake_call_deepseek_json
+    try:
+        segments = svc._recorder_brain_order_block_segments(message, min_confidence=0.68, max_segments=4)
+        assert_equal(segments, ["白鲨 50ml离心管，订2包，每包60元，明天送。"], "recorder brain should keep only current order blocks")
+        rows = svc._llm_extract_rows(
+            message,
+            date_output_mode="YYYY-MM-DD",
+            use_segmentation=False,
+            max_segments=4,
+            recorder_brain_segments=segments,
+        )
+        products = [str(row.get("product_name") or "") for row in rows]
+        joined = " ".join(products)
+        assert_true(any("白鲨" in product and "离心管" in product for product in products), f"recorder brain order block should feed extraction: {products}")
+        assert_true("试剂盒" not in joined, f"quoted product should not enter classified extraction: {products}")
+    finally:
+        export_run_module.call_deepseek_json = original_call_deepseek_json
+
+
+def validate_live_ocr_quote_and_validation_marker_cleanup() -> None:
+    svc = RecorderExportRunService(tenant_id=TEST_TENANT)
+    rows, _meta = svc._extract_order_rows(
+        {"module_key": "order_sheet_lab_v1", "module_version": "test", "config": {"llm_extraction_enabled": False}},
+        [
+            {
+                "raw_message_id": "live_ocr_marker_a",
+                "type": "text",
+                "sender": "self",
+                "sender_role": "self",
+                "source_adapter": "win32_ocr",
+                "content": "【记录员实盘验收\nLIVE LAB EXPORT 20260622 011053A】\n周梦老师：白鲨50ml离心管，订2包，每包60元，明天送。",
+                "captured_at": "2026-06-22T01:13:52",
+                "conversation_type": "group",
+                "target_name": "新数据测试",
+            },
+            {
+                "raw_message_id": "live_ocr_quote_only_b",
+                "type": "text",
+                "sender": "self",
+                "sender_role": "self",
+                "source_adapter": "win32_ocr",
+                "content": "【记录员实盘验收\nLIVE_LAB_EXPORT_20260622_011053 C】\n[引[用 张老师： I旧订单 试剂盒 9盒 1元]",
+                "captured_at": "2026-06-22T01:13:52",
+                "conversation_type": "group",
+                "target_name": "新数据测试",
+            },
+            {
+                "raw_message_id": "live_ocr_marker_code_noise",
+                "type": "text",
+                "sender": "self",
+                "sender_role": "self",
+                "source_adapter": "win32_ocr",
+                "content": "LIVLLAD LAPURTZUZ0U0ZZUTU9U0A]\n周梦老师：白鲨50ml离心管，订2包，每包60元，明天送。",
+                "captured_at": "2026-06-22T01:13:52",
+                "conversation_type": "group",
+                "target_name": "新数据测试",
+            },
+            {
+                "raw_message_id": "live_ocr_quote_mixed_c",
+                "type": "text",
+                "sender": "self",
+                "sender_role": "self",
+                "source_adapter": "win32_ocr",
+                "content": "【记录员实盘验收\nLIVE LAB EXPORT 20260622 011053 C]\n[用 张老师： I旧订单 试剂盒 9盒 1元]\n当前只订津腾有机滤膜0.22um50片/盒订1盒88元，收货人陈老师。",
+                "captured_at": "2026-06-22T01:13:52",
+                "conversation_type": "group",
+                "target_name": "新数据测试",
+            },
+        ],
+    )
+    products = [str(row.get("product_name") or "") for row in rows]
+    joined = " ".join(products)
+    assert_true(any("白鲨" in item and "离心管" in item for item in products), f"live marker row should keep real product only: {products}")
+    assert_true("LIVE" not in joined and "LIVLLAD" not in joined and "记录员实盘验收" not in joined, f"validation marker must not enter product fields: {products}")
+    assert_true("试剂盒" not in joined and "旧订单" not in joined, f"quoted history must not create export products: {products}")
+    membrane_rows = [row for row in rows if "津腾" in str(row.get("product_name") or "") or "滤膜" in str(row.get("product_name") or "")]
+    assert_true(membrane_rows, f"current membrane order should be extracted: {rows}")
+    membrane = membrane_rows[0]
+    assert_equal(str(membrane.get("quantity") or ""), "1", f"packaging count must not be used as order quantity: {membrane}")
+    assert_equal(str(membrane.get("unit") or ""), "盒", f"order unit should be the explicit ordered box: {membrane}")
+    assert_equal(str(membrane.get("total_sale") or ""), "88", f"total should use ordered quantity times price: {membrane}")
+    assert_true("quote_contamination" in set(membrane.get("risk_flags") or []), f"mixed quote row should stay reviewable: {membrane}")
+
+
 def validate_ocr_broken_line_order_rules() -> None:
     svc = RecorderExportRunService(tenant_id=TEST_TENANT)
     examples = [
@@ -634,6 +863,77 @@ def validate_ocr_broken_line_order_rules() -> None:
             assert_true(expected in compact, f"OCR broken-line extraction should include {expected}: {compact}")
         joined = " ".join(" ".join(item) for item in compact)
         assert_true("LIVE_OCR_FIX" not in joined, f"validation marker should not pollute extracted rows: {compact}")
+    live_split_rows = svc._rule_extract_rows_from_message(
+        {
+            "raw_message_id": "ocr_unit_price_tail",
+            "content": "王主任-赵老板老师：源叶 羟基酪醇 S25716-1g 订\n1瓶384元；索莱宝PBS缓冲液P1010订3瓶每瓶\n45元。",
+            "message_time": "2026-06-22T01:13:52",
+            "captured_at": "2026-06-22T01:13:52",
+            "source_adapter": "win32_ocr",
+            "type": "text",
+        }
+    )
+    assert_true(
+        any("源叶" in str(row.get("brand") or "") and "羟基酪醇" in str(row.get("product_name") or "") for row in live_split_rows),
+        f"first SKU should stay source-brand row: {live_split_rows}",
+    )
+    assert_true(
+        any(
+            "索莱宝" in str(row.get("brand") or "")
+            and "PBS" in str(row.get("product_name") or "")
+            and str(row.get("quantity") or "") == "3"
+            and str(row.get("sale_price") or "") == "45"
+            for row in live_split_rows
+        ),
+        f"unit-price tail should merge into second SKU: {live_split_rows}",
+    )
+    assert_true(
+        not any(str(row.get("product_name") or "") == "源叶" and str(row.get("sale_price") or "") == "45" for row in live_split_rows),
+        f"price tail must not become a carried-brand row: {live_split_rows}",
+    )
+    deduped = svc._dedupe_close_export_rows(
+        [
+            {
+                "date": "2026-06-22",
+                "time": "01:13:52",
+                "name": "王主任",
+                "owner": "赵老板",
+                "brand": "源叶",
+                "product_name": "源叶羟基酪醇",
+                "spec": "S25716-1g",
+                "quantity": "2",
+                "unit": "瓶",
+                "sale_price": "",
+                "total_sale": "",
+                "record_type": "order_item",
+                "needs_review": True,
+                "risk_flags": ["missing_price"],
+                "confidence": 0.62,
+                "evidence_message_ids": ["bad_ocr"],
+            },
+            {
+                "date": "2026-06-22",
+                "time": "01:13:52",
+                "name": "王主任",
+                "owner": "赵老板",
+                "brand": "源叶",
+                "product_name": "源叶羟基酪醇",
+                "spec": "S25716-1g",
+                "quantity": "1",
+                "unit": "瓶",
+                "sale_price": "384",
+                "total_sale": "384",
+                "record_type": "order_item",
+                "needs_review": False,
+                "risk_flags": [],
+                "confidence": 0.95,
+                "evidence_message_ids": ["good_ocr"],
+            },
+        ]
+    )
+    assert_equal(len(deduped), 1, f"close OCR variants should collapse into the better row: {deduped}")
+    assert_equal(str(deduped[0].get("quantity") or ""), "1", f"complete OCR row should win: {deduped}")
+    assert_equal(str(deduped[0].get("sale_price") or ""), "384", f"complete OCR row should carry price: {deduped}")
 
 
 def validate_brand_single_use_rules() -> None:

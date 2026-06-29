@@ -33,6 +33,13 @@ def _truthy(value: Any, *, default: bool = False) -> bool:
     return str(value).strip().lower() not in {"0", "false", "no", "off", ""}
 
 
+def _int_or(value: Any, default: int) -> int:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
+
+
 def _name(value: Any) -> str:
     return str(value or "").strip()
 
@@ -291,6 +298,40 @@ def assert_customer_service_recent_bootstrap_guard(
     return summary
 
 
+def apply_customer_service_live_safety_rpa_send_defaults(config: dict[str, Any]) -> dict[str, Any]:
+    """Apply live-safety RPA input defaults without validating target routing."""
+
+    merged = copy.deepcopy(config)
+    if not _guard_settings(merged):
+        return merged
+
+    rpa_send = dict(merged.get("rpa_humanized_send", {}) or {})
+    rpa_send.setdefault("enabled", True)
+    rpa_send["input_method"] = "clipboard_chunks"
+    rpa_send["adaptive_speed_enabled"] = True
+    rpa_send["typing_typo_probability"] = 0.0
+    rpa_send["typing_typo_max"] = 0
+    rpa_send["typing_chunk_min_chars"] = max(_int_or(rpa_send.get("typing_chunk_min_chars"), 0), 2)
+    rpa_send["typing_chunk_max_chars"] = min(max(_int_or(rpa_send.get("typing_chunk_max_chars"), 5), 4), 7)
+    rpa_send["typing_char_delay_min_ms"] = max(_int_or(rpa_send.get("typing_char_delay_min_ms"), 0), 45)
+    rpa_send["typing_char_delay_max_ms"] = max(_int_or(rpa_send.get("typing_char_delay_max_ms"), 0), 145)
+    rpa_send["typing_micro_pause_every_chars"] = max(_int_or(rpa_send.get("typing_micro_pause_every_chars"), 0), 18)
+    rpa_send["typing_micro_pause_min_ms"] = max(_int_or(rpa_send.get("typing_micro_pause_min_ms"), 0), 180)
+    rpa_send["typing_micro_pause_max_ms"] = max(_int_or(rpa_send.get("typing_micro_pause_max_ms"), 0), 480)
+    rpa_send["send_pre_delay_min_ms"] = max(_int_or(rpa_send.get("send_pre_delay_min_ms"), 0), 250)
+    rpa_send["send_pre_delay_max_ms"] = max(_int_or(rpa_send.get("send_pre_delay_max_ms"), 0), 900)
+    rpa_send["send_post_input_delay_min_ms"] = max(_int_or(rpa_send.get("send_post_input_delay_min_ms"), 0), 320)
+    rpa_send["send_post_input_delay_max_ms"] = max(_int_or(rpa_send.get("send_post_input_delay_max_ms"), 0), 900)
+    rpa_send["input_fast_visual_confirm_enabled"] = True
+    rpa_send["send_trigger_mode"] = "enter_only"
+    rpa_send["send_input_confirm_attempts"] = 1
+    rpa_send["send_rate_min_interval_seconds"] = 0
+    rpa_send["send_rate_burst_window_seconds"] = max(_int_or(rpa_send.get("send_rate_burst_window_seconds"), 0), 600)
+    rpa_send["send_rate_burst_limit"] = max(_int_or(rpa_send.get("send_rate_burst_limit"), 0), 20)
+    merged["rpa_humanized_send"] = rpa_send
+    return merged
+
+
 def apply_customer_service_live_safety_guard(
     config: dict[str, Any],
     *,
@@ -465,32 +506,7 @@ def apply_customer_service_live_safety_guard(
     transport_risk["passive_logout_probe_interval_seconds"] = min(max(probe_interval, 30), 60)
     merged["transport_risk_guard"] = transport_risk
 
-    rpa_send = dict(merged.get("rpa_humanized_send", {}) or {})
-    rpa_send.setdefault("enabled", True)
-    rpa_send.setdefault("input_method", "clipboard_chunks")
-    rpa_send["adaptive_speed_enabled"] = True
-    rpa_send["typing_typo_probability"] = 0.0
-    rpa_send["typing_typo_max"] = 0
-    rpa_send["typing_chunk_min_chars"] = max(int(rpa_send.get("typing_chunk_min_chars") or 0), 2)
-    rpa_send["typing_chunk_max_chars"] = min(max(int(rpa_send.get("typing_chunk_max_chars") or 5), 4), 7)
-    rpa_send["typing_char_delay_min_ms"] = max(int(rpa_send.get("typing_char_delay_min_ms") or 0), 45)
-    rpa_send["typing_char_delay_max_ms"] = max(int(rpa_send.get("typing_char_delay_max_ms") or 0), 145)
-    rpa_send["typing_micro_pause_every_chars"] = max(int(rpa_send.get("typing_micro_pause_every_chars") or 0), 18)
-    rpa_send["typing_micro_pause_min_ms"] = max(int(rpa_send.get("typing_micro_pause_min_ms") or 0), 180)
-    rpa_send["typing_micro_pause_max_ms"] = max(int(rpa_send.get("typing_micro_pause_max_ms") or 0), 480)
-    rpa_send["send_pre_delay_min_ms"] = max(int(rpa_send.get("send_pre_delay_min_ms") or 0), 250)
-    rpa_send["send_pre_delay_max_ms"] = max(int(rpa_send.get("send_pre_delay_max_ms") or 0), 900)
-    # Keep a human-like post-input pause, but avoid an overly conservative floor
-    # that drags response latency in normal low-risk scenarios.
-    rpa_send["send_post_input_delay_min_ms"] = max(int(rpa_send.get("send_post_input_delay_min_ms") or 0), 320)
-    rpa_send["send_post_input_delay_max_ms"] = max(int(rpa_send.get("send_post_input_delay_max_ms") or 0), 900)
-    rpa_send["input_fast_visual_confirm_enabled"] = True
-    rpa_send["send_trigger_mode"] = "enter_only"
-    rpa_send["send_input_confirm_attempts"] = 1
-    rpa_send["send_rate_min_interval_seconds"] = 0
-    rpa_send["send_rate_burst_window_seconds"] = max(int(rpa_send.get("send_rate_burst_window_seconds") or 0), 600)
-    rpa_send["send_rate_burst_limit"] = max(int(rpa_send.get("send_rate_burst_limit") or 0), 20)
-    merged["rpa_humanized_send"] = rpa_send
+    merged = apply_customer_service_live_safety_rpa_send_defaults(merged)
 
     for section_name, max_chars in (
         ("rag_response", 150),

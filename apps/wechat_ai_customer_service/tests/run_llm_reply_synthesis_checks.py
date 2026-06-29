@@ -221,7 +221,13 @@ class FakeConnector:
     def __post_init__(self) -> None:
         self.sent_texts: list[str] = []
 
-    def get_messages(self, target: str, exact: bool = True) -> dict[str, Any]:
+    def get_messages(
+        self,
+        target: str,
+        exact: bool = True,
+        history_load_times: int = 0,
+        **kwargs: Any,
+    ) -> dict[str, Any]:
         return {"ok": True, "target": target, "exact": exact, "messages": self.messages}
 
     def send_text_and_verify(self, target: str, text: str, exact: bool = True, *, skip_send_rate_guard: bool = False) -> dict[str, Any]:

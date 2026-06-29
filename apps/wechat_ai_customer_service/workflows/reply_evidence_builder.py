@@ -775,6 +775,7 @@ def compact_rag_evidence(rag_evidence: dict[str, Any], *, max_hits: int, max_tex
             if str(item.get("chunk_id") or item.get("source_id") or "")
         ][: max(1, max_hits)],
         "ai_experience_hits": ai_experience_hits[: max(1, max_hits)],
+        "timing": rag_evidence.get("timing") if isinstance(rag_evidence.get("timing"), dict) else {},
         "hits": hits,
     }
 
@@ -2157,6 +2158,9 @@ def flatten_text_values(value: Any) -> list[str]:
 
 def catalog_product_payload(item: dict[str, Any]) -> dict[str, Any]:
     data = item.get("data", {}) or {}
+    price_tiers = data.get("price_tiers", []) or data.get("discount_tiers", []) or []
+    shipping_policy = str(data.get("shipping_policy") or data.get("shipping") or "")
+    warranty_policy = str(data.get("warranty_policy") or data.get("warranty") or "")
     return {
         "id": item.get("id"),
         "category_id": PRODUCT_MASTER_CATEGORY_ID,
@@ -2167,10 +2171,14 @@ def catalog_product_payload(item: dict[str, Any]) -> dict[str, Any]:
         "aliases": list(data.get("aliases", []) or [])[:10],
         "specs": truncate_text(str(data.get("specs") or ""), 260),
         "price": data.get("price"),
+        "price_tiers": compact_mapping(price_tiers, max_text_chars=120),
+        "discount_tiers": compact_mapping(price_tiers, max_text_chars=120),
         "unit": data.get("unit"),
         "stock": data.get("inventory"),
-        "shipping": truncate_text(str(data.get("shipping_policy") or ""), 220),
-        "warranty": truncate_text(str(data.get("warranty_policy") or ""), 220),
+        "shipping_policy": truncate_text(shipping_policy, 220),
+        "warranty_policy": truncate_text(warranty_policy, 220),
+        "shipping": truncate_text(shipping_policy, 220),
+        "warranty": truncate_text(warranty_policy, 220),
         "reply_templates": compact_mapping(data.get("reply_templates", {}) or {}, max_text_chars=260),
         "risk_rules": list(data.get("risk_rules", []) or [])[:8],
     }

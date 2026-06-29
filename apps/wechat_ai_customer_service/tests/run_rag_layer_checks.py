@@ -18,6 +18,7 @@ for path in (PROJECT_ROOT, WORKFLOWS_ROOT, ADAPTERS_ROOT):
     if str(path) not in sys.path:
         sys.path.insert(0, str(path))
 
+import rag_layer  # noqa: E402
 from rag_layer import RagService  # noqa: E402
 from apps.wechat_ai_customer_service.admin_backend.services.learning_service import attach_rag_evidence  # noqa: E402
 from apps.wechat_ai_customer_service.adapters import knowledge_loader  # noqa: E402
@@ -152,6 +153,66 @@ def check_runtime_evidence_can_include_rag_without_authorization() -> None:
     assert_true(pack.get("safety", {}).get("allowed_auto_reply") in {True, False}, "safety summary should remain present")
 
 
+def check_experience_reference_index_cache_reuses_built_entries() -> None:
+    service = make_service()
+    experience_root = service.sources_root.parent / "rag_experience"
+    experience_root.mkdir(parents=True, exist_ok=True)
+    experiences_path = experience_root / "experiences.json"
+    experiences_path.write_text(
+        json.dumps(
+            [
+                {
+                    "experience_id": "exp_vehicle_recommend_1",
+                    "tenant_id": "rag_test",
+                    "status": "active",
+                    "source": "rag_reply",
+                    "summary": "客户要家用代步车时，先按预算筛两台。",
+                    "question": "预算5到8万，家用代步，省油耐用。",
+                    "reply_text": "可以先看领动和凌派，预算内更稳。",
+                    "rag_hit": {
+                        "chunk_id": "chunk_vehicle_recommend_1",
+                        "score": 0.82,
+                        "text": "家用代步预算内推荐，强调预算、车况和用途。",
+                    },
+                    "usage": {"reply_count": 3},
+                    "experience_review": {"status": "kept"},
+                    "reviewed_by_user": True,
+                    "quality": {
+                        "band": "medium",
+                        "retrieval_allowed": False,
+                        "signals": {
+                            "quality_allows_retrieval": True,
+                            "review_allows_retrieval": True,
+                        },
+                    },
+                    "updated_at": "2026-06-21T00:00:00",
+                    "created_at": "2026-06-21T00:00:00",
+                }
+            ],
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    rag_layer._EXPERIENCE_REFERENCE_INDEX_CACHE["key"] = None
+    rag_layer._EXPERIENCE_REFERENCE_INDEX_CACHE["entries"] = None
+
+    first = service.search_experience_references("预算5到8万家用代步", limit=3)
+    first_timing = first.get("timing") if isinstance(first.get("timing"), dict) else {}
+    assert_equal(first_timing.get("reference_index_cache_state"), "miss", "first reference search should build cache")
+    assert_true(first.get("hits"), "first reference search should still return hits")
+
+    second = service.search_experience_references("预算5到8万家用代步", limit=3)
+    second_timing = second.get("timing") if isinstance(second.get("timing"), dict) else {}
+    assert_equal(second_timing.get("reference_index_cache_state"), "memory", "second reference search should reuse memory cache")
+
+    rag_layer._EXPERIENCE_REFERENCE_INDEX_CACHE["key"] = None
+    rag_layer._EXPERIENCE_REFERENCE_INDEX_CACHE["entries"] = None
+    third = service.search_experience_references("预算5到8万家用代步", limit=3)
+    third_timing = third.get("timing") if isinstance(third.get("timing"), dict) else {}
+    assert_equal(third_timing.get("reference_index_cache_state"), "file", "new-process style search should reuse file cache")
+    assert_true(third.get("hits"), "file cache reference search should still return hits")
+
+
 def cleanup() -> None:
     if TEST_ROOT.exists():
         shutil.rmtree(TEST_ROOT)
@@ -172,6 +233,7 @@ CHECKS = [
     check_candidate_can_attach_rag_evidence,
     check_delete_source_removes_chunks_and_index,
     check_runtime_evidence_can_include_rag_without_authorization,
+    check_experience_reference_index_cache_reuses_built_entries,
 ]
 
 
