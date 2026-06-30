@@ -59,6 +59,8 @@ except Exception as exc:  # pragma: no cover - allows pure parser tests without 
         MOUSEEVENTF_MOVE = 0x0001
         MOUSEEVENTF_LEFTDOWN = 0x0002
         MOUSEEVENTF_LEFTUP = 0x0004
+        MOUSEEVENTF_RIGHTDOWN = 0x0008
+        MOUSEEVENTF_RIGHTUP = 0x0010
         MOUSEEVENTF_WHEEL = 0x0800
         WM_MOUSEWHEEL = 0x020A
 
@@ -178,7 +180,7 @@ CHAT_HEADER_MAX_Y = 90
 CHAT_INPUT_BOTTOM_OFFSET = 52
 DEFAULT_MESSAGE_BOTTOM_EXCLUDE_PX = 95
 OCR_MIN_CONFIDENCE = 0.45
-SIDECAR_BASE_ACTIONS = ("status", "capabilities", "sessions", "messages", "send", "recover-render")
+SIDECAR_BASE_ACTIONS = ("status", "capabilities", "sessions", "messages", "send", "recover-render", "voice-transcribe")
 SIDECAR_ACTION_CHOICES = (*SIDECAR_BASE_ACTIONS, *ADD_FRIEND_ROUTES)
 SEND_GUARD_PATH = PROJECT_ROOT / "runtime" / "wechat_win32_ocr_send_guard.json"
 UI_ACTION_GUARD_PATH = PROJECT_ROOT / "runtime" / "wechat_win32_ocr_ui_action_guard.json"
@@ -215,6 +217,7 @@ DEFAULT_UI_ACTION_KIND_SWITCH_GAP_MS = 170
 DEFAULT_UI_ACTION_NEAR_POINT_RADIUS_PX = 7
 DEFAULT_UI_ACTION_NEAR_POINT_GAP_MS = 720
 DEFAULT_UI_ACTION_NEAR_POINT_SOFT_LIMIT = 2
+VOICE_TRANSCRIBE_TEXT_TOKENS = ("转文字", "语音转文字", "转为文字", "转写")
 DEFAULT_RENDER_RECOVERY_MIN_INTERVAL_SECONDS = 180
 DEFAULT_QUICK_LOGIN_AUTO_ENTER = False
 DEFAULT_TARGET_READY_MAX_ATTEMPTS = 1
@@ -674,6 +677,56 @@ def run_action(args: argparse.Namespace) -> dict[str, Any]:
             min_delay_ms=bounded_int(args.min_delay_ms, default=180, minimum=0, maximum=5000),
             max_delay_ms=bounded_int(args.max_delay_ms, default=650, minimum=0, maximum=10000),
             restore_to_latest=True if args.restore_to_latest is None else bool(args.restore_to_latest),
+            artifact_dir=args.artifact_dir,
+        )
+    if action == "voice-transcribe":
+        if args.target:
+            clean_session_key = str(args.session_key or "").strip()
+            validation = (
+                {"ok": False, "reason": "session_key_requires_row_activation"}
+                if clean_session_key
+                else validate_active_send_target(
+                    hwnd,
+                    args.target,
+                    exact=bool(args.exact),
+                    artifact_dir=args.artifact_dir,
+                )
+            )
+            opened = False
+            if not validation.get("ok"):
+                opened = open_chat(
+                    hwnd,
+                    args.target,
+                    exact=bool(args.exact),
+                    artifact_dir=args.artifact_dir,
+                    session_key=clean_session_key,
+                )
+                humanized_action_sleep(380, 620)
+                validation = validate_active_send_target(
+                    hwnd,
+                    args.target,
+                    exact=bool(args.exact),
+                    artifact_dir=args.artifact_dir,
+                )
+            if not validation.get("ok"):
+                return {
+                    "ok": False,
+                    "online": bool(validation.get("online", True)),
+                    "adapter": "win32_ocr",
+                    "state": "target_not_confirmed_for_voice_transcribe",
+                    "window_probe": probe,
+                    "target": args.target,
+                    "opened": bool(opened),
+                    "guard": validation,
+                    "open_chat_timing": dict(_LAST_OPEN_CHAT_TIMING),
+                    "error": "The target chat was not confirmed before clicking voice transcription.",
+                }
+            if scroll_to_latest_before_read_enabled():
+                scroll_chat_to_latest(hwnd)
+        return voice_transcribe_payload(
+            hwnd,
+            probe,
+            target=args.target or "",
             artifact_dir=args.artifact_dir,
         )
     if action == "send":
@@ -1533,6 +1586,606 @@ def messages_payload(
         "messages": messages,
         "ocr_items_count": len(ocr_items),
     }
+
+
+def voice_transcribe_payload(
+    hwnd: int,
+    probe: dict[str, Any],
+    *,
+    target: str,
+    artifact_dir: str | None = None,
+) -> dict[str, Any]:
+    before_screenshot, before_path = capture_wechat(hwnd, artifact_dir=artifact_dir, label="voice_transcribe_before")
+    before_items = run_ocr(before_screenshot)
+    geometry = get_window_geometry(hwnd)
+    image_size = getattr(before_screenshot, "size", (int(geometry.get("width") or 0), int(geometry.get("height") or 0)))
+    before_messages = parse_messages_from_ocr(before_items, image_size, target=target)
+    click_target = find_voice_transcribe_target(before_items, image_size)
+    hover_attempt: dict[str, Any] | None = None
+    context_menu_attempt: dict[str, Any] | None = None
+    if not click_target:
+        return {
+            "ok": False,
+            "online": True,
+            "adapter": "win32_ocr",
+            "state": "voice_transcribe_target_not_found",
+            "window_probe": probe,
+            "target": target,
+            "screenshot_path": before_path,
+            "ocr_items_count": len(before_items),
+            "messages": before_messages,
+            "error": "No visible WeChat voice-to-text affordance was found.",
+        }
+
+    if str(click_target.get("source") or "") == "inferred_from_voice_duration":
+        hover_attempt = hover_voice_transcribe_button(
+            hwnd,
+            click_target,
+            image_size=image_size,
+            artifact_dir=artifact_dir,
+        )
+        hover_target = hover_attempt.get("click_target") if isinstance(hover_attempt, dict) else None
+        if isinstance(hover_target, dict):
+            click_target = hover_target
+
+    click_x, click_y, jitter_meta = jitter_voice_transcribe_click_point(click_target, geometry)
+    click_bounds = [int(value) for value in click_target.get("click_bounds") or []]
+    click_result = human_window_image_click_in_bounds(
+        hwnd,
+        click_x,
+        click_y,
+        bounds=click_bounds,
+        action_name="voice_transcribe_click",
+    )
+    wait_ms = bounded_int(
+        os.getenv("WECHAT_WIN32_OCR_VOICE_TRANSCRIBE_WAIT_MS"),
+        default=2600,
+        minimum=500,
+        maximum=15000,
+    )
+    humanized_action_sleep(max(200, wait_ms - 500), wait_ms + 900)
+
+    after_screenshot, after_path = capture_wechat(hwnd, artifact_dir=artifact_dir, label="voice_transcribe_after")
+    after_items = run_ocr(after_screenshot)
+    after_size = getattr(after_screenshot, "size", image_size)
+    after_messages = parse_messages_from_ocr(after_items, after_size, target=target)
+    before_keys = {sidecar_message_content_key(message) for message in before_messages}
+    new_messages = [
+        message
+        for message in after_messages
+        if sidecar_message_content_key(message) not in before_keys
+    ]
+    transcribed_messages = [
+        message
+        for message in new_messages
+        if not voice_duration_text_like(str(message.get("content_clean") or message.get("content") or ""))
+    ]
+    return {
+        "ok": bool(click_result.get("ok")),
+        "online": True,
+        "adapter": "win32_ocr",
+        "state": "voice_transcribe_clicked" if click_result.get("ok") else "voice_transcribe_click_failed",
+        "window_probe": probe,
+        "target": target,
+        "before_screenshot_path": before_path,
+        "after_screenshot_path": after_path,
+        "click_target": click_target,
+        "hover_attempt": hover_attempt or {},
+        "context_menu_attempt": context_menu_attempt or {},
+        "click": click_result,
+        "planned_click_point": [click_x, click_y],
+        "click_jitter": jitter_meta,
+        "wait_ms": wait_ms,
+        "before_messages": before_messages,
+        "messages": after_messages,
+        "new_messages": new_messages,
+        "transcribed_messages": transcribed_messages,
+        "ocr_items_count": len(after_items),
+    }
+
+
+def voice_transcribe_compact_text(text: str) -> str:
+    return re.sub(r"\s+", "", normalize_ocr_text(text))
+
+
+def voice_transcribe_button_text_like(text: str) -> bool:
+    compact = voice_transcribe_compact_text(text)
+    return bool(compact) and any(voice_transcribe_compact_text(token) in compact for token in VOICE_TRANSCRIBE_TEXT_TOKENS)
+
+
+def voice_duration_text_like(text: str) -> bool:
+    compact = voice_transcribe_compact_text(text).replace("“", '"').replace("”", '"').replace("″", '"')
+    if not compact:
+        return False
+    if re.fullmatch(r"\d{1,3}\"", compact):
+        return True
+    if re.fullmatch(r"0\d{1,2}", compact):
+        return True
+    if re.fullmatch(r"[\)\]）>》!|lI]{1,2}\d{1,3}[\"']?", compact):
+        return True
+    return False
+
+
+def voice_duration_item_like(item: dict[str, Any]) -> bool:
+    text = str(item.get("text") or "")
+    if voice_duration_text_like(text):
+        return True
+    compact = voice_transcribe_compact_text(text)
+    if not re.fullmatch(r"\d{1,3}", compact):
+        return False
+    width = float(item.get("right") or 0) - float(item.get("left") or 0)
+    height = float(item.get("bottom") or 0) - float(item.get("top") or 0)
+    return 8.0 <= width <= 86.0 and 8.0 <= height <= 36.0
+
+
+def voice_transcribe_item_is_in_chat_surface(item: dict[str, Any], image_size: tuple[int, int]) -> bool:
+    width, height = image_size
+    split_x = session_split_x(width)
+    center_y = float(item.get("center_y") or 0)
+    if float(item.get("left") or 0) < split_x + 20:
+        return False
+    if center_y < chat_header_cutoff_y(height):
+        return False
+    bottom_exclude_px = max(DEFAULT_MESSAGE_BOTTOM_EXCLUDE_PX, int(height * 0.10))
+    if center_y > height - bottom_exclude_px:
+        return False
+    rect = {
+        "left": int(float(item.get("left") or 0)),
+        "top": int(float(item.get("top") or 0)),
+        "right": int(float(item.get("right") or 0)),
+        "bottom": int(float(item.get("bottom") or 0)),
+    }
+    return not rect_in_input_area(rect, {"width": width, "height": height})
+
+
+def voice_duration_has_transcribed_text_below(
+    duration_item: dict[str, Any],
+    ocr_items: list[dict[str, Any]],
+    image_size: tuple[int, int],
+) -> bool:
+    duration_bottom = float(duration_item.get("bottom") or 0)
+    duration_left = float(duration_item.get("left") or 0)
+    duration_right = float(duration_item.get("right") or 0)
+    for item in ocr_items:
+        if item is duration_item:
+            continue
+        text = str(item.get("text") or "").strip()
+        if not text or voice_transcribe_button_text_like(text) or voice_duration_item_like(item):
+            continue
+        if is_message_noise(text):
+            continue
+        if not voice_transcribe_item_is_in_chat_surface(item, image_size):
+            continue
+        gap = float(item.get("top") or 0) - duration_bottom
+        if gap < 8 or gap > 88:
+            continue
+        left = float(item.get("left") or 0)
+        right = float(item.get("right") or 0)
+        starts_near_voice = duration_left - 42 <= left <= duration_right + 42
+        extends_like_transcript = right >= duration_right + 40 or len(voice_transcribe_compact_text(text)) >= 4
+        if starts_near_voice and extends_like_transcript:
+            return True
+    return False
+
+
+def voice_transcribe_click_target_from_bounds(
+    *,
+    source: str,
+    label: str,
+    bounds: list[int],
+    item: dict[str, Any] | None = None,
+    min_points: int = 10,
+) -> dict[str, Any]:
+    left, top, right, bottom = [int(value) for value in bounds[:4]]
+    candidates = _spread_points_in_rect(left, top, right, bottom, min_points=min_points)
+    return {
+        "source": source,
+        "label": label,
+        "click_bounds": [left, top, right, bottom],
+        "candidate_points": [list(point) for point in candidates],
+        "candidate_count": len(candidates),
+        "item": item or {},
+    }
+
+
+def voice_duration_context_click_bounds(item: dict[str, Any], image_size: tuple[int, int]) -> list[int]:
+    width, height = image_size
+    split_x = session_split_x(width)
+    left = max(split_x + 16, int(float(item.get("left") or 0)) - 18)
+    top = max(chat_header_cutoff_y(height), int(float(item.get("top") or 0)) - 16)
+    right = min(width - 18, int(float(item.get("right") or 0)) + 78)
+    bottom = min(height - DEFAULT_MESSAGE_BOTTOM_EXCLUDE_PX, int(float(item.get("bottom") or 0)) + 16)
+    if right <= left:
+        right = min(width - 18, left + 64)
+    if bottom <= top:
+        bottom = min(height - DEFAULT_MESSAGE_BOTTOM_EXCLUDE_PX, top + 28)
+    return [left, top, right, bottom]
+
+
+def voice_duration_context_click_target(duration_target: dict[str, Any], image_size: tuple[int, int]) -> dict[str, Any] | None:
+    item = duration_target.get("item") if isinstance(duration_target, dict) else None
+    if not isinstance(item, dict) or not item:
+        return None
+    bounds = voice_duration_context_click_bounds(item, image_size)
+    return voice_transcribe_click_target_from_bounds(
+        source="voice_duration_context_menu_anchor",
+        label="Right-click anchor for WeChat voice bubble context menu",
+        bounds=bounds,
+        item=item,
+    )
+
+
+def hover_voice_transcribe_button(
+    hwnd: int,
+    duration_target: dict[str, Any],
+    *,
+    image_size: tuple[int, int],
+    artifact_dir: str | None = None,
+) -> dict[str, Any]:
+    anchor = voice_duration_context_click_target(duration_target, image_size)
+    if not anchor:
+        return {"ok": False, "reason": "voice_duration_anchor_missing"}
+    geometry = get_window_geometry(hwnd)
+    anchor_x, anchor_y, anchor_jitter = jitter_voice_transcribe_click_point(anchor, geometry)
+    hover = human_window_image_hover_in_bounds(
+        hwnd,
+        anchor_x,
+        anchor_y,
+        bounds=[int(value) for value in anchor.get("click_bounds") or []],
+        action_name="voice_transcribe_duration_hover",
+    )
+    humanized_action_sleep(320, 620)
+    hover_screenshot, hover_path = capture_wechat(hwnd, artifact_dir=artifact_dir, label="voice_transcribe_hover")
+    hover_items = run_ocr(hover_screenshot)
+    hover_size = getattr(hover_screenshot, "size", image_size)
+    ocr_target = find_voice_transcribe_target(hover_items, hover_size, allow_inferred=False)
+    visual_target = None if ocr_target else find_visual_voice_transcribe_hover_target(hover_screenshot, hover_items, hover_size)
+    click_target = ocr_target or visual_target or {
+        **duration_target,
+        "source": "hover_inferred_from_voice_duration",
+        "label": "Inferred WeChat voice-to-text hover button from voice bubble",
+    }
+    return {
+        "ok": bool(hover.get("ok")),
+        "hover": hover,
+        "anchor": anchor,
+        "anchor_point": [anchor_x, anchor_y],
+        "anchor_jitter": anchor_jitter,
+        "hover_screenshot_path": hover_path,
+        "hover_ocr_items_count": len(hover_items),
+        "click_target": click_target,
+        "reason": "ocr_target_found" if ocr_target else ("visual_target_found" if visual_target else "using_hover_inferred_target"),
+    }
+
+
+def voice_transcribe_visual_button_score(image: Image.Image, bounds: list[int]) -> dict[str, Any]:
+    if image is None or not bounds or len(bounds) < 4:
+        return {"visible": False, "score": 0.0, "reason": "missing_image_or_bounds"}
+    width, height = image.size
+    left = max(0, min(width, int(bounds[0])))
+    top = max(0, min(height, int(bounds[1])))
+    right = max(left + 1, min(width, int(bounds[2])))
+    bottom = max(top + 1, min(height, int(bounds[3])))
+    crop = image.crop((left, top, right, bottom)).convert("RGB")
+    pixels = list(crop.get_flattened_data() if hasattr(crop, "get_flattened_data") else crop.getdata())
+    total = len(pixels)
+    if not total:
+        return {"visible": False, "score": 0.0, "reason": "empty_crop", "bounds": [left, top, right, bottom]}
+    mid_gray = 0
+    bright = 0
+    dark = 0
+    red = 0
+    corner = pixels[0]
+    different_from_corner = 0
+    for r, g, b in pixels:
+        avg = (r + g + b) / 3.0
+        spread = max(r, g, b) - min(r, g, b)
+        if 34.0 <= avg <= 132.0 and spread <= 34:
+            mid_gray += 1
+        if avg >= 135.0 and spread <= 86:
+            bright += 1
+        if avg <= 32.0:
+            dark += 1
+        if r >= 160 and g <= 96 and b <= 96:
+            red += 1
+        if abs(r - corner[0]) + abs(g - corner[1]) + abs(b - corner[2]) > 45:
+            different_from_corner += 1
+    mid_gray_ratio = mid_gray / total
+    bright_ratio = bright / total
+    dark_ratio = dark / total
+    red_ratio = red / total
+    diff_ratio = different_from_corner / total
+    score = mid_gray_ratio + min(diff_ratio, 0.42) * 0.35 + bright_ratio * 0.15
+    if red_ratio > 0.02 and mid_gray_ratio < 0.16:
+        score *= 0.35
+    visible = bool(mid_gray_ratio >= 0.18 and dark_ratio <= 0.88 and score >= 0.22)
+    return {
+        "visible": visible,
+        "score": round(score, 6),
+        "mid_gray_ratio": round(mid_gray_ratio, 6),
+        "bright_ratio": round(bright_ratio, 6),
+        "dark_ratio": round(dark_ratio, 6),
+        "red_ratio": round(red_ratio, 6),
+        "diff_ratio": round(diff_ratio, 6),
+        "bounds": [left, top, right, bottom],
+    }
+
+
+def find_visual_voice_transcribe_hover_target(
+    image: Image.Image,
+    ocr_items: list[dict[str, Any]],
+    image_size: tuple[int, int],
+) -> dict[str, Any] | None:
+    targets: list[dict[str, Any]] = []
+    for item in ocr_items:
+        if not voice_duration_item_like(item):
+            continue
+        if not voice_transcribe_item_is_in_chat_surface(item, image_size):
+            continue
+        if voice_duration_has_transcribed_text_below(item, ocr_items, image_size):
+            continue
+        center_y = int(float(item.get("center_y") or 0))
+        voice_right = int(float(item.get("right") or 0))
+        width, height = image_size
+        left = max(session_split_x(width) + 86, voice_right + 70)
+        right = min(width - 24, voice_right + 154)
+        top = max(chat_header_cutoff_y(height), center_y - 18)
+        bottom = min(height - DEFAULT_MESSAGE_BOTTOM_EXCLUDE_PX, center_y + 18)
+        if right <= left or bottom <= top:
+            continue
+        visual = voice_transcribe_visual_button_score(image, [left, top, right, bottom])
+        if not visual.get("visible"):
+            continue
+        target = voice_transcribe_click_target_from_bounds(
+            source="visual_hover_button",
+            label="Visually detected WeChat voice-to-text hover button",
+            bounds=[left, top, right, bottom],
+            item=item,
+        )
+        target["visual_score"] = visual
+        targets.append(target)
+    if not targets:
+        return None
+    return max(targets, key=lambda target: float((target.get("visual_score") or {}).get("score") or 0.0))
+
+
+def open_voice_transcribe_context_menu(
+    hwnd: int,
+    duration_target: dict[str, Any],
+    *,
+    image_size: tuple[int, int],
+    artifact_dir: str | None = None,
+) -> dict[str, Any]:
+    anchor = voice_duration_context_click_target(duration_target, image_size)
+    if not anchor:
+        return {"ok": False, "reason": "voice_duration_anchor_missing"}
+    geometry = get_window_geometry(hwnd)
+    anchor_x, anchor_y, anchor_jitter = jitter_voice_transcribe_click_point(anchor, geometry)
+    right_click = human_window_image_right_click_in_bounds(
+        hwnd,
+        anchor_x,
+        anchor_y,
+        bounds=[int(value) for value in anchor.get("click_bounds") or []],
+        action_name="voice_transcribe_context_right_click",
+    )
+    humanized_action_sleep(260, 520)
+    menu_screenshot, menu_path = capture_wechat(hwnd, artifact_dir=artifact_dir, label="voice_transcribe_context_menu")
+    menu_items = run_ocr(menu_screenshot)
+    menu_size = getattr(menu_screenshot, "size", image_size)
+    menu_target = find_voice_transcribe_target(menu_items, menu_size, allow_inferred=False)
+    return {
+        "ok": bool(right_click.get("ok") and menu_target),
+        "right_click": right_click,
+        "anchor": anchor,
+        "anchor_point": [anchor_x, anchor_y],
+        "anchor_jitter": anchor_jitter,
+        "menu_screenshot_path": menu_path,
+        "menu_ocr_items_count": len(menu_items),
+        "click_target": menu_target,
+        "reason": "menu_target_found" if menu_target else "menu_target_not_found",
+    }
+
+
+def dismiss_voice_transcribe_context_menu(hwnd: int) -> dict[str, Any]:
+    try:
+        activate_window(hwnd)
+        key_press(win32con.VK_ESCAPE)
+        humanized_action_sleep(120, 260)
+        return {"ok": True, "method": "escape"}
+    except Exception as exc:
+        return {"ok": False, "method": "escape", "error": repr(exc)}
+
+
+def find_voice_transcribe_target(
+    ocr_items: list[dict[str, Any]],
+    image_size: tuple[int, int],
+    *,
+    allow_inferred: bool = True,
+) -> dict[str, Any] | None:
+    width, height = image_size
+    direct_targets: list[dict[str, Any]] = []
+    for item in ocr_items:
+        text = str(item.get("text") or "")
+        if not voice_transcribe_button_text_like(text):
+            continue
+        if not voice_transcribe_item_is_in_chat_surface(item, image_size):
+            continue
+        left = max(session_split_x(width) + 16, int(float(item.get("left") or 0)) - 18)
+        top = max(chat_header_cutoff_y(height), int(float(item.get("top") or 0)) - 12)
+        right = min(width - 18, int(float(item.get("right") or 0)) + 18)
+        bottom = min(height - DEFAULT_MESSAGE_BOTTOM_EXCLUDE_PX, int(float(item.get("bottom") or 0)) + 12)
+        if right <= left or bottom <= top:
+            continue
+        direct_targets.append(
+            voice_transcribe_click_target_from_bounds(
+                source="ocr_transcribe_button",
+                label="OCR matched WeChat voice-to-text button",
+                bounds=[left, top, right, bottom],
+                item=item,
+            )
+        )
+    if direct_targets:
+        return max(direct_targets, key=lambda target: float((target.get("item") or {}).get("center_y") or 0))
+
+    if not allow_inferred:
+        return None
+
+    inferred_targets: list[dict[str, Any]] = []
+    for item in ocr_items:
+        text = str(item.get("text") or "")
+        if not voice_duration_item_like(item):
+            continue
+        if not voice_transcribe_item_is_in_chat_surface(item, image_size):
+            continue
+        if voice_duration_has_transcribed_text_below(item, ocr_items, image_size):
+            continue
+        center_y = int(float(item.get("center_y") or 0))
+        voice_right = int(float(item.get("right") or 0))
+        left = max(session_split_x(width) + 86, voice_right + 70)
+        right = min(width - 24, voice_right + 154)
+        top = max(chat_header_cutoff_y(height), center_y - 18)
+        bottom = min(height - DEFAULT_MESSAGE_BOTTOM_EXCLUDE_PX, center_y + 18)
+        if right <= left or bottom <= top:
+            continue
+        inferred_targets.append(
+            voice_transcribe_click_target_from_bounds(
+                source="inferred_from_voice_duration",
+                label="Inferred WeChat voice-to-text button from untranscribed voice bubble",
+                bounds=[left, top, right, bottom],
+                item=item,
+            )
+        )
+    if inferred_targets:
+        return max(inferred_targets, key=lambda target: float((target.get("item") or {}).get("center_y") or 0))
+    return None
+
+
+def voice_transcribe_click_candidate_points(target: dict[str, Any], *, min_points: int = 10) -> list[tuple[int, int]]:
+    bounds = target.get("click_bounds") if isinstance(target, dict) else None
+    if not isinstance(bounds, list) or len(bounds) < 4:
+        return []
+    return _spread_points_in_rect(
+        int(bounds[0]),
+        int(bounds[1]),
+        int(bounds[2]),
+        int(bounds[3]),
+        min_points=min_points,
+    )
+
+
+def jitter_voice_transcribe_click_point(target: dict[str, Any], geometry: dict[str, Any]) -> tuple[int, int, dict[str, Any]]:
+    candidates = [
+        (int(point[0]), int(point[1]))
+        for point in target.get("candidate_points", [])
+        if isinstance(point, (list, tuple)) and len(point) >= 2
+    ]
+    if not candidates:
+        candidates = voice_transcribe_click_candidate_points(target, min_points=10)
+    bounds = [int(value) for value in target.get("click_bounds", [0, 0, 0, 0])[:4]]
+    if len(bounds) < 4:
+        bounds = [0, 0, int(geometry.get("width") or 0), int(geometry.get("height") or 0)]
+    base_x, base_y = random.choice(candidates) if candidates else (
+        int((bounds[0] + bounds[2]) / 2),
+        int((bounds[1] + bounds[3]) / 2),
+    )
+    jitter_x = bounded_int(
+        os.getenv("WECHAT_WIN32_OCR_VOICE_TRANSCRIBE_POINT_JITTER_X"),
+        default=5,
+        minimum=0,
+        maximum=14,
+    )
+    jitter_y = bounded_int(
+        os.getenv("WECHAT_WIN32_OCR_VOICE_TRANSCRIBE_POINT_JITTER_Y"),
+        default=4,
+        minimum=0,
+        maximum=12,
+    )
+    final_x = bounded_int(
+        base_x + random.randint(-jitter_x, jitter_x),
+        default=base_x,
+        minimum=min(bounds[0], bounds[2]),
+        maximum=max(bounds[0], bounds[2]),
+    )
+    final_y = bounded_int(
+        base_y + random.randint(-jitter_y, jitter_y),
+        default=base_y,
+        minimum=min(bounds[1], bounds[3]),
+        maximum=max(bounds[1], bounds[3]),
+    )
+    return final_x, final_y, {
+        "enabled": True,
+        "role": "voice_transcribe_button",
+        "source": str(target.get("source") or ""),
+        "candidate_count": len(candidates),
+        "base": [base_x, base_y],
+        "final": [final_x, final_y],
+        "bounds": bounds,
+        "jitter": [jitter_x, jitter_y],
+    }
+
+
+def message_group_starts_with_voice_duration(group: list[dict[str, Any]]) -> bool:
+    if len(group) < 2:
+        return False
+    first = group[0]
+    second = group[1]
+    if not voice_duration_item_like(first):
+        return False
+    first_bottom = float(first.get("bottom") or 0)
+    second_top = float(second.get("top") or 0)
+    gap = second_top - first_bottom
+    if gap < 4 or gap > 92:
+        return False
+    first_left = float(first.get("left") or 0)
+    second_left = float(second.get("left") or 0)
+    return abs(first_left - second_left) <= 48.0
+
+
+def strip_voice_duration_prefix_from_message_content(content: str, group: list[dict[str, Any]]) -> tuple[str, bool]:
+    if not message_group_starts_with_voice_duration(group):
+        return content, False
+    lines = [line.strip() for line in str(content or "").splitlines() if line.strip()]
+    if len(lines) < 2:
+        return content, False
+    return "\n".join(lines[1:]).strip(), True
+
+
+FILE_CARD_FOOTER_TEXTS = {
+    "微信电脑版",
+    "微信Windows版",
+    "微信Mac版",
+    "WeChat for Windows",
+    "WeChat for Mac",
+}
+
+
+def message_group_is_file_card_noise(group: list[dict[str, Any]], content: str) -> bool:
+    lines = [str(line or "").strip() for line in str(content or "").splitlines() if str(line or "").strip()]
+    if not lines:
+        return False
+    if len(lines) == 1 and lines[0] in FILE_CARD_FOOTER_TEXTS:
+        return True
+    has_footer = any(line in FILE_CARD_FOOTER_TEXTS for line in lines)
+    if not has_footer:
+        return False
+    has_file_name = any(re.search(r"\.[A-Za-z0-9]{1,8}$", line) for line in lines)
+    has_file_size = any(re.fullmatch(r"\d+(?:\.\d+)?\s*[KMGT]?B?", line, re.IGNORECASE) for line in lines)
+    return bool(has_file_name or has_file_size)
+
+
+def message_group_is_voice_duration_only(group: list[dict[str, Any]]) -> bool:
+    if not group:
+        return False
+    return all(voice_duration_item_like(item) for item in group)
+
+
+def sender_fields_for_message_side(side: str, *, target: str) -> tuple[str, str]:
+    if side == "self":
+        return "self", "self"
+    conversation_type = infer_conversation_type(target)
+    if conversation_type == "private":
+        return "customer", "customer"
+    return "unknown", "unknown"
 
 
 def ocr_page_fingerprint(ocr_items: list[dict[str, Any]], *, geometry: dict[str, Any]) -> dict[str, Any]:
@@ -7155,9 +7808,13 @@ def parse_messages_from_ocr(ocr_items: list[dict[str, Any]], image_size: tuple[i
 
     messages: list[dict[str, Any]] = []
     for group in grouped:
+        if message_group_is_voice_duration_only(group):
+            continue
         raw_content = "\n".join(str(item.get("text") or "").strip() for item in group if str(item.get("text") or "").strip())
         content = normalize_message_content(raw_content)
         if not content:
+            continue
+        if message_group_is_file_card_noise(group, content):
             continue
         side = str(group[0].get("side") or "unknown")
         y = float(group[0].get("center_y") or 0)
@@ -7168,6 +7825,11 @@ def parse_messages_from_ocr(ocr_items: list[dict[str, Any]], image_size: tuple[i
             "bottom": int(max(float(item.get("bottom") or 0) for item in group)),
         }
         quality_flags: list[str] = []
+        content, voice_duration_prefix_removed = strip_voice_duration_prefix_from_message_content(content, group)
+        if not content:
+            continue
+        if voice_duration_prefix_removed:
+            quality_flags.append("voice_duration_prefix_removed")
         if len(group) > 1:
             gaps = [
                 max(0.0, float(group[index].get("top") or 0) - float(group[index - 1].get("bottom") or 0))
@@ -7178,11 +7840,12 @@ def parse_messages_from_ocr(ocr_items: list[dict[str, Any]], image_size: tuple[i
                 quality_flags.append("multi_bubble_possible_merge")
         ocr_confidence = min(float(item.get("confidence") or 0) for item in group)
         digest = hashlib.sha1(f"{target}|{side}|{round(y)}|{content}".encode("utf-8")).hexdigest()[:16]
+        sender, sender_role = sender_fields_for_message_side(side, target=target)
         record = {
             "id": f"win32_ocr:{digest}",
             "type": "text",
-            "sender": "self" if side == "self" else "unknown",
-            "sender_role": "self" if side == "self" else "unknown",
+            "sender": sender,
+            "sender_role": sender_role,
             "sender_role_algorithm": str(group[0].get("sender_role_algorithm") or "wechat_win32_bubble_role_v2"),
             "sender_role_confidence": float(group[0].get("sender_role_confidence") or 0.0),
             "sender_role_evidence": list(group[0].get("sender_role_evidence") or []),
@@ -7198,7 +7861,7 @@ def parse_messages_from_ocr(ocr_items: list[dict[str, Any]], image_size: tuple[i
         envelope = build_message_envelope(
             record,
             source_adapter="win32_ocr",
-            conversation={"target_name": target, "conversation_type": "group" if "群" in str(target or "") else "unknown"},
+            conversation={"target_name": target, "conversation_type": infer_conversation_type(target)},
             ocr_items=group,
             bubble_rect=rect,
         )
@@ -7745,6 +8408,117 @@ def human_window_image_click_in_bounds(
     finally:
         if left_down_sent:
             ensure_left_button_released()
+
+
+def human_window_image_hover_in_bounds(
+    hwnd: int,
+    x: int,
+    y: int,
+    *,
+    bounds: list[int],
+    action_name: str = "human_window_image_hover_in_bounds",
+) -> dict[str, Any]:
+    """Hover a screenshot-space point, clamped to a known safe window rectangle."""
+    raw_x, raw_y, jitter_meta = jitter_window_image_click_surface_point(hwnd, int(x), int(y))
+    hover_x, hover_y = clamp_point_to_bounds(raw_x, raw_y, bounds)
+    require_active_ui_action_budget(
+        action_name,
+        metadata={"hwnd": int(hwnd or 0), "x": hover_x, "y": hover_y, "bounds": bounds, "jitter": jitter_meta},
+    )
+    activate_window(hwnd)
+    ensure_left_button_released()
+    try:
+        left, top, _right, _bottom = win32gui.GetWindowRect(hwnd)
+        screen_x = int(left) + int(hover_x)
+        screen_y = int(top) + int(hover_y)
+        start_x, start_y = win32api.GetCursorPos()
+        steps = random.randint(7, 13)
+        for step in range(1, steps + 1):
+            ratio = step / steps
+            ease = ratio * ratio * (3 - 2 * ratio)
+            jitter_x = random.randint(-2, 2) if step < steps else 0
+            jitter_y = random.randint(-2, 2) if step < steps else 0
+            next_x = int(start_x + (screen_x - start_x) * ease) + jitter_x
+            next_y = int(start_y + (screen_y - start_y) * ease) + jitter_y
+            win32api.SetCursorPos((next_x, next_y))
+            time.sleep(random.uniform(0.016, 0.052))
+        time.sleep(random.uniform(0.18, 0.36))
+        return {
+            "ok": True,
+            "x": hover_x,
+            "y": hover_y,
+            "screen_x": screen_x,
+            "screen_y": screen_y,
+            "raw_x": raw_x,
+            "raw_y": raw_y,
+            "bounds": bounds,
+            "steps": steps,
+            "jitter": jitter_meta,
+        }
+    except Exception as exc:
+        return {"ok": False, "x": hover_x, "y": hover_y, "bounds": bounds, "error": repr(exc), "jitter": jitter_meta}
+
+
+def human_window_image_right_click_in_bounds(
+    hwnd: int,
+    x: int,
+    y: int,
+    *,
+    bounds: list[int],
+    action_name: str = "human_window_image_right_click_in_bounds",
+) -> dict[str, Any]:
+    """Right-click a screenshot-space point, clamped to a known safe window rectangle."""
+    raw_x, raw_y, jitter_meta = jitter_window_image_click_surface_point(hwnd, int(x), int(y))
+    click_x, click_y = clamp_point_to_bounds(raw_x, raw_y, bounds)
+    require_active_ui_action_budget(
+        action_name,
+        metadata={"hwnd": int(hwnd or 0), "x": click_x, "y": click_y, "bounds": bounds, "jitter": jitter_meta},
+    )
+    activate_window(hwnd)
+    ensure_left_button_released()
+    right_down_sent = False
+    try:
+        left, top, _right, _bottom = win32gui.GetWindowRect(hwnd)
+        screen_x = int(left) + int(click_x)
+        screen_y = int(top) + int(click_y)
+        start_x, start_y = win32api.GetCursorPos()
+        steps = random.randint(6, 11)
+        for step in range(1, steps + 1):
+            ratio = step / steps
+            ease = ratio * ratio * (3 - 2 * ratio)
+            jitter_x = random.randint(-2, 2) if step < steps else 0
+            jitter_y = random.randint(-2, 2) if step < steps else 0
+            next_x = int(start_x + (screen_x - start_x) * ease) + jitter_x
+            next_y = int(start_y + (screen_y - start_y) * ease) + jitter_y
+            win32api.SetCursorPos((next_x, next_y))
+            time.sleep(random.uniform(0.016, 0.052))
+        time.sleep(random.uniform(0.08, 0.22))
+        win32api.mouse_event(win32con.MOUSEEVENTF_RIGHTDOWN, 0, 0, 0, 0)
+        right_down_sent = True
+        time.sleep(random.uniform(0.055, 0.145))
+        win32api.mouse_event(win32con.MOUSEEVENTF_RIGHTUP, 0, 0, 0, 0)
+        right_down_sent = False
+        time.sleep(random.uniform(0.16, 0.34))
+        return {
+            "ok": True,
+            "x": click_x,
+            "y": click_y,
+            "screen_x": screen_x,
+            "screen_y": screen_y,
+            "raw_x": raw_x,
+            "raw_y": raw_y,
+            "bounds": bounds,
+            "steps": steps,
+            "jitter": jitter_meta,
+        }
+    except Exception as exc:
+        return {"ok": False, "x": click_x, "y": click_y, "bounds": bounds, "error": repr(exc), "jitter": jitter_meta}
+    finally:
+        if right_down_sent:
+            try:
+                win32api.mouse_event(win32con.MOUSEEVENTF_RIGHTUP, 0, 0, 0, 0)
+            except Exception:
+                pass
 
 
 def human_screen_hover(x: int, y: int, *, action_name: str = "human_screen_hover") -> dict[str, Any]:

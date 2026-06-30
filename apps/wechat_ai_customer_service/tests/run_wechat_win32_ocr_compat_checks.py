@@ -97,11 +97,17 @@ from apps.wechat_ai_customer_service.adapters.wechat_win32_ocr_sidecar import ( 
     input_region_soft_blank_noise,
     input_click_candidate_points,
     is_message_noise,
+    find_voice_transcribe_target,
     jitter_client_click_surface_point,
     jitter_input_click_point,
     jitter_send_click_point,
+    jitter_voice_transcribe_click_point,
     sendinput_safe_text,
     sendinput_utf16_units,
+    voice_transcribe_click_candidate_points,
+    voice_duration_context_click_target,
+    voice_duration_text_like,
+    voice_transcribe_visual_button_score,
     merge_message_history_snapshots,
     message_anchor_match_type,
     message_probe_tokens,
@@ -715,6 +721,118 @@ def test_parse_messages_from_ocr() -> None:
     assert_true(messages[0]["sender"] == "self", f"right-side message should be self: {messages}")
 
 
+def test_parse_messages_strips_voice_duration_prefix_after_transcription() -> None:
+    items = [
+        {"text": '5"', "confidence": 0.66, "left": 440, "right": 489, "top": 547, "bottom": 573, "center_x": 464.5, "center_y": 560},
+        {
+            "text": "我想买一辆便宜的、好用的、省油的，代步用，上班",
+            "confidence": 0.99,
+            "left": 437,
+            "right": 846,
+            "top": 599,
+            "bottom": 622,
+            "center_x": 641.5,
+            "center_y": 610.5,
+        },
+        {"text": "用。", "confidence": 0.90, "left": 435, "right": 469, "top": 620, "bottom": 649, "center_x": 452, "center_y": 634.5},
+    ]
+    messages = parse_messages_from_ocr(items, (980, 860), target="许聪")
+    assert_true(len(messages) == 1, f"transcribed voice should remain one message: {messages}")
+    assert_true(messages[0]["sender"] == "customer", f"private peer voice transcript should be customer-owned: {messages}")
+    assert_true(messages[0]["sender_role"] == "customer", f"private peer voice transcript role should be customer: {messages}")
+    assert_true(
+        messages[0]["content"] == "我想买一辆便宜的、好用的、省油的，代步用，上班\n用。",
+        f"voice duration prefix should be removed from content: {messages}",
+    )
+    assert_true("5\"" in messages[0]["content_raw_ocr"], f"raw OCR should retain the duration for audit: {messages}")
+    assert_true("voice_duration_prefix_removed" in messages[0]["quality_flags"], f"cleanup should be auditable: {messages}")
+
+    light_mode_items = [
+        {"text": ')3"', "confidence": 0.58, "left": 440, "right": 489, "top": 432, "bottom": 458, "center_x": 464.5, "center_y": 445.0},
+        {
+            "text": "有没有10万以内的电车或者混动车？",
+            "confidence": 0.99,
+            "left": 440,
+            "right": 714,
+            "top": 486,
+            "bottom": 506,
+            "center_x": 577,
+            "center_y": 496,
+        },
+    ]
+    light_messages = parse_messages_from_ocr(light_mode_items, (980, 860), target="许聪")
+    assert_true(len(light_messages) == 1, f"light-mode malformed duration should stay with transcript: {light_messages}")
+    assert_true(
+        light_messages[0]["content"] == "有没有10万以内的电车或者混动车？",
+        f"malformed duration prefix should be removed: {light_messages}",
+    )
+    assert_true(light_messages[0]["sender"] == "customer", f"voice transcript should remain customer-owned: {light_messages}")
+    assert_true("voice_duration_prefix_removed" in light_messages[0]["quality_flags"], f"cleanup should be auditable: {light_messages}")
+
+
+def test_parse_messages_skips_file_card_footer_noise() -> None:
+    footer_only = [
+        {"text": "微信电脑版", "confidence": 0.99, "left": 434, "right": 541, "top": 96, "bottom": 118, "center_x": 487.5, "center_y": 107},
+    ]
+    assert_true(
+        parse_messages_from_ocr(footer_only, (980, 860), target="许聪") == [],
+        "standalone WeChat file-card footer must not become customer text",
+    )
+
+    file_card = [
+        {"text": "gamil账号.txt", "confidence": 0.99, "left": 437, "right": 560, "top": 210, "bottom": 235, "center_x": 498.5, "center_y": 222.5},
+        {"text": "7.5K", "confidence": 0.98, "left": 438, "right": 484, "top": 258, "bottom": 280, "center_x": 461, "center_y": 269},
+        {"text": "微信电脑版", "confidence": 0.99, "left": 437, "right": 542, "top": 305, "bottom": 328, "center_x": 489.5, "center_y": 316.5},
+    ]
+    assert_true(
+        parse_messages_from_ocr(file_card, (980, 860), target="许聪") == [],
+        "file-card filename/size/footer group must not enter Brain context",
+    )
+
+
+def test_parse_messages_skips_unconverted_voice_duration_only() -> None:
+    items = [
+        {"text": '3"', "confidence": 0.72, "left": 440, "right": 489, "top": 616, "bottom": 641, "center_x": 464.5, "center_y": 628.5},
+        {"text": '5"', "confidence": 0.76, "left": 441, "right": 490, "top": 688, "bottom": 714, "center_x": 465.5, "center_y": 701.0},
+    ]
+    messages = parse_messages_from_ocr(items, (980, 860), target="xucong")
+    assert_true(not messages, f"unconverted voice durations must not become LLM text input: {messages}")
+
+
+def test_parse_messages_labels_private_left_side_as_customer() -> None:
+    item = {
+        "text": "private-left-text",
+        "confidence": 0.99,
+        "left": 485,
+        "right": 620,
+        "top": 234,
+        "bottom": 277,
+        "center_x": 552.5,
+        "center_y": 255.5,
+    }
+    messages = parse_messages_from_ocr([item], (980, 860), target="xucong")
+    assert_true(messages, f"private peer message should be captured: {messages}")
+    assert_true(messages[0]["sender"] == "customer", f"private peer message should be customer-owned: {messages}")
+    assert_true(messages[0]["sender_role"] == "customer", f"private peer role should be customer: {messages}")
+
+
+def test_parse_messages_keeps_group_left_side_unknown() -> None:
+    item = {
+        "text": "group-left-text",
+        "confidence": 0.99,
+        "left": 485,
+        "right": 620,
+        "top": 234,
+        "bottom": 277,
+        "center_x": 552.5,
+        "center_y": 255.5,
+    }
+    messages = parse_messages_from_ocr([item], (980, 860), target="sales chatroom")
+    assert_true(messages, f"group peer message should be captured: {messages}")
+    assert_true(messages[0]["sender"] == "unknown", f"group peer message must not be private-customer-owned: {messages}")
+    assert_true(messages[0]["sender_role"] == "unknown", f"group peer role should remain unknown without speaker metadata: {messages}")
+
+
 def test_parse_messages_keeps_low_visible_bubble_lines() -> None:
     items = [
         {"text": "长订单第一行", "confidence": 0.98, "left": 440, "right": 610, "top": 712, "bottom": 736, "center_x": 525, "center_y": 724},
@@ -1092,6 +1210,121 @@ def test_input_click_jitter_has_enough_entropy() -> None:
                 os.environ.pop(key, None)
             else:
                 os.environ[key] = value
+
+
+def test_voice_transcribe_target_prefers_visible_convert_button() -> None:
+    image_size = (980, 860)
+    items = [
+        {
+            "text": "转文字",
+            "left": 578.0,
+            "top": 614.0,
+            "right": 626.0,
+            "bottom": 642.0,
+            "center_x": 602.0,
+            "center_y": 628.0,
+            "confidence": 0.91,
+        }
+    ]
+    target = find_voice_transcribe_target(items, image_size)
+    assert_true(target is not None, "visible voice-to-text button should be detected")
+    assert_true(target.get("source") == "ocr_transcribe_button", f"target should come from OCR button: {target}")
+    points = voice_transcribe_click_candidate_points(target)
+    assert_true(len(points) >= 10, f"voice transcribe button should expose a 10-point pool: {points}")
+    bounds = target.get("click_bounds") or []
+    assert_true(all(bounds[0] <= x <= bounds[2] and bounds[1] <= y <= bounds[3] for x, y in points), f"points must stay in bounds: {target}")
+
+
+def test_voice_transcribe_target_infers_latest_unconverted_voice_only() -> None:
+    image_size = (980, 860)
+    items = [
+        {
+            "text": '2"',
+            "left": 442.0,
+            "top": 456.0,
+            "right": 487.0,
+            "bottom": 482.0,
+            "center_x": 464.5,
+            "center_y": 469.0,
+            "confidence": 0.76,
+        },
+        {
+            "text": "你好，你在吗？",
+            "left": 436.0,
+            "top": 507.0,
+            "right": 558.0,
+            "bottom": 534.0,
+            "center_x": 497.0,
+            "center_y": 520.0,
+            "confidence": 0.99,
+        },
+        {
+            "text": '4"',
+            "left": 442.0,
+            "top": 573.0,
+            "right": 487.0,
+            "bottom": 594.0,
+            "center_x": 464.5,
+            "center_y": 583.5,
+            "confidence": 0.74,
+        },
+    ]
+    assert_true(voice_duration_text_like('4"'), "quoted duration should be recognized")
+    assert_true(voice_duration_text_like("02"), "OCR duration without quote should be tolerated")
+    assert_true(not voice_duration_text_like("我想买车"), "normal transcript should not look like a duration")
+    assert_true(
+        find_voice_transcribe_target(items, image_size, allow_inferred=False) is None,
+        "duration-only OCR must not be treated as a visible voice-to-text menu item",
+    )
+    target = find_voice_transcribe_target(items, image_size)
+    assert_true(target is not None, "latest unconverted voice duration should infer a convert target")
+    assert_true(target.get("source") == "inferred_from_voice_duration", f"target should be inferred from duration: {target}")
+    assert_true((target.get("item") or {}).get("text") == '4"', f"converted 2s voice must be skipped: {target}")
+    points = voice_transcribe_click_candidate_points(target)
+    assert_true(len(set(points)) >= 10, f"inferred button should expose distinct candidate points: {points}")
+    anchor = voice_duration_context_click_target(target, image_size)
+    assert_true(anchor is not None, f"inferred voice duration should provide a context-menu right-click anchor: {target}")
+    anchor_points = voice_transcribe_click_candidate_points(anchor)
+    assert_true(len(set(anchor_points)) >= 10, f"context-menu anchor should expose distinct candidate points: {anchor_points}")
+
+
+def test_voice_transcribe_click_jitter_uses_candidate_pool() -> None:
+    image_size = (980, 860)
+    target = find_voice_transcribe_target(
+        [
+            {
+                "text": '4"',
+                "left": 442.0,
+                "top": 573.0,
+                "right": 487.0,
+                "bottom": 594.0,
+                "center_x": 464.5,
+                "center_y": 583.5,
+                "confidence": 0.74,
+            }
+        ],
+        image_size,
+    )
+    assert_true(target is not None, "voice target should be inferred")
+    bounds = target.get("click_bounds") or []
+    samples = [jitter_voice_transcribe_click_point(target, {"width": 980, "height": 860})[0:2] for _ in range(80)]
+    assert_true(len(set(samples)) >= 24, f"voice transcribe click should not repeat one point: {len(set(samples))}")
+    assert_true(all(bounds[0] <= x <= bounds[2] and bounds[1] <= y <= bounds[3] for x, y in samples), f"jitter samples must stay inside button bounds: {samples}")
+
+
+def test_voice_transcribe_visual_button_score_rejects_dark_background_red_dot() -> None:
+    image = Image.new("RGB", (120, 48), (30, 30, 31))
+    draw = ImageDraw.Draw(image)
+    draw.rounded_rectangle((36, 8, 112, 38), radius=12, fill=(51, 51, 52))
+    draw.text((52, 15), "TXT", fill=(185, 185, 185))
+    visible = voice_transcribe_visual_button_score(image, [32, 6, 116, 42])
+    assert_true(visible.get("visible"), f"button-like grey pill should be visible: {visible}")
+
+    blank = Image.new("RGB", (120, 48), (30, 30, 31))
+    draw_blank = ImageDraw.Draw(blank)
+    draw_blank.ellipse((54, 20, 60, 26), fill=(202, 46, 56))
+    hidden = voice_transcribe_visual_button_score(blank, [32, 6, 116, 42])
+    assert_true(not hidden.get("visible"), f"red dot on dark chat background must not look like a button: {hidden}")
 
 
 def test_input_region_visual_delta_confirmation() -> None:
@@ -6301,6 +6534,11 @@ def main() -> int:
         test_add_friend_optional_field_fill_disabled_by_default,
         test_message_probe_tokens_prefer_semantic_body_after_live_marker,
         test_parse_messages_from_ocr,
+        test_parse_messages_strips_voice_duration_prefix_after_transcription,
+        test_parse_messages_skips_file_card_footer_noise,
+        test_parse_messages_skips_unconverted_voice_duration_only,
+        test_parse_messages_labels_private_left_side_as_customer,
+        test_parse_messages_keeps_group_left_side_unknown,
         test_parse_messages_keeps_low_visible_bubble_lines,
         test_parse_messages_excludes_left_input_draft_residue,
         test_parse_messages_classifies_wide_right_bubbles_as_self,
@@ -6316,6 +6554,10 @@ def main() -> int:
         test_send_points_apply_small_safe_jitter,
         test_send_and_input_points_use_candidate_pools,
         test_input_click_jitter_has_enough_entropy,
+        test_voice_transcribe_target_prefers_visible_convert_button,
+        test_voice_transcribe_target_infers_latest_unconverted_voice_only,
+        test_voice_transcribe_click_jitter_uses_candidate_pool,
+        test_voice_transcribe_visual_button_score_rejects_dark_background_red_dot,
         test_send_rate_guard,
         test_wechat_rpa_lock_recovers_stale_lock_and_times_out_on_live_lock,
         test_uia_control_selection_prefers_chatbox,

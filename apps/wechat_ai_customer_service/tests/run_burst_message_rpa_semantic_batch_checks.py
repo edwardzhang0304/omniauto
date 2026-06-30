@@ -59,7 +59,7 @@ class FakeConnector:
         self.history_load_calls: list[int] = []
         self.sent_texts: list[str] = []
 
-    def get_messages(self, target: str, exact: bool = True, history_load_times: int = 0) -> dict[str, Any]:
+    def get_messages(self, target: str, exact: bool = True, history_load_times: int = 0, **kwargs: Any) -> dict[str, Any]:
         if history_load_times:
             self.history_load_calls.append(history_load_times)
         messages = self.loaded if history_load_times and self.loaded is not None else self.visible
@@ -71,7 +71,7 @@ class FakeConnector:
             "messages": messages,
         }
 
-    def send_text_and_verify(self, target: str, text: str, exact: bool = True, *, skip_send_rate_guard: bool = False) -> dict[str, Any]:
+    def send_text_and_verify(self, target: str, text: str, exact: bool = True, *, skip_send_rate_guard: bool = False, **kwargs: Any) -> dict[str, Any]:
         self.sent_texts.append(text)
         return {"ok": True, "verified": True, "target": target, "text": text, "exact": exact}
 
@@ -122,7 +122,12 @@ def check_sidecar_request_contract() -> dict[str, Any]:
     assert_equal(payload.get("target"), "许聪", "target")
     assert_true(payload.get("exact") is True, "exact")
     assert_equal(payload.get("history_load_times"), 4, "history load times")
-    return payload
+    voice = _args_to_request(["voice-transcribe", "--target", "许聪", "--exact", "--session-key", "row-1"])
+    assert_equal(voice.get("action"), "voice-transcribe", "voice action")
+    assert_equal(voice.get("target"), "许聪", "voice target")
+    assert_true(voice.get("exact") is True, "voice exact")
+    assert_equal(voice.get("session_key"), "row-1", "voice session key")
+    return {"messages": payload, "voice_transcribe": voice}
 
 
 def check_split_need_groups_as_single_event() -> dict[str, Any]:

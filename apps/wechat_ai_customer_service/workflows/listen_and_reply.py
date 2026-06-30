@@ -670,6 +670,69 @@ def _enqueue_post_reply_work(
         pass
 
 
+def auto_voice_transcription_settings(config: dict[str, Any]) -> dict[str, Any]:
+    raw = config.get("voice_transcription") if isinstance(config.get("voice_transcription"), dict) else {}
+    env_value = os.getenv("WECHAT_AUTO_VOICE_TRANSCRIBE")
+    enabled = raw.get("enabled", True)
+    if env_value is not None and env_value.strip():
+        enabled = env_value.strip().lower() in {"1", "true", "yes", "on"}
+    try:
+        max_attempts = int(os.getenv("WECHAT_AUTO_VOICE_TRANSCRIBE_MAX_ATTEMPTS") or raw.get("max_attempts") or 4)
+    except (TypeError, ValueError):
+        max_attempts = 4
+    artifact_dir = str(raw.get("artifact_dir") or os.getenv("WECHAT_AUTO_VOICE_TRANSCRIBE_ARTIFACT_DIR") or "").strip()
+    return {
+        "enabled": bool(enabled),
+        "max_attempts": max(1, min(max_attempts, 8)),
+        "artifact_dir": artifact_dir,
+    }
+
+
+def maybe_auto_transcribe_voice_messages(
+    *,
+    connector: WeChatConnector,
+    target: TargetConfig,
+    config: dict[str, Any],
+    console_settings: dict[str, Any],
+) -> dict[str, Any]:
+    settings = auto_voice_transcription_settings(config)
+    if not settings.get("enabled"):
+        return {"attempted": False, "enabled": False, "reason": "voice_transcription_disabled"}
+    if console_settings.get("enabled") is False:
+        return {"attempted": False, "enabled": True, "reason": "customer_service_disabled"}
+    transcribe = getattr(connector, "transcribe_voice_messages", None)
+    if not callable(transcribe):
+        return {"attempted": False, "enabled": True, "reason": "connector_voice_transcription_not_supported"}
+    try:
+        result = transcribe(
+            target.name,
+            exact=target.exact,
+            session_key=str(getattr(target, "session_key", "") or ""),
+            max_attempts=int(settings.get("max_attempts") or 4),
+            artifact_dir=str(settings.get("artifact_dir") or "") or None,
+        )
+    except Exception as exc:
+        return {
+            "attempted": True,
+            "enabled": True,
+            "ok": False,
+            "state": "voice_transcription_exception",
+            "error": repr(exc),
+        }
+    if isinstance(result, dict):
+        result = dict(result)
+        result["attempted"] = True
+        result["enabled"] = True
+        return result
+    return {"attempted": True, "enabled": True, "ok": False, "state": "voice_transcription_invalid_result"}
+
+
+def attach_voice_transcription_audit(payload: dict[str, Any], voice_transcription: dict[str, Any]) -> dict[str, Any]:
+    if isinstance(payload, dict) and voice_transcription and voice_transcription.get("attempted"):
+        payload["voice_transcription"] = voice_transcription
+    return payload
+
+
 def process_target(
     connector: WeChatConnector,
     target: TargetConfig,
@@ -695,12 +758,29 @@ def process_target(
     if target_state_key != target.name:
         target_state["_session_key"] = target_state_key
         target_state["_display_name"] = target.name
+    console_settings = config.get("_local_customer_service_settings", {}) or {}
+    write_workflow_phase("voice_transcription_start", target=target.name)
+    voice_transcription = maybe_auto_transcribe_voice_messages(
+        connector=connector,
+        target=target,
+        config=config,
+        console_settings=console_settings,
+    )
+    write_workflow_phase(
+        "voice_transcription_done",
+        target=target.name,
+        attempted=bool(voice_transcription.get("attempted")),
+        ok=bool(voice_transcription.get("ok")) if voice_transcription.get("attempted") else None,
+        state=voice_transcription.get("state"),
+        transcribed_messages_count=voice_transcription.get("transcribed_messages_count"),
+    )
     write_workflow_phase("target_get_messages_start", target=target.name, send=bool(send))
     payload = connector.get_messages(
         target.name,
         exact=target.exact,
         session_key=str(getattr(target, "session_key", "") or ""),
     )
+    attach_voice_transcription_audit(payload, voice_transcription)
     write_workflow_phase(
         "target_get_messages_done",
         target=target.name,
@@ -708,13 +788,14 @@ def process_target(
         message_count=len(payload.get("messages") or []),
     )
     if not payload.get("ok"):
-        return base_event(target, "error", {"messages": payload})
-    console_settings = config.get("_local_customer_service_settings", {}) or {}
+        return base_event(target, "error", {"messages": payload, "voice_transcription": voice_transcription})
     if console_settings.get("enabled") is False:
         raw_capture = maybe_record_raw_messages(target, config, payload.get("messages", []) or [])
+        attach_voice_transcription_audit(raw_capture, voice_transcription)
         return base_event(target, "skipped", {"reason": "customer_service_disabled", "raw_capture": raw_capture})
     if str(console_settings.get("reply_mode") or "") == "record_only":
         raw_capture = maybe_record_raw_messages(target, config, payload.get("messages", []) or [])
+        attach_voice_transcription_audit(raw_capture, voice_transcription)
         return base_event(target, "skipped", {"reason": "record_only_mode", "raw_capture": raw_capture})
     if str(console_settings.get("reply_mode") or "") == "manual_assist":
         send = False
@@ -730,6 +811,7 @@ def process_target(
     write_workflow_phase("history_backfill_done", target=target.name, message_count=len(payload.get("messages") or []))
     payload = normalize_capture_payload_for_semantic_processing(payload, target=target, config=config)
     raw_capture = maybe_record_raw_messages(target, config, payload.get("messages", []) or [])
+    attach_voice_transcription_audit(raw_capture, voice_transcription)
     selection = select_batch_details(
         payload.get("messages", []) or [],
         target_state=target_state,

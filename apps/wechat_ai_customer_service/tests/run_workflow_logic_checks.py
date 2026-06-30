@@ -183,6 +183,31 @@ class FakeConnector:
         return {"ok": True, "verified": True, "target": target, "exact": exact, "text": text, "session_key": kwargs.get("session_key", "")}
 
 
+class VoiceTranscribeConnector(FakeConnector):
+    def __init__(self, messages: list[dict[str, Any]], transcribed_messages: list[dict[str, Any]]) -> None:
+        super().__init__(messages)
+        self.transcribed_messages_source = transcribed_messages
+        self.call_order: list[str] = []
+        self.transcribe_calls: list[dict[str, Any]] = []
+
+    def transcribe_voice_messages(self, target: str, exact: bool = True, **kwargs: Any) -> dict[str, Any]:
+        self.call_order.append("transcribe_voice_messages")
+        self.transcribe_calls.append({"target": target, "exact": exact, **kwargs})
+        self.messages = list(self.transcribed_messages_source)
+        return {
+            "ok": True,
+            "state": "voice_transcribe_completed",
+            "target": target,
+            "exact": exact,
+            "transcribed_messages": list(self.transcribed_messages_source),
+            "transcribed_messages_count": len(self.transcribed_messages_source),
+        }
+
+    def get_messages(self, target: str, exact: bool = True, history_load_times: int = 0, **kwargs: Any) -> dict[str, Any]:
+        self.call_order.append("get_messages")
+        return super().get_messages(target, exact=exact, history_load_times=history_load_times, **kwargs)
+
+
 class RateLimitedTransportConnector(FakeConnector):
     def send_text_and_verify(self, target: str, text: str, exact: bool = True, *, skip_send_rate_guard: bool = False, **kwargs: Any) -> dict[str, Any]:
         self.sent_texts.append(text)
@@ -384,6 +409,7 @@ def run_checks() -> dict[str, Any]:
         check_semantic_batch_planner_groups_split_need,
         check_semantic_batch_planner_separates_stale_general_noise_from_business_turn,
         check_semantic_batch_planner_detects_mixed_risk_questions,
+        check_auto_voice_transcription_runs_before_message_capture,
         check_customer_preference_context_preserves_spouse_parking_need,
         check_short_chase_up_after_replied_self_history_does_not_continue_closed_topic,
         check_short_chase_up_with_unanswered_customer_context_can_continue_open_topic,
@@ -1248,6 +1274,49 @@ def check_semantic_batch_planner_detects_mixed_risk_questions() -> None:
     )
     assert_equal(plan.get("kind"), "multi_question_mixed_risk", "document boundary mixed with normal needs should be flagged")
     assert_equal(plan.get("risk_level"), "boundary", "mixed risk batch should keep boundary risk level")
+
+
+def check_auto_voice_transcription_runs_before_message_capture() -> None:
+    config = load_smoke_config()
+    config["_local_customer_service_settings"] = {"enabled": True, "reply_mode": "record_only"}
+    config["voice_transcription"] = {"enabled": True, "max_attempts": 2}
+    target = TargetConfig(name="许聪", enabled=True, exact=True, allow_self_for_test=False, max_batch_messages=4)
+    transcribed = [
+        {
+            "id": "voice-transcribed-1",
+            "type": "text",
+            "sender": "customer",
+            "sender_role": "customer",
+            "content": "我想买一个日系的省油的车。",
+            "content_raw_ocr": "3\"\n我想买一个日系的省油的车。",
+            "quality_flags": ["voice_duration_prefix_removed"],
+        }
+    ]
+    connector = VoiceTranscribeConnector([], transcribed)
+    event = process_target(
+        connector=connector,  # type: ignore[arg-type]
+        target=target,
+        config=config,
+        rules=load_rules(resolve_path(config.get("rules_path"))),
+        state={"version": 1, "targets": {}},
+        send=True,
+        write_data=False,
+        allow_fallback_send=False,
+        mark_dry_run=False,
+    )
+    assert_equal(event.get("reason"), "record_only_mode", "record-only should still capture after voice transcription")
+    assert_equal(
+        connector.call_order[:2],
+        ["transcribe_voice_messages", "get_messages"],
+        "voice transcription must run before message capture",
+    )
+    assert_equal(len(connector.transcribe_calls), 1, "voice transcription should be attempted once per target poll")
+    assert_equal(connector.transcribe_calls[0].get("max_attempts"), 2, "configured max attempts should reach connector")
+    raw_capture = event.get("raw_capture") if isinstance(event.get("raw_capture"), dict) else {}
+    voice_audit = raw_capture.get("voice_transcription") if isinstance(raw_capture.get("voice_transcription"), dict) else {}
+    assert_true(voice_audit.get("attempted") is True, f"voice transcription audit should be attached: {voice_audit}")
+    assert_equal(voice_audit.get("transcribed_messages_count"), 1, "transcribed message count should be auditable")
+    assert_equal(connector.sent_texts, [], "record-only voice transcription must not send a reply")
 
 
 def check_customer_preference_context_preserves_spouse_parking_need() -> None:
