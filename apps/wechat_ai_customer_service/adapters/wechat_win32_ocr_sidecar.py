@@ -5951,6 +5951,62 @@ def clear_sidebar_search_box_without_select_all(
     else:
         human_window_image_click(hwnd, search_x, search_y)
     humanized_action_sleep(720, 1600)
+    if not artifact_dir and progress_event is None:
+        # Keep the legacy low-disturbance path for ordinary visible-target
+        # search fallback calls. The strict select-all/OCR verification below
+        # is reserved for artifact-backed remark-code targeting.
+        default_backspaces = random.randint(1, 3)
+        backspaces = bounded_int(
+            os.getenv("WECHAT_WIN32_OCR_TARGET_SEARCH_CLEAR_BACKSPACES"),
+            default=default_backspaces,
+            minimum=0,
+            maximum=8,
+        )
+        deletes = bounded_int(
+            os.getenv("WECHAT_WIN32_OCR_TARGET_SEARCH_CLEAR_DELETES"),
+            default=0,
+            minimum=0,
+            maximum=2,
+        )
+        key_count = 1
+        for idx in range(backspaces):
+            guard = recover_send_window_guard(hwnd, max_attempts=1) if recover_foreground else basic_send_window_guard(hwnd)
+            if not guard.get("ok"):
+                return {
+                    "ok": False,
+                    "reason": "window_guard_failed_during_search_clear",
+                    "window_guard": guard,
+                    "backspaces": idx,
+                    "deletes": 0,
+                    "click": click_result,
+                }
+            key_press(win32con.VK_BACK)
+            key_count += 1
+            humanized_action_sleep(140, 460)
+        for idx in range(deletes):
+            guard = recover_send_window_guard(hwnd, max_attempts=1) if recover_foreground else basic_send_window_guard(hwnd)
+            if not guard.get("ok"):
+                return {
+                    "ok": False,
+                    "reason": "window_guard_failed_during_search_clear",
+                    "window_guard": guard,
+                    "backspaces": backspaces,
+                    "deletes": idx,
+                    "click": click_result,
+                }
+            key_press(win32con.VK_DELETE)
+            key_count += 1
+            humanized_action_sleep(160, 480)
+        humanized_action_sleep(520, 1300)
+        return {
+            "ok": True,
+            "method": "slow_sidebar_search_prepare",
+            "backspaces": backspaces,
+            "deletes": deletes,
+            "key_count": key_count,
+            "click": click_result,
+            "window_guard": guard,
+        }
     probe_shot, probe_path = capture_wechat(hwnd, artifact_dir=artifact_dir, label="open_chat_search_box_after_click")
     probe_items = run_ocr_traced(probe_shot, "open_chat_search_box_after_click", source="open_chat")
     if progress_event is not None:
@@ -6094,6 +6150,7 @@ def type_sidebar_search_query(
     geometry: dict[str, Any] | None = None,
     artifact_dir: str | None = None,
     recover_foreground: bool = False,
+    verify_after_paste: bool = False,
 ) -> dict[str, Any]:
     method = str(os.getenv("WECHAT_WIN32_OCR_TARGET_SEARCH_INPUT_METHOD") or "clipboard").strip().lower()
     if method == "clipboard":
@@ -6105,6 +6162,8 @@ def type_sidebar_search_query(
         humanized_action_sleep(220, 720)
         hotkey(win32con.VK_CONTROL, ord("V"))
         humanized_action_sleep(850, 1700)
+        if not artifact_dir and not verify_after_paste:
+            return {"ok": True, "method": "clipboard", "window_guard": guard}
         active_geometry = geometry if isinstance(geometry, dict) else get_window_geometry(hwnd)
         verify_shot, verify_path = capture_wechat(hwnd, artifact_dir=artifact_dir, label="open_chat_search_box_after_paste")
         verify_items = run_ocr_traced(verify_shot, "open_chat_search_box_after_paste", source="open_chat")
@@ -6708,6 +6767,7 @@ def open_chat_by_remark_code_search(
         geometry=geometry,
         artifact_dir=artifact_dir,
         recover_foreground=True,
+        verify_after_paste=True,
     )
     _sidecar_timing_finish(timing, "search_by_remark_code_input", input_started)
     event("paste_remark_code", "completed" if input_result.get("ok") else "failed", result=input_result)
@@ -8740,7 +8800,7 @@ def parse_messages_from_ocr(ocr_items: list[dict[str, Any]], image_size: tuple[i
         previous = grouped[-1][-1]
         previous_side = str(previous.get("side") or "unknown")
         vertical_gap = float(item["top"]) - float(previous["bottom"])
-        if side == "unknown" and previous_side == "self" and message_line_continues_previous_self_bubble(item, previous, vertical_gap):
+        if side != "self" and previous_side == "self" and message_line_continues_previous_self_bubble(item, previous, vertical_gap):
             evidence = list(item.get("sender_role_evidence") or [])
             evidence.append("self_continuation_from_previous_line")
             grouped[-1].append({**item, "side": "self", "sender_role_evidence": evidence})
@@ -8876,6 +8936,8 @@ def classify_message_side_details(item: dict[str, Any], *, width: int) -> dict[s
     )
     if left_customer_lane:
         evidence.append("left_customer_lane")
+        if left_in_self_lane:
+            evidence.append("legacy_left_hint_downgraded_without_right_structure")
         return {
             "side": "customer",
             "confidence": 0.84,
