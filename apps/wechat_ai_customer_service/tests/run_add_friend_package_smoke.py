@@ -6,6 +6,7 @@ import sys
 import tempfile
 import json
 from pathlib import Path
+from unittest.mock import patch
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
@@ -918,6 +919,33 @@ def test_sidecar_uses_flow_context_for_entry_click() -> None:
     )
 
 
+def test_add_friend_flow_forwards_action_journal_on_every_query_path() -> None:
+    import ast
+
+    flow_path = PROJECT_ROOT / "apps/wechat_ai_customer_service/adapters/add_friend_flow.py"
+    tree = ast.parse(flow_path.read_text(encoding="utf-8"))
+    query_calls = [
+        node
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and node.func.attr == "input_add_friend_query_and_search"
+    ]
+    assert_true(
+        len(query_calls) == 2,
+        f"expected exactly two add_friend query paths, got {[node.lineno for node in query_calls]}",
+    )
+    missing = [
+        node.lineno
+        for node in query_calls
+        if "action_journal_path" not in {keyword.arg for keyword in node.keywords}
+    ]
+    assert_true(
+        not missing,
+        f"every add_friend query path must forward action_journal_path; missing at lines {missing}",
+    )
+
+
 def test_sidecar_uses_add_friend_payload_builders() -> None:
     sidecar = (
         PROJECT_ROOT / "apps/wechat_ai_customer_service/adapters/wechat_win32_ocr_sidecar.py"
@@ -1081,6 +1109,33 @@ def test_entry_click_task_outcome_contract() -> None:
     assert_true(invite_sent.get("task_status") == "completed", f"invite_sent task status mismatch: {invite_sent}")
     assert_true(invite_sent.get("result_code") == "invite_sent", f"invite_sent result mismatch: {invite_sent}")
 
+    contradictory = add_friend_entry_click_task_outcome(
+        {
+            "ok": True,
+            "task_status": "failed",
+            "result_code": "invite_sent",
+            "error_code": "ACCOUNT_RESTRICTED",
+            "current_step": "invite_confirm_clicked",
+        }
+    )
+    assert_true(
+        contradictory.get("ok") is False,
+        f"explicit failure must override a stale click-success flag: {contradictory}",
+    )
+    assert_true(
+        contradictory.get("task_status") == "failed",
+        f"contradictory result must normalize to failed: {contradictory}",
+    )
+    assert_true(
+        contradictory.get("result_code") == "",
+        f"failed result must not retain invite_sent: {contradictory}",
+    )
+    assert_true(
+        contradictory.get("server_report_payload", {}).get("task.status")
+        == "failed",
+        f"server report must use the same normalized terminal state: {contradictory}",
+    )
+
 
 def test_add_friend_actions_contract() -> None:
     from apps.wechat_ai_customer_service.adapters.add_friend_actions import (
@@ -1162,6 +1217,7 @@ def test_invite_form_locator_contract() -> None:
     semantic_targets = add_friend_invite_form_targets(
         (468, 834),
         [
+            ocr_item("申请添加朋友", 182, 21, 288, 43, confidence=0.999),
             ocr_item("发送添加朋友申请", 38, 82, 182, 108),
             ocr_item("备注", 38, 276, 82, 304),
             ocr_item("确定", 112, 770, 166, 802),
@@ -1170,6 +1226,15 @@ def test_invite_form_locator_contract() -> None:
     assert_true(
         semantic_targets["invite_greeting_textarea"].get("strategy") == "semantic_ocr_anchor_locator",
         f"greeting should use semantic locator: {semantic_targets}",
+    )
+    assert_true(
+        (semantic_targets["invite_greeting_textarea"].get("item") or {}).get("text")
+        == "发送添加朋友申请",
+        f"greeting must prefer the exact field label over the higher-confidence page title: {semantic_targets}",
+    )
+    assert_true(
+        semantic_targets["invite_greeting_textarea"]["point"][1] > 130,
+        f"greeting click must land inside the textarea, not on its top border: {semantic_targets}",
     )
     assert_true(
         semantic_targets["invite_remark_input"].get("fallback_used") is False,
@@ -1186,6 +1251,25 @@ def test_invite_form_locator_contract() -> None:
         ocr_items=[ocr_item("我是车金二手车张伟", 40, 122, 260, 152), ocr_item("客户-CJ8K2P", 40, 330, 180, 358)],
     )
     assert_true(field_check.get("ok") is True, f"field verification should pass visible OCR text: {field_check}")
+    multiline_check = invite_form_field_verification(
+        verify_message="您好，我是车金二手车的C2Window，您刚咨询过二手车",
+        remark_name="C1ADD01",
+        remark_code="C1ADD01",
+        ocr_items=[
+            ocr_item("您好，我是车金二手车的C2Window，", 40, 122, 350, 150),
+            ocr_item("您刚咨询过二手车", 40, 154, 220, 182),
+            ocr_item("C1ADD01", 40, 320, 150, 348),
+        ],
+        field_bounds={
+            "verify_message": [30, 110, 430, 210],
+            "remark_name": [30, 290, 430, 360],
+            "remark_code": [30, 290, 430, 360],
+        },
+    )
+    assert_true(
+        multiline_check.get("ok") is True,
+        f"multiline greeting OCR fragments should be joined inside the field: {multiline_check}",
+    )
 
 
 def test_invite_form_input_click_failure_blocks_keyboard_actions() -> None:
@@ -1241,6 +1325,400 @@ def test_invite_form_field_verification_blocks_confirm_click() -> None:
         '"confirm": {"ok": False, "skipped": True' in section
         or "'confirm': {'ok': False, 'skipped': True" in section,
         "failed field verification must skip confirm click",
+    )
+
+
+def test_invite_form_failed_field_retries_once_before_confirm() -> None:
+    source = (
+        PROJECT_ROOT
+        / "apps/wechat_ai_customer_service/adapters/wechat_win32_ocr/add_friend_windows.py"
+    ).read_text(encoding="utf-8")
+    section = source.split(
+        "def fill_add_friend_invite_form_and_confirm", 1
+    )[1].split("def type_add_friend_query_like_human_for_entry", 1)[0]
+    retry_index = section.find("action_name='invite_greeting_retry'")
+    final_gate_index = section.find("if not field_verification.get('ok')")
+    confirm_index = section.find("action_name='invite_confirm_button_click'")
+    assert_true(retry_index >= 0, "missing one-time greeting retry")
+    assert_true(final_gate_index >= 0, "missing final field verification gate")
+    assert_true(confirm_index >= 0, "missing invite confirm click")
+    assert_true(
+        retry_index < final_gate_index < confirm_index,
+        "retry and final verification must happen before confirm click",
+    )
+    assert_true(
+        "fill_retry_attempts" in section,
+        "retry evidence must be retained for diagnostics",
+    )
+
+
+def test_invite_confirm_uses_durable_action_journal_before_click() -> None:
+    from PIL import Image
+
+    from apps.wechat_ai_customer_service.adapters.wechat_win32_ocr import (
+        add_friend_windows,
+    )
+
+    image = Image.new("RGB", (468, 834), (255, 255, 255))
+    targets_map = {
+        "invite_greeting_textarea": {
+            "name": "invite_greeting_textarea",
+            "x": 120,
+            "y": 220,
+            "click_bounds": [40, 160, 428, 280],
+        },
+        "invite_remark_input": {
+            "name": "invite_remark_input",
+            "x": 120,
+            "y": 340,
+            "click_bounds": [40, 300, 428, 380],
+        },
+        "invite_confirm_button": {
+            "name": "invite_confirm_button",
+            "x": 360,
+            "y": 790,
+            "click_bounds": [300, 750, 430, 820],
+        },
+    }
+    field_verification = {
+        "ok": True,
+        "verify_message": {"ok": True},
+        "remark_name": {"ok": True},
+        "remark_code": {"ok": True},
+    }
+
+    class FakeOps:
+        def __init__(self) -> None:
+            self.events: list[tuple[str, object]] = []
+            self.capture_count = 0
+
+        def add_friend_paced_pause(self, *_args, **_kwargs) -> float:
+            return 0.0
+
+        def capture_wechat_window_visible_screen(self, *_args, **_kwargs):
+            self.capture_count += 1
+            if self.capture_count == 1:
+                return image, "before.png"
+            self.events.append(("post_click_capture", None))
+            raise RuntimeError("simulated post-click capture failure")
+
+        def run_ocr_on_screen_region(self, *_args, **_kwargs):
+            return []
+
+        def paste_invite_form_text(self, *_args, **_kwargs):
+            return {"ok": True}
+
+        def capture_invite_form_field_review(self, *_args, **_kwargs):
+            return {
+                "shot": image,
+                "screenshot_path": "filled.png",
+                "annotated_path": "filled-annotated.png",
+                "ocr_items": [],
+                "ocr_seconds": 0.0,
+                "targets_map": targets_map,
+                "targets": list(targets_map.values()),
+                "field_verification": field_verification,
+            }
+
+        def write_action_phase_journal(self, _path, phase, **payload) -> None:
+            self.events.append(("journal", {"phase": phase, **payload}))
+
+        def human_window_image_click_in_bounds(self, *_args, **_kwargs):
+            self.events.append(("confirm_click", None))
+            return {"ok": True}
+
+    fake_ops = FakeOps()
+    original_ops = add_friend_windows._SIDECAR_OPS
+    try:
+        add_friend_windows.bind_sidecar_ops(fake_ops)
+        with (
+            patch.object(
+                add_friend_windows,
+                "add_friend_invite_form_targets",
+                return_value=targets_map,
+            ),
+            patch.object(
+                add_friend_windows,
+                "draw_add_friend_screen_annotation",
+                return_value="annotated.png",
+            ),
+        ):
+            try:
+                add_friend_windows.fill_add_friend_invite_form_and_confirm(
+                    1001,
+                    Path(tempfile.mkdtemp(prefix="add-friend-confirm-test-")),
+                    verify_message="您好",
+                    remark_name="客户-CJ8K2P",
+                    remark_code="CJ8K2P",
+                    action_journal_path="action-journal.json",
+                )
+            except RuntimeError as exc:
+                assert_true(
+                    "post-click capture failure" in str(exc),
+                    f"unexpected post-click failure: {exc!r}",
+                )
+            else:
+                raise AssertionError("post-click diagnostic failure was not raised")
+    finally:
+        add_friend_windows.bind_sidecar_ops(original_ops)
+
+    event_names = [name for name, _payload in fake_ops.events]
+    assert_true(
+        event_names == ["journal", "confirm_click", "journal", "post_click_capture"],
+        f"unexpected irreversible-action ordering: {fake_ops.events}",
+    )
+    trigger = fake_ops.events[0][1]
+    confirmed = fake_ops.events[2][1]
+    assert_true(
+        isinstance(trigger, dict) and trigger.get("phase") == "trigger_attempted",
+        f"trigger_attempted must be durable before click: {trigger}",
+    )
+    assert_true(
+        isinstance(confirmed, dict) and confirmed.get("phase") == "confirmed",
+        f"confirmed must be durable after successful click: {confirmed}",
+    )
+    assert_true(
+        confirmed.get("business_state") == "invite_sent"
+        and confirmed.get("business_result_confirmed") is True,
+        f"successful click must confirm invite_sent: {confirmed}",
+    )
+    terminal = confirmed.get("terminal_payload") or {}
+    assert_true(
+        terminal.get("ok") is True
+        and terminal.get("task_status") == "completed"
+        and terminal.get("result_code") == "invite_sent",
+        f"post-click diagnostics must not downgrade invite_sent: {terminal}",
+    )
+
+
+def test_post_confirm_residual_dialog_uses_only_exact_top_title() -> None:
+    from apps.wechat_ai_customer_service.adapters.wechat_win32_ocr.add_friend_windows import (
+        add_friend_residual_dialog_close_target,
+    )
+
+    image_size = (468, 834)
+    sparse_title = [{
+        "text": "添加朋友",
+        "left": 188,
+        "top": 12,
+        "right": 280,
+        "bottom": 42,
+        "center_x": 234,
+        "center_y": 27,
+        "confidence": 0.99,
+    }]
+    target = add_friend_residual_dialog_close_target(sparse_title, image_size)
+    assert_true(target is not None, "sparse real add-friend page should be closable from its title")
+    assert_true(
+        target.get("click_bounds") == [412, 6, 462, 58],
+        f"close target must stay inside the dialog title bar: {target}",
+    )
+    body_only = [{**sparse_title[0], "top": 260, "bottom": 292, "center_y": 276}]
+    assert_true(
+        add_friend_residual_dialog_close_target(body_only, image_size) is None,
+        "body copy must not authorize a close click",
+    )
+    invite_form_title = [{**sparse_title[0], "text": "申请添加朋友"}]
+    assert_true(
+        add_friend_residual_dialog_close_target(invite_form_title, image_size) is None,
+        "the invite form title must not be mistaken for the residual profile dialog",
+    )
+
+
+def _run_post_confirm_cleanup_case(
+    *,
+    close_click_ok: bool,
+    window_disappears: bool,
+    window_visible_after_click: bool = True,
+) -> tuple[dict[str, object], object]:
+    from PIL import Image
+
+    from apps.wechat_ai_customer_service.adapters.wechat_win32_ocr import add_friend_windows
+
+    image = Image.new("RGB", (468, 834), (255, 255, 255))
+    targets_map = {
+        "invite_greeting_textarea": {"x": 120, "y": 220, "click_bounds": [40, 160, 428, 280]},
+        "invite_remark_input": {"x": 120, "y": 340, "click_bounds": [40, 300, 428, 380]},
+        "invite_confirm_button": {"x": 360, "y": 790, "click_bounds": [300, 750, 430, 820]},
+    }
+
+    class WindowApi:
+        def __init__(self) -> None:
+            self.exists = True
+            self.visible = True
+
+        def IsWindow(self, _hwnd: int) -> bool:
+            return self.exists
+
+        def IsWindowVisible(self, _hwnd: int) -> bool:
+            return self.exists and self.visible
+
+    class FakeOps:
+        def __init__(self) -> None:
+            self.capture_count = 0
+            self.capture_hwnds: list[int] = []
+            self.ocr_count = 0
+            self.click_names: list[str] = []
+            self.click_hwnds: list[int] = []
+            self.journal_writes: list[dict[str, object]] = []
+            self.win32gui = WindowApi()
+
+        def add_friend_paced_pause(self, *_args, **_kwargs) -> float:
+            return 0.0
+
+        def capture_wechat_window_visible_screen(self, hwnd, *_args, **_kwargs):
+            self.capture_count += 1
+            self.capture_hwnds.append(int(hwnd))
+            return image, f"capture-{self.capture_count}.png"
+
+        def run_ocr_on_screen_region(self, *_args, **_kwargs):
+            self.ocr_count += 1
+            # Reproduce the live failure: the sparse post-confirm profile is
+            # still open, but OCR never returns its title.
+            return []
+
+        def paste_invite_form_text(self, *_args, **_kwargs):
+            return {"ok": True}
+
+        def capture_invite_form_field_review(self, *_args, **_kwargs):
+            return {
+                "shot": image,
+                "screenshot_path": "filled.png",
+                "annotated_path": "filled-annotated.png",
+                "ocr_items": [],
+                "ocr_seconds": 0.0,
+                "targets_map": targets_map,
+                "targets": list(targets_map.values()),
+                "field_verification": {
+                    "ok": True,
+                    "verify_message": {"ok": True},
+                    "remark_name": {"ok": True},
+                    "remark_code": {"ok": True},
+                },
+            }
+
+        def write_action_phase_journal(self, _path, phase, **kwargs):
+            self.journal_writes.append({"phase": phase, **kwargs})
+            return {"ok": True}
+
+        def human_window_image_click_in_bounds(self, hwnd, *_args, **kwargs):
+            action_name = str(kwargs.get("action_name") or "")
+            self.click_names.append(action_name)
+            self.click_hwnds.append(int(hwnd))
+            if action_name == "post_confirm_add_friend_dialog_close":
+                if not close_click_ok:
+                    return {"ok": False, "reason": "simulated_close_click_failure"}
+                if window_disappears:
+                    self.win32gui.exists = False
+                    self.win32gui.visible = False
+                else:
+                    self.win32gui.visible = window_visible_after_click
+            return {"ok": True}
+
+    fake_ops = FakeOps()
+    original_ops = add_friend_windows._SIDECAR_OPS
+    try:
+        add_friend_windows.bind_sidecar_ops(fake_ops)
+        with (
+            patch.object(add_friend_windows, "add_friend_invite_form_targets", return_value=targets_map),
+            patch.object(add_friend_windows, "draw_add_friend_screen_annotation", return_value="annotated.png"),
+        ):
+            result = add_friend_windows.fill_add_friend_invite_form_and_confirm(
+                1001,
+                Path(tempfile.mkdtemp(prefix="add-friend-cleanup-test-")),
+                verify_message="您好",
+                remark_name="客户-CJ8K2P",
+                remark_code="CJ8K2P",
+                action_journal_path="action-journal.json",
+                parent_dialog_hwnd=2002,
+            )
+    finally:
+        add_friend_windows.bind_sidecar_ops(original_ops)
+
+    return result, fake_ops
+
+
+def test_post_confirm_residual_dialog_is_closed_once_when_title_ocr_misses() -> None:
+    result, fake_ops = _run_post_confirm_cleanup_case(
+        close_click_ok=True,
+        window_disappears=True,
+    )
+
+    assert_true(result.get("ok") is True, f"invite result should remain successful: {result}")
+    assert_true(
+        fake_ops.click_names == ["invite_confirm_button_click", "post_confirm_add_friend_dialog_close"],
+        f"residual dialog must be closed exactly once after confirm: {fake_ops.click_names}",
+    )
+    assert_true(
+        fake_ops.capture_hwnds == [1001, 2002]
+        and fake_ops.click_hwnds == [1001, 2002],
+        f"post-confirm OCR and close must target the surviving parent dialog: "
+        f"captures={fake_ops.capture_hwnds}, clicks={fake_ops.click_hwnds}",
+    )
+    cleanup = result.get("post_confirm_cleanup") or {}
+    assert_true(
+        cleanup.get("detected") is True
+        and cleanup.get("attempted") is True
+        and cleanup.get("closed") is True,
+        f"cleanup evidence mismatch: {cleanup}",
+    )
+    assert_true(
+        cleanup.get("detection_source") == "known_dialog_hwnd",
+        f"known dialog HWND must authorize cleanup when title OCR misses: {cleanup}",
+    )
+    journal_terminal = (fake_ops.journal_writes[-1].get("terminal_payload") or {})
+    assert_true(
+        (journal_terminal.get("post_confirm_cleanup") or {}).get("state") == "closed",
+        f"durable terminal evidence must record successful cleanup: {journal_terminal}",
+    )
+
+
+def test_post_confirm_close_click_failure_is_not_reported_as_closed() -> None:
+    result, fake_ops = _run_post_confirm_cleanup_case(
+        close_click_ok=False,
+        window_disappears=False,
+    )
+
+    assert_true(result.get("ok") is True, f"irreversible invite result must remain successful: {result}")
+    cleanup = result.get("post_confirm_cleanup") or {}
+    assert_true(
+        fake_ops.click_names == ["invite_confirm_button_click", "post_confirm_add_friend_dialog_close"],
+        f"cleanup must be attempted exactly once: {fake_ops.click_names}",
+    )
+    assert_true(
+        cleanup.get("attempted") is True
+        and cleanup.get("closed") is False
+        and cleanup.get("reason") == "dialog_close_click_failed",
+        f"failed close click must remain an explicit unclosed result: {cleanup}",
+    )
+    journal_terminal = (fake_ops.journal_writes[-1].get("terminal_payload") or {})
+    assert_true(
+        (journal_terminal.get("post_confirm_cleanup") or {}).get("state") == "unclosed",
+        f"durable terminal evidence must not hide cleanup failure: {journal_terminal}",
+    )
+
+
+def test_post_confirm_visible_window_is_not_reported_closed_when_verify_ocr_misses() -> None:
+    result, _fake_ops = _run_post_confirm_cleanup_case(
+        close_click_ok=True,
+        window_disappears=False,
+        window_visible_after_click=True,
+    )
+
+    assert_true(result.get("ok") is True, f"irreversible invite result must remain successful: {result}")
+    cleanup = result.get("post_confirm_cleanup") or {}
+    verification = cleanup.get("verification") or {}
+    assert_true(
+        cleanup.get("attempted") is True
+        and cleanup.get("closed") is False
+        and cleanup.get("reason") == "residual_dialog_still_visible",
+        f"a surviving visible HWND must never be inferred closed from missing OCR: {cleanup}",
+    )
+    assert_true(
+        verification.get("window_exists") is True
+        and verification.get("window_visible") is True
+        and verification.get("residual_target") is None,
+        f"verification must preserve the OCR miss and live-window evidence: {verification}",
     )
 
 
@@ -1519,44 +1997,6 @@ def test_add_friend_pacing_tier_contract() -> None:
     assert_true(normalize_pacing_tier("missing") == "default", "unknown pacing tier should fallback to default")
 
 
-def test_post_confirm_residual_dialog_uses_only_exact_top_title() -> None:
-    from apps.wechat_ai_customer_service.adapters.wechat_win32_ocr.add_friend_windows import (
-        add_friend_residual_dialog_close_target,
-    )
-
-    image_size = (468, 834)
-    sparse_title = [{
-        "text": "添加朋友",
-        "left": 188,
-        "top": 12,
-        "right": 280,
-        "bottom": 42,
-        "center_x": 234,
-        "center_y": 27,
-        "confidence": 0.99,
-    }]
-    target = add_friend_residual_dialog_close_target(sparse_title, image_size)
-    assert_true(target is not None, "sparse real add-friend page should be closable from its title")
-    assert_true(
-        target.get("click_bounds") == [412, 6, 462, 58],
-        f"close target must stay inside the dialog title bar: {target}",
-    )
-    assert_true(
-        add_friend_residual_dialog_close_target(
-            [{**sparse_title[0], "top": 260, "bottom": 292, "center_y": 276}],
-            image_size,
-        ) is None,
-        "body copy must not authorize a close click",
-    )
-    assert_true(
-        add_friend_residual_dialog_close_target(
-            [{**sparse_title[0], "text": "申请添加朋友"}],
-            image_size,
-        ) is None,
-        "the invite form title must not be mistaken for the residual profile dialog",
-    )
-
-
 def test_add_friend_result_mapping_contract() -> None:
     from apps.wechat_ai_customer_service.adapters.add_friend_result_mapping import (
         ERROR_ACCOUNT_RESTRICTED,
@@ -1748,6 +2188,7 @@ def main() -> int:
         test_add_friend_flow_context_contract,
         test_add_friend_already_friend_terminal_event_contract,
         test_sidecar_uses_flow_context_for_entry_click,
+        test_add_friend_flow_forwards_action_journal_on_every_query_path,
         test_sidecar_uses_add_friend_payload_builders,
         test_add_friend_preflight_blocks_unready_window,
         test_add_friend_formal_preclick_requires_foreground_and_main_surface,
@@ -1757,12 +2198,17 @@ def main() -> int:
         test_invite_form_locator_contract,
         test_invite_form_input_click_failure_blocks_keyboard_actions,
         test_invite_form_field_verification_blocks_confirm_click,
+        test_invite_form_failed_field_retries_once_before_confirm,
+        test_invite_confirm_uses_durable_action_journal_before_click,
+        test_post_confirm_residual_dialog_uses_only_exact_top_title,
+        test_post_confirm_residual_dialog_is_closed_once_when_title_ocr_misses,
+        test_post_confirm_close_click_failure_is_not_reported_as_closed,
+        test_post_confirm_visible_window_is_not_reported_closed_when_verify_ocr_misses,
         test_query_verify_invalid_dialog_handle_returns_structured_failure,
         test_add_friend_primary_locator_contract,
         test_add_friend_live_window_paths_pass_screenshot_to_plus_locator,
         test_add_friend_ocr_contract,
         test_add_friend_pacing_tier_contract,
-        test_post_confirm_residual_dialog_uses_only_exact_top_title,
         test_add_friend_result_mapping_contract,
         test_add_friend_screenshot_artifact_contract,
         test_sidecar_add_friend_helpers_import,
