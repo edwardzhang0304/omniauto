@@ -313,6 +313,7 @@ DEFAULT_SEND_TRIGGER_MODE = "enter_only"
 DEFAULT_STRICT_SEND_FOCUS_GUARD = True
 DEFAULT_FOCUS_CLICK_FALLBACK = True
 DEFAULT_ALLOW_UNKNOWN_FOREGROUND_GUARD = True
+SEND_WINDOW_FOCUS_RECOVERY_DELAYS_SECONDS = (0.30, 0.70)
 INPUT_TEXT_DARK_RATIO_MIN = 0.0025
 INPUT_TEXT_SOFT_BLANK_DARK_RATIO_MAX = 0.035
 INPUT_TEXT_SOFT_BLANK_MEAN_MIN = 242.0
@@ -7484,39 +7485,26 @@ def send_payload(
 
     reused_prevalidated_guard = bool(isinstance(validated_guard, dict) and validated_guard.get("ok"))
     pre_send_guard_started = _sidecar_timing_start(timing, "pre_send_guard")
+    focus_guard = recover_send_window_guard(hwnd, max_attempts=2)
+    if not focus_guard.get("ok"):
+        _sidecar_timing_finish(timing, "pre_send_guard", pre_send_guard_started)
+        return finish({
+            "ok": False,
+            "online": True,
+            "adapter": "win32_ocr",
+            "state": "send_guard_blocked",
+            "window_probe": probe,
+            "target": target,
+            "guard": {"window_guard": focus_guard},
+            "action_phase": "not_attempted",
+            "error": str(focus_guard.get("reason") or "send focus guard blocked"),
+        })
     if reused_prevalidated_guard:
         validation = dict(validated_guard or {})
         # Re-check foreground/visibility quickly before using the cached target
         # confirmation.  The default path still re-runs strict OCR below; only
         # an explicit same-target continuation may reuse the cached guard.
-        focus_guard = recover_send_window_guard(hwnd, max_attempts=1)
-        if not focus_guard.get("ok"):
-            # Fallback to full active target validation to keep behavior robust
-            # when foreground recovery is temporarily blocked.
-            validation = validate_active_send_target_for_identity(
-                hwnd,
-                target,
-                exact=exact,
-                artifact_dir=artifact_dir,
-                session_key=session_key,
-                conversation_type=conversation_type,
-            )
-            _sidecar_timing_merge_validation(timing, "pre_send_guard_validation", validation)
-            reused_prevalidated_guard = False
-            if not validation.get("ok"):
-                _sidecar_timing_finish(timing, "pre_send_guard", pre_send_guard_started)
-                return finish({
-                    "ok": False,
-                    "online": bool(validation.get("online", True)),
-                    "adapter": "win32_ocr",
-                    "state": "send_guard_blocked",
-                    "window_probe": probe,
-                    "target": target,
-                    "guard": {**validation, "window_guard": focus_guard},
-                    "error": str(validation.get("error") or validation.get("reason") or "send guard blocked"),
-                })
-            geometry = validation["geometry"]
-        elif allow_cached_prevalidated_guard_without_ocr and active_send_guard_is_strong(validation):
+        if allow_cached_prevalidated_guard_without_ocr and active_send_guard_is_strong(validation):
             geometry = get_window_geometry(hwnd)
             geometry_check = validate_send_geometry(geometry)
             cached_geometry = validation.get("geometry") if isinstance(validation.get("geometry"), dict) else {}
@@ -8694,7 +8682,11 @@ def recover_send_window_guard(hwnd: int, *, max_attempts: int = 1) -> dict[str, 
     last_guard = guard
     for attempt in range(1, attempts + 1):
         activate_window(hwnd)
-        time.sleep(random.uniform(0.06, 0.14))
+        delay_index = min(
+            attempt - 1,
+            len(SEND_WINDOW_FOCUS_RECOVERY_DELAYS_SECONDS) - 1,
+        )
+        time.sleep(SEND_WINDOW_FOCUS_RECOVERY_DELAYS_SECONDS[delay_index])
         retry_guard = basic_send_window_guard(hwnd)
         if retry_guard.get("ok"):
             return {
