@@ -31,6 +31,12 @@ DEFAULT_REVIEWER_TEMPERATURE = 0.1
 REVIEWER_VERDICTS = {"pass", "repair", "block", "handoff_suggest"}
 REVIEWER_MODES = {"shadow", "suspicious_only", "always"}
 _REVIEW_CACHE: dict[str, dict[str, Any]] = {}
+SOFT_ADVISORY_HANDOFF_REASONS = {
+    "matched_faq_requires_handoff",
+    "missing_authoritative_evidence",
+    "no_relevant_business_evidence",
+    "auto_reply_disabled",
+}
 COMMON_SENSE_QUESTION_TERMS = (
     "保险",
     "车损险",
@@ -305,6 +311,10 @@ def review_brain_reply_semantics(
             plan=plan,
             brain_input=brain_input,
         )
+    review = relax_soft_evidence_clarification_review(
+        review=review,
+        plan=plan,
+    )
     if review.get("unavailable"):
         review["soft_pass_low_risk"] = bool(cfg.get("soft_pass_low_risk")) and plan_allows_unavailable_soft_pass(
             plan,
@@ -833,6 +843,120 @@ def is_relaxable_bounded_advisory_semantic_error(text: str) -> bool:
     return contains_any(clean, BOUNDED_ADVISORY_RELAXABLE_SEMANTIC_TERMS)
 
 
+def relax_soft_evidence_clarification_review(
+    *,
+    review: dict[str, Any],
+    plan: dict[str, Any],
+) -> dict[str, Any]:
+    """Do not let a legacy no-evidence flag erase a safe Brain clarification.
+
+    This is deliberately narrower than a generic reviewer override.  It only
+    applies to a low-risk, fact-free information-collection plan and only drops
+    reviewer findings whose text is about the soft no-authority projection
+    itself.  Product claims, commitments, cross-session concerns and any other
+    semantic error remain blocking and still go through Brain repair.
+    """
+
+    if not review.get("invoked") or review.get("status") != "ok":
+        return review
+    if not soft_evidence_clarification_plan_is_safe(plan):
+        return review
+    hard_concerns = string_list(review.get("hard_boundary_concerns"))
+    semantic_errors = string_list(review.get("semantic_errors"))
+    remaining_concerns = [item for item in hard_concerns if not soft_evidence_only_review_finding(item)]
+    remaining_errors = [item for item in semantic_errors if not soft_evidence_only_review_finding(item)]
+    if len(remaining_concerns) == len(hard_concerns) and len(remaining_errors) == len(semantic_errors):
+        return review
+
+    result = dict(review)
+    result["hard_boundary_concerns"] = remaining_concerns
+    result["semantic_errors"] = remaining_errors
+    errors = list(remaining_errors)
+    errors.extend(f"hard_boundary_concern:{item}" for item in remaining_concerns)
+    result["errors"] = errors
+    warnings = list(result.get("warnings", []) or [])
+    warnings.append("soft_evidence_clarification_review_relaxed")
+    result["warnings"] = warnings
+    if not errors:
+        result["ok"] = True
+        result["verdict"] = "pass"
+        result["repair_instruction"] = ""
+        result["customer_visible_risk"] = "low"
+        result["reason"] = append_reason(
+            str(result.get("reason") or ""),
+            "fact_free_clarification_not_blocked_by_soft_evidence",
+        )
+    else:
+        result["ok"] = False
+    return result
+
+
+def soft_evidence_clarification_plan_is_safe(plan: dict[str, Any]) -> bool:
+    if str(plan.get("recommended_action") or "").strip().lower() != "send_reply":
+        return False
+    if str(plan.get("answer_mode") or "").strip() not in {
+        "ask_clarifying_question",
+        "collect_customer_info",
+    }:
+        return False
+    if not bool(plan.get("can_answer", True)) or plan.get("facts_claimed"):
+        return False
+    reply = join_reply_segments(plan.get("reply_segments", []) or [])
+    if not reply or low_information_stall_reply(reply):
+        return False
+    risk = plan.get("risk") if isinstance(plan.get("risk"), dict) else {}
+    if bool(risk.get("needs_handoff")) or plan_customer_visible_risk(plan) != "low":
+        return False
+    hard_risk_tags = {
+        "illegal_request",
+        "prompt_injection",
+        "policy_violation",
+        "finance_commitment",
+        "price_commitment",
+        "stock_commitment",
+        "contract_commitment",
+        "authority_conflict",
+    }
+    risk_tags = {str(item).strip().lower() for item in risk.get("risk_tags", []) or [] if str(item).strip()}
+    return not bool(risk_tags & hard_risk_tags)
+
+
+def soft_evidence_only_review_finding(text: str) -> bool:
+    compact = normalize_space(text).lower()
+    if not compact:
+        return True
+    markers = (
+        "no_relevant_business_evidence",
+        "missing_authoritative_evidence",
+        "must_handoff",
+        "allowed_auto_reply=false",
+        "无相关业务证据",
+        "没有可授权的商品",
+        "无可授权的商品",
+        "暂无商品库",
+        "缺少product_master",
+        "没有product_master",
+    )
+    if not any(marker in compact for marker in markers):
+        return False
+    non_relaxable = (
+        "编造",
+        "虚构",
+        "价格冲突",
+        "库存冲突",
+        "车况冲突",
+        "事实冲突",
+        "跨会话",
+        "错会话",
+        "提示词",
+        "密钥",
+        "违法",
+        "贷款承诺",
+        "合同承诺",
+    )
+    return not any(marker in compact for marker in non_relaxable)
+
+
 def is_allowed_common_sense_question(text: str) -> bool:
     return contains_any(str(text or ""), COMMON_SENSE_QUESTION_TERMS)
 
@@ -1016,6 +1140,8 @@ def build_quality_reviewer_prompt(request: dict[str, Any]) -> tuple[str, str]:
         +
         "你不能授权商品事实、价格、库存、车况、政策或承诺；商品事实只能来自product_master，政策流程只能来自formal_knowledge。"
         "逐句检查草稿中的可核验事实是否由authority_evidence_summary或客户当前消息授权；稳定的一般常识只能辅助解释和建议。"
+        "authority_evidence_summary.safety.soft_advisory_guard只表示缺少可授权商品/政策事实，不是硬转人工："
+        "若BrainPlan为低风险ask_clarifying_question或collect_customer_info、facts_claimed为空且草稿没有具体车型、价格、库存、车况或政策承诺，必须按普通需求澄清审稿，不能仅因没有product_master判repair、block或handoff_suggest。"
         "authority_evidence_summary.product_master_ids中的每一项都包含该商品本轮可用的紧凑事实；"
         "逐句把草稿中的商品断言与这些事实及brain_plan_summary.facts_claimed核对，任一商品断言无法对应时必须判repair。"
         "任何需要实时查询、会随时间变化或证据中不存在的外部状态，不能由常识代替；草稿若仍作肯定或否定断言，应判repair。"
@@ -1140,9 +1266,35 @@ def compact_authority_evidence_for_review(evidence_pack: dict[str, Any]) -> dict
             evidence_pack=evidence_pack,
         ),
         "intent_tags": compact_list(evidence_pack.get("intent_tags") or [], max_items=10, max_text_chars=40),
-        "safety": compact_mapping(evidence_pack.get("safety") or {}, max_text_chars=100),
-        "authority_rule": "product_master/formal_knowledge authorize facts; AI experience/style/common sense are auxiliary only.",
+        "safety": compact_safety_for_semantic_review(evidence_pack.get("safety")),
+        "authority_rule": (
+            "product_master/formal_knowledge authorize product and policy facts; "
+            "soft_advisory_guard is not a hard handoff. A low-risk ask_clarifying_question or "
+            "collect_customer_info plan with no factual claim may be sent without product ids."
+        ),
     }
+
+
+def compact_safety_for_semantic_review(value: Any) -> dict[str, Any]:
+    """Give the reviewer the same soft/hard safety meaning as the Brain prompt.
+
+    Evidence resolution historically stores missing authority as a handoff-shaped
+    compatibility projection.  That projection is advisory for a Brain-authored,
+    fact-free clarification; forwarding the raw booleans made the reviewer turn
+    the advisory back into a hard veto.
+    """
+
+    if not isinstance(value, dict):
+        return {}
+    reasons = {str(item).strip() for item in value.get("reasons", []) or [] if str(item).strip()}
+    if value.get("must_handoff") is True and reasons and reasons <= SOFT_ADVISORY_HANDOFF_REASONS:
+        return {
+            "soft_advisory_guard": True,
+            "reasons": sorted(reasons),
+            "allowed_customer_visible_modes": ["ask_clarifying_question", "collect_customer_info"],
+            "forbidden_without_authority": ["product_fact", "price", "stock", "condition", "policy_commitment"],
+        }
+    return compact_mapping(value, max_text_chars=100)
 
 
 def product_ids_from_product_master(product_master: dict[str, Any]) -> list[str]:
