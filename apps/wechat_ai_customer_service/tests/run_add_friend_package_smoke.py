@@ -1508,7 +1508,7 @@ def test_add_friend_pacing_tier_contract() -> None:
         pacing_range,
     )
 
-    for tier in ["critical_click", "input", "verify", "report", "default"]:
+    for tier in ["critical_click", "input", "post_confirm_cleanup", "verify", "report", "default"]:
         assert_true(tier in DEFAULT_ADD_FRIEND_PACING_TIERS, f"missing pacing tier: {tier}")
         low, high = pacing_range(tier)
         assert_true(0 <= low <= high, f"invalid pacing range for {tier}: {(low, high)}")
@@ -1517,6 +1517,44 @@ def test_add_friend_pacing_tier_contract() -> None:
         assert_true(meta.get("profile") == "balanced", f"pacing should default to balanced profile: {meta}")
     assert_true(pacing_range("report") == (0, 0), f"report tier should not wait: {pacing_range('report')}")
     assert_true(normalize_pacing_tier("missing") == "default", "unknown pacing tier should fallback to default")
+
+
+def test_post_confirm_residual_dialog_uses_only_exact_top_title() -> None:
+    from apps.wechat_ai_customer_service.adapters.wechat_win32_ocr.add_friend_windows import (
+        add_friend_residual_dialog_close_target,
+    )
+
+    image_size = (468, 834)
+    sparse_title = [{
+        "text": "添加朋友",
+        "left": 188,
+        "top": 12,
+        "right": 280,
+        "bottom": 42,
+        "center_x": 234,
+        "center_y": 27,
+        "confidence": 0.99,
+    }]
+    target = add_friend_residual_dialog_close_target(sparse_title, image_size)
+    assert_true(target is not None, "sparse real add-friend page should be closable from its title")
+    assert_true(
+        target.get("click_bounds") == [412, 6, 462, 58],
+        f"close target must stay inside the dialog title bar: {target}",
+    )
+    assert_true(
+        add_friend_residual_dialog_close_target(
+            [{**sparse_title[0], "top": 260, "bottom": 292, "center_y": 276}],
+            image_size,
+        ) is None,
+        "body copy must not authorize a close click",
+    )
+    assert_true(
+        add_friend_residual_dialog_close_target(
+            [{**sparse_title[0], "text": "申请添加朋友"}],
+            image_size,
+        ) is None,
+        "the invite form title must not be mistaken for the residual profile dialog",
+    )
 
 
 def test_add_friend_result_mapping_contract() -> None:
@@ -1724,6 +1762,7 @@ def main() -> int:
         test_add_friend_live_window_paths_pass_screenshot_to_plus_locator,
         test_add_friend_ocr_contract,
         test_add_friend_pacing_tier_contract,
+        test_post_confirm_residual_dialog_uses_only_exact_top_title,
         test_add_friend_result_mapping_contract,
         test_add_friend_screenshot_artifact_contract,
         test_sidecar_add_friend_helpers_import,
