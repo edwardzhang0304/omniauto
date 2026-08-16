@@ -25,6 +25,7 @@ from apps.wechat_ai_customer_service.adapters import wechat_win32_ocr_sidecar  #
 from apps.wechat_ai_customer_service.adapters.wechat_win32_ocr.geometry import session_split_x  # noqa: E402
 from apps.wechat_ai_customer_service.optional_plugins.vision.capture.surface import (  # noqa: E402
     image_candidates_without_reliable_typed_message_conflicts,
+    messages_outside_image_bubbles,
     self_visual_image_messages_from_current_surface,
 )
 
@@ -301,6 +302,48 @@ def check_reliable_message_type_wins_over_false_image_surface() -> None:
         [],
         "trusted untranscribed voice structure must veto image",
     )
+
+    for role, candidate_bounds, text_bounds in (
+        ("self", [489, 411, 878, 532], [510, 419, 858, 531]),
+        ("customer", [470, 411, 820, 532], [490, 419, 800, 531]),
+    ):
+        candidate = {
+            "bounds": candidate_bounds,
+            "side": role,
+            "role_facing_edge_surface_continuity": 0.98,
+        }
+        reliable_text = {
+            "id": f"confirmed-{role}-long-text",
+            "type": "text",
+            "sender_role": role,
+            "sender_role_source": "same_row_avatar",
+            "content": "你好，10万左右可以先按你的用车需求筛选合适车型。",
+            "bubble_rect": text_bounds,
+            "avatar_alignment": {"role": role},
+        }
+        assert_equal(
+            image_candidates_without_reliable_typed_message_conflicts(
+                [candidate],
+                [reliable_text],
+                [],
+            ),
+            [],
+            f"reliable {role} text must veto a continuous structural image",
+        )
+        assert_equal(
+            messages_outside_image_bubbles(
+                [reliable_text],
+                [
+                    {
+                        "type": "image",
+                        "sender_role": role,
+                        "bubble_rect": candidate_bounds,
+                    }
+                ],
+            ),
+            [reliable_text],
+            f"final merge must preserve reliable {role} text",
+        )
 
     invalid_cases = [
         ({**reliable_voice, "voice_anchor": {"item": {"sender_role": "customer"}}}, image),
