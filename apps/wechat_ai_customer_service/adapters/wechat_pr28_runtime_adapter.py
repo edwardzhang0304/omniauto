@@ -19,15 +19,15 @@ from typing import Any
 # Advance the byte-control baseline only to the last independently reviewed
 # commit that intentionally changed a PR-owned file.  Later Vision work must
 # still leave every blob below byte-identical to this fixed head.
-PR28_HEAD = "1c0a0e9e89f457c3ae71df855f447954909a2182"
+PR28_HEAD = "3afed619afc8c1e0e71231459acafa3c2aabe608"
 PR28_BLOBS = {
     "apps/wechat_ai_customer_service/adapters/wechat_connector.py": "f25d605ee6baff4b935f4339a6183d5446d97c33",
     "apps/wechat_ai_customer_service/adapters/wechat_win32_ocr/text_normalization.py": "7a09c6ddd2d218ee941686f4985cc2f184f03a4d",
-    "apps/wechat_ai_customer_service/adapters/wechat_win32_ocr_sidecar.py": "fb392b0d9d16e3aa2b441076c2c83b4ddc3f0b37",
-    "apps/wechat_ai_customer_service/tests/run_wechat_win32_ocr_compat_checks.py": "81bbadfd8de2557a15a57493c55db89c31794cf0",
+    "apps/wechat_ai_customer_service/adapters/wechat_win32_ocr_sidecar.py": "63b5fcbb9912677a95cecf91f22ba32babf3aa71",
+    "apps/wechat_ai_customer_service/tests/run_wechat_win32_ocr_compat_checks.py": "22650f8e464a5dc687717756b2a69a00370a2e4c",
     "apps/wechat_ai_customer_service/tests/run_wechat_win32_ocr_sender_role_screenshot_replay.py": "0832a0be250093ef3c8384d6c0296b50f9d2b4c8",
     "apps/wechat_ai_customer_service/tests/run_wechat_win32_ocr_window_action_planning_checks.py": "b191519738e21adcb3625029fc8e0f5474fd2a5e",
-    "apps/wechat_ai_customer_service/wechat_message_envelope.py": "3c81ea47717b67ea3b82d9224fc7d83941eed722",
+    "apps/wechat_ai_customer_service/wechat_message_envelope.py": "b2af6878294693490b7e56b5f04dbb5f87dc0ace",
 }
 
 
