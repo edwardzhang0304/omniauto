@@ -23,7 +23,7 @@ PR28_HEAD = "3afed619afc8c1e0e71231459acafa3c2aabe608"
 PR28_BLOBS = {
     "apps/wechat_ai_customer_service/adapters/wechat_connector.py": "f25d605ee6baff4b935f4339a6183d5446d97c33",
     "apps/wechat_ai_customer_service/adapters/wechat_win32_ocr/text_normalization.py": "7a09c6ddd2d218ee941686f4985cc2f184f03a4d",
-    "apps/wechat_ai_customer_service/adapters/wechat_win32_ocr_sidecar.py": "63b5fcbb9912677a95cecf91f22ba32babf3aa71",
+    "apps/wechat_ai_customer_service/adapters/wechat_win32_ocr_sidecar.py": "04e91fc5e2eb3623437de10263bd24f0168cd3b3",
     "apps/wechat_ai_customer_service/tests/run_wechat_win32_ocr_compat_checks.py": "22650f8e464a5dc687717756b2a69a00370a2e4c",
     "apps/wechat_ai_customer_service/tests/run_wechat_win32_ocr_sender_role_screenshot_replay.py": "0832a0be250093ef3c8384d6c0296b50f9d2b4c8",
     "apps/wechat_ai_customer_service/tests/run_wechat_win32_ocr_window_action_planning_checks.py": "b191519738e21adcb3625029fc8e0f5474fd2a5e",
