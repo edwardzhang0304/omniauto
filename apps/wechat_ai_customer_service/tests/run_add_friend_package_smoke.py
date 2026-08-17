@@ -892,8 +892,10 @@ def _run_already_friend_cleanup_case(*, close_click_ok: bool) -> tuple[dict[str,
             self.win32gui = WindowApi()
             self.click_names: list[str] = []
             self.click_hwnds: list[int] = []
+            self.pause_reasons: list[str] = []
 
-        def add_friend_paced_pause(self, *_args, **_kwargs) -> float:
+        def add_friend_paced_pause(self, *_args, **kwargs) -> float:
+            self.pause_reasons.append(str(kwargs.get("reason") or ""))
             return 0.0
 
         def human_window_image_click_in_bounds(self, hwnd, *_args, **kwargs):
@@ -936,6 +938,13 @@ def test_already_friend_residual_dialog_is_closed_once() -> None:
 
     assert_true(result.get("ok") is True, f"already_friend must remain successful: {result}")
     assert_true(result.get("result_code") == "already_friend", f"unexpected result: {result}")
+    assert_true(
+        fake_ops.pause_reasons == [
+            "after_already_friend_detection_before_cleanup",
+            "after_already_friend_add_friend_dialog_close_before_verify",
+        ],
+        f"already_friend cleanup pacing mismatch: {fake_ops.pause_reasons}",
+    )
     assert_true(
         fake_ops.click_names == ["already_friend_add_friend_dialog_close"]
         and fake_ops.click_hwnds == [3003],

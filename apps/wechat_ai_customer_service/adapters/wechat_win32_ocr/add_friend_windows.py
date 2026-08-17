@@ -1612,7 +1612,11 @@ def click_add_contact_entry_from_search_result(hwnd: int, output_dir: Path, *, r
     if target is None:
         surface = classify_add_friend_ocr_surface(result_items, result_shot.size)
         if surface.get('result_code') == RESULT_ALREADY_FRIEND:
-            cleanup, cleanup_timings = close_proven_add_friend_dialog(
+            pause_seconds = _ops().add_friend_paced_pause(
+                'post_confirm_cleanup',
+                reason='after_already_friend_detection_before_cleanup',
+            )
+            cleanup, close_timings = close_proven_add_friend_dialog(
                 hwnd,
                 output_dir,
                 current_shot=result_shot,
@@ -1620,6 +1624,13 @@ def click_add_contact_entry_from_search_result(hwnd: int, output_dir: Path, *, r
                 action_name='already_friend_add_friend_dialog_close',
                 verify_label='add_friend_already_friend_cleanup_verify_window',
             )
+            cleanup_timings = [
+                {
+                    'name': 'after_already_friend_detection_before_cleanup_pause',
+                    'seconds': round(pause_seconds, 3),
+                },
+                *close_timings,
+            ]
             return add_friend_completed_result(
                 state='already_friend',
                 result_code=RESULT_ALREADY_FRIEND,
