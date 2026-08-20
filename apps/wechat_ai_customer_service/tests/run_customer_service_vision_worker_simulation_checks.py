@@ -34,6 +34,7 @@ from apps.wechat_ai_customer_service.optional_plugins.vision.integrations import
 from apps.wechat_ai_customer_service.optional_plugins.vision.clipboard_payload import (  # noqa: E402
     EphemeralClipboardImage,
 )
+from apps.wechat_ai_customer_service.adapters.wechat_win32_ocr import window_layout  # noqa: E402
 from apps.wechat_ai_customer_service.adapters.wechat_win32_ocr.geometry import session_split_x  # noqa: E402
 
 
@@ -46,6 +47,19 @@ class _Win32Con:
     VK_ESCAPE = 0x1B
 
 
+def _draw_layout_chrome(surface: Image.Image) -> None:
+    draw = ImageDraw.Draw(surface)
+    split = session_split_x(surface.size[0])
+    draw.rectangle([0, 0, 70, 860], fill=(224, 224, 224))
+    draw.rectangle([71, 0, split, 89], fill=(210, 210, 210))
+    draw.rectangle([71, 90, split, 860], fill=(240, 240, 240))
+    draw.rectangle([split + 1, 0, 979, 89], fill=(238, 238, 238))
+    draw.rectangle([split + 1, 90, 979, 759], fill=(255, 255, 255))
+    draw.rectangle([split + 1, 760, 979, 859], fill=(242, 242, 242))
+    draw.line([(71, 89), (979, 89)], fill=(110, 110, 110), width=2)
+    draw.line([(split + 1, 759), (979, 759)], fill=(110, 110, 110), width=2)
+
+
 class FakeGenericWeChatHost:
     _WIN32_IMPORT_ERROR = ""
     DEFAULT_QUICK_LOGIN_AUTO_ENTER = False
@@ -54,10 +68,9 @@ class FakeGenericWeChatHost:
 
     def __init__(self) -> None:
         self.surface = Image.new("RGB", (980, 860), (247, 247, 247))
+        _draw_layout_chrome(self.surface)
         draw = ImageDraw.Draw(self.surface)
-        split = session_split_x(980)
-        draw.rectangle([0, 0, split, 860], fill=(240, 240, 240))
-        draw.rectangle([split + 12, 90, 972, 760], fill=(255, 255, 255))
+        split = 370
         draw.rectangle([split + 42, 250, split + 282, 470], fill=(30, 120, 190))
         draw.rectangle([760, 500, 940, 660], fill=(190, 80, 50))
         self.menu = self.surface.copy()
@@ -70,6 +83,32 @@ class FakeGenericWeChatHost:
         self.latest_restores = 0
         self.last_right_click_bounds: list[int] = []
         self.cleared_sequences: list[int] = []
+        self._layout_snapshots: dict[int, dict[str, Any]] = {}
+        self._popup_layout_snapshot: dict[str, Any] | None = None
+
+    def layout_snapshot_for_image(self, image: Image.Image) -> dict[str, Any]:
+        cached = self._layout_snapshots.get(id(image))
+        if cached is not None:
+            return dict(cached)
+        structural = window_layout.build_structural_layout_regions(image)
+        snapshot = window_layout.build_layout_snapshot(
+            hwnd=100,
+            frame_id=window_layout.new_frame_id(100),
+            capture_mode=window_layout.CAPTURE_MODE_WINDOW_VISIBLE_SCREEN,
+            image_size=image.size,
+            capture_screen_origin=[0, 0],
+            window_rect=[0, 0, image.size[0], image.size[1]],
+            client_rect=[0, 0, image.size[0], image.size[1]],
+            client_screen_origin=[0, 0],
+            dpi_scale=1.0,
+            regions=structural.get("regions") or {},
+            anchors=structural.get("anchors") or [],
+            confidence=float(structural.get("confidence") or 0.0),
+            conflicts=structural.get("conflicts") or [],
+            executable=bool(structural.get("ok")),
+        )
+        self._layout_snapshots[id(image)] = snapshot
+        return dict(snapshot)
 
     @staticmethod
     def configure_dpi_awareness() -> None:
@@ -154,13 +193,60 @@ class FakeGenericWeChatHost:
         self.capture_artifact_dirs.append(artifact_dir)
         return self.menu, ""
 
+    def wait_for_wechat_context_menu_stable(self) -> int:
+        return 180
+
+    def observe_wechat_context_menu(
+        self,
+        _hwnd: int,
+        *,
+        anchor_screen: tuple[int, int],
+        artifact_dir: str | None,
+        label: str,
+    ) -> dict[str, Any]:
+        assert_true(artifact_dir is None and bool(label), "menu observation must stay transient")
+        if self._popup_layout_snapshot is None:
+            width, height = self.menu.size
+            self._popup_layout_snapshot = window_layout.build_layout_snapshot(
+                hwnd=200,
+                frame_id=window_layout.new_frame_id(200),
+                capture_mode=window_layout.CAPTURE_MODE_WINDOW_VISIBLE_SCREEN,
+                image_size=self.menu.size,
+                capture_screen_origin=[0, 0],
+                window_rect=[0, 0, width, height],
+                client_rect=[0, 0, width, height],
+                client_screen_origin=[0, 0],
+                dpi_scale=1.0,
+                regions={"surface_bounds": [0, 0, width, height]},
+                anchors=[],
+                confidence=1.0,
+                conflicts=[],
+                executable=True,
+                surface_kind="popup",
+                required_region_names=window_layout.POPUP_LAYOUT_REGION_NAMES,
+            )
+        return {
+            "ok": True,
+            "menu_hwnd": 200,
+            "layout_snapshot_id": str(self._popup_layout_snapshot.get("layout_snapshot_id") or ""),
+            "image_size": self.menu.size,
+            "local_ocr_items": self.run_ocr(self.menu),
+            "anchor_screen": list(anchor_screen),
+        }
+
     def run_ocr(self, image: Image.Image) -> list[dict[str, Any]]:
         if image is self.menu:
             return [{"text": "复制", "left": 600, "top": 488, "right": 636, "bottom": 508, "confidence": 0.95}]
         return []
 
     @staticmethod
-    def parse_messages_from_ocr(_items: list[dict[str, Any]], _size: tuple[int, int], *, target: str) -> list[dict[str, Any]]:
+    def parse_messages_from_ocr(
+        _items: list[dict[str, Any]],
+        _size: tuple[int, int],
+        *,
+        target: str,
+        screenshot: Image.Image | None = None,
+    ) -> list[dict[str, Any]]:
         return []
 
     @staticmethod
@@ -185,10 +271,18 @@ class FakeGenericWeChatHost:
         *,
         bounds: list[int],
         action_name: str,
+        expected_snapshot_id: str,
     ) -> dict[str, Any]:
+        assert_true(bool(expected_snapshot_id), "right click must carry a frame snapshot")
         self.right_clicks += 1
         self.last_right_click_bounds = [int(value) for value in bounds[:4]]
-        return {"ok": True, "bounds": bounds, "action_name": action_name}
+        return {
+            "ok": True,
+            "bounds": bounds,
+            "action_name": action_name,
+            "screen_x": int(_x),
+            "screen_y": int(_y),
+        }
 
     def human_window_image_click_in_bounds(
         self,
@@ -198,7 +292,9 @@ class FakeGenericWeChatHost:
         *,
         bounds: list[int],
         action_name: str,
+        expected_snapshot_id: str,
     ) -> dict[str, Any]:
+        assert_true(bool(expected_snapshot_id), "menu click must carry a frame snapshot")
         self.menu_clicks += 1
         self.copy_pending = True
         return {"ok": True, "bounds": bounds, "action_name": action_name}
@@ -260,7 +356,7 @@ def check_worker_copies_current_customer_image_without_sidecar_action() -> None:
     assert_true(transaction.get("visual_side") == "customer", "copy must preserve direction proof")
     assert_true(host.right_clicks == 1 and host.menu_clicks == 1, "copy must use one bounded right-click and one Copy click")
     assert_true(host.cleared_sequences == [], "copy-only operation must leave the generation for its caller to consume")
-    assert_true(host.capture_artifact_dirs == [None, None], "copy transaction must not persist screenshots")
+    assert_true(host.capture_artifact_dirs == [None], "copy transaction must not persist screenshots")
 
 
 def check_common_menu_observer_is_preferred_over_legacy_capture() -> None:
@@ -286,9 +382,16 @@ def check_common_menu_observer_is_preferred_over_legacy_capture() -> None:
             assert_true(label, "menu observation label is required")
             self.menu_observations += 1
             x, y = anchor_screen
+            base = super().observe_wechat_context_menu(
+                _hwnd,
+                anchor_screen=anchor_screen,
+                artifact_dir=artifact_dir,
+                label=label,
+            )
             return {
+                **base,
                 "ok": True,
-                "image_size": (1920, 1080),
+                "image_size": self.menu.size,
                 "local_ocr_items": [
                     {
                         "text": "复制",
@@ -311,6 +414,7 @@ def check_common_menu_observer_is_preferred_over_legacy_capture() -> None:
             *,
             bounds: list[int],
             action_name: str,
+            expected_snapshot_id: str,
         ) -> dict[str, Any]:
             result = super().human_window_image_right_click_in_bounds(
                 hwnd,
@@ -318,6 +422,7 @@ def check_common_menu_observer_is_preferred_over_legacy_capture() -> None:
                 y,
                 bounds=bounds,
                 action_name=action_name,
+                expected_snapshot_id=expected_snapshot_id,
             )
             return {**result, "screen_x": 700, "screen_y": 420}
 
@@ -419,10 +524,7 @@ class BacksearchHost(FakeGenericWeChatHost):
     def __init__(self) -> None:
         super().__init__()
         self.empty_surface = Image.new("RGB", (980, 860), (247, 247, 247))
-        draw = ImageDraw.Draw(self.empty_surface)
-        split = session_split_x(980)
-        draw.rectangle([0, 0, split, 860], fill=(240, 240, 240))
-        draw.rectangle([split + 12, 90, 972, 760], fill=(255, 255, 255))
+        _draw_layout_chrome(self.empty_surface)
         self.surface_index = 0
 
     def capture_wechat(self, _hwnd: int, *, artifact_dir: str | None, label: str) -> tuple[Image.Image, str]:
@@ -483,10 +585,9 @@ def check_explicit_unanchored_single_image_only_uses_current_frame() -> None:
 
 def _surface_with_customer_images(image_rows: list[tuple[int, int]]) -> Image.Image:
     surface = Image.new("RGB", (980, 860), (247, 247, 247))
+    _draw_layout_chrome(surface)
     draw = ImageDraw.Draw(surface)
     split = session_split_x(980)
-    draw.rectangle([0, 0, split, 860], fill=(240, 240, 240))
-    draw.rectangle([split + 12, 90, 972, 760], fill=(255, 255, 255))
     for index, (top, bottom) in enumerate(image_rows):
         draw.rectangle([split + 42, top, split + 282, bottom], fill=(30 + index * 30, 120, 190))
     return surface
@@ -509,7 +610,7 @@ class AnchorBacksearchHost(FakeGenericWeChatHost):
         self.capture_artifact_dirs.append(artifact_dir)
         return (self.empty_surface if self.surface_index == 0 else self.anchor_surface), ""
 
-    def parse_messages_from_ocr(self, _items: list[dict[str, Any]], _size: tuple[int, int], *, target: str) -> list[dict[str, Any]]:
+    def parse_messages_from_ocr(self, _items: list[dict[str, Any]], _size: tuple[int, int], *, target: str, screenshot: Image.Image | None = None) -> list[dict[str, Any]]:
         if self.surface_index == 0:
             return []
         return [
@@ -613,7 +714,7 @@ class MultiImageHost(FakeGenericWeChatHost):
             ]
         return []
 
-    def parse_messages_from_ocr(self, _items: list[dict[str, Any]], _size: tuple[int, int], *, target: str) -> list[dict[str, Any]]:
+    def parse_messages_from_ocr(self, _items: list[dict[str, Any]], _size: tuple[int, int], *, target: str, screenshot: Image.Image | None = None) -> list[dict[str, Any]]:
         if not self.with_self_boundary:
             return []
         return [
@@ -1133,7 +1234,7 @@ def check_fresh_reanchor_uses_global_matcher_for_ambiguous_keys() -> None:
 
 
 class NormalCurrentImageHost(FakeGenericWeChatHost):
-    def parse_messages_from_ocr(self, _items: list[dict[str, Any]], _size: tuple[int, int], *, target: str) -> list[dict[str, Any]]:
+    def parse_messages_from_ocr(self, _items: list[dict[str, Any]], _size: tuple[int, int], *, target: str, screenshot: Image.Image | None = None) -> list[dict[str, Any]]:
         return [
             {
                 "id": "normal-anchor",

@@ -39,10 +39,11 @@ from apps.wechat_ai_customer_service.admin_backend.services.customer_service_run
 from apps.wechat_ai_customer_service.admin_backend.services.customer_service_scheduler import (  # noqa: E402
     ManagedListenerSchedulerBridge,
 )
-from apps.wechat_ai_customer_service.cloud_gate import cloud_gate_status, cloud_required_enabled  # noqa: E402
-from apps.wechat_ai_customer_service.customer_service_live_safety import (  # noqa: E402
-    apply_customer_service_live_safety_rpa_send_defaults,
+from apps.wechat_ai_customer_service.adapters.wechat_win32_ocr.env_config import (  # noqa: E402
+    DEFAULT_SEND_TRIGGER_MODE,
+    normalize_send_trigger_mode,
 )
+from apps.wechat_ai_customer_service.cloud_gate import cloud_gate_status, cloud_required_enabled  # noqa: E402
 from apps.wechat_ai_customer_service.sync import VpsLocalSyncService  # noqa: E402
 
 
@@ -121,7 +122,7 @@ RPA_HUMANIZED_SEND_DEFAULTS = {
     "adaptive_speed_enabled": True,
     "fast_send_confirmation_enabled": True,
     "input_fast_visual_confirm_enabled": True,
-    "send_trigger_mode": "enter_only",
+    "send_trigger_mode": DEFAULT_SEND_TRIGGER_MODE,
     "send_input_confirm_attempts": 3,
     "send_rate_min_interval_seconds": 0,
     "send_rate_burst_window_seconds": 600,
@@ -170,17 +171,6 @@ def normalize_humanized_input_method(method: Any) -> str:
     )
     if enforce_intermittent and raw == "clipboard_once" and not allow_clipboard_once:
         return "clipboard_chunks"
-    return raw
-
-
-def normalize_send_trigger_mode(method: Any) -> str:
-    raw = str(method or RPA_HUMANIZED_SEND_DEFAULTS["send_trigger_mode"]).strip().lower()
-    if raw not in {"click_only", "enter_only", "enter_then_click"}:
-        return str(RPA_HUMANIZED_SEND_DEFAULTS["send_trigger_mode"])
-    if raw == "enter_then_click":
-        return "enter_only"
-    if raw == "click_only" and not env_bool("WECHAT_WIN32_OCR_ALLOW_CLICK_SEND_TRIGGER", default=False):
-        return "enter_only"
     return raw
 
 
@@ -381,19 +371,9 @@ def _deduped_names(values: Any) -> list[str]:
 def normalize_runtime_target_guard_settings(settings: dict[str, Any] | None) -> dict[str, Any]:
     source = settings if isinstance(settings, dict) else {}
     enabled = bool(source.get("enabled")) and bool(source.get("enforce_runtime_targets", True))
-    if "allow_dynamic_all_sessions" in source:
-        allow_dynamic_all_sessions = bool(source.get("allow_dynamic_all_sessions"))
-    else:
-        disable_dynamic_all_sessions = source.get("disable_respond_all_unread_sessions")
-        if disable_dynamic_all_sessions is None:
-            disable_dynamic_all_sessions = True
-        if isinstance(disable_dynamic_all_sessions, str):
-            disable_dynamic_all_sessions = disable_dynamic_all_sessions.strip().lower() not in {"0", "false", "no", "off", ""}
-        allow_dynamic_all_sessions = not bool(disable_dynamic_all_sessions)
     return {
         "enabled": enabled,
         "allowed_targets": _deduped_names(source.get("allowed_targets") or source.get("targets")),
-        "allow_dynamic_all_sessions": allow_dynamic_all_sessions,
         "reason": "live_safety_guard_runtime_targets" if enabled else "disabled",
     }
 
@@ -502,7 +482,6 @@ def load_rpa_humanized_send_settings(config_path: Path) -> dict[str, Any]:
     except Exception:
         raw = {}
     if isinstance(raw, dict):
-        raw = apply_customer_service_live_safety_rpa_send_defaults(raw)
         candidate = raw.get("rpa_humanized_send")
         if isinstance(candidate, dict):
             payload = dict(candidate)
@@ -568,19 +547,14 @@ def load_rpa_humanized_send_settings(config_path: Path) -> dict[str, Any]:
                 os.getenv("WECHAT_WIN32_OCR_HUMANIZED_TYPING_TYPO_PROBABILITY"),
                 float(
                     settings.get("typing_typo_probability")
-                    if settings.get("typing_typo_probability") not in (None, "")
-                    else RPA_HUMANIZED_SEND_DEFAULTS["typing_typo_probability"]
+                    or RPA_HUMANIZED_SEND_DEFAULTS["typing_typo_probability"]
                 ),
             ),
         ),
     )
     settings["typing_typo_max"] = non_negative_int(
         os.getenv("WECHAT_WIN32_OCR_HUMANIZED_TYPING_TYPO_MAX"),
-        int(
-            settings.get("typing_typo_max")
-            if settings.get("typing_typo_max") not in (None, "")
-            else RPA_HUMANIZED_SEND_DEFAULTS["typing_typo_max"]
-        ),
+        int(settings.get("typing_typo_max") or RPA_HUMANIZED_SEND_DEFAULTS["typing_typo_max"]),
     )
     settings["send_pre_delay_min_ms"] = non_negative_int(
         os.getenv("WECHAT_WIN32_OCR_HUMANIZED_SEND_PRE_DELAY_MIN_MS"),
@@ -1136,38 +1110,6 @@ def evaluate_runtime_target_guard(
     if not active.get("enabled"):
         return {"enabled": False, "ok": True, "stop": False, "observations": observations}
     allowed = set(active.get("allowed_targets") or [])
-    if active.get("allow_dynamic_all_sessions"):
-        # The operator explicitly enabled dynamic all-session monitoring. The
-        # monitor itself still filters File Transfer Assistant to avoid a
-        # self-message loop; this guard must not silently restore a stale
-        # static whitelist over that opt-in mode.
-        file_transfer_observations = [
-            item
-            for item in observations
-            if str(item.get("target") or "").strip() == "文件传输助手"
-        ]
-        if file_transfer_observations:
-            return {
-                "enabled": True,
-                "ok": False,
-                "stop": True,
-                "reason": "runtime_disallowed_target_detected",
-                "message": "检测到文件传输助手进入自动客服监听，已自动停机保护，避免自消息循环。",
-                "allowed_targets": sorted(allowed),
-                "dynamic_all_sessions": True,
-                "observations": observations,
-                "disallowed_targets": ["文件传输助手"],
-                "disallowed_observations": file_transfer_observations,
-            }
-        return {
-            "enabled": True,
-            "ok": True,
-            "stop": False,
-            "allowed_targets": sorted(allowed),
-            "dynamic_all_sessions": True,
-            "observations": observations,
-            "disallowed_targets": [],
-        }
     if not allowed:
         return {
             "enabled": True,
@@ -1340,7 +1282,6 @@ def run_passive_logout_probe(
     probe_env["PYTHONUTF8"] = "1"
     probe_env["PYTHONIOENCODING"] = "utf-8"
     probe_env["WECHAT_WIN32_OCR_PASSIVE_PROBE"] = "1"
-    probe_env["WECHAT_WIN32_OCR_WINDOW_NORMALIZE"] = "0"
     probe_env["WECHAT_WIN32_OCR_QUICK_LOGIN_AUTO_ENTER"] = "0"
     command = [str(python_bin), str(WIN32_OCR_SIDECAR_SCRIPT), "status"]
     process = subprocess.Popen(
@@ -1440,12 +1381,11 @@ def run_interactive_rpa_calibration(
     probe_env["PYTHONUTF8"] = "1"
     probe_env["PYTHONIOENCODING"] = "utf-8"
     probe_env["WECHAT_WIN32_OCR_PASSIVE_PROBE"] = "0"
-    probe_env["WECHAT_WIN32_OCR_WINDOW_NORMALIZE"] = "1"
     probe_env["WECHAT_WIN32_OCR_QUICK_LOGIN_AUTO_ENTER"] = "0"
     probe_env["WECHAT_WIN32_OCR_AGGRESSIVE_FOCUS"] = "1"
     probe_env["WECHAT_WIN32_OCR_ATTACH_THREAD_INPUT"] = "1"
     probe_env["WECHAT_WIN32_OCR_ACTIVATE_DEBOUNCE_SECONDS"] = "0"
-    command = [str(python_bin), str(WIN32_OCR_SIDECAR_SCRIPT), "status"]
+    command = [str(python_bin), str(WIN32_OCR_SIDECAR_SCRIPT), "normalize-window"]
     process = subprocess.Popen(
         command,
         cwd=str(PROJECT_ROOT),
@@ -2772,13 +2712,12 @@ def summarize_scheduler_tick_activity(result: dict[str, Any] | None) -> dict[str
     pending = int(summary.get("pending_sessions") or 0)
     running = int(summary.get("llm_running") or 0)
     ready = int(summary.get("reply_ready") or 0)
-    sending = int(summary.get("reply_sending") or 0)
     sent = int(summary.get("reply_sent") or 0)
     event_names = {str(item.get("event") or "") for item in events}
     llm_completed = "llm_task_completed" in event_names
     send_completed = "send_completed" in event_names
     send_failed = "send_failed" in event_names
-    busy = bool(pending or running or ready or sending or sent or events)
+    busy = bool(pending or running or ready or sent or events)
     unread_or_capture_changed = bool(
         event_names
         & {
@@ -2791,7 +2730,6 @@ def summarize_scheduler_tick_activity(result: dict[str, Any] | None) -> dict[str
     )
     urgent_followup = bool(
         ready > 0
-        or sending > 0
         or pending > 0
         or llm_completed
         or send_completed
@@ -2805,7 +2743,6 @@ def summarize_scheduler_tick_activity(result: dict[str, Any] | None) -> dict[str
         "pending_sessions": pending,
         "llm_running": running,
         "reply_ready": ready,
-        "reply_sending": sending,
         "reply_sent": sent,
         "event_names": sorted(event_names),
     }
@@ -2818,12 +2755,11 @@ def status_message_from_result(result: dict, duration: float) -> str:
         summary = result.get("summary") if isinstance(result.get("summary"), dict) else {}
         sent = int(summary.get("reply_sent") or 0)
         ready = int(summary.get("reply_ready") or 0)
-        sending = int(summary.get("reply_sending") or 0)
         running = int(summary.get("llm_running") or 0)
         pending = int(summary.get("pending_sessions") or 0)
         if sent:
             return f"并发调度已发送回复，队列：待读 {pending}，思考中 {running}，待发 {ready}。耗时 {duration} 秒。"
-        if ready or sending or running or pending:
+        if ready or running or pending:
             return f"并发调度运行中，队列：待读 {pending}，思考中 {running}，待发 {ready}。耗时 {duration} 秒。"
         return f"并发调度本轮未发现新消息。耗时 {duration} 秒。"
     events = [item for item in result.get("events", []) or [] if isinstance(item, dict)]

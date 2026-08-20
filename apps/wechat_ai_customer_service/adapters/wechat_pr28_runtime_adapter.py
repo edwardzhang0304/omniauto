@@ -1,11 +1,8 @@
-"""Runtime containment for the byte-immutable WeChat PR #28 integration.
+"""Runtime containment for the WeChat PR #28 integration.
 
-This module is deliberately outside every PR-owned file.  It preserves the
-original connector method names and payload shapes while applying host-side
-identity and process-environment policy before the immutable connector enters
-the physical RPA layer.
-
-It must not contain customer-service reply logic or optional Vision logic.
+This adapter preserves the connector API while applying host-side physical
+identity and process-environment policy before entering the RPA layer. It must
+not contain reply orchestration or optional Vision logic.
 """
 
 from __future__ import annotations
@@ -16,9 +13,9 @@ from dataclasses import dataclass
 from typing import Any
 
 
-# Advance the byte-control baseline only to the last independently reviewed
-# commit that intentionally changed a PR-owned file.  Later Vision work must
-# still leave every blob below byte-identical to this fixed head.
+# Fixed protected-file baseline.  The absolute Vision boundary check compares
+# these values with the candidate and must fail visibly until an upstream
+# reviewer approves and advances the protected baseline.
 PR28_HEAD = "3afed619afc8c1e0e71231459acafa3c2aabe608"
 PR28_BLOBS = {
     "apps/wechat_ai_customer_service/adapters/wechat_connector.py": "f25d605ee6baff4b935f4339a6183d5446d97c33",
@@ -29,17 +26,11 @@ PR28_BLOBS = {
     "apps/wechat_ai_customer_service/tests/run_wechat_win32_ocr_window_action_planning_checks.py": "b191519738e21adcb3625029fc8e0f5474fd2a5e",
     "apps/wechat_ai_customer_service/wechat_message_envelope.py": "b2af6878294693490b7e56b5f04dbb5f87dc0ace",
 }
+UPSTREAM_OMNIAUTO_COMMIT = "855c21881641cdb2f9fe69d3f2e1caa05e37d04d"
 
 
 def physical_rpa_identity_kwargs(values: dict[str, Any]) -> dict[str, Any]:
-    """Project a semantic identity onto the immutable PR physical boundary.
-
-    ``session_key`` and the exact title remain the hard physical identity.  A
-    conversation type learned later from message structure is useful semantic
-    metadata, but must not invalidate the already-issued opaque key.  Omitting
-    only that optional physical filter lets PR #28 reacquire the exact key while
-    keeping every caller-visible field unchanged.
-    """
+    """Keep the opaque row key authoritative at the physical RPA boundary."""
 
     projected = dict(values or {})
     if str(projected.get("session_key") or "").strip():
@@ -63,8 +54,9 @@ def _install_sidecar_environment_containment(connector: Any) -> None:
         env_overrides: dict[str, str] | None = None,
     ) -> dict[str, Any]:
         overrides = dict(env_overrides or {})
-        if "WECHAT_WIN32_OCR_WINDOW_FIXED_ORIGIN" not in os.environ:
-            overrides.setdefault("WECHAT_WIN32_OCR_WINDOW_FIXED_ORIGIN", "1")
+        # Window/layout defaults are intentionally not set here.  The Sidecar
+        # owns the single production policy and this adapter only passes
+        # explicit operator overrides through.
         return original(
             args,
             allow_failure=allow_failure,
@@ -76,15 +68,12 @@ def _install_sidecar_environment_containment(connector: Any) -> None:
     try:
         connector.call_compat_sidecar = contained_call
     except (AttributeError, TypeError):
-        # Frozen test doubles and custom third-party connectors remain valid.
-        # They do not spawn the immutable PR Sidecar and therefore need no
-        # process-environment containment.
         return
 
 
 @dataclass
 class WeChatPr28RuntimeAdapter:
-    """Transparent internal proxy around the immutable PR connector."""
+    """Transparent internal proxy around the upstream connector."""
 
     delegate: Any
 
@@ -95,19 +84,17 @@ class WeChatPr28RuntimeAdapter:
         return getattr(self.delegate, name)
 
     def get_messages(self, target: str, exact: bool = True, **kwargs: Any) -> dict[str, Any]:
-        return self.delegate.get_messages(
+        return self.delegate.get_messages(target, exact=exact, **physical_rpa_identity_kwargs(kwargs))
+
+    def transcribe_voice_messages(self, target: str, exact: bool = True, **kwargs: Any) -> dict[str, Any]:
+        return self.delegate.transcribe_voice_messages(
             target,
             exact=exact,
             **physical_rpa_identity_kwargs(kwargs),
         )
 
     def send_text(self, target: str, text: str, exact: bool = True, **kwargs: Any) -> dict[str, Any]:
-        return self.delegate.send_text(
-            target,
-            text,
-            exact=exact,
-            **physical_rpa_identity_kwargs(kwargs),
-        )
+        return self.delegate.send_text(target, text, exact=exact, **physical_rpa_identity_kwargs(kwargs))
 
     def send_text_and_verify(
         self,
@@ -123,6 +110,7 @@ class WeChatPr28RuntimeAdapter:
             **physical_rpa_identity_kwargs(kwargs),
         )
 
+
 def adapt_wechat_pr28_connector(connector: Any) -> Any:
     if isinstance(connector, WeChatPr28RuntimeAdapter):
         return connector
@@ -132,6 +120,7 @@ def adapt_wechat_pr28_connector(connector: Any) -> Any:
 __all__ = [
     "PR28_BLOBS",
     "PR28_HEAD",
+    "UPSTREAM_OMNIAUTO_COMMIT",
     "WeChatPr28RuntimeAdapter",
     "adapt_wechat_pr28_connector",
     "physical_rpa_identity_kwargs",

@@ -393,10 +393,26 @@ def _capture_visual_group_frame(
     )
     ocr_items = sidecar_ops.run_ocr(screenshot)
     image_size = tuple(getattr(screenshot, "size", (0, 0)))
+    snapshot_reader = getattr(sidecar_ops, "layout_snapshot_for_image", None)
+    layout_snapshot = snapshot_reader(screenshot) if callable(snapshot_reader) else None
+    viewport = (
+        list((layout_snapshot or {}).get("message_viewport_bounds") or [])
+        if isinstance(layout_snapshot, dict)
+        else []
+    )
+    if not bool((layout_snapshot or {}).get("executable")) or len(viewport) != 4:
+        return {
+            "ok": False,
+            "reason": "WECHAT_UI_LAYOUT_UNRESOLVED",
+            "state": "vision_visual_group_layout_unresolved",
+            "messages": [],
+            "selection": {},
+        }
     messages = sidecar_ops.parse_messages_from_ocr(
         ocr_items,
         image_size,
         target=target_name,
+        screenshot=screenshot,
     )
     blocking_reason = sidecar_ops.blocking_screen_reason(ocr_items)
     if blocking_reason:
@@ -415,7 +431,12 @@ def _capture_visual_group_frame(
         # extra images before the group validator can reject them explicitly.
         max_images=DEFAULT_MAX_VISIBLE_IMAGE_CANDIDATES,
         side_filter=side_filter,
-        time_markers=extract_chat_time_markers(ocr_items, image_size),
+        time_markers=extract_chat_time_markers(
+            ocr_items,
+            image_size,
+            message_viewport_bounds=viewport,
+        ),
+        message_viewport_bounds=viewport,
     )
     surface_messages = visual_image_envelopes_from_bubbles(
         bubbles,
@@ -630,12 +651,22 @@ def _copy_one_visual_message(
     sequence_before = clipboard_sequence_number(sidecar_ops)
     if sequence_before is None:
         return _failure_payload("clipboard_sequence_unavailable")
+    snapshot_reader = getattr(sidecar_ops, "layout_snapshot_for_image", None)
+    layout_snapshot = snapshot_reader(screenshot) if callable(snapshot_reader) else None
+    expected_snapshot_id = str(
+        (layout_snapshot or {}).get("layout_snapshot_id")
+        if isinstance(layout_snapshot, dict)
+        else ""
+    ).strip()
+    if not expected_snapshot_id:
+        return _failure_payload("WECHAT_UI_LAYOUT_UNRESOLVED")
     right_click = sidecar_ops.human_window_image_right_click_in_bounds(
         hwnd,
         int(anchor.get("x") or 0),
         int(anchor.get("y") or 0),
         bounds=[left, top, right, bottom],
         action_name="visual_group_image_context_right_click",
+        expected_snapshot_id=expected_snapshot_id,
     )
     right_click = right_click if isinstance(right_click, dict) else {"ok": False}
     sleeper = getattr(sidecar_ops, "humanized_action_sleep", None)
@@ -647,12 +678,20 @@ def _copy_one_visual_message(
         label=f"visual_group_context_menu_{index}",
     )
     copy_target = menu_result.get("copy_target")
+    menu_observation = dict(menu_result.get("observation") or {})
     if not right_click.get("ok") or not copy_target:
         try:
             sidecar_ops.key_press(sidecar_ops.win32con.VK_ESCAPE)
         except Exception:
             pass
         return _failure_payload("image_context_menu_copy_item_missing")
+    copy_target = {
+        **dict(copy_target),
+        "popup_hwnd": int(menu_observation.get("menu_hwnd") or 0),
+        "layout_snapshot_id": str(
+            menu_observation.get("layout_snapshot_id") or ""
+        ),
+    }
     if callable(validate_before_menu_click):
         menu_guard_reason = validate_before_menu_click()
         if menu_guard_reason:

@@ -6,17 +6,53 @@ import random
 import sys
 from pathlib import Path
 
+from PIL import Image, ImageDraw
+
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from apps.wechat_ai_customer_service.adapters.wechat_win32_ocr import interaction_evidence
+from apps.wechat_ai_customer_service.adapters.wechat_win32_ocr import window_layout
 from apps.wechat_ai_customer_service.adapters import wechat_win32_ocr_sidecar as sidecar
 
 
 def assert_true(value: bool, message: str) -> None:
     if not value:
         raise AssertionError(message)
+
+
+def _production_layout_snapshot() -> dict[str, object]:
+    image = Image.new("RGB", (980, 860), (247, 247, 247))
+    draw = ImageDraw.Draw(image)
+    draw.rectangle([0, 0, 70, 859], fill=(224, 224, 224))
+    draw.rectangle([71, 0, 370, 89], fill=(210, 210, 210))
+    draw.rectangle([71, 90, 370, 859], fill=(240, 240, 240))
+    draw.rectangle([371, 0, 979, 89], fill=(238, 238, 238))
+    draw.rectangle([371, 90, 979, 759], fill=(255, 255, 255))
+    draw.rectangle([371, 760, 979, 859], fill=(242, 242, 242))
+    draw.line([(70, 0), (70, 859)], fill=(110, 110, 110), width=2)
+    draw.line([(370, 0), (370, 859)], fill=(110, 110, 110), width=2)
+    draw.line([(71, 89), (979, 89)], fill=(110, 110, 110), width=2)
+    draw.line([(371, 759), (979, 759)], fill=(110, 110, 110), width=2)
+    structural = window_layout.build_structural_layout_regions(image)
+    assert_true(structural.get("ok") is True, f"production layout builder rejected fixture: {structural}")
+    return window_layout.build_layout_snapshot(
+        hwnd=1001,
+        frame_id=window_layout.new_frame_id(1001),
+        capture_mode=window_layout.CAPTURE_MODE_WINDOW_VISIBLE_SCREEN,
+        image_size=image.size,
+        capture_screen_origin=[0, 0],
+        window_rect=[0, 0, 980, 860],
+        client_rect=[0, 0, 980, 860],
+        client_screen_origin=[0, 0],
+        dpi_scale=1.0,
+        regions=structural.get("regions") or {},
+        anchors=structural.get("anchors") or [],
+        confidence=float(structural.get("confidence") or 0.0),
+        conflicts=structural.get("conflicts") or [],
+        executable=bool(structural.get("ok")),
+    )
 
 
 def test_missing_or_failed_probe_never_authorizes_click() -> None:
@@ -52,7 +88,6 @@ def test_missing_input_bounds_causes_zero_rpa_clicks() -> None:
         "capture_wechat": sidecar.capture_wechat,
         "run_ocr_for_input_region_probe": sidecar.run_ocr_for_input_region_probe,
         "input_text_region_state": sidecar.input_text_region_state,
-        "clear_existing_input_draft": sidecar.clear_existing_input_draft,
         "human_client_click": sidecar.human_client_click,
         "time_sleep": sidecar.time.sleep,
     }
@@ -64,7 +99,6 @@ def test_missing_input_bounds_causes_zero_rpa_clicks() -> None:
         sidecar.capture_wechat = lambda *_args, **_kwargs: (object(), "input.png")
         sidecar.run_ocr_for_input_region_probe = lambda *_args, **_kwargs: ([], "roi")
         sidecar.input_text_region_state = lambda *_args, **_kwargs: {"has_visible_text": False, "reason": "input_region_blank"}
-        sidecar.clear_existing_input_draft = lambda *_args, before_state=None, **_kwargs: {"ok": True, "after": before_state}
         sidecar.human_client_click = lambda *_args, **_kwargs: calls.__setitem__("click", calls["click"] + 1)
         sidecar.time.sleep = lambda _seconds: None
         result = sidecar.paste_text_with_confirmation(
@@ -115,6 +149,7 @@ def test_missing_search_label_causes_zero_rpa_actions() -> None:
 
 def test_observed_search_placeholder_variants_are_accepted_in_sidebar_only() -> None:
     geometry = {"left": 0, "top": 0, "right": 980, "bottom": 860, "width": 980, "height": 860}
+    layout_snapshot = _production_layout_snapshot()
     placeholder = {
         "text": "Q\u641c\u7d22",
         "left": 101,
@@ -122,10 +157,18 @@ def test_observed_search_placeholder_variants_are_accepted_in_sidebar_only() -> 
         "right": 143,
         "bottom": 83,
     }
-    evidence = sidecar.sidebar_search_box_evidence([placeholder], geometry=geometry)
+    evidence = sidecar.sidebar_search_box_evidence(
+        [placeholder],
+        geometry=geometry,
+        layout_snapshot=layout_snapshot,
+    )
     assert_true(evidence.get("ok") is True, f"known placeholder OCR variant must be accepted: {evidence}")
     outside_sidebar = dict(placeholder, left=522, right=563)
-    outside = sidecar.sidebar_search_box_evidence([outside_sidebar], geometry=geometry)
+    outside = sidecar.sidebar_search_box_evidence(
+        [outside_sidebar],
+        geometry=geometry,
+        layout_snapshot=layout_snapshot,
+    )
     assert_true(outside.get("ok") is False, f"search-like text outside sidebar must remain blocked: {outside}")
 
 

@@ -253,10 +253,18 @@ def _click_menu_item(
     *,
     local_x: int,
     local_y: int,
+    local_bounds: list[int],
     screen_x: int,
     screen_y: int,
     screen_bounds: list[int],
 ) -> None:
+    frame_action = getattr(port, "click_frame", None)
+    if callable(frame_action):
+        if _accepts_keyword(frame_action, "bounds"):
+            frame_action(local_x, local_y, bounds=local_bounds)
+        else:
+            frame_action(local_x, local_y)
+        return
     screen_action = getattr(port, "click_screen", None)
     if callable(screen_action):
         if _accepts_keyword(screen_action, "bounds"):
@@ -465,6 +473,7 @@ def _acquire_legacy_current_image_via_ports(
                 ports.ui_action,
                 local_x=int(copy_geometry["x"]),
                 local_y=int(copy_geometry["y"]),
+                local_bounds=list(copy_geometry["bounds"]),
                 screen_x=int(copy_geometry["x"]),
                 screen_y=int(copy_geometry["y"]),
                 screen_bounds=list(copy_geometry["bounds"]),
@@ -892,6 +901,7 @@ def _acquire_current_image_via_ports(
                 ports.ui_action,
                 local_x=int(copy_geometry["x"]),
                 local_y=int(copy_geometry["y"]),
+                local_bounds=local_bounds,
                 screen_x=origin_x + int(copy_geometry["x"]),
                 screen_y=origin_y + int(copy_geometry["y"]),
                 screen_bounds=[

@@ -10,14 +10,8 @@ from pathlib import Path
 from typing import Any, Mapping
 
 from apps.wechat_ai_customer_service.adapters.wechat_connector import WeChatConnector
-from apps.wechat_ai_customer_service.adapters.wechat_pr28_runtime_adapter import (
-    adapt_wechat_pr28_connector,
-)
 from apps.wechat_ai_customer_service.admin_backend.services.customer_service_runtime import CustomerServiceRuntime
 from apps.wechat_ai_customer_service.admin_backend.services.recorder_runtime import RecorderRuntime
-from apps.wechat_ai_customer_service.customer_service_live_safety import (
-    apply_customer_service_live_safety_rpa_send_defaults,
-)
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[4]
@@ -55,7 +49,6 @@ def collect_rpa_acceptance_report(
     checks: list[dict[str, Any]] = []
 
     customer_config = read_json(tenant_root / "customer_service" / "listener_config.json")
-    customer_config = apply_customer_service_live_safety_rpa_send_defaults(customer_config)
     recorder_settings = read_json(tenant_root / "recorder" / "settings.json")
     customer_status = read_effective_runtime_status(
         root,
@@ -76,7 +69,7 @@ def collect_rpa_acceptance_report(
         raise ValueError("wechat_probe must be one of: none, passive, interactive")
     if wechat_probe != "none":
         capability = probe_wechat_capability(
-            connector or adapt_wechat_pr28_connector(WeChatConnector()),
+            connector or WeChatConnector(),
             mode=wechat_probe,
         )
 
@@ -251,10 +244,19 @@ def add_humanized_send_checks(
 
 
 def add_window_normalization_policy_checks(checks: list[dict[str, Any]], env: Mapping[str, str]) -> None:
-    normalize_enabled = env_flag(env.get("WECHAT_WIN32_OCR_WINDOW_NORMALIZE"), default=True)
+    dynamic_layout_enabled = env_flag(env.get("WECHAT_WIN32_OCR_DYNAMIC_LAYOUT_ENABLED"), default=True)
     fixed_origin = env_flag(env.get("WECHAT_WIN32_OCR_WINDOW_FIXED_ORIGIN"), default=True)
-    if not normalize_enabled:
-        add_check(checks, "window_normalization_policy", "fail", "WeChat window normalization is disabled.", {"WECHAT_WIN32_OCR_WINDOW_NORMALIZE": env.get("WECHAT_WIN32_OCR_WINDOW_NORMALIZE", "")})
+    if not dynamic_layout_enabled and not str(env.get("WECHAT_WIN32_OCR_LEGACY_DEVICE_PROFILE") or "").strip():
+        add_check(
+            checks,
+            "window_normalization_policy",
+            "fail",
+            "Dynamic layout is disabled without an explicit accepted legacy device profile.",
+            {
+                "WECHAT_WIN32_OCR_DYNAMIC_LAYOUT_ENABLED": env.get("WECHAT_WIN32_OCR_DYNAMIC_LAYOUT_ENABLED", ""),
+                "WECHAT_WIN32_OCR_LEGACY_DEVICE_PROFILE": "configured" if env.get("WECHAT_WIN32_OCR_LEGACY_DEVICE_PROFILE") else "",
+            },
+        )
         return
     if not fixed_origin:
         add_check(checks, "window_normalization_policy", "fail", "WeChat window fixed-origin normalization is disabled.", {"WECHAT_WIN32_OCR_WINDOW_FIXED_ORIGIN": env.get("WECHAT_WIN32_OCR_WINDOW_FIXED_ORIGIN", "")})
@@ -265,6 +267,7 @@ def add_window_normalization_policy_checks(checks: list[dict[str, Any]], env: Ma
         "pass",
         "WeChat window normalization uses a fixed safe origin before RPA operations.",
         {
+            "WECHAT_WIN32_OCR_DYNAMIC_LAYOUT_ENABLED": env.get("WECHAT_WIN32_OCR_DYNAMIC_LAYOUT_ENABLED", ""),
             "WECHAT_WIN32_OCR_WINDOW_WIDTH": env.get("WECHAT_WIN32_OCR_WINDOW_WIDTH", ""),
             "WECHAT_WIN32_OCR_WINDOW_HEIGHT": env.get("WECHAT_WIN32_OCR_WINDOW_HEIGHT", ""),
             "WECHAT_WIN32_OCR_WINDOW_LEFT": env.get("WECHAT_WIN32_OCR_WINDOW_LEFT", ""),

@@ -60,7 +60,6 @@ KEY_SIGNATURES = {
         "open_voice_transcribe_context_menu",
         "parse_messages_from_ocr",
         "run_action",
-        "voice_transcribe_payload",
     },
 }
 

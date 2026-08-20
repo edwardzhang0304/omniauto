@@ -32,6 +32,8 @@ if str(PROJECT_ROOT) not in sys.path:
 from apps.wechat_ai_customer_service.adapters.wechat_win32_ocr_sidecar import (  # noqa: E402
     parse_messages_from_ocr,
     run_ocr,
+)
+from apps.wechat_ai_customer_service.adapters.wechat_win32_ocr.geometry import (  # noqa: E402
     session_split_x,
 )
 

@@ -23,7 +23,6 @@ from apps.wechat_ai_customer_service.optional_plugins.vision import (  # noqa: E
 )
 from apps.wechat_ai_customer_service.optional_plugins.vision.capture.wechat import (  # noqa: E402
     image_bubble_visual_fingerprint,
-    session_split_x,
 )
 from apps.wechat_ai_customer_service.optional_plugins.vision.errors import (  # noqa: E402
     VISION_IMAGE_CLIPBOARD_CLEAR_FAILED,
@@ -255,7 +254,7 @@ class _FramePort:
     def __init__(self) -> None:
         self.surface = Image.new("RGB", (980, 860), (247, 247, 247))
         draw = ImageDraw.Draw(self.surface)
-        split = session_split_x(980)
+        split = 370  # Diagnostic fixture only; production layout is snapshot-driven.
         draw.rectangle([0, 0, split, 860], fill=(240, 240, 240))
         draw.rectangle([split + 12, 90, 972, 760], fill=(255, 255, 255))
         draw.rectangle([split + 42, 260, split + 282, 480], fill=(30, 120, 190))
