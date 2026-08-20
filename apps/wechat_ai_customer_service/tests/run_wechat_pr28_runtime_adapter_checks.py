@@ -103,7 +103,7 @@ def check_runtime_proxy_preserves_calls_and_has_no_retired_vision_routes() -> No
     )
 
 
-def check_sidecar_fixed_origin_default_is_injected_without_overriding_owner_choice() -> None:
+def check_sidecar_window_policy_is_owned_only_by_sidecar() -> None:
     previous = os.environ.get("WECHAT_WIN32_OCR_WINDOW_FIXED_ORIGIN")
     try:
         os.environ.pop("WECHAT_WIN32_OCR_WINDOW_FIXED_ORIGIN", None)
@@ -111,7 +111,7 @@ def check_sidecar_fixed_origin_default_is_injected_without_overriding_owner_choi
         adapt_wechat_pr28_connector(raw)
         raw.call_compat_sidecar(["status"], env_overrides={"OTHER": "1"})
         overrides = raw.calls[-1]["env_overrides"]
-        assert_true(overrides["WECHAT_WIN32_OCR_WINDOW_FIXED_ORIGIN"] == "1", "safe fixed-origin default missing")
+        assert_true("WECHAT_WIN32_OCR_WINDOW_FIXED_ORIGIN" not in overrides, "runtime adapter injected a second origin policy")
         assert_true(overrides["OTHER"] == "1", "existing sidecar environment was replaced")
 
         os.environ["WECHAT_WIN32_OCR_WINDOW_FIXED_ORIGIN"] = "0"
@@ -133,7 +133,7 @@ def main() -> int:
         check_exact_session_key_drops_only_physical_type_filter,
         check_type_is_preserved_without_opaque_key,
         check_runtime_proxy_preserves_calls_and_has_no_retired_vision_routes,
-        check_sidecar_fixed_origin_default_is_injected_without_overriding_owner_choice,
+        check_sidecar_window_policy_is_owned_only_by_sidecar,
     ]
     results: list[dict[str, Any]] = []
     for check in checks:
