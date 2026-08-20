@@ -140,11 +140,11 @@ def vision_plus_icon_candidates(
 def plus_entry_target(
     geometry: dict[str, Any],
     image_size: tuple[int, int],
-    ocr_items: list[dict[str, Any]] | None = None,
     *,
     screenshot: Any | None = None,
     route_kind: str = "windows",
     dynamic_sidebar_header_bounds: list[int] | None = None,
+    search_anchor_bounds: list[int] | None = None,
 ) -> dict[str, Any]:
     width, height = int(image_size[0]), int(image_size[1])
     has_dynamic_header = bool(
@@ -152,12 +152,31 @@ def plus_entry_target(
         and len(dynamic_sidebar_header_bounds) >= 4
     )
     safe_bounds = normalize_bounds(dynamic_sidebar_header_bounds) if has_dynamic_header else [0, 0, 0, 0]
-    candidates = vision_plus_icon_candidates(screenshot, image_size, search_bounds=safe_bounds) if has_dynamic_header else []
-    selected = candidates[0] if len(candidates) == 1 else None
-    executable = bool(
-        selected is not None
-        and str(selected.get("source") or "") == "vision_plus_icon"
+    candidates = (
+        vision_plus_icon_candidates(screenshot, image_size, search_bounds=safe_bounds)
+        if has_dynamic_header
+        else []
     )
+    selected_search_bounds = normalize_bounds(search_anchor_bounds)
+    search_anchor_valid = bool(
+        selected_search_bounds[2] > selected_search_bounds[0]
+        and selected_search_bounds[3] > selected_search_bounds[1]
+        and point_in_bounds(*center_of_bounds(selected_search_bounds), safe_bounds)
+    )
+    # The native plus is the action control to the right of the current search
+    # text. A magnifying-glass icon belongs to the search field and lies left
+    # of (or overlaps) that OCR anchor; it must never become an executable plus.
+    if search_anchor_valid:
+        search_right = selected_search_bounds[2]
+        candidates = [
+            candidate
+            for candidate in candidates
+            if normalize_point(candidate.get("point"))[0] > search_right
+        ]
+    else:
+        candidates = []
+    selected = candidates[0] if len(candidates) == 1 else None
+    executable = bool(selected is not None and str(selected.get("source") or "") == "vision_plus_icon")
     if selected is None:
         selected = {
             "source": "plus_icon_not_found" if has_dynamic_header else "dynamic_sidebar_header_bounds_missing",
@@ -198,7 +217,11 @@ def plus_entry_target(
             "actual_resolution": [width, height],
             "actual_geometry": dict(geometry or {}),
             "final_click_point": list(selected_point) if executable else [],
-            "conflicts": [] if len(candidates) <= 1 else ["multiple_plus_icon_candidates"],
+            "conflicts": (
+                ["search_anchor_missing_or_ambiguous"]
+                if not search_anchor_valid
+                else ([] if len(candidates) <= 1 else ["multiple_plus_icon_candidates"])
+            ),
             "executable": executable,
         },
     )
