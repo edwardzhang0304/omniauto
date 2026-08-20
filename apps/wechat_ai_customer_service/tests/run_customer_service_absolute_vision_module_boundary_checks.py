@@ -102,6 +102,7 @@ def _function(relative: str, name: str) -> ast.FunctionDef:
 
 
 def check_pr28_blobs_and_legacy_vision_paths_are_quarantined() -> None:
+    mismatches: list[str] = []
     for relative, expected in PR28_BLOBS.items():
         completed = subprocess.run(
             ["git", "hash-object", "--", relative],
@@ -111,11 +112,9 @@ def check_pr28_blobs_and_legacy_vision_paths_are_quarantined() -> None:
             text=True,
             encoding="utf-8",
         )
-        assert_true(
-            completed.stdout.strip() == expected,
-            f"controlled PR #28 baseline file changed: {relative}",
-        )
-
+        actual = completed.stdout.strip()
+        if actual != expected:
+            mismatches.append(f"{relative}: expected={expected} actual={actual}")
     connector = "apps/wechat_ai_customer_service/adapters/wechat_connector.py"
     sidecar = _source("apps/wechat_ai_customer_service/adapters/wechat_win32_ocr_sidecar.py")
     assert_true(
@@ -176,6 +175,10 @@ def check_pr28_blobs_and_legacy_vision_paths_are_quarantined() -> None:
     assert_true(
         "run_customer_clipboard_image_transaction" not in plan_source,
         "production planner still discovers the immutable PR image transaction",
+    )
+    assert_true(
+        not mismatches,
+        "controlled PR #28 baseline files changed:\n" + "\n".join(mismatches),
     )
 
 
@@ -424,7 +427,7 @@ class _LeasePort:
         yield {"acquired": True}
 
 
-def check_direct_ports_run_complete_ephemeral_transaction() -> None:
+def check_untyped_direct_ports_fail_before_ui_action() -> None:
     provider = _ProviderPort()
     action = _ActionPort()
     service = create_vision_service(
@@ -445,11 +448,14 @@ def check_direct_ports_run_complete_ephemeral_transaction() -> None:
             "side_filter": "customer",
         }
     )
-    assert_true(result.get("applied") is True and result.get("adoptable") is True, f"direct ports did not complete: {result}")
-    assert_true([item[0] for item in action.actions] == ["right_click", "click"], f"unexpected UI transaction: {action.actions}")
-    assert_true(provider.image is not None and provider.image.released, "image memory must be zeroized before API returns")
-    serialized = json.dumps(result, ensure_ascii=False)
-    assert_true("image_bytes" not in serialized and "saved_image_path" not in serialized, "public result leaked image material")
+    assert_true(
+        result.get("applied") is False
+        and result.get("adoptable") is False
+        and result.get("reason") == "vision_strict_identity_required",
+        f"untyped direct ports must fail closed: {result}",
+    )
+    assert_true(action.actions == [], f"untyped direct ports must not touch UI: {action.actions}")
+    assert_true(provider.image is None, "untyped direct ports must not call the provider")
 
 
 def check_strict_transaction_fails_closed_when_clipboard_clear_fails() -> None:
@@ -563,7 +569,7 @@ def main() -> int:
         check_retired_file_and_crop_routes_have_no_live_implementation,
         check_dependency_direction_and_single_owner,
         check_core_uses_only_neutral_optional_capability_dispatch,
-        check_direct_ports_run_complete_ephemeral_transaction,
+        check_untyped_direct_ports_fail_before_ui_action,
         check_strict_transaction_fails_closed_when_clipboard_clear_fails,
         check_strict_transaction_completes_and_releases_image_memory,
     ]
@@ -574,7 +580,6 @@ def main() -> int:
             results.append({"name": check.__name__, "ok": True})
         except Exception as exc:  # pragma: no cover - test harness
             results.append({"name": check.__name__, "ok": False, "error": repr(exc)})
-            break
     failures = [item for item in results if not item.get("ok")]
     print(json.dumps({"ok": not failures, "count": len(results), "failures": failures, "results": results}, ensure_ascii=False, indent=2))
     return 1 if failures else 0
