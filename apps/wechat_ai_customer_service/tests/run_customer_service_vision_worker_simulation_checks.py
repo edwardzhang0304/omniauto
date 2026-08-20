@@ -35,7 +35,6 @@ from apps.wechat_ai_customer_service.optional_plugins.vision.clipboard_payload i
     EphemeralClipboardImage,
 )
 from apps.wechat_ai_customer_service.adapters.wechat_win32_ocr import window_layout  # noqa: E402
-from apps.wechat_ai_customer_service.adapters.wechat_win32_ocr.geometry import session_split_x  # noqa: E402
 
 
 def assert_true(value: Any, message: str) -> None:
@@ -49,15 +48,25 @@ class _Win32Con:
 
 def _draw_layout_chrome(surface: Image.Image) -> None:
     draw = ImageDraw.Draw(surface)
-    split = session_split_x(surface.size[0])
-    draw.rectangle([0, 0, 70, 860], fill=(224, 224, 224))
-    draw.rectangle([71, 0, split, 89], fill=(210, 210, 210))
-    draw.rectangle([71, 90, split, 860], fill=(240, 240, 240))
-    draw.rectangle([split + 1, 0, 979, 89], fill=(238, 238, 238))
-    draw.rectangle([split + 1, 90, 979, 759], fill=(255, 255, 255))
-    draw.rectangle([split + 1, 760, 979, 859], fill=(242, 242, 242))
-    draw.line([(71, 89), (979, 89)], fill=(110, 110, 110), width=2)
-    draw.line([(split + 1, 759), (979, 759)], fill=(110, 110, 110), width=2)
+    width, height = surface.size
+    fixture_nav = int(width * 0.12)
+    fixture_sidebar = int(width * 0.40)
+    fixture_header = int(height * 0.12)
+    fixture_input = int(height * 0.80)
+    draw.rectangle([0, 0, fixture_nav, height - 1], fill=(224, 224, 224))
+    draw.rectangle([fixture_nav + 1, 0, fixture_sidebar, fixture_header], fill=(210, 210, 210))
+    draw.rectangle([fixture_nav + 1, fixture_header + 1, fixture_sidebar, height - 1], fill=(240, 240, 240))
+    draw.rectangle([fixture_sidebar + 1, 0, width - 1, fixture_header], fill=(238, 238, 238))
+    draw.rectangle([fixture_sidebar + 1, fixture_header + 1, width - 1, fixture_input], fill=(255, 255, 255))
+    draw.rectangle([fixture_sidebar + 1, fixture_input + 1, width - 1, height - 1], fill=(242, 242, 242))
+    draw.line([(fixture_nav, fixture_header), (width - 1, fixture_header)], fill=(110, 110, 110), width=2)
+    draw.line([(fixture_sidebar, fixture_input), (width - 1, fixture_input)], fill=(110, 110, 110), width=2)
+
+
+def _message_viewport(surface: Image.Image) -> list[int]:
+    structural = window_layout.build_structural_layout_regions(surface)
+    assert_true(structural.get("ok"), f"fixture must resolve through production layout builder: {structural}")
+    return list((structural.get("regions") or {}).get("message_viewport_bounds") or [])
 
 
 class FakeGenericWeChatHost:
@@ -70,9 +79,9 @@ class FakeGenericWeChatHost:
         self.surface = Image.new("RGB", (980, 860), (247, 247, 247))
         _draw_layout_chrome(self.surface)
         draw = ImageDraw.Draw(self.surface)
-        split = 370
-        draw.rectangle([split + 42, 250, split + 282, 470], fill=(30, 120, 190))
-        draw.rectangle([760, 500, 940, 660], fill=(190, 80, 50))
+        viewport = _message_viewport(self.surface)
+        draw.rectangle([viewport[0] + 42, 250, min(viewport[2] - 260, viewport[0] + 282), 470], fill=(30, 120, 190))
+        draw.rectangle([max(viewport[0] + 300, viewport[2] - 220), 500, viewport[2] - 40, 660], fill=(190, 80, 50))
         self.menu = self.surface.copy()
         self.capture_artifact_dirs: list[str | None] = []
         self.sequence = 41
@@ -587,9 +596,9 @@ def _surface_with_customer_images(image_rows: list[tuple[int, int]]) -> Image.Im
     surface = Image.new("RGB", (980, 860), (247, 247, 247))
     _draw_layout_chrome(surface)
     draw = ImageDraw.Draw(surface)
-    split = session_split_x(980)
+    viewport = _message_viewport(surface)
     for index, (top, bottom) in enumerate(image_rows):
-        draw.rectangle([split + 42, top, split + 282, bottom], fill=(30 + index * 30, 120, 190))
+        draw.rectangle([viewport[0] + 42, top, min(viewport[2] - 80, viewport[0] + 282), bottom], fill=(30 + index * 30, 120, 190))
     return surface
 
 

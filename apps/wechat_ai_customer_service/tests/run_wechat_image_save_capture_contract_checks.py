@@ -23,7 +23,6 @@ from apps.wechat_ai_customer_service.optional_plugins.vision.capture.wechat impo
 )
 from apps.wechat_ai_customer_service.adapters import wechat_win32_ocr_sidecar  # noqa: E402
 from apps.wechat_ai_customer_service.adapters.wechat_win32_ocr import window_layout  # noqa: E402
-from apps.wechat_ai_customer_service.adapters.wechat_win32_ocr.geometry import session_split_x  # noqa: E402
 from apps.wechat_ai_customer_service.optional_plugins.vision.capture.surface import (  # noqa: E402
     image_candidates_without_reliable_typed_message_conflicts,
     messages_outside_image_bubbles,
@@ -88,9 +87,9 @@ def _customer_image_surface() -> Image.Image:
     image = Image.new("RGB", (980, 860), (247, 247, 247))
     _draw_layout_chrome(image)
     draw = ImageDraw.Draw(image)
-    split = session_split_x(980)
-    draw.rectangle([split + 42, 260, split + 282, 480], fill=(30, 120, 190))
-    draw.rectangle([760, 500, 940, 660], fill=(190, 80, 50))
+    viewport = _message_viewport(image)
+    draw.rectangle([viewport[0] + 42, 260, min(viewport[2] - 260, viewport[0] + 282), 480], fill=(30, 120, 190))
+    draw.rectangle([max(viewport[0] + 300, viewport[2] - 220), 500, viewport[2] - 40, 660], fill=(190, 80, 50))
     return image
 
 
