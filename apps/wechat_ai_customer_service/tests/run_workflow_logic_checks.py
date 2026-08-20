@@ -2197,10 +2197,18 @@ def check_auto_reply_disabled_blocks_runtime_send() -> None:
 def check_customer_service_console_switches_take_effect() -> None:
     tenant_id = "workflow_switch_probe"
     old_tenant = os.environ.get("WECHAT_KNOWLEDGE_TENANT")
-    os.environ["WECHAT_KNOWLEDGE_TENANT"] = tenant_id
+    old_llm_config_path = llm_config_module._LLM_CONFIG_PATH
+    test_llm_config_path = Path(tempfile.gettempdir()) / f"workflow_console_llm_{os.getpid()}.json"
     settings_store = CustomerServiceSettings(tenant_id=tenant_id)
-    remove_file(settings_store.settings_path)
     try:
+        remove_file(test_llm_config_path)
+        test_llm_config_path.write_text(
+            json.dumps({"LLM_PROVIDER": "deepseek"}),
+            encoding="utf-8",
+        )
+        llm_config_module._LLM_CONFIG_PATH = test_llm_config_path
+        os.environ["WECHAT_KNOWLEDGE_TENANT"] = tenant_id
+        remove_file(settings_store.settings_path)
         settings_store.save(
             {
                 "enabled": False,
@@ -2412,6 +2420,8 @@ def check_customer_service_console_switches_take_effect() -> None:
         assert_true("文件传输助手" in ignored_names, "disabled managed session should enter ignored list")
     finally:
         remove_file(settings_store.settings_path)
+        remove_file(test_llm_config_path)
+        llm_config_module._LLM_CONFIG_PATH = old_llm_config_path
         if old_tenant is None:
             os.environ.pop("WECHAT_KNOWLEDGE_TENANT", None)
         else:
@@ -5168,29 +5178,29 @@ def check_local_customer_service_settings_follow_active_anthropic_kimi_route() -
     old_anthropic_flash_model = os.environ.get("ANTHROPIC_FLASH_MODEL")
     old_anthropic_pro_model = os.environ.get("ANTHROPIC_PRO_MODEL")
     old_llm_config_path = llm_config_module._LLM_CONFIG_PATH
-    test_llm_config_path = settings_store.settings_path.with_name("llm_config_kimi_probe.json")
-    llm_config_module._LLM_CONFIG_PATH = test_llm_config_path
-    os.environ["WECHAT_KNOWLEDGE_TENANT"] = tenant_id
-    os.environ["LLM_PROVIDER"] = "anthropic"
-    os.environ["ACTIVE_LLM_PROVIDER"] = "anthropic"
-    os.environ["ANTHROPIC_BASE_URL"] = "https://aiself.vip/v1"
-    os.environ["ANTHROPIC_FLASH_MODEL"] = "kimi-for-coding"
-    os.environ["ANTHROPIC_PRO_MODEL"] = "kimi-for-coding"
-    remove_file(settings_store.settings_path)
-    test_llm_config_path.write_text(
-        json.dumps(
-            {
-                "LLM_PROVIDER": "anthropic",
-                "ANTHROPIC_BASE_URL": "https://aiself.vip/v1",
-                "ANTHROPIC_FLASH_MODEL": "kimi-for-coding",
-                "ANTHROPIC_PRO_MODEL": "kimi-for-coding",
-            },
-            ensure_ascii=False,
-            indent=2,
-        ),
-        encoding="utf-8",
-    )
+    test_llm_config_path = Path(tempfile.gettempdir()) / f"llm_config_kimi_probe_{os.getpid()}.json"
     try:
+        llm_config_module._LLM_CONFIG_PATH = test_llm_config_path
+        os.environ["WECHAT_KNOWLEDGE_TENANT"] = tenant_id
+        os.environ["LLM_PROVIDER"] = "anthropic"
+        os.environ["ACTIVE_LLM_PROVIDER"] = "anthropic"
+        os.environ["ANTHROPIC_BASE_URL"] = "https://aiself.vip/v1"
+        os.environ["ANTHROPIC_FLASH_MODEL"] = "kimi-for-coding"
+        os.environ["ANTHROPIC_PRO_MODEL"] = "kimi-for-coding"
+        remove_file(settings_store.settings_path)
+        test_llm_config_path.write_text(
+            json.dumps(
+                {
+                    "LLM_PROVIDER": "anthropic",
+                    "ANTHROPIC_BASE_URL": "https://aiself.vip/v1",
+                    "ANTHROPIC_FLASH_MODEL": "kimi-for-coding",
+                    "ANTHROPIC_PRO_MODEL": "kimi-for-coding",
+                },
+                ensure_ascii=False,
+                indent=2,
+            ),
+            encoding="utf-8",
+        )
         settings_store.save({"use_llm": True, "customer_service_brain_mode": "brain_first"})
         config = load_smoke_config()
         config["llm_reply_synthesis"] = {
