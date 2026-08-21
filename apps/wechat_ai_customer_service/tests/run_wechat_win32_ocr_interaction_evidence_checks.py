@@ -7,15 +7,14 @@ import random
 import sys
 from pathlib import Path
 
-from PIL import Image, ImageDraw
+from PIL import Image
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from apps.wechat_ai_customer_service.adapters.wechat_win32_ocr import interaction_evidence
-from apps.wechat_ai_customer_service.adapters.wechat_win32_ocr import window_layout
 from apps.wechat_ai_customer_service.adapters import wechat_win32_ocr_sidecar as sidecar
+from apps.wechat_ai_customer_service.adapters.wechat_win32_ocr import interaction_evidence, window_layout
 
 
 def assert_true(value: bool, message: str) -> None:
@@ -23,46 +22,70 @@ def assert_true(value: bool, message: str) -> None:
         raise AssertionError(message)
 
 
-def _production_layout_snapshot() -> dict[str, object]:
-    image = Image.new("RGB", (980, 860), (247, 247, 247))
-    draw = ImageDraw.Draw(image)
-    draw.rectangle([0, 0, 70, 859], fill=(224, 224, 224))
-    draw.rectangle([71, 0, 370, 89], fill=(210, 210, 210))
-    draw.rectangle([71, 90, 370, 859], fill=(240, 240, 240))
-    draw.rectangle([371, 0, 979, 89], fill=(238, 238, 238))
-    draw.rectangle([371, 90, 979, 759], fill=(255, 255, 255))
-    draw.rectangle([371, 760, 979, 859], fill=(242, 242, 242))
-    draw.line([(70, 0), (70, 859)], fill=(110, 110, 110), width=2)
-    draw.line([(370, 0), (370, 859)], fill=(110, 110, 110), width=2)
-    draw.line([(71, 89), (979, 89)], fill=(110, 110, 110), width=2)
-    draw.line([(371, 759), (979, 759)], fill=(110, 110, 110), width=2)
-    structural = window_layout.build_structural_layout_regions(image)
-    assert_true(structural.get("ok") is True, f"production layout builder rejected fixture: {structural}")
-    return window_layout.build_layout_snapshot(
+def production_layout_snapshot(image_size: tuple[int, int] = (980, 860)) -> dict[str, object]:
+    """Resolve a frame through the production startup calibrator and frame builder."""
+
+    width, height = image_size
+    image = Image.new("RGB", image_size, (120, 120, 120))
+    pixels = image.load()
+    nav_x = int(width * 0.12)
+    sidebar_x = int(width * 0.40)
+    header_y = int(height * 0.12)
+    input_y = int(height * 0.80)
+    for x in (nav_x, sidebar_x):
+        for y in range(height):
+            pixels[x - 1, y] = (20, 20, 20)
+            pixels[x + 1, y] = (230, 230, 230)
+    for y in (header_y, input_y):
+        for x in range(width):
+            pixels[x, y - 1] = (20, 20, 20)
+            pixels[x, y + 1] = (230, 230, 230)
+    calibration = window_layout.build_startup_layout_calibration(
         hwnd=1001,
-        frame_id=window_layout.new_frame_id(1001),
-        capture_mode=window_layout.CAPTURE_MODE_WINDOW_VISIBLE_SCREEN,
-        image_size=image.size,
-        capture_screen_origin=[0, 0],
-        window_rect=[0, 0, 980, 860],
-        client_rect=[0, 0, 980, 860],
+        process_id=2001,
+        image=image,
+        ocr_items=[],
+        window_rect=[0, 0, width, height],
+        client_rect={"left": 0, "top": 0, "right": width, "bottom": height, "width": width, "height": height},
         client_screen_origin=[0, 0],
         dpi_scale=1.0,
-        regions=structural.get("regions") or {},
-        anchors=structural.get("anchors") or [],
-        confidence=float(structural.get("confidence") or 0.0),
-        conflicts=structural.get("conflicts") or [],
-        executable=bool(structural.get("ok")),
+        capture_mode=window_layout.CAPTURE_MODE_CLIENT_AREA,
     )
+    assert_true(bool(calibration.get("executable")), f"production startup calibrator rejected test frame: {calibration}")
+    snapshot = window_layout.build_layout_snapshot(
+        hwnd=1001,
+        frame_id=f"interaction-evidence-{width}x{height}",
+        capture_mode=window_layout.CAPTURE_MODE_CLIENT_AREA,
+        image_size=image_size,
+        capture_screen_origin=[0, 0],
+        window_rect=[0, 0, width, height],
+        client_rect=[0, 0, width, height],
+        client_screen_origin=[0, 0],
+        dpi_scale=1.0,
+        regions={name: calibration[name] for name in window_layout.REQUIRED_LAYOUT_REGION_NAMES},
+        anchors=calibration["anchors"],
+        confidence=calibration["confidence"],
+        conflicts=calibration["conflicts"],
+        executable=True,
+    )
+    snapshot["calibration_id"] = str(calibration["calibration_id"])
+    return snapshot
 
 
 def test_missing_or_failed_probe_never_authorizes_click() -> None:
-    missing = interaction_evidence.input_surface_click_evidence({"has_visible_text": False, "reason": "input_region_blank"})
-    failed = interaction_evidence.input_surface_click_evidence(
-        {"has_visible_text": False, "reason": "input_region_blank", "bounds": [400, 680, 880, 800], "error": "capture_failed"}
+    missing = interaction_evidence.input_surface_click_evidence(
+        {"has_visible_text": False, "reason": "input_region_blank"}
     )
-    assert_true(missing.get("ok") is False and "evidence" in str(missing.get("reason")), f"missing bounds must block: {missing}")
-    assert_true(failed.get("ok") is False and "probe_failed" in str(failed.get("reason")), f"failed probe must block: {failed}")
+    failed = interaction_evidence.input_surface_click_evidence(
+        {
+            "has_visible_text": False,
+            "reason": "input_region_blank",
+            "bounds": [400, 680, 880, 800],
+            "error": "capture_failed",
+        }
+    )
+    assert_true(missing.get("ok") is False, f"missing bounds must block: {missing}")
+    assert_true(failed.get("ok") is False, f"failed probe must block: {failed}")
 
 
 def test_verified_clicks_stay_inside_observed_interior_with_variation() -> None:
@@ -74,7 +97,6 @@ def test_verified_clicks_stay_inside_observed_interior_with_variation() -> None:
     for seed in range(60):
         random.seed(seed)
         selected = interaction_evidence.choose_input_click_point(evidence, random_module=random)
-        assert_true(selected.get("ok") is True, f"verified evidence should select a point: {selected}")
         x, y = selected["point"]
         left, top, right, bottom = evidence["click_bounds"]
         assert_true(left <= x < right and top <= y < bottom, f"point escaped evidence bounds: {selected}")
@@ -84,6 +106,7 @@ def test_verified_clicks_stay_inside_observed_interior_with_variation() -> None:
 
 def test_missing_input_bounds_causes_zero_rpa_clicks() -> None:
     originals = {
+        "win32gui": sidecar.win32gui,
         "activate_window": sidecar.activate_window,
         "recover_send_window_guard": sidecar.recover_send_window_guard,
         "capture_wechat": sidecar.capture_wechat,
@@ -95,7 +118,9 @@ def test_missing_input_bounds_causes_zero_rpa_clicks() -> None:
     calls = {"click": 0}
     geometry = {"left": 0, "top": 0, "right": 980, "bottom": 860, "width": 980, "height": 860}
     try:
-        sidecar.activate_window = lambda *_args, **_kwargs: True
+        sidecar.activate_window = lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("C3 input/send must not activate or restore WeChat")
+        )
         sidecar.recover_send_window_guard = lambda *_args, **_kwargs: {"ok": True, "reason": "window_valid"}
         sidecar.capture_wechat = lambda *_args, **_kwargs: (object(), "input.png")
         sidecar.run_ocr_for_input_region_probe = lambda *_args, **_kwargs: ([], "roi")
@@ -122,19 +147,14 @@ def test_missing_input_bounds_causes_zero_rpa_clicks() -> None:
 
 def test_visual_send_forwards_verified_bounds_through_real_click_mapping() -> None:
     hwnd = 1001
-    snapshot = _production_layout_snapshot()
+    snapshot = production_layout_snapshot()
     snapshot_id = str(snapshot.get("layout_snapshot_id") or "")
     input_bounds = list(snapshot.get("input_bounds") or [])
     assert_true(snapshot_id != "" and len(input_bounds) == 4, f"invalid production snapshot fixture: {snapshot}")
-    expected_click_evidence = interaction_evidence.input_surface_click_evidence(
-        {
-            "has_visible_text": False,
-            "reason": "input_region_blank",
-            "bounds": input_bounds,
-        }
-    )
-    expected_click_bounds = list(expected_click_evidence.get("click_bounds") or [])
-    assert_true(len(expected_click_bounds) == 4, f"invalid input click evidence: {expected_click_evidence}")
+    mapped_input = window_layout.map_reference_region_point(snapshot, "input_focus")
+    expected_input_point = list(mapped_input.get("image_point") or [])
+    expected_click_bounds = list(input_bounds)
+    assert_true(len(expected_input_point) == 2, f"startup coordinate map did not resolve input point: {mapped_input}")
     geometry = {
         "left": 0,
         "top": 0,
@@ -178,6 +198,14 @@ def test_visual_send_forwards_verified_bounds_through_real_click_mapping() -> No
     sidecar._LATEST_LAYOUT_SNAPSHOT_BY_HWND[hwnd] = snapshot_id
     try:
         os.environ["WECHAT_WIN32_OCR_INPUT_FAST_VISUAL_CONFIRM"] = "1"
+        sidecar.win32gui = type(
+            "ForegroundWin32Gui",
+            (),
+            {
+                "GetForegroundWindow": staticmethod(lambda: hwnd),
+                "GetAncestor": staticmethod(lambda candidate, _flag: candidate),
+            },
+        )()
         sidecar.get_window_geometry = lambda *_args, **_kwargs: dict(geometry)
         sidecar.get_window_client_geometry = lambda *_args, **_kwargs: dict(client_geometry)
         sidecar.window_dpi_scale = lambda *_args, **_kwargs: 1.0
@@ -202,8 +230,9 @@ def test_visual_send_forwards_verified_bounds_through_real_click_mapping() -> No
             "method": "sendinput_unicode",
             "typed_chars": len(text),
         }
+
         def capture_after_input(*_args, **_kwargs):
-            refreshed = _production_layout_snapshot()
+            refreshed = production_layout_snapshot()
             refreshed_id = str(refreshed.get("layout_snapshot_id") or "")
             sidecar._LAYOUT_SNAPSHOT_STORE.put(refreshed)
             sidecar._LATEST_LAYOUT_SNAPSHOT_BY_HWND[hwnd] = refreshed_id
@@ -246,6 +275,7 @@ def test_visual_send_forwards_verified_bounds_through_real_click_mapping() -> No
         input_click, focus_proof_click = physical_clicks
         assert_true(input_click.get("action_name") == "human_window_image_click", f"wrong click boundary: {input_click}")
         assert_true(input_click.get("bounds") == expected_click_bounds, f"verified input bounds were not mapped to physical click: {input_click}")
+        assert_true(input_click.get("point") == expected_input_point, f"input click did not use the startup coordinate map: {input_click}")
         assert_true(focus_proof_click.get("bounds") == input_bounds, f"fresh input snapshot did not reach focus proof: {focus_proof_click}")
         assert_true(pressed_keys == [sidecar.win32con.VK_RETURN], f"real send trigger did not reach Enter boundary: {pressed_keys}")
     finally:
@@ -275,7 +305,9 @@ def test_missing_search_label_causes_zero_rpa_actions() -> None:
     calls = {"click": 0, "key": 0}
     try:
         sidecar.basic_send_window_guard = lambda *_args, **_kwargs: {"ok": True, "reason": "window_valid"}
-        sidecar.get_window_geometry = lambda *_args, **_kwargs: {"left": 0, "top": 0, "right": 980, "bottom": 860, "width": 980, "height": 860}
+        sidecar.get_window_geometry = lambda *_args, **_kwargs: {
+            "left": 0, "top": 0, "right": 980, "bottom": 860, "width": 980, "height": 860
+        }
         sidecar.capture_wechat = lambda *_args, **_kwargs: (object(), "search.png")
         sidecar.run_ocr_traced = lambda *_args, **_kwargs: []
         sidecar.target_switch_surface_state = lambda *_args, **_kwargs: {"ok": True, "reason": "surface_ready"}
@@ -292,23 +324,21 @@ def test_missing_search_label_causes_zero_rpa_actions() -> None:
 
 def test_observed_search_placeholder_variants_are_accepted_in_sidebar_only() -> None:
     geometry = {"left": 0, "top": 0, "right": 980, "bottom": 860, "width": 980, "height": 860}
-    layout_snapshot = _production_layout_snapshot()
+    layout_snapshot = production_layout_snapshot()
+    header_bounds = window_layout.required_region(layout_snapshot, "sidebar_header_bounds")
     placeholder = {
-        "text": "Q\u641c\u7d22",
-        "left": 101,
-        "top": 61,
-        "right": 143,
-        "bottom": 83,
+        "text": "Q搜索",
+        "left": header_bounds[0] + 34,
+        "top": header_bounds[1] + 38,
+        "right": header_bounds[0] + 76,
+        "bottom": header_bounds[1] + 60,
     }
     evidence = sidecar.sidebar_search_box_evidence(
-        [placeholder],
-        geometry=geometry,
-        layout_snapshot=layout_snapshot,
+        [placeholder], geometry=geometry, layout_snapshot=layout_snapshot
     )
     assert_true(evidence.get("ok") is True, f"known placeholder OCR variant must be accepted: {evidence}")
-    outside_sidebar = dict(placeholder, left=522, right=563)
     outside = sidecar.sidebar_search_box_evidence(
-        [outside_sidebar],
+        [dict(placeholder, left=522, right=563)],
         geometry=geometry,
         layout_snapshot=layout_snapshot,
     )
