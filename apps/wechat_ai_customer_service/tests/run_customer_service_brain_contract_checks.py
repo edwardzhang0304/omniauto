@@ -3045,6 +3045,11 @@ def check_brain_same_capture_retry_recovers_unavailable_response() -> CaseResult
         {
             "provider": "openai",
             "mode": "shadow",
+            "total_time_budget_seconds": 175,
+            "primary_attempt_timeout_seconds": 90,
+            "timeout_seconds": 150,
+            "large_prompt_timeout_seconds": 150,
+            "very_large_prompt_timeout_seconds": 150,
             "same_capture_brain_unavailable_retry_delay_seconds": 0,
         }
     )
@@ -3097,6 +3102,7 @@ def check_brain_same_capture_retry_recovers_unavailable_response() -> CaseResult
         f"unavailable retry should remain explicitly auditable: {status}",
     )
     assert_true(len(calls) == 1, f"provider failover already owns the transport attempt; expected one call, got {len(calls)}")
+    assert_true(calls[0].get("timeout") == 90, f"primary attempt must reserve time for later Brain stages: {calls}")
     return CaseResult(
         "brain_unavailable_returns_for_scheduler_requeue_without_duplicate_call",
         True,

@@ -10,8 +10,10 @@ import time
 import urllib.error
 import urllib.request
 from collections.abc import Callable
+from contextlib import contextmanager
+from contextvars import ContextVar
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterator
 
 
 DEFAULT_DEEPSEEK_BASE_URL = "https://api.deepseek.com"
@@ -69,6 +71,40 @@ GATEWAY_FAILOVERABLE_LLM_ERROR_MARKERS = (
 _LLM_FAILOVER_AFFINITY_TTL_SECONDS = 300.0
 _LLM_FAILOVER_AFFINITY_LOCK = threading.Lock()
 _LLM_FAILOVER_AFFINITY: dict[tuple[str, str, str, str], dict[str, Any]] = {}
+_LLM_TOTAL_DEADLINE_MONOTONIC: ContextVar[float | None] = ContextVar(
+    "llm_total_deadline_monotonic",
+    default=None,
+)
+
+
+@contextmanager
+def llm_total_time_budget(total_seconds: int | float) -> Iterator[None]:
+    """Apply one shared wall-clock budget to all LLM routes in this context."""
+
+    seconds = max(0.05, float(total_seconds))
+    token = _LLM_TOTAL_DEADLINE_MONOTONIC.set(time.monotonic() + seconds)
+    try:
+        yield
+    finally:
+        _LLM_TOTAL_DEADLINE_MONOTONIC.reset(token)
+
+
+def llm_total_time_budget_remaining_seconds() -> float | None:
+    deadline = _LLM_TOTAL_DEADLINE_MONOTONIC.get()
+    if deadline is None:
+        return None
+    return max(0.0, deadline - time.monotonic())
+
+
+def _llm_total_budget_exhausted_result() -> dict[str, Any]:
+    return {
+        "ok": False,
+        "status": 0,
+        "error": "llm_total_time_budget_exhausted",
+        "wall_timeout": True,
+        "total_time_budget_exhausted": True,
+        "wall_timeout_seconds": 0.0,
+    }
 
 
 LLM_PROVIDER_PRESETS: dict[str, dict[str, Any]] = {
@@ -970,8 +1006,19 @@ def call_llm_request_once_with_wall_timeout(
     wall_timeout: int | float | None = None,
     **kwargs: Any,
 ) -> dict[str, Any]:
+    remaining_total_budget = llm_total_time_budget_remaining_seconds()
+    if remaining_total_budget is not None and remaining_total_budget < 0.05:
+        return _llm_total_budget_exhausted_result()
     if wall_timeout is None or float(wall_timeout) <= 0:
-        return call_llm_request_once(**kwargs)
+        if remaining_total_budget is None:
+            return call_llm_request_once(**kwargs)
+        requested_wall_timeout = float(kwargs.get("timeout") or remaining_total_budget)
+    else:
+        requested_wall_timeout = float(wall_timeout)
+    if remaining_total_budget is not None:
+        requested_wall_timeout = min(requested_wall_timeout, remaining_total_budget)
+    if requested_wall_timeout <= 0:
+        return _llm_total_budget_exhausted_result()
     # urllib's timeout is a per-blocking-operation socket timeout.  DNS, TLS,
     # response headers and a trickled body can therefore exceed it in total.
     # Keep the transport-level deadlines as the first line of defence, and add
@@ -979,13 +1026,13 @@ def call_llm_request_once_with_wall_timeout(
     # call always returns within the advertised wall budget.  A dedicated
     # daemon is used instead of ThreadPoolExecutor: executor shutdown waits for
     # an already-running future and would recreate the latency amplification.
-    effective_wall_timeout = max(1.0, float(wall_timeout))
+    effective_wall_timeout = max(0.05, requested_wall_timeout)
     request_kwargs = dict(kwargs)
     try:
         configured_timeout = float(request_kwargs.get("timeout") or effective_wall_timeout)
     except (TypeError, ValueError):
         configured_timeout = effective_wall_timeout
-    request_kwargs["timeout"] = max(1.0, min(configured_timeout, effective_wall_timeout))
+    request_kwargs["timeout"] = max(0.05, min(configured_timeout, effective_wall_timeout))
     completed = threading.Event()
     result_box: dict[str, Any] = {}
 

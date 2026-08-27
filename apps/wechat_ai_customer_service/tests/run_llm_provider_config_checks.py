@@ -113,6 +113,7 @@ def run_checks() -> dict[str, Any]:
             check_model_unavailable_primary_is_failoverable()
             check_stage_can_disallow_fallback(calls)
             check_failover_preserves_actual_fallback_route(calls)
+            check_total_time_budget_caps_fallback_to_remaining_time()
             check_wall_timeout_primary_activates_fallback()
             check_wall_timeout_affinity_survives_initial_fallback_timeout()
             check_wall_timeout_bounds_slow_response_headers()
@@ -123,7 +124,7 @@ def run_checks() -> dict[str, Any]:
         finally:
             llm_config_module.urllib.request.urlopen = old_urlopen
             llm_config_module._LLM_CONFIG_PATH = old_path
-    return {"ok": True, "checks": 16}
+    return {"ok": True, "checks": 17}
 
 
 def check_legacy_deepseek_defaults() -> None:
@@ -458,6 +459,65 @@ def check_failover_preserves_actual_fallback_route(calls: list[dict[str, Any]]) 
         "fallback should use independent fallback timeout",
     )
     assert_equal(calls[-1]["url"], "https://aiself.vip/v1/messages", "fallback route should call anthropic messages")
+
+
+def check_total_time_budget_caps_fallback_to_remaining_time() -> None:
+    original_call = llm_config_module.call_llm_request_once
+    observed_timeouts: list[float] = []
+    primary_signature = llm_config_module.llm_route_signature(
+        provider="openai",
+        api_key="sk-total-budget-primary",
+        base_url="https://total-budget-primary.invalid/v1",
+        model="gpt-total-budget",
+    )
+    llm_config_module._clear_llm_failover_affinity(primary_signature)
+
+    def fake_call(**kwargs: Any) -> dict[str, Any]:
+        observed_timeouts.append(float(kwargs.get("timeout") or 0.0))
+        if len(observed_timeouts) == 1:
+            time.sleep(0.15)
+            return {"ok": False, "status": 0, "error": "simulated primary timeout"}
+        return {
+            "ok": True,
+            "status": 200,
+            "provider": "deepseek",
+            "model": "deepseek-chat",
+            "response_text": "{}",
+        }
+
+    llm_config_module.call_llm_request_once = fake_call
+    try:
+        with llm_config_module.llm_total_time_budget(0.28):
+            result = llm_config_module.call_llm_request_with_failover(
+                provider="openai",
+                api_key="sk-total-budget-primary",
+                base_url="https://total-budget-primary.invalid/v1",
+                model="gpt-total-budget",
+                messages=[{"role": "user", "content": "ping"}],
+                timeout=0.18,
+                wall_timeout=0.18,
+                fallback_timeout=0.18,
+                fallback_wall_timeout=0.18,
+                max_tokens=8,
+                config={
+                    "LLM_FALLBACK_ENABLED": "1",
+                    "LLM_FALLBACK_PROVIDER": "deepseek",
+                    "LLM_FALLBACK_BASE_URL": "https://total-budget-fallback.invalid/v1",
+                    "LLM_FALLBACK_FLASH_MODEL": "deepseek-chat",
+                    "LLM_FALLBACK_API_KEY": "sk-total-budget-fallback",
+                },
+            )
+    finally:
+        llm_config_module.call_llm_request_once = original_call
+
+    assert_true(result.get("ok"), f"fallback should use the remaining shared budget: {result}")
+    assert_equal(len(observed_timeouts), 2, "shared budget check should attempt primary and fallback once")
+    assert_true(0.05 <= observed_timeouts[0] <= 0.18, f"primary timeout escaped its allocation: {observed_timeouts}")
+    assert_true(0.0 < observed_timeouts[1] < 0.16, f"fallback did not consume only remaining budget: {observed_timeouts}")
+    assert_true(
+        llm_config_module.llm_total_time_budget_remaining_seconds() is None,
+        "shared LLM budget context must not leak into later requests",
+    )
 
 
 def check_wall_timeout_primary_activates_fallback() -> None:
