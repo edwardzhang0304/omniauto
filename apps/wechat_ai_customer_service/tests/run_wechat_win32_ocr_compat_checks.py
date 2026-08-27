@@ -226,6 +226,23 @@ def _compat_layout_snapshot(
     )
 
 
+def _empty_send_context_guard(
+    sidecar_mod: object,
+    image_size: tuple[int, int] = (980, 860),
+) -> dict[str, object]:
+    layout_snapshot = _compat_layout_snapshot(image_size)
+    return sidecar_mod.build_send_context_guard(
+        [],
+        layout_evidence={
+            "ok": True,
+            "layout_snapshot_id": layout_snapshot["layout_snapshot_id"],
+            "message_viewport_bounds": list(
+                layout_snapshot["message_viewport_bounds"]
+            ),
+        },
+    )
+
+
 def _register_compat_image_layout(sidecar_mod: object, image: object, *, hwnd: int = 1001) -> dict[str, object]:
     image_size = tuple(getattr(image, "size", (0, 0))[:2])
     snapshot = _compat_layout_snapshot(
@@ -579,6 +596,73 @@ def test_run_sidecar_cli_accepts_visible_session_candidate() -> None:
     assert_true("CJR8S5K3" in str(captured.get("visible_session_candidate")), f"candidate should reach run_action: {captured}")
 
 
+def test_run_sidecar_cli_accepts_chat_fact_roi_ocr() -> None:
+    import apps.wechat_ai_customer_service.adapters.wechat_win32_ocr_sidecar as sidecar_module
+
+    captured = {}
+
+    def fake_run_action(args):
+        captured["action"] = args.action
+        captured["chat_fact_roi_ocr"] = args.chat_fact_roi_ocr
+        return {"ok": True, "state": "messages_ocr"}
+
+    original = sidecar_module.run_action
+    sidecar_module.run_action = fake_run_action
+    try:
+        payload = sidecar_module.run_sidecar_cli(
+            [
+                "messages",
+                "--target",
+                "CJTEST01",
+                "--chat-fact-roi-ocr",
+            ]
+        )
+    finally:
+        sidecar_module.run_action = original
+    assert_true(payload.get("ok") is True, f"CLI should accept ROI OCR: {payload}")
+    assert_true(captured.get("action") == "messages", f"unexpected action: {captured}")
+    assert_true(captured.get("chat_fact_roi_ocr") is True, f"ROI flag lost: {captured}")
+
+
+def test_run_sidecar_cli_accepts_same_frame_full_ocr_evidence() -> None:
+    import apps.wechat_ai_customer_service.adapters.wechat_win32_ocr_sidecar as sidecar_module
+
+    captured = {}
+    evidence = {
+        "frame_id": "frame-cli-replay",
+        "screenshot_path": "C:/evidence/frame.png",
+    }
+
+    def fake_run_action(args):
+        captured["action"] = args.action
+        captured["same_frame_full_ocr_evidence"] = (
+            args.same_frame_full_ocr_evidence
+        )
+        return {"ok": True, "state": "messages_ocr"}
+
+    original = sidecar_module.run_action
+    sidecar_module.run_action = fake_run_action
+    try:
+        payload = sidecar_module.run_sidecar_cli(
+            [
+                "messages",
+                "--target",
+                "CJTEST01",
+                "--same-frame-full-ocr-evidence",
+                json.dumps(evidence),
+            ]
+        )
+    finally:
+        sidecar_module.run_action = original
+    assert_true(payload.get("ok") is True, f"CLI replay evidence failed: {payload}")
+    assert_true(captured.get("action") == "messages", f"unexpected action: {captured}")
+    assert_true(
+        json.loads(str(captured.get("same_frame_full_ocr_evidence") or "{}"))
+        == evidence,
+        f"same-frame evidence lost: {captured}",
+    )
+
+
 def test_voice_daemon_request_preserves_formal_action_identity() -> None:
     from apps.wechat_ai_customer_service.adapters.wechat_win32_ocr_sidecar import (
         args_for_daemon_request,
@@ -600,6 +684,54 @@ def test_voice_daemon_request_preserves_formal_action_identity() -> None:
         argv[argv.index("--reserved-worker-stable-id") + 1]
         == "worker-message-9",
         f"reserved worker id lost: {argv}",
+    )
+
+
+def test_messages_daemon_request_preserves_chat_fact_roi_ocr_mode() -> None:
+    from apps.wechat_ai_customer_service.adapters.wechat_win32_ocr_sidecar import (
+        args_for_daemon_request,
+    )
+
+    argv = args_for_daemon_request(
+        {
+            "action": "messages",
+            "target": "CJTEST01",
+            "chat_fact_roi_ocr": True,
+        }
+    )
+    assert_true(
+        "--chat-fact-roi-ocr" in argv,
+        f"daemon must preserve the pre-send ROI OCR request: {argv}",
+    )
+    open_chat_argv = args_for_daemon_request(
+        {
+            "action": "open-chat",
+            "target": "CJTEST01",
+            "chat_fact_roi_ocr": True,
+        }
+    )
+    assert_true(
+        "--chat-fact-roi-ocr" in open_chat_argv,
+        "daemon must preserve the ROI mode for the reusable locate frame: "
+        f"{open_chat_argv}",
+    )
+    replay_evidence = {
+        "frame_id": "frame-daemon-replay",
+        "screenshot_path": "C:/evidence/frame.png",
+    }
+    replay_argv = args_for_daemon_request(
+        {
+            "action": "messages",
+            "target": "CJTEST01",
+            "same_frame_full_ocr_evidence": replay_evidence,
+        }
+    )
+    serialized = replay_argv[
+        replay_argv.index("--same-frame-full-ocr-evidence") + 1
+    ]
+    assert_true(
+        json.loads(serialized) == replay_evidence,
+        f"daemon must preserve same-frame evidence: {replay_argv}",
     )
 
 def test_parse_sessions_from_ocr() -> None:
@@ -1065,6 +1197,7 @@ def test_add_friend_menu_click_handles_stale_dialog_hwnd() -> None:
         "window_dpi_scale": sidecar_mod.window_dpi_scale,
         "activate_window": sidecar_mod.activate_window,
         "ensure_left_button_released": sidecar_mod.ensure_left_button_released,
+        "win32gui": sidecar_mod.win32gui,
         "layout_store": sidecar_mod._LAYOUT_SNAPSHOT_STORE,
         "latest_layout": dict(sidecar_mod._LATEST_LAYOUT_SNAPSHOT_BY_HWND),
     }
@@ -1635,6 +1768,127 @@ def test_messages_frame_reuses_screenshot_and_falls_back_to_same_frame_title_roi
     assert_true(capture.call_count == 0, "target confirmation must not capture a second image")
 
 
+def test_send_fact_roi_message_miss_falls_back_on_same_frame() -> None:
+    sidecar_mod = sys.modules["apps.wechat_ai_customer_service.adapters.wechat_win32_ocr_sidecar"]
+    image = Image.new("RGB", (980, 860), "white")
+    _register_compat_image_layout(sidecar_mod, image, hwnd=101)
+    geometry = {
+        "left": 0,
+        "top": 0,
+        "right": 980,
+        "bottom": 860,
+        "width": 980,
+        "height": 860,
+    }
+    message = {
+        "id": "customer-1",
+        "type": "text",
+        "message_type": "text",
+        "sender": "customer",
+        "sender_role": "customer",
+        "content": "想看十万左右的车",
+        "bubble_rect": [410, 200, 650, 240],
+        "avatar_alignment": {"role": "customer", "confirmed": True},
+    }
+    layout_evidence = {
+        "ok": True,
+        "message_viewport_bounds": [382, 86, 980, 679],
+    }
+    expected_guard = sidecar_mod.build_send_context_guard(
+        sidecar_mod.build_message_observations_v3([message]),
+        screenshot=image,
+        layout_evidence=layout_evidence,
+    )
+    calls = {"full_images": []}
+
+    def parse_messages(items, *_args, **_kwargs):
+        return [message] if items and items[0].get("source") == "full" else []
+
+    def full_ocr(frame, *_args, **_kwargs):
+        calls["full_images"].append(frame)
+        return [{"source": "full"}]
+
+    with patch.object(
+        sidecar_mod,
+        "run_ocr_for_chat_fact_frame",
+        return_value=(
+            [{"source": "roi"}],
+            {
+                "source": "chat_fact_roi",
+                "regions": [
+                    "chat_header_bounds",
+                    "message_viewport_bounds",
+                    "input_bounds",
+                ],
+                "ocr_call_count": 3,
+            },
+        ),
+    ), patch.object(sidecar_mod, "run_ocr_traced", side_effect=full_ocr), patch.object(
+        sidecar_mod,
+        "validate_active_send_target",
+        return_value={
+            "ok": True,
+            "reason": "target_confirmed",
+            "confirmation_confidence": "active_title_strict",
+            "geometry": geometry,
+        },
+    ), patch.object(sidecar_mod, "active_send_guard_is_strong", return_value=True), patch.object(
+        sidecar_mod,
+        "get_window_geometry",
+        return_value=geometry,
+    ), patch.object(
+        sidecar_mod,
+        "parse_current_chat_frame_messages",
+        side_effect=parse_messages,
+    ), patch.object(
+        sidecar_mod,
+        "basic_chat_layout_evidence",
+        return_value=layout_evidence,
+    ), patch.object(
+        sidecar_mod,
+        "input_text_region_state",
+        return_value={"has_visible_text": False},
+    ):
+        snapshot = sidecar_mod.build_send_fact_snapshot_from_frame(
+            101,
+            target="CJTEST01",
+            text="AI回复",
+            exact=False,
+            artifact_dir=None,
+            label="compat_same_frame_fallback",
+            screenshot=image,
+            screenshot_path="same-frame.png",
+            expected_context_guard=expected_guard,
+        )
+
+    assert_true(snapshot.get("message_count") == 1, f"full OCR should recover the missing row: {snapshot}")
+    assert_true(calls["full_images"] == [image], f"fallback must reuse the exact same image: {calls}")
+    plan = snapshot.get("ocr_plan") or {}
+    assert_true(plan.get("source") == "full_fallback", f"fallback source missing: {plan}")
+    assert_true(
+        plan.get("fallback_reason") == "message_context_evidence_insufficient",
+        f"message evidence reason missing: {plan}",
+    )
+
+
+def test_input_text_detection_bounds_excludes_toolbar_from_click_surface() -> None:
+    sidecar_mod = sys.modules["apps.wechat_ai_customer_service.adapters.wechat_win32_ocr_sidecar"]
+    image = Image.new("RGB", (980, 860), "white")
+    snapshot = _register_compat_image_layout(sidecar_mod, image, hwnd=101)
+    click_bounds = sidecar_mod.win32_ocr_layout.required_region(
+        snapshot,
+        "input_bounds",
+    )
+    text_bounds = sidecar_mod.win32_ocr_layout.input_text_detection_bounds(
+        snapshot
+    )
+
+    assert_true(text_bounds[0] > click_bounds[0], f"left inset missing: {(click_bounds, text_bounds)}")
+    assert_true(text_bounds[2] < click_bounds[2], f"right inset missing: {(click_bounds, text_bounds)}")
+    assert_true(text_bounds[3] < click_bounds[3], f"toolbar exclusion missing: {(click_bounds, text_bounds)}")
+    assert_true(click_bounds == snapshot["input_bounds"], "text detection must not shrink the click surface")
+
+
 def test_reused_frame_skips_title_roi_when_full_ocr_already_matches() -> None:
     sidecar_mod = sys.modules["apps.wechat_ai_customer_service.adapters.wechat_win32_ocr_sidecar"]
     image = Image.new("RGB", (965, 852), (247, 247, 247))
@@ -1702,6 +1956,7 @@ def test_reused_frame_title_roi_still_blocks_wrong_target() -> None:
 def test_voice_prepare_frame_blocks_action_when_target_is_wrong() -> None:
     sidecar_mod = sys.modules["apps.wechat_ai_customer_service.adapters.wechat_win32_ocr_sidecar"]
     image = Image.new("RGB", (965, 852), (247, 247, 247))
+    _register_compat_image_layout(sidecar_mod, image, hwnd=101)
     guard = {"ok": False, "online": True, "reason": "target_title_not_confirmed"}
     with patch.object(sidecar_mod, "capture_wechat", return_value=(image, "voice_before.png")) as capture, patch.object(
         sidecar_mod,
@@ -2353,8 +2608,16 @@ def test_input_fast_visual_confirm_keeps_before_ocr_and_skips_after_ocr() -> Non
     }
     calls = {"capture": [], "ocr": 0, "region": [], "click": 0}
     geometry = {"left": 0, "top": 0, "right": 980, "bottom": 860, "width": 980, "height": 860}
-    roi_bounds = tuple(_compat_layout_snapshot((980, 860))["input_bounds"])
+    layout_snapshot = _compat_layout_snapshot((980, 860))
+    click_bounds = tuple(layout_snapshot["input_bounds"])
+    roi_bounds = tuple(
+        sidecar_mod.win32_ocr_layout.input_text_detection_bounds(layout_snapshot)
+    )
     roi_size = (roi_bounds[2] - roi_bounds[0], roi_bounds[3] - roi_bounds[1])
+    assert_true(
+        roi_bounds[3] < click_bounds[3],
+        f"draft OCR must stop above the bottom toolbar: {(roi_bounds, click_bounds)}",
+    )
     try:
         os.environ["WECHAT_WIN32_OCR_INPUT_FAST_VISUAL_CONFIRM"] = "1"
         os.environ["WECHAT_WIN32_OCR_INPUT_CONFIRM_ROI_OCR"] = "1"
@@ -2382,6 +2645,7 @@ def test_input_fast_visual_confirm_keeps_before_ocr_and_skips_after_ocr() -> Non
                     "dark_ratio": 0.001,
                     "reason": "input_region_blank",
                     "bounds": list(roi_bounds),
+                    "click_bounds": list(click_bounds),
                 }
             return {
                 "has_visible_text": True,
@@ -2389,6 +2653,7 @@ def test_input_fast_visual_confirm_keeps_before_ocr_and_skips_after_ocr() -> Non
                 "dark_ratio": 0.025,
                 "reason": "ocr_or_dark_pixels",
                 "bounds": list(roi_bounds),
+                "click_bounds": list(click_bounds),
             }
 
         def fake_clear(_hwnd, *, points, geometry, before_state, artifact_dir=None, attempt=1):
@@ -2476,7 +2741,11 @@ def test_input_after_roi_confirmation_uses_input_region_ocr_without_full_ocr() -
         "time_sleep": sidecar_mod.time.sleep,
     }
     geometry = {"left": 0, "top": 0, "right": 980, "bottom": 860, "width": 980, "height": 860}
-    roi_bounds = tuple(_compat_layout_snapshot((980, 860))["input_bounds"])
+    roi_bounds = tuple(
+        sidecar_mod.win32_ocr_layout.input_text_detection_bounds(
+            _compat_layout_snapshot((980, 860))
+        )
+    )
     roi_size = (roi_bounds[2] - roi_bounds[0], roi_bounds[3] - roi_bounds[1])
     calls: dict[str, object] = {"ocr_sizes": [], "click": 0}
     try:
@@ -2575,7 +2844,11 @@ def test_input_after_roi_confirmation_falls_back_to_full_ocr_when_token_missing(
         "time_sleep": sidecar_mod.time.sleep,
     }
     geometry = {"left": 0, "top": 0, "right": 980, "bottom": 860, "width": 980, "height": 860}
-    roi_bounds = tuple(_compat_layout_snapshot((980, 860))["input_bounds"])
+    roi_bounds = tuple(
+        sidecar_mod.win32_ocr_layout.input_text_detection_bounds(
+            _compat_layout_snapshot((980, 860))
+        )
+    )
     roi_size = (roi_bounds[2] - roi_bounds[0], roi_bounds[3] - roi_bounds[1])
     calls: dict[str, object] = {"ocr_sizes": [], "full_calls": 0, "click": 0}
     try:
@@ -4613,7 +4886,7 @@ def test_auxiliary_wechat_shell_is_blocked() -> None:
     assert_true(chat.get("detected") is False, f"real chat surface should pass: {chat}")
 
 
-def test_normalize_wechat_window_uses_shared_safe_origin_when_size_is_already_safe() -> None:
+def test_normalize_wechat_window_uses_current_monitor_work_area_and_dpi_bucket() -> None:
     sidecar_mod = sys.modules["apps.wechat_ai_customer_service.adapters.wechat_win32_ocr_sidecar"]
     if not hasattr(sidecar_mod.ctypes, "windll"):
         return
@@ -4630,8 +4903,17 @@ def test_normalize_wechat_window_uses_shared_safe_origin_when_size_is_already_sa
 
     class FakeUser32:
         @staticmethod
-        def GetSystemMetrics(index: int) -> int:
-            return 1920 if index == 0 else 1200
+        def MonitorFromWindow(_hwnd: int, _flags: int) -> int:
+            return 77
+
+        @staticmethod
+        def GetMonitorInfoW(_monitor: int, info_pointer: Any) -> int:
+            info = info_pointer._obj
+            info.rcWork.left = 0
+            info.rcWork.top = 0
+            info.rcWork.right = 1920
+            info.rcWork.bottom = 1200
+            return 1
 
     class FakeWindll:
         user32 = FakeUser32()
@@ -4671,9 +4953,10 @@ def test_normalize_wechat_window_uses_shared_safe_origin_when_size_is_already_sa
         result = normalize_wechat_window(1001)
         assert_true(result.get("ok") is True, f"normalization should pass: {result}")
         assert_true(result.get("applied") is True, f"offscreen same-size window must be moved: {result}")
-        assert_true(calls == [(0, 0, 980, 860)], f"unexpected move call: {calls}")
-        assert_true((result.get("after") or {}).get("left") == 0, f"window should be clamped on-screen: {result}")
-        assert_true((result.get("after") or {}).get("top") == 0, f"window should use the shared safe origin: {result}")
+        assert_true(calls == [(12, 12, 800, 852)], f"unexpected move call: {calls}")
+        assert_true((result.get("after") or {}).get("left") == 12, f"window should use monitor-safe left margin: {result}")
+        assert_true((result.get("after") or {}).get("top") == 12, f"window should use monitor-safe top margin: {result}")
+        assert_true((result.get("work_area") or {}).get("source") == "MonitorFromWindow_GetMonitorInfoW", f"window must use its current monitor work area: {result}")
     finally:
         if previous_fixed_origin is None:
             os.environ.pop("WECHAT_WIN32_OCR_WINDOW_FIXED_ORIGIN", None)
@@ -6041,6 +6324,7 @@ def test_target_ready_switch_validation_cache_respects_target_and_geometry() -> 
 def test_send_payload_uses_single_fresh_baseline_before_typing() -> None:
     sidecar_mod = sys.modules["apps.wechat_ai_customer_service.adapters.wechat_win32_ocr_sidecar"]
     geometry = {"left": 0, "top": 0, "right": 980, "bottom": 860, "width": 980, "height": 860}
+    empty_context_guard = _empty_send_context_guard(sidecar_mod)
     originals = {
         "validate_active_send_target": sidecar_mod.validate_active_send_target,
         "recover_send_window_guard": sidecar_mod.recover_send_window_guard,
@@ -6081,12 +6365,7 @@ def test_send_payload_uses_single_fresh_baseline_before_typing() -> None:
                 "validation": pass_validate(),
                 "input_region": {"has_visible_text": False},
                 "matching_self_message_count": 0,
-                "send_context_guard": {
-                    "schema_version": 1,
-                    "sequence": [],
-                    "message_count": 0,
-                    "bottom": None,
-                },
+                "send_context_guard": dict(empty_context_guard),
             }
 
         sidecar_mod.capture_send_fact_snapshot = capture_snapshot
@@ -6116,12 +6395,7 @@ def test_send_payload_uses_single_fresh_baseline_before_typing() -> None:
             target="新数据测试",
             text="您好",
             exact=True,
-            expected_context_guard={
-                "schema_version": 1,
-                "sequence": [],
-                "message_count": 0,
-                "bottom": None,
-            },
+            expected_context_guard=dict(empty_context_guard),
             validated_guard={
                 "ok": True,
                 "online": True,
@@ -6148,6 +6422,7 @@ def test_send_payload_uses_single_fresh_baseline_before_typing() -> None:
 def test_send_payload_exposes_optional_timing_without_contract_changes() -> None:
     sidecar_mod = sys.modules["apps.wechat_ai_customer_service.adapters.wechat_win32_ocr_sidecar"]
     geometry = {"left": 0, "top": 0, "right": 980, "bottom": 860, "width": 980, "height": 860}
+    empty_context_guard = _empty_send_context_guard(sidecar_mod)
     originals = {
         "validate_active_send_target": sidecar_mod.validate_active_send_target,
         "recover_send_window_guard": sidecar_mod.recover_send_window_guard,
@@ -6183,12 +6458,7 @@ def test_send_payload_exposes_optional_timing_without_contract_changes() -> None
             },
             "input_region": {"has_visible_text": False},
             "matching_self_message_count": 0,
-            "send_context_guard": {
-                "schema_version": 1,
-                "sequence": [],
-                "message_count": 0,
-                "bottom": None,
-            },
+            "send_context_guard": dict(empty_context_guard),
         }
         sidecar_mod.reserve_send_rate = lambda **_kwargs: {"ok": True, "reason": "rate_ok"}
         sidecar_mod.send_with_visual_input = lambda *_args, **_kwargs: {
@@ -6227,12 +6497,7 @@ def test_send_payload_exposes_optional_timing_without_contract_changes() -> None
             target="新数据测试",
             text="您好",
             exact=True,
-            expected_context_guard={
-                "schema_version": 1,
-                "sequence": [],
-                "message_count": 0,
-                "bottom": None,
-            },
+            expected_context_guard=dict(empty_context_guard),
         )
         assert_true(payload.get("ok") is True, f"send payload should still succeed: {payload}")
         timing = payload.get("timing") if isinstance(payload.get("timing"), dict) else {}
@@ -6265,6 +6530,7 @@ def test_send_payload_exposes_optional_timing_without_contract_changes() -> None
 def test_send_payload_reuses_strict_guard_input_region_seed_for_before_check() -> None:
     sidecar_mod = sys.modules["apps.wechat_ai_customer_service.adapters.wechat_win32_ocr_sidecar"]
     geometry = {"left": 0, "top": 0, "right": 980, "bottom": 860, "width": 980, "height": 860}
+    empty_context_guard = _empty_send_context_guard(sidecar_mod)
     originals = {
         "validate_active_send_target": sidecar_mod.validate_active_send_target,
         "recover_send_window_guard": sidecar_mod.recover_send_window_guard,
@@ -6317,12 +6583,7 @@ def test_send_payload_reuses_strict_guard_input_region_seed_for_before_check() -
             },
             "input_region": {"has_visible_text": False, "reason": "input_region_blank"},
             "matching_self_message_count": 0,
-            "send_context_guard": {
-                "schema_version": 1,
-                "sequence": [],
-                "message_count": 0,
-                "bottom": None,
-            },
+            "send_context_guard": dict(empty_context_guard),
         }
         sidecar_mod.reserve_send_rate = lambda **_kwargs: {"ok": True, "reason": "rate_ok"}
 
@@ -6359,12 +6620,7 @@ def test_send_payload_reuses_strict_guard_input_region_seed_for_before_check() -
             target="新数据测试",
             text="您好",
             exact=True,
-            expected_context_guard={
-                "schema_version": 1,
-                "sequence": [],
-                "message_count": 0,
-                "bottom": None,
-            },
+            expected_context_guard=dict(empty_context_guard),
         )
         assert_true(payload.get("ok") is True, f"send payload should pass: {payload}")
         seed = calls["seed"]
@@ -7247,6 +7503,8 @@ def test_sidebar_search_state_detection_uses_focus_indicator_and_global_search_t
     draw = ImageDraw.Draw(focused)
     draw.rectangle([150, 53, 300, 86], outline=(12, 134, 85), width=2)
     normal = Image.new("RGB", (980, 860), (32, 32, 32))
+    _register_compat_image_layout(sidecar_mod, focused, hwnd=1001)
+    _register_compat_image_layout(sidecar_mod, normal, hwnd=1001)
     assert_true(
         sidecar_mod.sidebar_search_focus_indicator_detected(focused, geometry),
         "green focused search border should be detected",
@@ -7446,7 +7704,10 @@ def main() -> int:
         test_sidecar_contract_validation_failure_is_json_without_window_probe,
         test_sidecar_facade_exports_contract_surface,
         test_run_sidecar_cli_accepts_visible_session_candidate,
+        test_run_sidecar_cli_accepts_chat_fact_roi_ocr,
+        test_run_sidecar_cli_accepts_same_frame_full_ocr_evidence,
         test_voice_daemon_request_preserves_formal_action_identity,
+        test_messages_daemon_request_preserves_chat_fact_roi_ocr_mode,
         test_parse_sessions_from_ocr,
         test_sessions_payload_reports_unresolved_layout_instead_of_empty_success,
         test_sidebar_visible_list_enhanced_ocr_recovers_pinned_gray_sessions,
@@ -7484,6 +7745,8 @@ def main() -> int:
         test_parse_messages_outputs_message_envelope_fields,
         test_c2_observations_are_standalone_without_business_contract_file,
         test_messages_frame_reuses_screenshot_and_falls_back_to_same_frame_title_roi,
+        test_send_fact_roi_message_miss_falls_back_on_same_frame,
+        test_input_text_detection_bounds_excludes_toolbar_from_click_surface,
         test_reused_frame_skips_title_roi_when_full_ocr_already_matches,
         test_reused_frame_title_roi_still_blocks_wrong_target,
         test_voice_prepare_frame_blocks_action_when_target_is_wrong,
@@ -7550,7 +7813,7 @@ def main() -> int:
         test_window_selection_prefers_readable_window_over_larger_blank_window,
         test_dismiss_blank_foreground_minimizes_only_blank_wechat_window,
         test_auxiliary_wechat_shell_is_blocked,
-        test_normalize_wechat_window_uses_shared_safe_origin_when_size_is_already_safe,
+        test_normalize_wechat_window_uses_current_monitor_work_area_and_dpi_bucket,
         test_capabilities_success_exposes_top_level_geometry,
         test_blank_render_detection_for_empty_white_capture,
         test_blank_render_detection_for_bordered_white_capture,
