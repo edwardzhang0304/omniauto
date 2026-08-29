@@ -12,7 +12,6 @@ from typing import Any
 from PIL import Image, ImageOps
 
 from ..limits import resolve_image_source_limits
-from ..errors import VISION_IMAGE_UNDERSTANDING_SCHEMA_INVALID
 from .normalize import (
     normalize_customer_image_understanding_result,
 )
@@ -66,7 +65,7 @@ def now_iso() -> str:
 
 def effective_customer_image_understanding_settings(config: dict[str, Any] | None = None) -> dict[str, Any]:
     cfg = config if isinstance(config, dict) else {}
-    strict_adapter = bool(cfg.get("strict_image_adapter"))
+    strict_adapter = bool(cfg.get("_chejin_c2_strict_adapter"))
     runtime_settings = dict(cfg.get("customer_image_understanding", {}) or {})
     local_settings = {}
     if isinstance(cfg.get("_local_customer_service_settings"), dict):
@@ -169,7 +168,9 @@ def analyze_ephemeral_customer_image(
                 image = ImageOps.exif_transpose(decoded).convert("RGB")
                 sample = image.copy()
                 sample.thumbnail((96, 96), Image.Resampling.LANCZOS)
-                pixels = list(sample.getdata())
+                pixels = list(
+                    getattr(sample, "get_flattened_data", sample.getdata)()
+                )
                 image.close()
                 sample.close()
     except (Image.DecompressionBombError, OSError, ValueError, Warning):
@@ -478,7 +479,7 @@ def maybe_run_customer_image_understanding(
     settings = effective_customer_image_understanding_settings(config)
     strict_adapter = bool(
         isinstance(config, dict)
-        and config.get("strict_image_adapter")
+        and config.get("_chejin_c2_strict_adapter")
     )
     memory_payloads = list(image_payloads or [])
     source_limits = resolve_image_source_limits(config)
@@ -811,7 +812,7 @@ def maybe_run_customer_image_understanding(
                             (time.time() - started) * 1000
                         ),
                         "provider_error": (
-                            VISION_IMAGE_UNDERSTANDING_SCHEMA_INVALID
+                            "C2_IMAGE_UNDERSTANDING_SCHEMA_INVALID"
                         ),
                         "used_fallback": False,
                     },

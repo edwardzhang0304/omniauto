@@ -9,8 +9,6 @@ from typing import Any
 
 from PIL import Image, ImageStat
 
-from ..errors import VISION_IMAGE_OBSERVATION_TRUNCATED
-
 DEFAULT_BOTTOM_EXCLUDE_PX = 95
 DEFAULT_MAX_VISIBLE_IMAGE_CANDIDATES = 64
 MIN_MEDIA_COMPONENT_FILL_RATIO = 0.28
@@ -787,7 +785,15 @@ def image_bubble_visual_fingerprint(
     screenshot: Image.Image,
     bounds: Any,
 ) -> str:
-    """Return the one shared movement-stable fingerprint for an image bubble."""
+    """Return local, current-frame evidence for one image bubble.
+
+    The perceptual dHash keeps the existing tolerant comparison available for
+    diagnostics.  The second component is deliberately stricter: it hashes a
+    quantized inset thumbnail so two different pictures that happen to share a
+    dHash cannot inherit the same frame-action ticket merely because they
+    occupy the same slot.  This value is action evidence only; it is never a
+    durable message identity.
+    """
 
     rect = _visual_bounds(bounds)
     if rect is None:
@@ -803,7 +809,9 @@ def image_bubble_visual_fingerprint(
     try:
         resampling = getattr(Image, "Resampling", Image).LANCZOS
         gray = crop.convert("L").resize((9, 8), resampling)
-        pixels = list(gray.getdata())
+        pixels = list(
+            getattr(gray, "get_flattened_data", gray.getdata)()
+        )
         bits = [
             1
             if pixels[row * 9 + column] > pixels[row * 9 + column + 1]
@@ -812,7 +820,35 @@ def image_bubble_visual_fingerprint(
             for column in range(8)
         ]
         value = sum(bit << index for index, bit in enumerate(bits))
-        return f"dhash64:{value:016x}"
+        width, height = crop.size
+        inset_x = max(2, int(width * 0.04))
+        inset_y = max(2, int(height * 0.04))
+        if width - inset_x * 2 >= 24 and height - inset_y * 2 >= 24:
+            content = crop.crop(
+                (inset_x, inset_y, width - inset_x, height - inset_y)
+            )
+        else:
+            content = crop.copy()
+        try:
+            normalized = content.convert("RGB").resize((24, 24), resampling)
+            try:
+                # Four bits per channel absorb tiny capture noise while still
+                # separating visually similar but physically different media.
+                quantized = bytes(
+                    int(channel) & 0xF0
+                    for pixel in getattr(
+                        normalized,
+                        "get_flattened_data",
+                        normalized.getdata,
+                    )()
+                    for channel in pixel[:3]
+                )
+            finally:
+                normalized.close()
+        finally:
+            content.close()
+        content_digest = hashlib.sha256(quantized).hexdigest()
+        return f"imagev2:{value:016x}:{content_digest}"
     finally:
         crop.close()
 
@@ -822,15 +858,37 @@ def image_visual_fingerprint_distance(left: Any, right: Any) -> int | None:
 
     left_text = str(left or "").strip().lower()
     right_text = str(right or "").strip().lower()
-    if not left_text.startswith("dhash64:") or not right_text.startswith("dhash64:"):
+    def dhash_value(value: str) -> str:
+        if value.startswith("dhash64:"):
+            return value.split(":", 1)[1]
+        if value.startswith("imagev2:"):
+            parts = value.split(":", 2)
+            return parts[1] if len(parts) == 3 else ""
+        return ""
+
+    left_hash = dhash_value(left_text)
+    right_hash = dhash_value(right_text)
+    if not left_hash or not right_hash:
         return None
     try:
-        return (
-            int(left_text.split(":", 1)[1], 16)
-            ^ int(right_text.split(":", 1)[1], 16)
-        ).bit_count()
+        return (int(left_hash, 16) ^ int(right_hash, 16)).bit_count()
     except (TypeError, ValueError):
         return None
+
+
+def image_visual_static_content_matches(left: Any, right: Any) -> bool:
+    """Return whether both current-frame fingerprints prove identical content."""
+
+    left_parts = str(left or "").strip().lower().split(":", 2)
+    right_parts = str(right or "").strip().lower().split(":", 2)
+    return bool(
+        len(left_parts) == 3
+        and len(right_parts) == 3
+        and left_parts[0] == "imagev2"
+        and right_parts[0] == "imagev2"
+        and len(left_parts[2]) == 64
+        and left_parts[2] == right_parts[2]
+    )
 
 
 def stable_image_neighbor_signature(message: dict[str, Any]) -> str:
@@ -1093,9 +1151,9 @@ def detect_visual_image_bubbles(
                 left + int(min(crop.width, ((max_x + 1) * block) / scale)),
                 top + int(min(crop.height, ((max_y + 1) * block) / scale)),
             )
-            # A component continuing through the cropped chat boundary may
-            # have its avatar or media pixels outside the current frame. It
-            # is not a complete current-screen message and must not become an
+            # A component continuing through the cropped chat boundary may have
+            # avatar or media pixels outside the current frame. It is not a
+            # complete current-screen message and must not become an
             # actionable image target.
             if _bounds_continue_through_chat_crop_boundary(
                 image,
@@ -1194,9 +1252,9 @@ def detect_visual_image_bubbles(
                 side=side,
                 regions=protected_regions,
             )
-            # Reliable type evidence is terminal for this frame. Structural
+            # Reliable type evidence is terminal for this frame.  Structural
             # media geometry is deliberately weaker evidence and must never
-            # turn a trusted text or voice row back into an image. In
+            # turn a trusted text or voice row back into an image.  In
             # particular, role-facing edge continuity cannot distinguish a
             # solid WeChat text bubble from an image surface.
             reliable_type_veto = typed_conflict is not None
@@ -1285,7 +1343,7 @@ def detect_visual_image_bubbles(
         ),
     )
     if len(candidates) > limit:
-        raise RuntimeError(VISION_IMAGE_OBSERVATION_TRUNCATED)
+        raise RuntimeError("C2_IMAGE_OBSERVATION_TRUNCATED")
     return candidates
 
 
@@ -1488,128 +1546,6 @@ def clamp_bounds(bounds: list[int] | tuple[int, int, int, int], image_size: tupl
     return left, top, right, bottom
 
 
-def capture_context_menu_image(
-    *,
-    sidecar_ops: Any,
-    hwnd: int,
-    artifact_dir: str,
-    label: str,
-) -> tuple[Any, str, str]:
-    """Backward-compatible transient context-menu capture facade."""
-
-    del artifact_dir
-    visible_capture = getattr(
-        sidecar_ops,
-        "capture_wechat_window_visible_screen",
-        None,
-    )
-    if callable(visible_capture):
-        try:
-            image, _path = visible_capture(
-                hwnd,
-                artifact_dir=None,
-                label=label,
-            )
-            return image, "", "visible_window"
-        except Exception:
-            pass
-    image, _path = sidecar_ops.capture_wechat(
-        hwnd,
-        artifact_dir=None,
-        label=label,
-    )
-    return image, "", "window_capture"
-
-
-def observe_copy_context_menu(
-    *,
-    sidecar_ops: Any,
-    hwnd: int,
-    right_click: dict[str, Any] | None,
-    image_size: tuple[int, int],
-    label: str,
-) -> dict[str, Any]:
-    """Observe one image menu through the common Host capability when present."""
-
-    click = right_click if isinstance(right_click, dict) else {}
-    wait_for_menu = getattr(
-        sidecar_ops,
-        "wait_for_wechat_context_menu_stable",
-        None,
-    )
-    observe_menu = getattr(sidecar_ops, "observe_wechat_context_menu", None)
-    if callable(wait_for_menu) and callable(observe_menu):
-        try:
-            wait_for_menu()
-            anchor = (
-                int(click.get("screen_x") or 0),
-                int(click.get("screen_y") or 0),
-            )
-            observation = observe_menu(
-                hwnd,
-                anchor_screen=anchor,
-                artifact_dir=None,
-                label=label,
-            )
-            observation = (
-                dict(observation)
-                if isinstance(observation, dict)
-                else {}
-            )
-            menu_items = [
-                item
-                for item in (observation.get("local_ocr_items") or [])
-                if isinstance(item, dict)
-            ]
-            menu_size = tuple(observation.get("image_size") or image_size)
-            return {
-                "ok": True,
-                "mode": "common_menu_observer",
-                "copy_target": find_copy_menu_item(
-                    menu_items,
-                    menu_size,
-                    anchor=anchor,
-                ),
-                "observation": observation,
-            }
-        except Exception as exc:
-            return {
-                "ok": False,
-                "mode": "common_menu_observer",
-                "reason": "image_context_menu_observation_failed",
-                "error_type": type(exc).__name__,
-            }
-
-    # Frozen Host compatibility. This branch can be removed only after the
-    # public Host contract deprecates capture_wechat + run_ocr explicitly.
-    try:
-        sidecar_ops.humanized_action_sleep(360, 720)
-        screenshot, _path, _method = capture_context_menu_image(
-            sidecar_ops=sidecar_ops,
-            hwnd=hwnd,
-            artifact_dir="",
-            label=label,
-        )
-        menu_items = sidecar_ops.run_ocr(screenshot)
-        menu_size = getattr(screenshot, "size", image_size)
-        return {
-            "ok": True,
-            "mode": "legacy_transient_capture",
-            "copy_target": find_copy_menu_item(menu_items, menu_size),
-            "observation": {
-                "image_size": list(menu_size),
-                "local_ocr_items": menu_items,
-            },
-        }
-    except Exception as exc:
-        return {
-            "ok": False,
-            "mode": "legacy_transient_capture",
-            "reason": "image_context_menu_observation_failed",
-            "error_type": type(exc).__name__,
-        }
-
-
 def click_context_menu_item(
     *,
     sidecar_ops: Any,
@@ -1808,19 +1744,69 @@ def execute_wechat_clipboard_image_copy(
         int(anchor.get("y") or 0),
         bounds=bounds,
         action_name="image_clipboard_copy_context_right_click",
-        expected_snapshot_id=str(
-            (layout_snapshot or {}).get("layout_snapshot_id") or ""
-        ),
+        expected_snapshot_id=str((layout_snapshot or {}).get("layout_snapshot_id") or ""),
     )
-    menu_result = observe_copy_context_menu(
-        sidecar_ops=sidecar_ops,
-        hwnd=hwnd,
-        right_click=right_click,
-        image_size=image_size,
-        label="image_clipboard_copy_context_menu",
+    wait_for_menu = getattr(
+        sidecar_ops,
+        "wait_for_wechat_context_menu_stable",
+        None,
     )
-    copy_target = menu_result.get("copy_target")
-    menu_observation = dict(menu_result.get("observation") or {})
+    if not callable(wait_for_menu):
+        try:
+            sidecar_ops.key_press(sidecar_ops.win32con.VK_ESCAPE)
+        except Exception:
+            pass
+        return {
+            "ok": False,
+            "online": True,
+            "adapter": "win32_ocr",
+            "state": "image_clipboard_copy_failed",
+            "reason": "C2_IMAGE_MENU_OPERATION_FAILED",
+            "target": target_name,
+            "session_key": session_key,
+            "assets": [],
+            "messages": [],
+            "transaction": {
+                "status": "menu_panel_unconfirmed",
+                "captured_at": captured_at,
+                "right_click_ok": bool(right_click.get("ok")),
+                "menu_copy_confirmed": False,
+            },
+        }
+    wait_for_menu()
+    observe_menu = getattr(sidecar_ops, "observe_wechat_context_menu", None)
+    menu_observation: dict[str, Any] = {}
+    if callable(observe_menu):
+        try:
+            menu_observation = observe_menu(
+                hwnd,
+                anchor_screen=(
+                    int((right_click or {}).get("screen_x") or 0),
+                    int((right_click or {}).get("screen_y") or 0),
+                ),
+                artifact_dir=None,
+                label="image_clipboard_copy_context_menu",
+            )
+        except Exception:
+            menu_observation = {}
+    menu_items = [
+        item
+        for item in (menu_observation.get("local_ocr_items") or [])
+        if isinstance(item, dict)
+    ]
+    menu_size = tuple(menu_observation.get("image_size") or image_size)
+    menu_origin = list(menu_observation.get("screen_origin") or [0, 0])
+    if len(menu_origin) < 2:
+        menu_origin = [0, 0]
+    local_anchor = (
+        int((right_click or {}).get("screen_x") or 0) - int(menu_origin[0]),
+        int((right_click or {}).get("screen_y") or 0) - int(menu_origin[1]),
+    )
+    copy_target = find_copy_menu_item(
+        menu_items,
+        menu_size,
+        anchor=local_anchor,
+    )
     if not right_click.get("ok") or not copy_target:
         try:
             sidecar_ops.key_press(sidecar_ops.win32con.VK_ESCAPE)
@@ -1831,13 +1817,17 @@ def execute_wechat_clipboard_image_copy(
             "online": True,
             "adapter": "win32_ocr",
             "state": "image_clipboard_copy_failed",
-            "reason": "image_context_menu_copy_item_missing",
+            "reason": "C2_IMAGE_MENU_OPERATION_FAILED",
             "target": target_name,
             "session_key": session_key,
             "assets": [],
             "messages": [],
             "transaction": {
-                "status": "failed",
+                "status": (
+                    "menu_evidence_incomplete"
+                    if bool(right_click.get("ok"))
+                    else "menu_panel_unconfirmed"
+                ),
                 "captured_at": captured_at,
                 "right_click_ok": bool(right_click.get("ok")),
                 "menu_copy_confirmed": False,
@@ -1864,13 +1854,13 @@ def execute_wechat_clipboard_image_copy(
             "online": True,
             "adapter": "win32_ocr",
             "state": "image_clipboard_copy_failed",
-            "reason": "image_context_menu_copy_click_failed",
+            "reason": "C2_IMAGE_MENU_OPERATION_FAILED",
             "target": target_name,
             "session_key": session_key,
             "assets": [],
             "messages": [],
             "transaction": {
-                "status": "failed",
+                "status": "menu_copy_item_unsafe",
                 "captured_at": captured_at,
                 "right_click_ok": True,
                 "menu_copy_confirmed": False,
