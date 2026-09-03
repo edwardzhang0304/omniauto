@@ -74,7 +74,9 @@ from customer_service_prompt_archive import archive_prompt_event, should_archive
 from llm_reply_guard import guard_synthesized_reply
 from evidence_authority import PRODUCT_MASTER_CATEGORY_ID, annotate_authority
 from reply_evidence_builder import (
+    apply_chejin_knowledge_release,
     authoritative_catalog_alias_matches,
+    build_chejin_managed_knowledge_query,
     build_reply_evidence_pack,
     catalog_product_payload,
     chejin_context_projection,
@@ -1294,6 +1296,10 @@ def _maybe_run_customer_service_brain_within_time_budget(
     record_stage("brain_preflight", stage_started)
 
     stage_started = time.time()
+    managed_knowledge_query = build_chejin_managed_knowledge_query(
+        target_state,
+        current_query_text=evidence_combined,
+    )
     evidence_pack = build_reply_evidence_pack(
         config=config_with_brain_synthesis_settings(config, settings),
         target_name=target_name,
@@ -1309,6 +1315,11 @@ def _maybe_run_customer_service_brain_within_time_budget(
         data_capture=data_capture,
         raw_capture=raw_capture,
         customer_profile=customer_profile,
+    )
+    apply_chejin_knowledge_release(
+        evidence_pack,
+        target_state,
+        query_text=managed_knowledge_query,
     )
     attach_conversation_runtime_hints_to_evidence_pack(evidence_pack, target_state)
     if str(evidence_pack.get("knowledge_error") or "").strip():
