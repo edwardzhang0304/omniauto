@@ -781,6 +781,85 @@ def is_failoverable_llm_failure(result: dict[str, Any] | None) -> bool:
     return any(marker in text for marker in GATEWAY_FAILOVERABLE_LLM_ERROR_MARKERS)
 
 
+_MISSING_RESPONSE_FIELD = object()
+
+
+def _response_field_type(value: Any) -> str:
+    if value is _MISSING_RESPONSE_FIELD:
+        return "missing"
+    if value is None:
+        return "null"
+    if isinstance(value, str):
+        return "string"
+    if isinstance(value, list):
+        return "list"
+    if isinstance(value, dict):
+        return "object"
+    if isinstance(value, bool):
+        return "boolean"
+    return "number" if isinstance(value, (int, float)) else "other"
+
+
+def _llm_response_structure(data: Any, request_style: str) -> dict[str, Any]:
+    """Only types, counts and fixed enums; never copy response/ reasoning text."""
+
+    body = data if isinstance(data, dict) else {}
+    choices = body.get("choices", _MISSING_RESPONSE_FIELD)
+    first = choices[0] if isinstance(choices, list) and choices else {}
+    message = first.get("message", _MISSING_RESPONSE_FIELD) if isinstance(first, dict) else _MISSING_RESPONSE_FIELD
+    if request_style == "anthropic_messages":
+        content_owner = body
+        finish = body.get("stop_reason")
+    else:
+        content_owner = message if isinstance(message, dict) else {}
+        finish = first.get("finish_reason") if isinstance(first, dict) else None
+    content = content_owner.get("content", _MISSING_RESPONSE_FIELD)
+    reasoning = content_owner.get("reasoning_content", _MISSING_RESPONSE_FIELD)
+    refusal = content_owner.get("refusal", _MISSING_RESPONSE_FIELD)
+    tool_calls = content_owner.get("tool_calls", _MISSING_RESPONSE_FIELD)
+    finish_reasons = {"stop", "length", "content_filter", "tool_calls", "function_call", "end_turn", "max_tokens", "stop_sequence", "tool_use", "pause_turn", "refusal"}
+    content_texts = []
+    if isinstance(content, str):
+        content_texts = [content]
+    elif isinstance(content, list):
+        content_texts = [item["text"] for item in content if isinstance(item, dict) and isinstance(item.get("text"), str)]
+    # Missing/null/unreadable metadata is unknown, not an observed empty value.
+    reasoning_chars = len(reasoning) if isinstance(reasoning, str) else None
+    tool_calls_count = len(tool_calls) if isinstance(tool_calls, list) else None
+    if request_style == "anthropic_messages" and isinstance(content, list):
+        thinking_blocks = [item for item in content if isinstance(item, dict) and item.get("type") in ("thinking", "redacted_thinking")]
+        reasoning_chars = (
+            sum(len(item["thinking"]) for item in thinking_blocks)
+            if thinking_blocks and all(item.get("type") == "thinking" and isinstance(item.get("thinking"), str) for item in thinking_blocks)
+            else None
+        )
+        tool_blocks = [item for item in content if isinstance(item, dict) and item.get("type") == "tool_use"]
+        if tool_blocks:
+            tool_calls_count = len(tool_blocks)
+    summary = {
+        "json_type": _response_field_type(data),
+        "choices_type": _response_field_type(choices),
+        "choices_count": len(choices) if isinstance(choices, list) else None,
+        "message_type": _response_field_type(message),
+        "content_type": _response_field_type(content),
+        "content_chars": sum(len(item) for item in content_texts),
+        "content_nonblank_chars": sum(len(item.strip()) for item in content_texts),
+        "reasoning_chars": reasoning_chars,
+        "refusal_chars": len(refusal) if isinstance(refusal, str) else None,
+        "tool_calls_count": tool_calls_count,
+        "finish_reason": finish if isinstance(finish, str) and finish in finish_reasons else "missing" if finish is None else "other",
+    }
+    usage = body.get("usage") if isinstance(body.get("usage"), dict) else {}
+    details = usage.get("completion_tokens_details") if isinstance(usage.get("completion_tokens_details"), dict) else {}
+    for key, value in {
+        "prompt_tokens": usage.get("prompt_tokens", usage.get("input_tokens")),
+        "completion_tokens": usage.get("completion_tokens", usage.get("output_tokens")),
+        "reasoning_tokens": details.get("reasoning_tokens"),
+    }.items():
+        summary[key] = value if type(value) is int and 0 <= value <= 10**12 else None
+    return summary
+
+
 def extract_llm_response_text(*, provider: Any, data: Any) -> str:
     provider_id = normalize_llm_provider(provider)
     if llm_provider_request_style(provider_id) == "anthropic_messages":
@@ -902,6 +981,15 @@ def call_llm_request_once(
         headers=headers,
         method="POST",
     )
+    diagnostics: dict[str, Any] = {
+        "schema_version": 1,
+        "requested_max_tokens": payload["max_tokens"],
+        "body_read_complete": False,
+        "json_decode_attempted": False,
+        "json_decoded": False,
+        "extraction_attempted": False,
+        "extraction_succeeded": False,
+    }
     try:
         with llm_urlopen(
             request,
@@ -909,14 +997,27 @@ def call_llm_request_once(
             provider=provider_id,
             allow_insecure_tls=allow_insecure_tls,
         ) as response:
-            raw = _read_http_response_before_deadline(response, deadline=request_deadline).decode("utf-8", errors="replace")
+            diagnostics["http_status"] = int(getattr(response, "status", 200) or 200)
+            raw_bytes = _read_http_response_before_deadline(response, deadline=request_deadline)
+            diagnostics["body_bytes"] = len(raw_bytes)
+            diagnostics["body_read_complete"] = True
+            raw = raw_bytes.decode("utf-8", errors="replace")
+            diagnostics["json_decode_attempted"] = True
             data = json.loads(raw)
+            diagnostics["json_decoded"] = True
+            try:
+                diagnostics.update(_llm_response_structure(data, request_style))
+            except Exception:  # noqa: BLE001 - evidence collection cannot affect extraction
+                diagnostics["collection_failed"] = True
+            diagnostics["extraction_attempted"] = True
             tool_payload = extract_anthropic_tool_json_object(data) if json_mode else None
             response_text = (
                 json.dumps(tool_payload, ensure_ascii=False)
                 if isinstance(tool_payload, dict)
                 else extract_llm_response_text(provider=provider_id, data=data)
             )
+            diagnostics["extracted_chars"] = len(response_text)
+            diagnostics["extraction_succeeded"] = True
             result = {
                 "ok": True,
                 "provider": provider_id,
@@ -925,6 +1026,7 @@ def call_llm_request_once(
                 "base_url": normalize_llm_base_url(base_url),
                 "status": int(getattr(response, "status", 200) or 200),
                 "response_text": response_text,
+                "response_diagnostics": diagnostics,
                 "usage": data.get("usage", {}) if isinstance(data, dict) else {},
                 "request_style": request_style,
                 "tool_json_mode": bool(json_mode and isinstance(tool_payload, dict)),
@@ -936,9 +1038,12 @@ def call_llm_request_once(
             return result
     except urllib.error.HTTPError as exc:
         try:
-            body = _read_http_response_before_deadline(exc, deadline=request_deadline).decode("utf-8", errors="replace")
+            raw_error = _read_http_response_before_deadline(exc, deadline=request_deadline)
+            body = raw_error.decode("utf-8", errors="replace")
+            diagnostics.update(body_bytes=len(raw_error), body_read_complete=True)
         except Exception:
             body = ""
+        diagnostics["http_status"] = int(getattr(exc, "code", 0) or 0)
         return {
             "ok": False,
             "provider": provider_id,
@@ -947,6 +1052,7 @@ def call_llm_request_once(
             "base_url": normalize_llm_base_url(base_url),
             "status": int(getattr(exc, "code", 0) or 0),
             "error": body[:1000],
+            "response_diagnostics": diagnostics,
             "request_style": request_style,
         }
     except Exception as exc:  # noqa: BLE001 - caller converts to user-visible diagnostics
@@ -958,6 +1064,7 @@ def call_llm_request_once(
             "base_url": normalize_llm_base_url(base_url),
             "status": 0,
             "error": repr(exc),
+            "response_diagnostics": diagnostics,
             "request_style": request_style,
         }
 
