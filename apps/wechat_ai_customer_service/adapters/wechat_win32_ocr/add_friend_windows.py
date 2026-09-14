@@ -460,7 +460,8 @@ def add_friend_plus_entry_target(
         )
     except win32_ocr_window_layout.LayoutSnapshotError:
         mapped_reference = {}
-    if mapped_reference:
+    visual_match = bool(target.get("executable") and target.get("source") == "vision_plus_icon")
+    if not visual_match and mapped_reference:
         mapped_point = list(mapped_reference["image_point"])
         target["point"] = mapped_point
         target["x"] = int(mapped_point[0])
@@ -489,6 +490,7 @@ def add_friend_plus_entry_target(
         {
             "layout_snapshot_id": snapshot_id,
             "calibration_id": str((layout_snapshot or {}).get("calibration_id") or ""),
+            "startup_calibration_evidence": dict((layout_snapshot or {}).get("startup_calibration_evidence") or {}),
             "frame_id": str((layout_snapshot or {}).get("frame_id") or ""),
             "hwnd": int((layout_snapshot or {}).get("hwnd") or 0),
             "capture_mode": str((layout_snapshot or {}).get("capture_mode") or ""),
