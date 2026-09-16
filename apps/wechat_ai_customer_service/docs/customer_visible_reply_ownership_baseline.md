@@ -35,4 +35,12 @@ In particular, a non-empty Brain-authored short acknowledgement such as a respon
 
 ## Development Requirement
 
+Optional delivery constraint `reply_sequence_version=1` keeps Brain as the only
+author. The host supplies `reply_sequence_max_chars` and
+`reply_sequence_max_segments`; the packer preserves the complete reviewed text
+and combines only whole Brain-authored semantic units. Oversized or mismatched
+units return a hard repair finding to Brain, even with the general quality
+verifier disabled. No local truncation, tail removal, or replacement wording is
+allowed. Existing callers omitting the option retain their prior behavior.
+
 Every new customer-service development document must reference this baseline. Any exception requires updating `AGENTS.md`, this baseline, and contract tests before code changes.
