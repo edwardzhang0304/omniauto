@@ -225,6 +225,19 @@ listen_and_reply.py
 
 ## 11. 当前实施方向
 
+2026-09-16 独立分支新增可选 Brain 约束 `reply_sequence_version=1`，配合
+`reply_sequence_max_chars` / `reply_sequence_max_segments`；不传入时保持旧行为。
+`normalize_brain_plan(..., preserve_all_segments=True)` 与
+`normalize_reply_segments(..., preserve_all=True)` 是可选参数，供启用约束的调用方
+保留模型全部语义单元后统一审稿，不静默删掉重复段或尾段。
+新增纯函数 `adapters.reply_sequence` 不持有发送、调度、数据库或界面职责；
+逐条许可、回执、恢复由宿主既有接口负责。正在输入的一条沿用原发送流程，
+本轮不改变 Sidecar 的取消、清稿、键盘输入或鼠标点击合同。
+同模块的 `confirmed_customer_interruption` 只验证原发送证据：客户唯一新增尾部、
+未触发发送、已确认清除本程序草稿。宿主Worker和服务端共同调用此判断，
+仅用于取消旧余段与授权重新读取；不能凭该证据入库消息或直接发送。
+缺少证明、销售侧变化、未知发送仍由原发送保护处理。
+
 当前阶段采用“兼容门面 + 内部小模块 + 独立可选插件 + 现有框架内收拢”的方式。
 
 不采用大规模替换 scheduler、ledger、Brain bridge、状态字段或对外接口的方案。此前统一账本审计中的大框架替换内容仅保留为长期风险分析和未来可选研究，不作为当前获批实施路线。
