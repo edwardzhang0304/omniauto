@@ -3880,6 +3880,10 @@ def slim_brain_input_for_prompt(brain_input: dict[str, Any], *, settings: dict[s
                 "suggested_engagement_mode",
                 "customer_resists_business_redirect",
                 "business_anchor_strength",
+                # Keep the interpretation and visibility boundaries alongside
+                # historical labels; policy_note is already capped at 140 chars.
+                "policy_note",
+                "visibility_rule",
             )
             if key in strategy
         }
