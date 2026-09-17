@@ -1321,6 +1321,7 @@ def _maybe_run_customer_service_brain_within_time_budget(
         evidence_pack,
         target_state,
         query_text=managed_knowledge_query,
+        current_query_text=evidence_combined,
     )
     attach_conversation_runtime_hints_to_evidence_pack(evidence_pack, target_state)
     if str(evidence_pack.get("knowledge_error") or "").strip():
@@ -4418,7 +4419,7 @@ def compact_conversation_context_for_prompt(value: Any) -> dict[str, Any]:
 
     if not isinstance(value, dict):
         return {}
-    return {
+    payload = {
         key: compact_prompt_value(value.get(key), max_text_chars=140, max_list_items=4)
         for key in (
             "last_product_id",
@@ -4437,6 +4438,12 @@ def compact_conversation_context_for_prompt(value: Any) -> dict[str, Any]:
         )
         if value.get(key) not in (None, "", [], {})
     }
+    recovery = value.get("partial_reply_recovery")
+    if isinstance(recovery, dict) and recovery:
+        # The context bridge already validates this bounded sent prefix against
+        # immutable history. Preserve its text/instruction, not other raw state.
+        payload["partial_reply_recovery"] = copy.deepcopy(recovery)
+    return payload
 
 
 def compact_conversation_interaction_state_for_prompt(value: Any) -> dict[str, Any]:

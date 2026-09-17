@@ -42,6 +42,7 @@ def main() -> int:
         check_final_polish_preserves_brain_authored_strategy,
         check_retry_feedback_is_topic_neutral,
         check_active_brain_runtime_does_not_call_legacy_semantic_profiles,
+        check_partial_reply_recovery_context_survives_prompt_compaction,
     ]
     results: list[dict[str, Any]] = []
     for check in checks:
@@ -58,6 +59,28 @@ def main() -> int:
 def assert_true(value: Any, message: str) -> None:
     if not value:
         raise AssertionError(message)
+
+
+def check_partial_reply_recovery_context_survives_prompt_compaction() -> dict[str, Any]:
+    # OCR whitespace can make a confirmed segment exceed generic prompt clips.
+    # A bounded two-part prefix must retain every character and its instruction.
+    recovery = {
+        "origin_batch_id": "batch-original",
+        "confirmed_prefix": [
+            {"message_event_id": "event-1", "text": "资料 \n" * 70},
+            {"message_event_id": "event-2", "text": "安排 \n" * 70},
+        ],
+        "policy_note": "只回答尚未答完的内容，不要重复已发部分。",
+    }
+    context = {"partial_reply_recovery": recovery,
+               "last_product_id": "vehicle-1", "raw_capture": "PRIVATE-RAW-CAPTURE"}
+    projected = brain_module.compact_conversation_context_for_prompt(context)
+    assert_true(projected["partial_reply_recovery"] == recovery, "Recovery prefix/instruction was dropped or clipped")
+    assert_true(projected["last_product_id"] == "vehicle-1", "Existing reference anchor was lost")
+    assert_true("raw_capture" not in projected, "Unrelated operational capture leaked into prompt")
+    projected["partial_reply_recovery"]["confirmed_prefix"][0]["text"] = "changed-copy"
+    assert_true(recovery["confirmed_prefix"][0]["text"] == "资料 \n" * 70, "Projection mutated source history")
+    return {"confirmed_segments": 2, "prefix_preserved": True, "raw_capture_excluded": True}
 
 
 def brain_first_config() -> dict[str, Any]:
