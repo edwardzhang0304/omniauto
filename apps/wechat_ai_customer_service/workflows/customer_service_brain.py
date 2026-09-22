@@ -27,7 +27,7 @@ from apps.wechat_ai_customer_service.llm_config import (
     resolve_llm_base_url,
     resolve_llm_tier_model,
 )
-from llm_output_adapter import parse_llm_json_object
+from llm_output_adapter import llm_json_response_is_incomplete, parse_complete_llm_json_response
 from customer_service_brain_contract import (
     POLICY_FACT_TYPES,
     PRODUCT_FACT_TYPES,
@@ -99,6 +99,7 @@ DEFAULT_FALLBACK_TIMEOUT_SECONDS = 45
 DEFAULT_LARGE_PROMPT_THRESHOLD_CHARS = 5000
 DEFAULT_VERY_LARGE_PROMPT_THRESHOLD_CHARS = 12000
 DEFAULT_MAX_TOKENS = 8192
+DEFAULT_REPAIR_MAX_TOKENS = 16384
 DEFAULT_TEMPERATURE = 0.35
 DEFAULT_HISTORY_CHAR_BUDGET = 1200
 CHEJIN_HISTORY_AUTHORITY = "chejin_message_events_v1"
@@ -793,7 +794,7 @@ def apply_universal_brain_runtime_settings(
     # Keep one fixed, bounded budget for every universal turn.  This changes no
     # reply semantics and is never selected by topic, wording or message count.
     compact["max_tokens"] = DEFAULT_MAX_TOKENS
-    compact["quality_repair_max_tokens"] = 1400
+    compact["quality_repair_max_tokens"] = DEFAULT_REPAIR_MAX_TOKENS
     compact["same_capture_brain_invalid_plan_retry_max_tokens"] = 1400
     compact["temperature"] = 0.15
     compact["reasoning_effort"] = "none"
@@ -846,7 +847,7 @@ def apply_low_authority_fast_brain_settings(settings: dict[str, Any], decision: 
         fast["timeout_seconds"],
     )
     fast["quality_repair_timeout_seconds"] = min(int(settings.get("quality_repair_timeout_seconds") or 8), positive_int_setting(settings, "low_authority_fast_repair_timeout_seconds", 6, minimum=3))
-    fast["quality_repair_max_tokens"] = min(int(settings.get("quality_repair_max_tokens") or 520), positive_int_setting(settings, "low_authority_fast_repair_max_tokens", 260, minimum=128))
+    fast["quality_repair_max_tokens"] = min(int(settings.get("quality_repair_max_tokens") or DEFAULT_REPAIR_MAX_TOKENS), positive_int_setting(settings, "low_authority_fast_repair_max_tokens", DEFAULT_REPAIR_MAX_TOKENS, minimum=128))
     return fast
 
 
@@ -2306,7 +2307,7 @@ def effective_brain_settings(config: dict[str, Any]) -> dict[str, Any]:
     settings.setdefault("quality_repair_enabled", True)
     settings.setdefault("max_quality_repair_attempts", 1)
     settings.setdefault("quality_repair_timeout_seconds", 8)
-    settings.setdefault("quality_repair_max_tokens", 1200)
+    settings.setdefault("quality_repair_max_tokens", DEFAULT_REPAIR_MAX_TOKENS)
     settings.setdefault("json_structure_repair_enabled", True)
     settings.setdefault("json_structure_repair_timeout_seconds", 8)
     settings.setdefault("json_structure_repair_max_tokens", 700)
@@ -2345,7 +2346,7 @@ def effective_brain_settings(config: dict[str, Any]) -> dict[str, Any]:
     settings.setdefault("low_authority_fast_fallback_timeout_seconds", 10)
     settings.setdefault("low_authority_fast_max_tokens", DEFAULT_MAX_TOKENS)
     settings.setdefault("low_authority_fast_repair_timeout_seconds", 6)
-    settings.setdefault("low_authority_fast_repair_max_tokens", 520)
+    settings.setdefault("low_authority_fast_repair_max_tokens", DEFAULT_REPAIR_MAX_TOKENS)
     settings.setdefault("fallback_to_legacy_on_error", False)
     if "identity_guard_enabled" not in settings:
         if "identity_guard_enabled" in llm_synthesis:
@@ -2942,11 +2943,12 @@ def run_brain_llm(*, settings: dict[str, Any], brain_input: dict[str, Any]) -> d
             return retry
         return response
     raw_text = str(response.get("response_text") or "")
-    parsed = parse_llm_json_object(raw_text)
+    parsed = parse_complete_llm_json_response(response)
     if not isinstance(parsed, dict):
         repair = maybe_repair_brain_json_structure(
             settings=settings,
             raw_text=raw_text,
+            response_diagnostics=response.get("response_diagnostics"),
             stage="brain_llm",
             prompt_estimate=prompt_estimate,
         )
@@ -3016,7 +3018,7 @@ def maybe_retry_brain_repair_after_empty_plan(
     current_repair_timeout = int(settings.get("quality_repair_timeout_seconds") or 8)
     current_fallback_timeout = int(settings.get("fallback_timeout_seconds") or DEFAULT_FALLBACK_TIMEOUT_SECONDS)
     retry_settings["quality_repair_max_tokens"] = max(
-        int(settings.get("quality_repair_max_tokens") or 1200),
+        int(settings.get("quality_repair_max_tokens") or DEFAULT_REPAIR_MAX_TOKENS),
         positive_int_setting(settings, "same_capture_brain_empty_repair_retry_max_tokens", 900, minimum=512),
     )
     retry_settings["quality_repair_timeout_seconds"] = max(
@@ -3149,7 +3151,7 @@ def maybe_retry_brain_llm_after_unavailable_response(
     if not retry.get("ok"):
         return retry
     retry_raw_text = str(retry.get("response_text") or "")
-    parsed = parse_llm_json_object(retry_raw_text)
+    parsed = parse_complete_llm_json_response(retry)
     if isinstance(parsed, dict):
         retry["brain_plan"] = parsed
         return retry
@@ -3161,6 +3163,7 @@ def maybe_retry_brain_llm_after_unavailable_response(
     repair = maybe_repair_brain_json_structure(
         settings=settings,
         raw_text=retry_raw_text,
+        response_diagnostics=retry.get("response_diagnostics"),
         stage="brain_llm_unavailable_same_capture_retry",
         prompt_estimate=prompt_estimate,
     )
@@ -3394,7 +3397,7 @@ def maybe_retry_brain_llm_after_unparseable_response(
         return {"ok": False, "attempted": False, "error": "same_capture_brain_parse_retry_disabled"}
     raw_text = str(previous_response.get("response_text") or "")
     repair_error = str(previous_repair.get("error") or "")
-    if raw_text.strip() and repair_error not in {"brain_json_structure_repair_not_json_object", "empty_raw_response"}:
+    if raw_text.strip() and repair_error not in {"brain_json_structure_repair_not_json_object", "empty_raw_response", "brain_response_incomplete"}:
         # Malformed but non-empty JSON-like responses already had a structure
         # repair attempt. Avoid looping on deterministic schema errors.
         return {"ok": False, "attempted": False, "error": "non_empty_parse_failure_already_repaired"}
@@ -3429,13 +3432,14 @@ def maybe_retry_brain_llm_after_unparseable_response(
     if not retry.get("ok"):
         return retry
     retry_raw_text = str(retry.get("response_text") or "")
-    parsed = parse_llm_json_object(retry_raw_text)
+    parsed = parse_complete_llm_json_response(retry)
     if isinstance(parsed, dict):
         retry["brain_plan"] = parsed
         return retry
     repair = maybe_repair_brain_json_structure(
         settings=settings,
         raw_text=retry_raw_text,
+        response_diagnostics=retry.get("response_diagnostics"),
         stage="brain_llm_same_capture_retry",
         prompt_estimate=prompt_estimate,
     )
@@ -3488,6 +3492,7 @@ def maybe_repair_brain_json_structure(
     raw_text: str,
     stage: str,
     prompt_estimate: dict[str, Any] | None = None,
+    response_diagnostics: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Ask the LLM once to repair malformed Brain JSON.
 
@@ -3495,6 +3500,9 @@ def maybe_repair_brain_json_structure(
     facts; successful output still goes through normal Brain validation/guard.
     """
 
+    # Missing output must be regenerated by Brain, never closed into a reply.
+    if llm_json_response_is_incomplete({"response_text": raw_text, "response_diagnostics": response_diagnostics}):
+        return {"ok": False, "attempted": False, "status": "skipped", "error": "brain_response_incomplete"}
     if settings.get("json_structure_repair_enabled", True) is False:
         return {"ok": False, "attempted": False, "status": "skipped", "error": "json_structure_repair_disabled"}
     if not str(raw_text or "").strip():
@@ -3549,7 +3557,7 @@ def maybe_repair_brain_json_structure(
     if not response.get("ok"):
         return response
     repaired_text = str(response.get("response_text") or "")
-    parsed = parse_llm_json_object(repaired_text)
+    parsed = parse_complete_llm_json_response(response)
     if not isinstance(parsed, dict):
         response["ok"] = False
         response["error"] = "brain_json_structure_repair_not_json_object"
@@ -4016,7 +4024,7 @@ def run_brain_repair_llm(
         fallback_timeout=fallback_timeout_seconds,
         wall_timeout=timeout_seconds,
         fallback_wall_timeout=fallback_timeout_seconds,
-        max_tokens=positive_int_setting(settings, "quality_repair_max_tokens", 1200, minimum=256),
+        max_tokens=positive_int_setting(settings, "quality_repair_max_tokens", DEFAULT_REPAIR_MAX_TOKENS, minimum=256),
         temperature=float(settings.get("temperature") or DEFAULT_TEMPERATURE),
         tier=str(settings.get("model_tier") or "flash"),
         json_mode=True,
@@ -4029,7 +4037,7 @@ def run_brain_repair_llm(
     if not response.get("ok"):
         return response
     raw_text = str(response.get("response_text") or "")
-    parsed = parse_llm_json_object(raw_text)
+    parsed = parse_complete_llm_json_response(response)
     if not isinstance(parsed, dict):
         if settings.get("_single_brain_runtime_cleanup"):
             response["ok"] = False
@@ -4039,6 +4047,7 @@ def run_brain_repair_llm(
         repair = maybe_repair_brain_json_structure(
             settings=settings,
             raw_text=raw_text,
+            response_diagnostics=response.get("response_diagnostics"),
             stage="repair_llm",
             prompt_estimate=prompt_estimate,
         )
@@ -4107,8 +4116,8 @@ def maybe_retry_brain_repair_after_unparseable_response(
     current_repair_timeout = int(settings.get("quality_repair_timeout_seconds") or 8)
     current_fallback_timeout = int(settings.get("fallback_timeout_seconds") or DEFAULT_FALLBACK_TIMEOUT_SECONDS)
     retry_settings["quality_repair_max_tokens"] = max(
-        int(settings.get("quality_repair_max_tokens") or 1200),
-        positive_int_setting(settings, "same_capture_brain_repair_parse_retry_max_tokens", 1600, minimum=512),
+        int(settings.get("quality_repair_max_tokens") or DEFAULT_REPAIR_MAX_TOKENS),
+        positive_int_setting(settings, "same_capture_brain_repair_parse_retry_max_tokens", DEFAULT_REPAIR_MAX_TOKENS, minimum=512),
     )
     retry_settings["quality_repair_timeout_seconds"] = max(
         current_repair_timeout,
